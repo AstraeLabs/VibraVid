@@ -18,7 +18,7 @@ CLEAN = config_manager.get_bool('DEFAULT', 'show_message')
 SHOW = config_manager.get_bool('DEFAULT', 'show_message')
 
 
-def start_message():
+def start_message(clean: bool = CLEAN):
     """Display a stylized start message in the console."""
     
     msg = r'''
@@ -30,7 +30,7 @@ def start_message():
                                          
     '''.rstrip()
 
-    if CLEAN: 
+    if CLEAN and clean: 
         os.system("cls" if platform.system() == 'Windows' else "clear")
     
     if SHOW:

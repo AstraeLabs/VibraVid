@@ -51,7 +51,7 @@ def run_function(func: Callable[..., None], close_console: bool = False, search_
 
 def initialize():
     """Initialize the application with system checks and setup."""
-    start_message()
+    start_message(False)
     
     # Windows 7 terminal size fix
     if platform.system() == "Windows" and "7" in platform.version():
