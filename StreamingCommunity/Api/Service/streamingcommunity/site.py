@@ -9,14 +9,9 @@ from rich.console import Console
 
 
 # Internal utilities
-from StreamingCommunity.Util.headers import get_userAgent
-from StreamingCommunity.Util.http_client import create_client
+from StreamingCommunity.Util.http_client import create_client, get_userAgent
+from StreamingCommunity.Api.Template import site_constants, MediaManager
 from StreamingCommunity.Util.table import TVShowManager
-
-
-# Logic class
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaManager
 
 
 # Variable
@@ -39,17 +34,17 @@ def title_search(query: str) -> int:
     table_show_manager.clear()
 
     try:
-        response = create_client(headers={'user-agent': get_userAgent()}).get(f"{site_constant.FULL_URL}/it")
+        response = create_client(headers={'user-agent': get_userAgent()}).get(f"{site_constants.FULL_URL}/it")
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
         version = json.loads(soup.find('div', {'id': "app"}).get("data-page"))['version']
 
     except Exception as e:
-        console.print(f"[red]Site: {site_constant.SITE_NAME} version, request error: {e}")
+        console.print(f"[red]Site: {site_constants.SITE_NAME} version, request error: {e}")
         return 0
 
-    search_url = f"{site_constant.FULL_URL}/it/search?q={query}"
+    search_url = f"{site_constants.FULL_URL}/it/search?q={query}"
     console.print(f"[cyan]Search url: [yellow]{search_url}")
 
     try:
@@ -57,7 +52,7 @@ def title_search(query: str) -> int:
         response.raise_for_status()
 
     except Exception as e:
-        console.print(f"[red]Site: {site_constant.SITE_NAME}, request search error: {e}")
+        console.print(f"[red]Site: {site_constants.SITE_NAME}, request search error: {e}")
         return 0
 
     # Collect json data
@@ -86,7 +81,7 @@ def title_search(query: str) -> int:
 
             image_url = None
             if filename:
-                image_url = f"{site_constant.FULL_URL.replace('stream', 'cdn.stream')}/images/{filename}"
+                image_url = f"{site_constants.FULL_URL.replace('stream', 'cdn.stream')}/images/{filename}"
 
             # Extract date: prefer last_air_date, otherwise try translations (last_air_date or release_date)
             date = dict_title.get('last_air_date')

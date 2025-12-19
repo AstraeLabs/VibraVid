@@ -167,7 +167,7 @@ def get_info_wvd(cdm_device_path):
         dev_type = "Android Phone"
 
     console.print(
-        f"[cyan]WVD info: "
+        f"[cyan]Load WVD: "
         f"[red]L{device.security_level} [cyan]| [red]{dev_type} [cyan]| "
         f"[red]{company} {model} [cyan]| API [red]{caps.oem_crypto_api_version} [cyan]| "
         f"[cyan]SysID: [red]{device.system_id}"

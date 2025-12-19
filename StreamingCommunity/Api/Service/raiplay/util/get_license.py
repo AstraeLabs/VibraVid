@@ -2,8 +2,7 @@
 
 
 # Internal utilities
-from StreamingCommunity.Util.http_client import create_client
-from StreamingCommunity.Util.headers import get_headers
+from StreamingCommunity.Util.http_client import create_client, get_headers
 
 
 def generate_license_url(mpd_id: str):

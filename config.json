@@ -48,8 +48,12 @@
         "post_run": []
     },
     "SITE_LOGIN": {
+        "crunchyroll": {
+            "device_id": "",
+            "etp_rt": ""
+        },
         "tubi": {
-            "email:": "",
+            "email": "",
             "password": ""
         }
     }

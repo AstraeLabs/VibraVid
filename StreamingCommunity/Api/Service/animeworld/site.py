@@ -9,14 +9,10 @@ from rich.console import Console
 
 
 # Internal utilities
-from StreamingCommunity.Util.headers import get_headers
-from StreamingCommunity.Util.http_client import create_client
+from StreamingCommunity.Util.http_client import create_client, get_headers
+from StreamingCommunity.Api.Template import site_constants, MediaManager
 from StreamingCommunity.Util.table import TVShowManager
 
-
-# Logic class
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaManager
 
 
 # Variable
@@ -31,7 +27,7 @@ def get_session_and_csrf() -> dict:
     """
     # Send an initial GET request to the website
     client = create_client(headers=get_headers())
-    response = client.get(site_constant.FULL_URL)
+    response = client.get(site_constants.FULL_URL)
 
     # Extract the sessionId from the cookies
     session_id = response.cookies.get('sessionId')
@@ -65,14 +61,14 @@ def title_search(query: str) -> int:
     Returns:
         - int: A number containing the length of media search manager.
     """
-    search_url = f"{site_constant.FULL_URL}/search?keyword={query}"
+    search_url = f"{site_constants.FULL_URL}/search?keyword={query}"
     console.print(f"[cyan]Search url: [yellow]{search_url}")
 
     # Make the GET request
     try:
         response = create_client(headers=get_headers()).get(search_url)
     except Exception as e:
-        console.print(f"[red]Site: {site_constant.SITE_NAME}, request search error: {e}")
+        console.print(f"[red]Site: {site_constants.SITE_NAME}, request search error: {e}")
         return 0
 
     # Create soup istance
@@ -82,7 +78,7 @@ def title_search(query: str) -> int:
     for element in soup.find_all('a', class_='poster'):
         try:
             title = element.find('img').get('alt')
-            url = f"{site_constant.FULL_URL}{element.get('href')}"
+            url = f"{site_constants.FULL_URL}{element.get('href')}"
             status_div = element.find('div', class_='status')
             is_dubbed = False
             anime_type = 'TV'

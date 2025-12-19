@@ -10,18 +10,10 @@ from rich.prompt import Prompt
 
 
 # Internal utilities
-from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.headers import get_headers, get_userAgent
-from StreamingCommunity.Util.message import start_message
-from StreamingCommunity.Lib.DASH.downloader import DASH_Downloader
-from StreamingCommunity.Lib.HLS import HLS_Downloader
-
-
-# Logic class
-from .util.ScrapeSerie import GetSerieInfo
-from .util.get_license import generate_license_url
-from StreamingCommunity.Api.Player.mediapolisvod import VideoSource
-from StreamingCommunity.Api.Template.Util import (
+from StreamingCommunity.Util import config_manager, start_message
+from StreamingCommunity.Util.http_client import get_headers, get_userAgent
+from StreamingCommunity.Api.Template import site_constants, MediaItem
+from StreamingCommunity.Api.Template.episode_manager import (
     manage_selection, 
     map_episode_title,
     validate_selection, 
@@ -29,8 +21,16 @@ from StreamingCommunity.Api.Template.Util import (
     display_episodes_list,
     display_seasons_list
 )
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaItem
+from StreamingCommunity.Lib.DASH.downloader import DASH_Downloader
+from StreamingCommunity.Lib.HLS import HLS_Downloader
+
+
+# Logic
+from .util.ScrapeSerie import GetSerieInfo
+from .util.get_license import generate_license_url
+from .util.fix_mpd import fix_manifest_url
+from StreamingCommunity.Api.Player.mediapolisvod import VideoSource
+
 
 
 # Variable
@@ -56,11 +56,11 @@ def download_video(index_season_selected: int, index_episode_selected: int, scra
 
     # Get episode information
     obj_episode = scrape_serie.selectEpisode(index_season_selected, index_episode_selected-1)
-    console.print(f"\n[yellow]Download: [red]{site_constant.SITE_NAME} → [cyan]{scrape_serie.series_name} \\ [magenta]{obj_episode.name}[/magenta] ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} → [cyan]{scrape_serie.series_name} \\ [magenta]{obj_episode.name}[/magenta] ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
 
     # Define filename and path
     mp4_name = f"{map_episode_title(scrape_serie.series_name, index_season_selected, index_episode_selected, obj_episode.name)}.{extension_output}"
-    mp4_path = os.path.join(site_constant.SERIES_FOLDER, scrape_serie.series_name, f"S{index_season_selected}")
+    mp4_path = os.path.join(site_constants.SERIES_FOLDER, scrape_serie.series_name, f"S{index_season_selected}")
 
     # Get streaming URL
     master_playlist = VideoSource.extract_m3u8_url(obj_episode.url)
@@ -68,7 +68,7 @@ def download_video(index_season_selected: int, index_episode_selected: int, scra
     # HLS
     if ".mpd" not in master_playlist:
         r_proc = HLS_Downloader(
-            m3u8_url=master_playlist,
+            m3u8_url=fix_manifest_url(master_playlist),
             output_path=os.path.join(mp4_path, mp4_name)
         ).start()
 

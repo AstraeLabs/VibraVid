@@ -12,8 +12,8 @@ from rich.table import Table
 
 
 # Internal utilities
-from StreamingCommunity.Util.message import start_message
-from StreamingCommunity.Api.Template.loader import load_search_functions
+from StreamingCommunity.Util import start_message
+from StreamingCommunity.Api.Template import load_search_functions
 
 
 # Variable

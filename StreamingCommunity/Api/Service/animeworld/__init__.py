@@ -6,19 +6,17 @@ from rich.prompt import Prompt
 
 
 # Internal utilities
-from StreamingCommunity.Api.Template import get_select_title
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaItem
+from StreamingCommunity.Api.Template import site_constants, MediaItem, get_select_title
 
 
-# Logic class
+# Logic
 from .site import title_search, media_search_manager, table_show_manager
 from .serie import download_series
 from .film import download_film
 
 
 # Variable
-indice = 4
+indice = 6
 _useFor = "Anime"
 _deprecate = False
 
@@ -78,7 +76,7 @@ def search(string_to_search: str = None, get_onlyDatabase: bool = False, direct_
     if string_to_search is not None:
         actual_search_query = string_to_search.strip()
     else:
-        actual_search_query = msg.ask(f"\n[purple]Insert a word to search in [green]{site_constant.SITE_NAME}").strip()
+        actual_search_query = msg.ask(f"\n[purple]Insert a word to search in [green]{site_constants.SITE_NAME}").strip()
 
     # Handle empty input
     if not actual_search_query:

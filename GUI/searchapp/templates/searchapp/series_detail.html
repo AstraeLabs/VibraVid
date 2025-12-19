@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }} - Dettagli Serie</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          animation: {
+            'fade-in': 'fadeIn 0.5s ease-in-out',
+            'slide-up': 'slideUp 0.3s ease-out',
+          },
+          keyframes: {
+            fadeIn: {
+              '0%': { opacity: '0' },
+              '100%': { opacity: '1' },
+            },
+            slideUp: {
+              '0%': { transform: 'translateY(10px)', opacity: '0' },
+              '100%': { transform: 'translateY(0)', opacity: '1' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-900 min-h-screen text-gray-100">
+  <!-- Background Pattern -->
+  <div class="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%236B7280" fill-opacity="0.03"%3E%3Ccircle cx="30" cy="30" r="2"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-30"></div>
+
+  {% if bg_image_url %}
+  <!-- Hero Background -->
+  <div class="absolute top-0 left-0 right-0 h-96 bg-cover bg-center opacity-20" style="background-image: url('{{ bg_image_url }}'); filter: blur(8px);"></div>
+  <div class="absolute top-0 left-0 right-0 h-96 bg-gradient-to-b from-transparent to-gray-900"></div>
+  {% endif %}
+
+  <div class="relative z-10 container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="max-w-6xl mx-auto">
+      <!-- Back Button -->
+      <div class="mb-6 animate-fade-in">
+        <a href="{% url 'search_home' %}" class="inline-flex items-center text-gray-400 hover:text-white transition-colors">
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+          </svg>
+          Torna alla ricerca
+        </a>
+      </div>
+
+      <!-- Title Section -->
+      <div class="mb-8 animate-slide-up">
+        <div class="bg-gray-800 border border-gray-700 rounded-2xl p-8 shadow-2xl">
+          <div class="flex items-center mb-4">
+            <div class="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mr-4">
+              <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path>
+              </svg>
+            </div>
+            <div>
+              <h1 class="text-3xl font-bold text-white">{{ title }}</h1>
+              <p class="text-gray-400 mt-1">Seleziona stagione ed episodi da scaricare</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      {% if messages %}
+        <div class="mb-8 space-y-4 animate-slide-up">
+          {% for message in messages %}
+            <div class="flex items-center p-4 rounded-xl border {% if message.tags == 'success' %}bg-green-900/50 border-green-700 text-green-300{% elif message.tags == 'error' %}bg-red-900/50 border-red-700 text-red-300{% else %}bg-blue-900/50 border-blue-700 text-blue-300{% endif %}">
+              <span class="text-sm font-medium">{{ message }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <!-- Seasons List -->
+      <div class="space-y-6 animate-fade-in">
+        {% for season in seasons %}
+        <div class="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden shadow-xl">
+          <!-- Season Header -->
+          <div class="bg-gradient-to-r from-blue-600 to-blue-700 p-6">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center">
+                <div class="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center mr-4">
+                  <span class="text-xl font-bold text-white">{{ season.number }}</span>
+                </div>
+                <div>
+                  <h2 class="text-2xl font-bold text-white">Stagione {{ season.number }}</h2>
+                  <p class="text-blue-100 text-sm">{{ season.episodes|length }} episodi disponibili</p>
+                </div>
+              </div>
+              <!-- Download Full Season Button -->
+              <form method="post" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="source_alias" value="{{ source_alias }}">
+                <input type="hidden" name="item_payload" value="{{ item_payload }}">
+                <input type="hidden" name="season_number" value="{{ season.number }}">
+                <input type="hidden" name="download_type" value="full_season">
+                <button type="submit" class="bg-white hover:bg-gray-100 text-blue-600 font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg">
+                  <svg class="inline w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                  </svg>
+                  Scarica Stagione Completa
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Episodes List -->
+          <div class="p-6">
+            <form method="post" id="form-season-{{ season.number }}">
+              {% csrf_token %}
+              <input type="hidden" name="source_alias" value="{{ source_alias }}">
+              <input type="hidden" name="item_payload" value="{{ item_payload }}">
+              <input type="hidden" name="season_number" value="{{ season.number }}">
+              <input type="hidden" name="download_type" value="episodes">
+              <input type="hidden" name="selected_episodes" id="selected_episodes_{{ season.number }}" value="">
+
+              <div class="mb-4 flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-gray-200">Seleziona Episodi</h3>
+                <div class="flex gap-2">
+                  <button type="button" onclick="selectAllEpisodes({{ season.number }})" class="text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 py-2 px-4 rounded-lg transition-colors">
+                    Seleziona Tutti
+                  </button>
+                  <button type="button" onclick="deselectAllEpisodes({{ season.number }})" class="text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 py-2 px-4 rounded-lg transition-colors">
+                    Deseleziona Tutti
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">
+                {% for episode in season.episodes %}
+                <label class="episode-checkbox-label cursor-pointer">
+                  <input type="checkbox" class="episode-checkbox hidden" data-season="{{ season.number }}" data-episode="{{ episode.number }}" value="{{ episode.number }}">
+                  <div class="episode-card bg-gray-700 hover:bg-gray-600 border-2 border-gray-600 rounded-lg p-4 transition-all duration-200 text-center">
+                    <div class="text-xl font-bold text-white mb-1">{{ episode.number }}</div>
+                    <div class="text-xs text-gray-300 line-clamp-2">{{ episode.name }}</div>
+                    <div class="checkmark hidden mt-2">
+                      <svg class="w-6 h-6 text-green-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                      </svg>
+                    </div>
+                  </div>
+                </label>
+                {% endfor %}
+              </div>
+
+              <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg">
+                <svg class="inline w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+                Scarica Episodi Selezionati
+              </button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .line-clamp-2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .episode-checkbox:checked ~ .episode-card {
+      background-color: rgb(37 99 235) !important;
+      border-color: rgb(59 130 246) !important;
+    }
+
+    .episode-checkbox:checked ~ .episode-card .checkmark {
+      display: block !important;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+  </style>
+
+  <script>
+    function selectAllEpisodes(seasonNumber) {
+      const checkboxes = document.querySelectorAll(`input.episode-checkbox[data-season="${seasonNumber}"]`);
+      checkboxes.forEach(cb => cb.checked = true);
+      updateSelectedEpisodes(seasonNumber);
+    }
+
+    function deselectAllEpisodes(seasonNumber) {
+      const checkboxes = document.querySelectorAll(`input.episode-checkbox[data-season="${seasonNumber}"]`);
+      checkboxes.forEach(cb => cb.checked = false);
+      updateSelectedEpisodes(seasonNumber);
+    }
+
+    function updateSelectedEpisodes(seasonNumber) {
+      const checkboxes = document.querySelectorAll(`input.episode-checkbox[data-season="${seasonNumber}"]:checked`);
+      const episodes = Array.from(checkboxes).map(cb => cb.value);
+      
+      // Crea una stringa compatta (es: "1-5,7,9-12")
+      let episodeString = '';
+      if (episodes.length > 0) {
+        const sortedEpisodes = episodes.map(Number).sort((a, b) => a - b);
+        let ranges = [];
+        let start = sortedEpisodes[0];
+        let end = sortedEpisodes[0];
+        
+        for (let i = 1; i <= sortedEpisodes.length; i++) {
+          if (i < sortedEpisodes.length && sortedEpisodes[i] === end + 1) {
+            end = sortedEpisodes[i];
+          } else {
+            if (start === end) {
+              ranges.push(String(start));
+            } else if (end === start + 1) {
+              ranges.push(String(start));
+              ranges.push(String(end));
+            } else {
+              ranges.push(`${start}-${end}`);
+            }
+            if (i < sortedEpisodes.length) {
+              start = sortedEpisodes[i];
+              end = sortedEpisodes[i];
+            }
+          }
+        }
+        episodeString = ranges.join(',');
+      }
+      
+      document.getElementById(`selected_episodes_${seasonNumber}`).value = episodeString;
+    }
+
+    // Aggiungi event listener a tutti i checkbox
+    document.addEventListener('DOMContentLoaded', function() {
+      const checkboxes = document.querySelectorAll('.episode-checkbox');
+      checkboxes.forEach(cb => {
+        cb.addEventListener('change', function() {
+          updateSelectedEpisodes(this.dataset.season);
+        });
+      });
+
+      // Previeni submit se nessun episodio selezionato
+      const forms = document.querySelectorAll('form[id^="form-season-"]');
+      forms.forEach(form => {
+        form.addEventListener('submit', function(e) {
+          const seasonNumber = this.querySelector('input[name="season_number"]').value;
+          const selectedEpisodes = document.getElementById(`selected_episodes_${seasonNumber}`).value;
+          
+          if (!selectedEpisodes) {
+            e.preventDefault();
+            alert('Seleziona almeno un episodio da scaricare!');
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

@@ -19,12 +19,9 @@ console = Console()
 crypto_spec = importlib.util.find_spec("Cryptodome")
 crypto_installed = crypto_spec is not None
 
-
 if not crypto_installed:
     console.log("[red]pycryptodomex non è installato. Per favore installalo. Leggi readme.md [Requirement].")
     sys.exit(0)
-
-
 logging.info("[cyan]Decryption use: Cryptodomex")
 
 
@@ -58,10 +55,10 @@ class M3U8_Decryption:
         if self.method is not None:
             message = f"Method: [green]{self.method}"
         if self.key is not None:
-            message = f"Key: [green]{self.key.hex()}"
+            message += f" | Key: [green]{self.key.hex()}"
         if self.iv is not None:
             message += f" | IV: [green]{self.iv.hex()}"
-        console.log(f"[cyan]Decryption info= {message}")
+        console.log(f"[cyan]Decryption {message}")
 
     def decrypt(self, ciphertext: bytes) -> bytes:
         """
@@ -73,8 +70,6 @@ class M3U8_Decryption:
         Returns:
             bytes: The decrypted content.
         """
-        #start = time.perf_counter_ns()
-
         if self.method in {"AES", "AES-128"}:
             decrypted_data = self.cipher.decrypt(ciphertext)
             decrypted_content = unpad(decrypted_data, AES.block_size)

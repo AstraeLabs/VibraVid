@@ -10,15 +10,9 @@ from rich.prompt import Prompt
 
 
 # Internal utilities
-from StreamingCommunity.Util.message import start_message
-from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Lib.HLS import HLS_Downloader
-
-
-# Logic class
-from .util.ScrapeSerie import GetSerieInfo
-from .util.get_license import get_bearer_token, get_playback_url
-from StreamingCommunity.Api.Template.Util import (
+from StreamingCommunity.Util import config_manager, start_message
+from StreamingCommunity.Api.Template import site_constants, MediaItem
+from StreamingCommunity.Api.Template.episode_manager import (
     manage_selection, 
     map_episode_title, 
     validate_selection, 
@@ -26,8 +20,12 @@ from StreamingCommunity.Api.Template.Util import (
     display_episodes_list,
     display_seasons_list
 )
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaItem
+from StreamingCommunity.Lib.HLS import HLS_Downloader
+
+
+# Logic
+from .util.ScrapeSerie import GetSerieInfo
+from .util.get_license import get_bearer_token, get_playback_url
 
 
 # Variable
@@ -54,11 +52,11 @@ def download_video(index_season_selected: int, index_episode_selected: int, scra
 
     # Get episode information
     obj_episode = scrape_serie.selectEpisode(index_season_selected, index_episode_selected-1)
-    console.print(f"\n[yellow]Download: [red]{site_constant.SITE_NAME} → [cyan]{scrape_serie.series_name} \\ [magenta]{obj_episode.name}[/magenta] ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} → [cyan]{scrape_serie.series_name} \\ [magenta]{obj_episode.name}[/magenta] ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
 
     # Define filename and path for the downloaded video
     mp4_name = f"{map_episode_title(scrape_serie.series_name, index_season_selected, index_episode_selected, obj_episode.name)}.{extension_output}"
-    mp4_path = os.path.join(site_constant.SERIES_FOLDER, scrape_serie.series_name, f"S{index_season_selected}")
+    mp4_path = os.path.join(site_constants.SERIES_FOLDER, scrape_serie.series_name, f"S{index_season_selected}")
 
     # Get master playlist URL
     try:
@@ -142,16 +140,10 @@ def download_series(select_season: MediaItem, season_selection: str = None, epis
         - episode_selection (str, optional): Pre-defined episode selection that bypasses manual input
     """
     start_message()
-
-    # Get bearer token
-    try:
-        bearer_token = get_bearer_token()
-    except Exception as e:
-        console.print(f"[red]Error getting bearer token: {e}")
-        return
+    bearer_token = get_bearer_token()
 
     # Init class
-    scrape_serie = GetSerieInfo(select_season.url, bearer_token)
+    scrape_serie = GetSerieInfo(select_season.url, bearer_token, select_season.name)
 
     # Collect information about season
     scrape_serie.getNumberSeason()

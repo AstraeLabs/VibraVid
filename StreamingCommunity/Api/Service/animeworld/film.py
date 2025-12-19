@@ -8,16 +8,14 @@ from rich.console import Console
 
 
 # Internal utilities
-from StreamingCommunity.Util.os import os_manager
-from StreamingCommunity.Util.message import start_message
+from StreamingCommunity.Util import os_manager, start_message
+from StreamingCommunity.Api.Template import site_constants, MediaItem
 from StreamingCommunity.Lib.MP4 import MP4_Downloader
 
 
-# Logic class
+# Logic
 from .util.ScrapeSerie import ScrapSerie
 from StreamingCommunity.Api.Player.sweetpixel import VideoSource
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaItem
 
 
 # Variable
@@ -34,23 +32,23 @@ def download_film(select_title: MediaItem):
     """
     start_message()
     
-    scrape_serie = ScrapSerie(select_title.url, site_constant.FULL_URL)
+    scrape_serie = ScrapSerie(select_title.url, site_constants.FULL_URL)
     episodes = scrape_serie.get_episodes() 
 
     # Get episode information
     episode_data = episodes[0]
-    console.print(f"\n[yellow]Download: [red]{site_constant.SITE_NAME} ([cyan]{scrape_serie.get_name()}) \n")
+    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} ([cyan]{scrape_serie.get_name()}) \n")
 
     # Define filename and path for the downloaded video
     serie_name_with_year = os_manager.get_sanitize_file(scrape_serie.get_name(), select_title.date)
     mp4_name = f"{serie_name_with_year}.mp4"
-    mp4_path = os.path.join(site_constant.ANIME_FOLDER, serie_name_with_year.replace('.mp4', ''))
+    mp4_path = os.path.join(site_constants.ANIME_FOLDER, serie_name_with_year.replace('.mp4', ''))
 
     # Create output folder
     os_manager.create_path(mp4_path)
 
     # Get video source for the episode
-    video_source = VideoSource(site_constant.FULL_URL, episode_data, scrape_serie.session_id, scrape_serie.csrf_token)
+    video_source = VideoSource(site_constants.FULL_URL, episode_data, scrape_serie.session_id, scrape_serie.csrf_token)
     mp4_link = video_source.get_playlist()
 
     # Start downloading

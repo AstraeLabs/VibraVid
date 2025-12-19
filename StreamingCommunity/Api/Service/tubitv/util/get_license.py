@@ -6,8 +6,7 @@ from typing import Tuple, Optional
 
 # Internal utilities
 from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.headers import get_userAgent, get_headers
-from StreamingCommunity.Util.http_client import create_client
+from StreamingCommunity.Util.http_client import create_client, get_userAgent, get_headers
 
 
 # Variable
@@ -34,8 +33,8 @@ def get_bearer_token():
         'platform': 'web',
         'device_id': generate_device_id(),
         'credentials': {
-            'email': config.get('email'),
-            'password': config.get('password')
+            'email': str(config.get('email')).strip(),
+            'password': str(config.get('password')).strip()
         },
     }
 

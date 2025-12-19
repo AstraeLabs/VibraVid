@@ -19,7 +19,7 @@ def extract_content_id(url: str) -> str:
 
 
 class GetSerieInfo:
-    def __init__(self, url, bearer_token=None):
+    def __init__(self, url, bearer_token=None, series_name=None):
         """
         Initialize the GetSerieInfo class for scraping Tubi TV series information.
         
@@ -30,7 +30,7 @@ class GetSerieInfo:
         self.url = url
         self.content_id = extract_content_id(url)
         self.bearer_token = bearer_token
-        self.series_name = None
+        self.series_name = series_name
         self.seasons_manager = SeasonManager()
         self.all_episodes_by_season = {}
         
@@ -65,12 +65,6 @@ class GetSerieInfo:
             
             # Store episodes by season
             self.all_episodes_by_season = episodes_by_season
-            
-            # Get series name from first episode
-            first_season = list(episodes_by_season.values())[0]
-            if first_season and len(first_season) > 0:
-                first_episode = first_season[0]
-                self.series_name = first_episode.get('series_title', 'Unknown Series')
             
             # Create seasons in SeasonManager
             for season_num in sorted(episodes_by_season.keys(), key=int):

@@ -57,4 +57,4 @@ class SiteConstant:
             base_path = os.path.join(base_path, self.SITE_NAME)
         return os.path.join(base_path, config_manager.get('OUT_FOLDER', 'anime_folder_name'))
 
-site_constant = SiteConstant()
+site_constants = SiteConstant()

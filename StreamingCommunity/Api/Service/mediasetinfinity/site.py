@@ -9,12 +9,11 @@ from rich.console import Console
 
 # Internal utilities
 from StreamingCommunity.Util.http_client import create_client
+from StreamingCommunity.Api.Template import site_constants, MediaManager
 from StreamingCommunity.Util.table import TVShowManager
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaManager
 
 
-# Logic class
+# Logic
 from .util.get_license import get_bearer_token
 
 
@@ -49,7 +48,7 @@ def title_search(query: str) -> int:
         response = create_client(headers=class_mediaset_api.generate_request_headers()).get(search_url, params=params)
         response.raise_for_status()
     except Exception as e:
-        console.print(f"[red]Site: {site_constant.SITE_NAME}, request search error: {e}")
+        console.print(f"[red]Site: {site_constants.SITE_NAME}, request search error: {e}")
         return 0
 
     # Parse response

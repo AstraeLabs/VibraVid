@@ -1,0 +1,147 @@
+name: Build and Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_pypi:
+        description: 'Pubblicare su PyPI (true) o compilare eseguibili? (false)'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+  push:
+    tags:
+      - "v*.*"
+
+jobs:
+  publish:
+    if: startsWith(github.ref_name, 'v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_pypi == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get the latest tag
+        id: get_latest_tag
+        run: echo "latest_tag=$(git describe --tags --abbrev=0)" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools>=61.0.0 wheel twine build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*
+
+  build:
+    if: startsWith(github.ref_name, 'v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_pypi == 'false')
+
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: StreamingCommunity_win
+            executable: StreamingCommunity_win.exe
+            separator: ';'
+
+          - os: macos-latest
+            artifact_name: StreamingCommunity_mac
+            executable: StreamingCommunity_mac
+            separator: ':'
+
+          - os: ubuntu-latest
+            artifact_name: StreamingCommunity_linux_latest
+            executable: StreamingCommunity_linux_latest
+            separator: ':'
+
+          - os: ubuntu-22.04
+            artifact_name: StreamingCommunity_linux_previous
+            executable: StreamingCommunity_linux_previous
+            separator: ':'
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get the latest tag
+        id: get_latest_tag
+        shell: pwsh
+        run: |
+          $latestTag = git describe --tags --abbrev=0
+          echo "latest_tag=$latestTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade certifi
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build executable with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --onefile --hidden-import=pycryptodomex --hidden-import=ua_generator \
+            --hidden-import=bs4 --hidden-import=httpx --hidden-import=rich --hidden-import=tqdm \
+            --hidden-import=m3u8 --hidden-import=psutil --hidden-import=unidecode \
+            --hidden-import=jsbeautifier --hidden-import=jsbeautifier.core \
+            --hidden-import=jsbeautifier.javascript --hidden-import=jsbeautifier.javascript.beautifier \
+            --hidden-import=jsbeautifier.unpackers --hidden-import=jsbeautifier.unpackers.packer \
+            --hidden-import=jsbeautifier.unpackers.javascriptobfuscator \
+            --hidden-import=jsbeautifier.unpackers.myobfuscate \
+            --hidden-import=jsbeautifier.unpackers.urlencode \
+            --hidden-import=jsbeautifier.unpackers.meshim \
+            --hidden-import=editorconfig --hidden-import=editorconfig.handlers \
+            --hidden-import=six --hidden-import=pathvalidate \
+            --hidden-import=xml.etree.ElementTree \
+            --hidden-import=pywidevine \
+            --hidden-import=Cryptodome.Cipher --hidden-import=Cryptodome.Cipher.AES \
+            --hidden-import=Cryptodome.Util --hidden-import=Cryptodome.Util.Padding \
+            --hidden-import=Cryptodome.Random \
+            --hidden-import=curl_cffi --hidden-import=_cffi_backend \
+            --collect-all curl_cffi \
+            --additional-hooks-dir=pyinstaller/hooks \
+            --add-data "StreamingCommunity${{ matrix.separator }}StreamingCommunity" \
+            --name=${{ matrix.artifact_name }} test_run.py
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.executable }}
+
+      - name: Create or update release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/${{ matrix.executable }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

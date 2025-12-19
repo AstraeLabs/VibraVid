@@ -13,8 +13,7 @@ from tqdm import tqdm
 
 
 # Internal utilities
-from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.color import Colors
+from StreamingCommunity.Util import config_manager, Colors
 
 
 # Variable
@@ -62,7 +61,7 @@ def decrypt_with_mp4decrypt(type, encrypted_path, kid, key, output_path=None):
     
     key_format = f"{kid.lower()}:{key.lower()}"
     cmd = [get_mp4decrypt_path(), "--key", key_format, encrypted_path, output_path]
-    logging.info(f"Running command: {' '.join(cmd)}")
+    logging.info(f"Running mp4decrypt command: {' '.join(cmd)}")
 
     progress_bar = None
     monitor_thread = None

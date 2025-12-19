@@ -8,12 +8,16 @@ from typing import Any, Dict, Optional, Union
 
 # External library
 import httpx
+import ua_generator
 from curl_cffi import requests
 
 
-# Logic class
+# Internal utilities
 from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.headers import get_userAgent
+
+
+# Variable
+ua =  ua_generator.generate(device='desktop', browser=('chrome', 'edge'))
 
 
 # Defaults from config
@@ -259,3 +263,12 @@ async def async_fetch(
                 # Use same backoff logic for async by sleeping in thread (short duration)
                 _sleep_with_backoff(attempt)
         return None
+
+
+def get_userAgent() -> str:
+    user_agent =  ua_generator.generate().text
+    return user_agent
+
+
+def get_headers() -> dict:
+    return ua.headers.get()

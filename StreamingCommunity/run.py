@@ -19,11 +19,10 @@ from rich.prompt import Prompt
 
 # Internal utilities
 from .global_search import global_search
-from StreamingCommunity.Api.Template.loader import load_search_functions, folder_name as lazy_loader_folder
-from StreamingCommunity.Util.message import start_message
-from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.os import os_manager
-from StreamingCommunity.Util.logger import Logger
+from StreamingCommunity.Api.Template import load_search_functions
+from StreamingCommunity.Api.Template.loader import folder_name as lazy_loader_folder
+from StreamingCommunity.Util import config_manager, os_manager, start_message, Logger
+from StreamingCommunity.Upload.update import update as git_update
 
 
 # Config
@@ -61,6 +60,12 @@ def initialize():
     if sys.version_info < (3, 7):
         console.log("[red]Install python version > 3.7.16")
         sys.exit(0)
+
+    # Attempt GitHub update
+    try:
+        git_update()
+    except Exception as e:
+        console.log(f"[red]Error with loading github: {str(e)}")
 
 
 def _expand_user_path(path: str) -> str:
@@ -280,7 +285,6 @@ def setup_argument_parser(search_functions):
     )
     
     # Add arguments
-    parser.add_argument("script_id", nargs="?", default="unknown", help="ID dello script")
     parser.add_argument('-s', '--search', default=None, help='Search terms')
     parser.add_argument('--global', action='store_true', help='Global search across sites')
     parser.add_argument('--not_close', type=bool, help='Keep console open after execution')
@@ -408,7 +412,7 @@ def get_user_site_selection(args, choice_labels):
         return msg.ask(prompt_message, choices=choice_keys, default="0", show_choices=False, show_default=False)
 
 
-def main(script_id=0):
+def main():
     Logger()
     execute_hooks('pre_run')
     initialize()

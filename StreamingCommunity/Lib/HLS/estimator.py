@@ -13,8 +13,7 @@ from tqdm import tqdm
 
 
 # Internal utilities
-from StreamingCommunity.Util.color import Colors
-from StreamingCommunity.Util.os import internet_manager
+from StreamingCommunity.Util import internet_manager, Colors
 
 
 class M3U8_Ts_Estimator:

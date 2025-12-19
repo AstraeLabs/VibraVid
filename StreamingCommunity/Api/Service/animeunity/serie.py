@@ -10,18 +10,15 @@ from rich.prompt import Prompt
 
 
 # Internal utilities
-from StreamingCommunity.Util.os import os_manager
-from StreamingCommunity.Util.message import start_message
+from StreamingCommunity.Util import os_manager, start_message
+from StreamingCommunity.Api.Template import site_constants, MediaItem
+from StreamingCommunity.Api.Template.episode_manager import manage_selection, dynamic_format_number
 from StreamingCommunity.Lib.MP4 import MP4_Downloader
 
 
-# Logic class
+# Logis
 from .util.ScrapeSerie import ScrapeSerieAnime
 from StreamingCommunity.Api.Player.vixcloud import VideoSourceAnime
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.Util import manage_selection, dynamic_format_number
-from StreamingCommunity.Api.Template.object import MediaItem
-
 
 
 # Variable
@@ -45,7 +42,7 @@ def download_episode(index_select: int, scrape_serie: ScrapeSerieAnime, video_so
 
     # Get episode information
     obj_episode = scrape_serie.selectEpisode(1, index_select)
-    console.print(f"\n[yellow]Download: [red]{site_constant.SITE_NAME} → [cyan]{scrape_serie.series_name} ([cyan]E{obj_episode.number}) \n")
+    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} → [cyan]{scrape_serie.series_name} ([cyan]E{obj_episode.number}) \n")
 
     # Collect mp4 url
     video_source.get_embed(obj_episode.id)
@@ -54,9 +51,9 @@ def download_episode(index_select: int, scrape_serie: ScrapeSerieAnime, video_so
     mp4_name = f"{scrape_serie.series_name}_EP_{dynamic_format_number(str(obj_episode.number))}.mp4"
 
     if scrape_serie.is_series:
-        mp4_path = os_manager.get_sanitize_path(os.path.join(site_constant.ANIME_FOLDER, scrape_serie.series_name))
+        mp4_path = os_manager.get_sanitize_path(os.path.join(site_constants.ANIME_FOLDER, scrape_serie.series_name))
     else:
-        mp4_path = os_manager.get_sanitize_path(os.path.join(site_constant.MOVIE_FOLDER, scrape_serie.series_name))
+        mp4_path = os_manager.get_sanitize_path(os.path.join(site_constants.MOVIE_FOLDER, scrape_serie.series_name))
 
     # Create output folder
     os_manager.create_path(mp4_path)
@@ -80,8 +77,8 @@ def download_series(select_title: MediaItem, season_selection: str = None, episo
         - episode_selection (str, optional): Episode selection input that bypasses manual input
     """
     start_message()
-    scrape_serie = ScrapeSerieAnime(site_constant.FULL_URL)
-    video_source = VideoSourceAnime(site_constant.FULL_URL)
+    scrape_serie = ScrapeSerieAnime(site_constants.FULL_URL)
+    video_source = VideoSourceAnime(site_constants.FULL_URL)
 
     # Set up video source (only configure scrape_serie now)
     scrape_serie.setup(None, select_title.id, select_title.slug)

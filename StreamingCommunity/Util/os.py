@@ -15,7 +15,7 @@ from pathvalidate import sanitize_filename, sanitize_filepath
 
 
 # Internal utilities
-from .installer import check_ffmpeg, check_mp4decrypt, check_device_wvd_path
+from .installer import check_ffmpeg, check_mp4decrypt, check_device_wvd_path, check_megatools
 from StreamingCommunity.Lib.DASH.cdm_helpher import get_info_wvd
 
 
@@ -224,6 +224,7 @@ class OsSummary:
         self.ffmpeg_path, self.ffprobe_path, _ = check_ffmpeg()
         self.mp4decrypt_path = check_mp4decrypt()
         self.wvd_path = check_device_wvd_path()
+        self.megatools_path = check_megatools()
         self._display_binary_paths()
 
     def _display_binary_paths(self):
@@ -232,7 +233,8 @@ class OsSummary:
             'ffmpeg': self.ffmpeg_path,
             'ffprobe': self.ffprobe_path,
             'mp4decrypt': self.mp4decrypt_path,
-            'wvd': self.wvd_path
+            'wvd': self.wvd_path,
+            'megatools': self.megatools_path
         }
         
         path_strings = []

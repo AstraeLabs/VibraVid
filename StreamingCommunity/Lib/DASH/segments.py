@@ -13,10 +13,9 @@ from rich.console import Console
 
 
 # Internal utilities
-from StreamingCommunity.Util.headers import get_userAgent
+from StreamingCommunity.Util.http_client import get_userAgent
 from StreamingCommunity.Lib.HLS.estimator import M3U8_Ts_Estimator
-from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.color import Colors
+from StreamingCommunity.Util import config_manager, Colors
 
 
 # Config
@@ -145,7 +144,6 @@ class MPD_Segments:
             worker_type = 'video' if 'Video' in description else 'audio'
             concurrent_downloads = self._get_worker_count(worker_type)
 
-        print("")
         progress_bar = tqdm(
             total=len(segment_urls) + 1,
             desc=f"Downloading {rep_id}",

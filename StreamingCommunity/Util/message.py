@@ -18,16 +18,16 @@ CLEAN = config_manager.get_bool('DEFAULT', 'show_message')
 SHOW = config_manager.get_bool('DEFAULT', 'show_message')
 
 
-def start_message(clean: bool = CLEAN):
+def start_message(clean: bool=True):
     """Display a stylized start message in the console."""
-    
     msg = r'''
-     _    ___ __              _    ___     __
-    | |  / (_) /_  _________ | |  / (_)___/ /
-    | | / / / __ \/ ___/ __ `/ | / / / __  / 
-    | |/ / / /_/ / /  / /_/ /| |/ / / /_/ /  
-    |___/_/_.___/_/   \__,_/ |___/_/\__,_/   
-                                         
+[red]+[cyan]=======================================================================================[red]+[purple]
+     ___                                         ______                     _           
+    / _ | ___________ _    _____ _____[yellow]  __ __[purple]   / __/ /________ ___ ___ _  (_)__  ___ _ 
+   / __ |/ __/ __/ _ \ |/|/ / _ `/ __/[yellow]  \ \ /[purple]  _\ \/ __/ __/ -_) _ `/  ' \/ / _ \/ _ `/ 
+  /_/ |_/_/ /_/  \___/__,__/\_,_/_/   [yellow] /_\_\ [purple] /___/\__/_/  \__/\_,_/_/_/_/_/_//_/\_, /  
+                                                                                /___/   
+[red]+[cyan]=======================================================================================[red]+
     '''.rstrip()
 
     if CLEAN and clean: 

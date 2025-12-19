@@ -10,17 +10,15 @@ from rich.prompt import Prompt
 
 
 # Internal utilities
-from StreamingCommunity.Util.os import os_manager
-from StreamingCommunity.Util.message import start_message
+from StreamingCommunity.Util import os_manager, start_message
+from StreamingCommunity.Api.Template import site_constants, MediaItem
+from StreamingCommunity.Api.Template.episode_manager import manage_selection, dynamic_format_number
 from StreamingCommunity.Lib.MP4 import MP4_Downloader
 
 
-# Logic class
+# Logic
 from .util.ScrapeSerie import ScrapSerie
 from StreamingCommunity.Api.Player.sweetpixel import VideoSource
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.Util import manage_selection, dynamic_format_number
-from StreamingCommunity.Api.Template.object import MediaItem
 
 
 # Variable
@@ -44,17 +42,17 @@ def download_episode(index_select: int, scrape_serie: ScrapSerie) -> Tuple[str,b
 
     # Get episode information
     episode_data = scrape_serie.selectEpisode(1, index_select)
-    console.print(f"\n[yellow]Download: [red]{site_constant.SITE_NAME} → [cyan]{scrape_serie.get_name()} ([cyan]E{str(index_select+1)}) \n")
+    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} → [cyan]{scrape_serie.get_name()} ([cyan]E{str(index_select+1)}) \n")
 
     # Define filename and path for the downloaded video
     mp4_name = f"{scrape_serie.get_name()}_EP_{dynamic_format_number(str(index_select+1))}.mp4"
-    mp4_path = os.path.join(site_constant.ANIME_FOLDER, scrape_serie.get_name())
+    mp4_path = os.path.join(site_constants.ANIME_FOLDER, scrape_serie.get_name())
 
     # Create output folder
     os_manager.create_path(mp4_path)
 
     # Get video source for the episode
-    video_source = VideoSource(site_constant.FULL_URL, episode_data, scrape_serie.session_id, scrape_serie.csrf_token)
+    video_source = VideoSource(site_constants.FULL_URL, episode_data, scrape_serie.session_id, scrape_serie.csrf_token)
     mp4_link = video_source.get_playlist()
 
     # Start downloading
@@ -77,7 +75,7 @@ def download_series(select_title: MediaItem, episode_selection: str = None):
     start_message()
 
     # Create scrap instance
-    scrape_serie = ScrapSerie(select_title.url, site_constant.FULL_URL)
+    scrape_serie = ScrapSerie(select_title.url, site_constants.FULL_URL)
     episodes = scrape_serie.get_episodes() 
 
     # Get episode count

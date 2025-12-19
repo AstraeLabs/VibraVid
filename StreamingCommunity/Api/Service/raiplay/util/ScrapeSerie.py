@@ -4,8 +4,7 @@ import logging
 
 
 # Internal utilities
-from StreamingCommunity.Util.headers import get_headers
-from StreamingCommunity.Util.http_client import create_client
+from StreamingCommunity.Util.http_client import create_client, get_headers
 from StreamingCommunity.Api.Template.object import SeasonManager
 
 

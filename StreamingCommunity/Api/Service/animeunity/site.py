@@ -8,14 +8,9 @@ from rich.console import Console
 
 
 # Internal utilities
-from StreamingCommunity.Util.headers import get_userAgent
-from StreamingCommunity.Util.http_client import create_client_curl
+from StreamingCommunity.Util.http_client import create_client_curl, get_userAgent
 from StreamingCommunity.Util.table import TVShowManager
-
-
-# Logic class
-from StreamingCommunity.Api.Template.config_loader import site_constant
-from StreamingCommunity.Api.Template.object import MediaManager
+from StreamingCommunity.Api.Template import site_constants, MediaManager
 
 
 # Variable
@@ -28,7 +23,7 @@ def get_token(user_agent: str) -> dict:
     """
     Retrieve session cookies from the site.
     """
-    response = create_client_curl(headers={'user-agent': user_agent}).get(site_constant.FULL_URL)
+    response = create_client_curl(headers={'user-agent': user_agent}).get(site_constants.FULL_URL)
     response.raise_for_status()
     all_cookies = {name: value for name, value in response.cookies.items()}
 
@@ -63,20 +58,20 @@ def title_search(query: str) -> int:
     }
 
     headers = {
-        'origin': site_constant.FULL_URL,
-        'referer': f"{site_constant.FULL_URL}/",
+        'origin': site_constants.FULL_URL,
+        'referer': f"{site_constants.FULL_URL}/",
         'user-agent': user_agent,
         'x-xsrf-token': data.get('XSRF-TOKEN', ''),
     }
 
     # First call: /livesearch
     try:
-        response1 = create_client_curl(headers=headers).post(f'{site_constant.FULL_URL}/livesearch', cookies=cookies, data={'title': query})
+        response1 = create_client_curl(headers=headers).post(f'{site_constants.FULL_URL}/livesearch', cookies=cookies, data={'title': query})
         response1.raise_for_status()
         process_results(response1.json().get('records', []), seen_titles, media_search_manager)
 
     except Exception as e:
-        console.print(f"[red]Site: {site_constant.SITE_NAME}, request search error: {e}")
+        console.print(f"[red]Site: {site_constants.SITE_NAME}, request search error: {e}")
         return 0
 
     # Second call: /archivio/get-animes
@@ -92,12 +87,12 @@ def title_search(query: str) -> int:
             'dubbed': False,
             'season': False,
         }
-        response2 = create_client_curl(headers=headers).post(f'{site_constant.FULL_URL}/archivio/get-animes', cookies=cookies, json=json_data)
+        response2 = create_client_curl(headers=headers).post(f'{site_constants.FULL_URL}/archivio/get-animes', cookies=cookies, json=json_data)
         response2.raise_for_status()
         process_results(response2.json().get('records', []), seen_titles, media_search_manager)
 
     except Exception as e:
-        console.print(f"Site: {site_constant.SITE_NAME}, archivio search error: {e}")
+        console.print(f"Site: {site_constants.SITE_NAME}, archivio search error: {e}")
 
     result_count = media_search_manager.get_length()
     return result_count

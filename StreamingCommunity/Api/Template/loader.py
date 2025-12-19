@@ -164,3 +164,12 @@ def load_search_functions() -> Dict[str, LazySearchModule]:
 
     logging.info(f"Loaded {len(loaded_functions)} search modules")
     return loaded_functions
+
+
+def get_folder_name() -> str:
+    """Get the folder name where site modules are located.
+    
+    Returns:
+        The folder name as a string
+    """
+    return folder_name

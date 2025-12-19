@@ -11,8 +11,7 @@ from rich.console import Console
 
 
 # Internal utilities
-from StreamingCommunity.Util.http_client import create_client
-from StreamingCommunity.Util.headers import get_headers, get_userAgent
+from StreamingCommunity.Util.http_client import create_client, get_headers, get_userAgent
 
 
 # Variable

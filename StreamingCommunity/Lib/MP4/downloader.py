@@ -16,11 +16,8 @@ from rich.prompt import Prompt
 
 
 # Internal utilities
-from StreamingCommunity.Util.color import Colors
-from StreamingCommunity.Util.headers import get_userAgent
-from StreamingCommunity.Util.http_client import create_client
-from StreamingCommunity.Util.config_json import config_manager
-from StreamingCommunity.Util.os import internet_manager, os_manager
+from StreamingCommunity.Util.http_client import create_client, get_userAgent
+from StreamingCommunity.Util import config_manager, os_manager, internet_manager, Colors
 
 
 # Logic class
@@ -127,7 +124,6 @@ def MP4_Downloader(url: str, path: str, referer: str = None, headers_: dict = No
                     return None, False
 
                 # Create progress bar with percentage instead of n_fmt/total_fmt
-                print("")
                 progress_bar = tqdm(
                     total=total,
                     ascii='░▒█',
@@ -186,7 +182,6 @@ def MP4_Downloader(url: str, path: str, referer: str = None, headers_: dict = No
             return None, interrupt_handler.kill_download
 
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
         console.print(f"[red]Unexpected Error: {e}")
         if os.path.exists(temp_path):
             os.remove(temp_path)

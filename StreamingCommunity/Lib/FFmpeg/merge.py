@@ -75,6 +75,7 @@ def join_video(video_path: str, out_path: str, codec: M3U8_Codec = None):
 
     # Output file and overwrite
     ffmpeg_cmd.extend([out_path, '-y'])
+    logging.info(f"FFMPEG Command: {' '.join(ffmpeg_cmd)} \n")
 
     # Run join
     if DEBUG_MODE:
@@ -122,7 +123,7 @@ def join_audios(video_path: str, audio_tracks: List[Dict[str, str]], out_path: s
     if use_shortest:
         for track in duration_diffs:
             color = "red" if track['has_error'] else "green"
-            console.print(f"[{color}]Audio {track['language']}: Video duration: {track['video_duration']:.2f}s, Audio duration: {track['audio_duration']:.2f}s, Difference: {track['difference']:.2f}s[/{color}]")
+            console.print(f"[{color}]Audio {track['language']}: Video duration: {track['video_duration']:.2f}s, Audio duration: {track['audio_duration']:.2f}s, Difference: {track['difference']:.2f}s[/{color}] \n")
 
     # Start command with locate ffmpeg
     ffmpeg_cmd = [get_ffmpeg_path()]
@@ -153,6 +154,7 @@ def join_audios(video_path: str, audio_tracks: List[Dict[str, str]], out_path: s
 
     # Output file and overwrite
     ffmpeg_cmd.extend([out_path, '-y'])
+    logging.info(f"FFMPEG Command: {' '.join(ffmpeg_cmd)} \n")
 
     # Run join
     if DEBUG_MODE:
@@ -197,7 +199,7 @@ def join_subtitle(video_path: str, subtitles_list: List[Dict[str, str]], out_pat
 
     # Overwrite
     ffmpeg_cmd += [out_path, "-y"]
-    logging.info(f"FFmpeg command: {ffmpeg_cmd}")
+    logging.info(f"FFMPEG Command: {' '.join(ffmpeg_cmd)} \n")
 
     # Run join
     if DEBUG_MODE:

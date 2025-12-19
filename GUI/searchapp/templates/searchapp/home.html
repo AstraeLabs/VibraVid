@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StreamingCommunity - Ricerca</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          animation: {
+            'fade-in': 'fadeIn 0.5s ease-in-out',
+            'slide-up': 'slideUp 0.3s ease-out',
+            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          },
+          keyframes: {
+            fadeIn: {
+              '0%': { opacity: '0' },
+              '100%': { opacity: '1' },
+            },
+            slideUp: {
+              '0%': { transform: 'translateY(10px)', opacity: '0' },
+              '100%': { transform: 'translateY(0)', opacity: '1' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+  {% csrf_token %}
+</head>
+<body class="bg-gray-900 min-h-screen text-gray-100">
+  <!-- Background Pattern -->
+  <div class="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%236B7280" fill-opacity="0.03"%3E%3Ccircle cx="30" cy="30" r="2"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-30"></div>
+
+  <div class="relative z-10 container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="text-center mb-12 animate-fade-in">
+      <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-6 shadow-lg">
+        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+        </svg>
+      </div>
+      <h1 class="text-4xl md:text-5xl font-bold text-white mb-4">
+        StreamingCommunity
+      </h1>
+      <p class="text-gray-400 text-lg max-w-2xl mx-auto">
+        Trova e scarica i tuoi contenuti preferiti da tutti i siti di streaming
+      </p>
+    </div>
+
+    <!-- Messages -->
+    {% if messages %}
+      <div class="max-w-2xl mx-auto mb-8 space-y-4 animate-slide-up">
+        {% for message in messages %}
+          <div class="flex items-center p-4 rounded-xl border {% if message.tags == 'success' %}bg-green-900/50 border-green-700 text-green-300{% elif message.tags == 'error' %}bg-red-900/50 border-red-700 text-red-300{% else %}bg-blue-900/50 border-blue-700 text-blue-300{% endif %}">
+            <div class="flex-shrink-0 mr-3">
+              {% if message.tags == 'success' %}
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
+              {% elif message.tags == 'error' %}
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+              {% else %}
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                </svg>
+              {% endif %}
+            </div>
+            <span class="text-sm font-medium">{{ message }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <!-- Search Form -->
+    <div class="max-w-2xl mx-auto animate-slide-up">
+      <div class="bg-gray-800 border border-gray-700 rounded-2xl p-8 shadow-2xl">
+        <form action="{% url 'search' %}" method="post" class="space-y-6">
+          {% csrf_token %}
+          
+          <!-- Site Selection -->
+          <div>
+            <label for="id_site" class="block text-sm font-semibold text-gray-200 mb-3">
+              <svg class="inline w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9v-9m0-9v9"></path>
+              </svg>
+              Seleziona Sito
+            </label>
+            <div class="relative group">
+              <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <svg class="w-5 h-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                </svg>
+              </div>
+              {{ form.site }}
+              <div class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
+                <svg class="w-5 h-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Search Query -->
+          <div>
+            <label for="id_query" class="block text-sm font-semibold text-gray-200 mb-3">
+              <svg class="inline w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+              </svg>
+              Cosa cerchi?
+            </label>
+            <div class="relative group">
+              <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <svg class="w-5 h-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+              </div>
+              {{ form.query }}
+              <div class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
+                <div class="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                  <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Submit Button -->
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-500/50">
+            <svg class="inline w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+            Cerca Contenuti
+          </button>
+        </form>
+      </div>
+
+      <!-- Features -->
+      <div class="mt-12 grid md:grid-cols-3 gap-6">
+        <div class="text-center p-6 bg-gray-800 border border-gray-700 rounded-xl">
+          <div class="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white mb-2">Veloce</h3>
+          <p class="text-sm text-gray-400">Ricerca istantanea su tutti i siti</p>
+        </div>
+        
+        <div class="text-center p-6 bg-gray-800 border border-gray-700 rounded-xl">
+          <div class="w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white mb-2">Sicuro</h3>
+          <p class="text-sm text-gray-400">Download sicuro e protetto</p>
+        </div>
+        
+        <div class="text-center p-6 bg-gray-800 border border-gray-700 rounded-xl">
+          <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white mb-2">Completo</h3>
+          <p class="text-sm text-gray-400">Film, serie TV e anime</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* Custom form styling */
+    /* Rimosse regole generiche che potevano sovrascrivere i widget del form */
+
+    /* Override specifico per i campi del form */
+    #id_site, #id_query {
+      background-color: #ffffff !important; /* sfondo bianco */
+      color: #111827 !important;            /* testo quasi nero */
+      border-color: #d1d5db !important;     /* grigio chiaro */
+      padding-left: 3rem;                    /* spazio per icone */
+      padding-right: 3rem;                   /* spazio per icone */
+    }
+    
+    /* Specific styling for select */
+    select {
+      @apply py-3 px-12; /* Padding per le icone laterali */
+      background-image: none !important; /* Rimuove la freccia di default */
+      color: #111827 !important; /* Fix: opzione selezionata visibile in dark */
+    }
+    
+    /* Specific styling for input */
+    input {
+      @apply py-3 px-12; /* Padding per le icone laterali */
+    }
+    
+    select option {
+      @apply bg-gray-700 text-white;
+      background-color: #374151 !important;
+      color: white !important;
+    }
+    
+    /* Hover effects */
+    select:hover, input:hover {
+      @apply border-gray-500;
+    }
+    
+    /* Focus effects */
+    select:focus, input:focus {
+      @apply border-blue-500 ring-2 ring-blue-500/20;
+    }
+    
+    /* Smooth scrolling */
+    html {
+      scroll-behavior: smooth;
+    }
+  </style>
+</body>
+</html>
+
+

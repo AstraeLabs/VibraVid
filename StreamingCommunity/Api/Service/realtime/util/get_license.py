@@ -1,10 +1,15 @@
 # 26.11.2025
 
+# External library
+from rich.console import Console
+
 
 # Internal utilities
-from StreamingCommunity.Util.headers import get_userAgent, get_headers
-from StreamingCommunity.Util.http_client import create_client
+from StreamingCommunity.Util.http_client import create_client, get_userAgent, get_headers
 
+
+# Variable
+console = Console()
 
 
 def get_playback_url(video_id: str, bearer_token: str, get_dash: bool, channel: str = "") -> str:
@@ -26,8 +31,11 @@ def get_playback_url(video_id: str, bearer_token: str, get_dash: bool, channel: 
         },
         'videoId': video_id,
     }
-
     response = create_client().post(bearer_token[channel]['endpoint'], headers=headers, json=json_data)
+    response.raise_for_status()
+
+    if response.status_code == 403:
+        console.print("[red]Set vpn to IT to download this content.")
 
     if not get_dash:
         return response.json()['data']['attributes']['streaming'][0]['url']
