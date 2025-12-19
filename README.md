@@ -144,8 +144,6 @@ dash_process.parse_manifest()
 
 if dash_process.download_and_decrypt():
     dash_process.finalize_output()
-
-dash_process.get_status()
 ```
 
 See [DASH example](./Test/Downloads/DASH.py) for complete usage.

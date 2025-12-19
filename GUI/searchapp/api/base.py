@@ -9,10 +9,11 @@ from dataclasses import dataclass
 @dataclass
 class MediaItem:
     """Standardized media item representation."""
-    id: Any
     title: str
-    slug: str
     type: str  # 'film', 'series', 'ova', etc.
+    slug: str = None
+    id: Any = None
+    path_id: Optional[str] = None
     url: Optional[str] = None
     poster: Optional[str] = None
     release_date: Optional[str] = None

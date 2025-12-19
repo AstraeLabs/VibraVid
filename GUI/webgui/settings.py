@@ -6,9 +6,8 @@ import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = BASE_DIR.parent  # /Users/.../StreamingCommunity
+PROJECT_ROOT = BASE_DIR.parent
 
-# Ensure project root is on sys.path to import top-level `StreamingCommunity` package
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
