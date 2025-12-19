@@ -195,7 +195,7 @@ class M3U8Manager:
             # 3. Filters are configured (not empty)
             if not self.audio_streams and all_audio and DOWNLOAD_SPECIFIC_AUDIO:
                 first_audio_lang = all_audio[0].get('language', 'unknown')
-                #console.print(f"[yellow]Auto-selecting first available audio track: {first_audio_lang}")
+                console.print(f"[yellow]Auto-selecting first available audio track: {first_audio_lang}")
                 self.audio_streams = [all_audio[0]]
 
             # Subtitle selection
