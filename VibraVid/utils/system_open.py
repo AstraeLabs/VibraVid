@@ -60,3 +60,35 @@ def open_folder(path: str) -> tuple[bool, str]:
         return True, f"Cartella aperta: {dir_path}"
     except Exception as e:
         return False, f"Impossibile aprire la cartella: {e}"
+
+
+def copy_to_clipboard(text: str) -> tuple[bool, str]:
+    """Copy text to system clipboard (cross-platform).
+
+    Returns (success, message).
+    """
+    if not text:
+        return False, "Nessun testo da copiare."
+
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE, close_fds=True)
+            p.communicate(input=text.encode("utf-8"))
+            return True, "Copiato negli appunti!"
+        elif system == "Windows":
+            p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE, close_fds=True)
+            p.communicate(input=text.encode("utf-8"))
+            return True, "Copiato negli appunti!"
+        else:
+            for cmd in [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]:
+                try:
+                    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, close_fds=True)
+                    p.communicate(input=text.encode("utf-8"))
+                    if p.returncode == 0:
+                        return True, "Copiato negli appunti!"
+                except FileNotFoundError:
+                    continue
+            return False, "Nessun gestore appunti trovato (installa wl-clipboard o xclip)."
+    except Exception as e:
+        return False, f"Impossibile copiare negli appunti: {e}"

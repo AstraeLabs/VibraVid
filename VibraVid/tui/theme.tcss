@@ -317,6 +317,21 @@ Button.site-pill.-primary {
     margin-right: 1;
 }
 
+#sort-btn {
+    min-width: 16;
+    height: 3;
+    margin-left: 1;
+    background: $bg-surface;
+    color: $accent-primary;
+    border: round $accent-primary;
+}
+
+#retry-failed-btn {
+    min-width: 16;
+    height: 3;
+    margin-left: 1;
+}
+
 #search-loading {
     height: 3;
 }
@@ -336,6 +351,31 @@ Button.site-pill.-primary {
     padding-right: 1;
 }
 
+#batch-actions-bar {
+    height: 3;
+    margin-top: 1;
+    align: left middle;
+    background: $bg-surface;
+    padding: 0 1;
+    border: round $status-success;
+}
+
+#batch-count-label {
+    width: auto;
+    margin-right: 2;
+    text-style: bold;
+    color: $status-success;
+}
+
+#btn-batch-enqueue {
+    margin-right: 1;
+    height: 3;
+}
+
+#btn-batch-clear {
+    height: 3;
+}
+
 #preview-container {
     width: 45%;
     height: 1fr;
@@ -349,16 +389,42 @@ Button.site-pill.-primary {
 }
 
 #search-preview-box {
-    height: 1fr;
+    height: auto;
+    max-height: 14;
+    margin-bottom: 1;
+}
+
+#preview-providers-box {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.preview-prov-title {
+    text-style: bold;
+    color: $accent-primary;
+    margin-bottom: 0;
+}
+
+#preview-providers-wrap {
+    height: auto;
+    margin-top: 0;
+}
+
+.preview-prov-pill {
+    min-width: 10;
+    height: 3;
+    margin-right: 1;
+    margin-bottom: 0;
 }
 
 #preview-actions-row {
-    height: 3;
+    height: auto;
     margin-top: 1;
 }
 
 #preview-actions-row Button {
     margin-right: 1;
+    margin-bottom: 1;
 }
 
 FuzzyList {
