@@ -6,11 +6,12 @@
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Grid, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Header, Input, LoadingIndicator, Static
 
@@ -161,6 +162,23 @@ def _get_library_status(item: object, site: str) -> str | None:
     return None
 
 
+@dataclass
+class SearchSnapshot:
+    """Result set of the last search, kept on the app so it outlives the screen.
+
+    Going Home unwinds the whole screen stack, which destroys the SearchScreen;
+    without this the user has to run the same search again to get back to it.
+    """
+
+    site: str | None
+    query: str
+    year: str
+    raw: list[tuple[str, object, list[tuple[str, object]]]]
+    failed_sites: list[str]
+    category: str
+    sort_mode: str
+
+
 class SearchScreen(Screen):
     """Runs catalog search and displays results alongside mouse-hover live metadata preview card and QoL controls."""
 
@@ -206,11 +224,11 @@ class SearchScreen(Screen):
                 yield Button(t("sort_by", mode=t(SORT_LABELS[self._current_sort_mode])), id="sort-btn")
                 yield Button(t("retry_failed_sites_btn", count=0), id="retry-failed-btn", variant="warning")
 
-            with Horizontal(id="category-filter-pills"):
+            with Grid(id="category-filter-pills"):
                 yield Button(f"{t('all')} (0)", id="filter-all", variant="primary", classes="filter-pill")
-                yield Button(f"🎬 {t('film')}", id="filter-film", classes="filter-pill")
-                yield Button(f"📺 {t('serie_anime')}", id="filter-serie", classes="filter-pill")
-                yield Button(f"🎵 {t('music')}", id="filter-music", classes="filter-pill")
+                yield Button(f"🎬 {t('film')} (0)", id="filter-film", classes="filter-pill")
+                yield Button(f"📺 {t('serie_anime')} (0)", id="filter-serie", classes="filter-pill")
+                yield Button(f"🎵 {t('music')} (0)", id="filter-music", classes="filter-pill")
 
             yield LoadingIndicator(id="search-loading")
             yield Static("", id="search-status")
@@ -231,9 +249,9 @@ class SearchScreen(Screen):
                             yield Static(
                                 t("active_provider_badge"), classes="preview-prov-title", id="preview-prov-title"
                             )
-                            with Horizontal(id="preview-providers-wrap"):
+                            with Grid(id="preview-providers-wrap"):
                                 pass
-                        with Horizontal(id="preview-actions-row"):
+                        with Grid(id="preview-actions-row"):
                             yield Button(t("download_now"), id="preview-open-btn", variant="primary")
                             yield Button(t("add_to_queue"), id="preview-queue-btn")
                             yield Button(t("copy_cli_btn"), id="preview-copy-btn")
@@ -242,13 +260,15 @@ class SearchScreen(Screen):
 
     def on_mount(self) -> None:
         self.query_one("#search-loading", LoadingIndicator).display = False
-        self.query_one("#preview-actions-row", Horizontal).display = False
+        self.query_one("#preview-actions-row", Grid).display = False
         self.query_one("#preview-providers-box", Vertical).display = False
         self.query_one("#retry-failed-btn", Button).display = False
         self.query_one("#batch-actions-bar", Horizontal).display = False
         self.query_one("#query", Input).focus()
         if self._initial_query:
             self._start_search()
+        else:
+            self._restore_snapshot()
 
     # ── Directional Navigation (Left / Right) ──────────────────────────────
 
@@ -372,6 +392,58 @@ class SearchScreen(Screen):
             status = t("no_results_status")
 
         self.query_one("#search-status", Static).update(status)
+        self._store_snapshot()
+
+    def _store_snapshot(self) -> None:
+        """Remember the current result set, so leaving the screen does not discard it."""
+        if not self._raw:
+            return
+        self.app.search_snapshot = SearchSnapshot(
+            site=self._site,
+            query=self._last_query,
+            year=self.query_one("#year", Input).value,
+            raw=list(self._raw),
+            failed_sites=list(self._failed_sites),
+            category=self._current_filter_category,
+            sort_mode=self._current_sort_mode,
+        )
+
+    def _restore_snapshot(self) -> bool:
+        """Repopulate from the last search of this session; False when there is none."""
+        snapshot = getattr(self.app, "search_snapshot", None)
+        if not isinstance(snapshot, SearchSnapshot) or snapshot.site != self._site or not snapshot.raw:
+            return False
+
+        self._raw = list(snapshot.raw)
+        self._failed_sites = list(snapshot.failed_sites)
+        self._last_query = snapshot.query
+        self._current_filter_category = snapshot.category
+        self._current_sort_mode = snapshot.sort_mode
+
+        self.query_one("#query", Input).value = snapshot.query
+        self.query_one("#year", Input).value = snapshot.year
+        self.query_one("#sort-btn", Button).label = t("sort_by", mode=t(SORT_LABELS[self._current_sort_mode]))
+
+        for btn_id, category in (
+            ("#filter-all", "all"),
+            ("#filter-film", "film"),
+            ("#filter-serie", "serie"),
+            ("#filter-music", "music"),
+        ):
+            btn = self.query_one(btn_id, Button)
+            btn.variant = "primary" if category == self._current_filter_category else "default"
+
+        retry_btn = self.query_one("#retry-failed-btn", Button)
+        if self._failed_sites:
+            retry_btn.label = t("retry_failed_sites_btn", count=len(self._failed_sites))
+        retry_btn.display = bool(self._failed_sites)
+
+        self._update_category_counts(self._raw)
+        self._populate_results_list()
+        self.query_one("#search-status", Static).update(
+            t("restored_results_status", count=len(self._raw), query=snapshot.query)
+        )
+        return True
 
     def _update_category_counts(self, results: list[tuple[str, object, list[tuple[str, object]]]]) -> None:
         total = len(results)
@@ -442,6 +514,7 @@ class SearchScreen(Screen):
 
         self.query_one("#results", FuzzyList).set_items(items, reset_filter=False)
         self._update_batch_bar()
+        self._store_snapshot()
 
     def _update_batch_bar(self) -> None:
         bar = self.query_one("#batch-actions-bar", Horizontal)
@@ -527,8 +600,29 @@ class SearchScreen(Screen):
         self._selected_provider_index = 0
         self._render_preview_card(payload)
 
+    def _provider_pills(self) -> list[Button]:
+        """Return the provider pill pool, in mount order (index matches the button ID suffix)."""
+        wrap = self.query_one("#preview-providers-wrap", Grid)
+        return [child for child in wrap.children if isinstance(child, Button)]
+
+    def _ensure_provider_pills(self, count: int) -> list[Button]:
+        """Grow the pill pool to at least `count` buttons and return it.
+
+        Pills are mounted once and never removed: `remove_children()` is deferred by the
+        message loop, so recreating them on every highlight raised DuplicateIds while the
+        previous buttons were still registered.
+        """
+        pills = self._provider_pills()
+        if len(pills) < count:
+            new_pills = [
+                Button("", id=f"btn-prov-{idx}", classes="preview-prov-pill") for idx in range(len(pills), count)
+            ]
+            self.query_one("#preview-providers-wrap", Grid).mount(*new_pills)
+            pills.extend(new_pills)
+        return pills
+
     def _render_preview_card(self, payload: tuple) -> None:
-        self.query_one("#preview-actions-row", Horizontal).display = True
+        self.query_one("#preview-actions-row", Grid).display = True
         site, item = payload[0], payload[1]
         providers = payload[2] if len(payload) > 2 else [(site, item)]
 
@@ -548,15 +642,12 @@ class SearchScreen(Screen):
 
         open_btn = self.query_one("#preview-open-btn", Button)
         if is_movie:
-            type_header = t("header_film")
             badge = f"[bold yellow]🎬 {t('film').upper()}[/bold yellow]"
             open_btn.label = f"⬇️ {t('download_movie')}"
         elif is_song:
-            type_header = t("header_music")
             badge = f"[bold magenta]🎵 {t('music').upper()}[/bold magenta]"
             open_btn.label = f"⬇️ {t('download_track')}"
         else:
-            type_header = t("header_serie")
             badge = f"[bold green]📺 {t('serie_anime').upper()}[/bold green]"
             open_btn.label = f"📺 {t('select_seasons_episodes')}"
 
@@ -570,10 +661,6 @@ class SearchScreen(Screen):
             status_line = ""
 
         lines = [
-            "[bold cyan]┌──────────────────────────────────────────────┐[/bold cyan]",
-            f"[bold cyan]│[/bold cyan] [bold white]{type_header[:44]:<44}[/bold white] [bold cyan]│[/bold cyan]",
-            "[bold cyan]└──────────────────────────────────────────────┘[/bold cyan]",
-            "",
             f"{badge}  [bold white]{name}[/bold white]" + (f" [dim]({year})[/dim]" if year else "") + status_line,
             f"[dim]{t('label_providers')}[/] [bold cyan]{prov_str}[/bold cyan]   [dim]{t('label_format')}[/] [bold white]{typ}[/bold white]",
         ]
@@ -593,17 +680,19 @@ class SearchScreen(Screen):
 
         # Render provider switcher pills
         prov_box = self.query_one("#preview-providers-box", Vertical)
-        prov_wrap = self.query_one("#preview-providers-wrap", Horizontal)
-        prov_wrap.remove_children()
-
         if len(providers) > 1:
             prov_box.display = True
-            for idx, (p_site, _) in enumerate(providers):
-                var = "primary" if idx == self._selected_provider_index else "default"
-                btn = Button(f"[{idx + 1}] {p_site}", id=f"btn-prov-{idx}", variant=var, classes="preview-prov-pill")
-                prov_wrap.mount(btn)
+            for idx, pill in enumerate(self._ensure_provider_pills(len(providers))):
+                if idx < len(providers):
+                    pill.label = f"[{idx + 1}] {providers[idx][0]}"
+                    pill.variant = "primary" if idx == self._selected_provider_index else "default"
+                    pill.display = True
+                else:
+                    pill.display = False
         else:
             prov_box.display = False
+            for pill in self._provider_pills():
+                pill.display = False
 
     @on(Button.Pressed, ".preview-prov-pill")
     def _on_provider_pill_pressed(self, event: Button.Pressed) -> None:

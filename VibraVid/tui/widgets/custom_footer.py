@@ -5,6 +5,7 @@
 
 import logging
 
+from rich.cells import cell_len
 from textual import events, on
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -14,6 +15,21 @@ from textual.widgets import Static
 from VibraVid.tui.i18n import t
 
 logger = logging.getLogger(__name__)
+
+# (widget id, key hint, i18n key, drop order). The footer drops entries with the
+# highest drop order first when the terminal is too narrow to show them all;
+# 0 is never dropped, so the quit hint always stays on screen.
+FOOTER_ITEMS: list[tuple[str, str, str, int]] = [
+    ("foot-home", "H", "nav_home", 3),
+    ("foot-downloads", "d", "nav_downloads", 5),
+    ("foot-queue", "q", "nav_queue", 6),
+    ("foot-history", "h", "nav_history", 7),
+    ("foot-settings", ",", "nav_settings", 8),
+    ("foot-system", "s", "nav_system", 9),
+    ("foot-help", "?", "nav_help", 4),
+    ("foot-back", "ESC", "nav_back", 2),
+    ("foot-quit", "Ctrl+Q", "nav_quit", 0),
+]
 
 
 class CustomFooter(Widget):
@@ -50,15 +66,38 @@ class CustomFooter(Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="custom-footer-bar"):
-            yield Static(fr"[bold #7dcfff]\[H][/bold #7dcfff] {t('nav_home')}", id="foot-home", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[d][/bold #7dcfff] {t('nav_downloads')}", id="foot-downloads", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[q][/bold #7dcfff] {t('nav_queue')}", id="foot-queue", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[h][/bold #7dcfff] {t('nav_history')}", id="foot-history", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[,][/bold #7dcfff] {t('nav_settings')}", id="foot-settings", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[s][/bold #7dcfff] {t('nav_system')}", id="foot-system", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[?][/bold #7dcfff] {t('nav_help')}", id="foot-help", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[ESC][/bold #7dcfff] {t('nav_back')}", id="foot-back", classes="foot-item")
-            yield Static(fr"[bold #7dcfff]\[Ctrl+Q][/bold #7dcfff] {t('nav_quit')}", id="foot-quit", classes="foot-item")
+            for item_id, key, label_key, _ in FOOTER_ITEMS:
+                yield Static(
+                    f"[bold #7dcfff]\\[{key}][/bold #7dcfff] {t(label_key)}",
+                    id=item_id,
+                    classes="foot-item",
+                )
+
+    def _item_width(self, key: str, label_key: str) -> int:
+        """Rendered width of one entry: its plain text plus the .foot-item padding."""
+        return cell_len(f"[{key}] {t(label_key)}") + 2
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Hide the least important entries when they no longer fit.
+
+        Without this the bar simply overflows: on an 80 column terminal the last
+        entries are laid out past the right edge and become invisible, quit included.
+        """
+        available = max(0, event.size.width - self.styles.gutter.width)
+        widths = {item_id: self._item_width(key, label_key) for item_id, key, label_key, _ in FOOTER_ITEMS}
+        hidden: set[str] = set()
+
+        def used() -> int:
+            return sum(width for item_id, width in widths.items() if item_id not in hidden)
+
+        for item_id, _, _, drop_order in sorted(FOOTER_ITEMS, key=lambda item: -item[3]):
+            if used() <= available:
+                break
+            if drop_order > 0:
+                hidden.add(item_id)
+
+        for item_id, _, _, _ in FOOTER_ITEMS:
+            self.query_one(f"#{item_id}", Static).display = item_id not in hidden
 
     @on(events.Click, ".foot-item")
     def _on_foot_item_click(self, event: events.Click) -> None:
@@ -80,5 +119,4 @@ class CustomFooter(Widget):
         elif target_id == "foot-back":
             self.app.action_back()
         elif target_id == "foot-quit":
-            self.app.action_quit()
-
+            self.app.exit()
