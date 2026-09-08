@@ -245,6 +245,9 @@ class DASH_Downloader(BaseDownloader):
         self.decryption_keys = []
         self.media_downloader = None
         self.custom_filters: dict | None = None
+        self.display_min_video_height: int | None = None
+        self.display_only_drm_video = False
+        self.display_only_drm_audio = False
         self._probe = DRMProbe()
 
     def _collect_drm_from_streams(self, streams: list, check_selected: bool = True) -> dict[str, list[dict]]:
@@ -743,7 +746,40 @@ class DASH_Downloader(BaseDownloader):
                 _was_selected = _dv_companion_stream.selected
                 _dv_companion_stream.selected = True
 
-            console.print(build_table(streams))
+            display_streams = streams
+            if self.display_min_video_height is not None:
+                def _display_height(stream) -> int:
+                    height = getattr(stream, "height", 0) or 0
+                    if height:
+                        return int(height)
+                    resolution = getattr(stream, "resolution", "") or ""
+                    try:
+                        return int(resolution.split("x")[-1])
+                    except (TypeError, ValueError):
+                        return 0
+
+                display_streams = [
+                    stream
+                    for stream in display_streams
+                    if getattr(stream, "type", "") != "video"
+                    or _display_height(stream) >= self.display_min_video_height
+                ]
+            if self.display_only_drm_video:
+                display_streams = [
+                    stream
+                    for stream in display_streams
+                    if getattr(stream, "type", "") != "video"
+                    or bool(getattr(stream, "drm", None) and stream.drm.is_encrypted())
+                ]
+            if self.display_only_drm_audio:
+                display_streams = [
+                    stream
+                    for stream in display_streams
+                    if getattr(stream, "type", "") != "audio"
+                    or bool(getattr(stream, "drm", None) and stream.drm.is_encrypted())
+                ]
+
+            console.print(build_table(display_streams))
             if _dv_companion_stream is not None and _was_selected is not None:
                 _dv_companion_stream.selected = _was_selected
 
