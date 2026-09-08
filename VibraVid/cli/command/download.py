@@ -142,7 +142,7 @@ def handle_direct_download(args) -> bool:
 
             if error:
                 logger.error(f"MP4 download error: {error}")
-                console.print(f"[red]Download error: {error}")
+                console.print(f"[red]Dio Cancaro: {error}")
                 return True, False
 
         elif url_type == "hls":
@@ -165,7 +165,7 @@ def handle_direct_download(args) -> bool:
 
             if error:
                 logger.error(f"HLS download error: {error}")
-                console.print(f"[red]Download error: {error}")
+                console.print(f"[red]Dio Cancaro: {error}")
                 return True, False
 
         elif url_type == "dash":
@@ -186,7 +186,7 @@ def handle_direct_download(args) -> bool:
 
             if error:
                 logger.error(f"DASH download error: {error}")
-                console.print(f"[red]Download error: {error}")
+                console.print(f"[red]Dio Cancaro: {error}")
                 return True, False
 
         elif url_type == "ism":
@@ -207,7 +207,7 @@ def handle_direct_download(args) -> bool:
 
             if error:
                 logger.error(f"ISM download error: {error}")
-                console.print(f"[red]Download error: {error}")
+                console.print(f"[red]Dio Cancaro: {error}")
                 return True, False
 
         elif url_type == "custom":
@@ -223,7 +223,7 @@ def handle_direct_download(args) -> bool:
 
             if error:
                 logger.error(f"Custom manifest download error: {error}")
-                console.print(f"[red]Download error: {error}")
+                console.print(f"[red]Dio Cancaro: {error}")
                 return True, False
 
         else:
