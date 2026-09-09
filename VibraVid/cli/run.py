@@ -46,6 +46,8 @@ _VERSION_FLAGS = {
     "FFprobe": ["-version"],
     "dovi_tool": ["--version"],
     "mkvmerge": ["--version"],
+    "yt-dlp": ["--version"],
+    "deno": ["--version"],
 }
 
 _EQUIVALENT_CMD_EXCLUDED_DESTS = {
@@ -193,7 +195,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group = parser.add_argument_group("Direct download (--down)")
     dl_group.add_argument("--down", metavar="URL", help="Stream URL to download directly (MP4 / HLS / DASH / ISM)")
     dl_group.add_argument("--down-json", dest="down_json", metavar="PATH", help="Path to a TRACKS_JSON file (see debug_track_json) — runs every entry's 'cmd' automatically, in sequence.")
-    dl_group.add_argument("--type", dest="stream_type", choices=["auto", "mp4", "hls", "dash", "ism"], default="auto", help="Force the stream type instead of auto-detecting (default: auto)")
+    dl_group.add_argument("--type", dest="stream_type", choices=["auto", "mp4", "hls", "dash", "ism", "yt-dlp"], default="auto", help="Force the stream type instead of auto-detecting (default: auto)")
     dl_group.add_argument("-o", "--output", metavar="PATH", help="Output file path (extension auto-appended if omitted)")
     dl_group.add_argument("--headers", action="append", metavar="Key:Value", help="HTTP header. Repeatable.")
     dl_group.add_argument("--license-url", dest="license_url", metavar="URL", help="DRM license server URL (Widevine / PlayReady)")
@@ -211,14 +213,35 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--meta-season", dest="meta_season", type=int, metavar="N", help="Season number metadata for this --down invocation.")
     dl_group.add_argument("--meta-episode", dest="meta_episode", type=int, metavar="N", help="Episode number metadata for this --down invocation.")
     dl_group.add_argument("--meta-site", dest="meta_site", metavar="NAME", help="Site/service name metadata for this --down invocation (e.g. streamingcommunity).")
-
+    dl_group.add_argument("--yt-dlp", dest="yt_dlp_url", metavar="URL", 
+    help="Download with yt-dlp (supports YouTube, Twitter, Vimeo, etc.)")
+    dl_group.add_argument("--format", dest="format", metavar="SPEC",
+    help="yt-dlp format selector (default: bestvideo+bestaudio/best)")
+    dl_group.add_argument("--list-formats", dest="list_formats", action="store_true",
+    help="List available yt-dlp formats for the URL and exit")
+    dl_group.add_argument("--interactive-format", dest="interactive_format", action="store_true",
+    help="Show the available yt-dlp formats and prompt for the format ID before downloading")
+    dl_group.add_argument("--extract-audio", dest="extract_audio", action="store_true",
+    help="Extract audio with yt-dlp")
+    dl_group.add_argument("--audio-format", dest="audio_format", metavar="FORMAT",
+    help="Audio format for yt-dlp extraction (e.g. mp3, m4a, wav, opus)")
+    dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY",
+    help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k)")
+    dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N",
+    help="Only process the first N entries of a playlist")
+    dl_group.add_argument("--sub-langs", dest="sub_langs", metavar="LANGS",
+    help="Comma-separated subtitle languages (e.g. it,en)")
+    dl_group.add_argument("--write-subs", dest="write_subs", action="store_true",
+    help="Write subtitles")
+    dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true",
+    help="Write auto-generated subtitles")
     # ── Utility
     util_group = parser.add_argument_group("Utility")
     util_group.add_argument("--tui", action="store_true", help="Launch the Textual Terminal User Interface (TUI)")
     util_group.add_argument("--no-log", action="store_true", help="Disable log file for this run")
     util_group.add_argument("--no-manifest-info", action="store_true", help="Don't print the parsed manifest/streams table")
     util_group.add_argument("-UP", "--update", action="store_true", help="Auto-update to latest version (binary only)")
-    util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check FFmpeg/flux/MKVToolNix/Velora against AstraeLabs/Binary and re-download whichever is outdated")
+    util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
@@ -430,7 +453,7 @@ def show_dependencies(search_functions):
     console.print(f"  [yellow]Binary:[/] [white]{binary_paths.get_binary_directory()}[/]")
     console.print()
 
-    from VibraVid.setup.checker import check_dovi_tool, check_ffmpeg, check_flux, check_mkvmerge, check_velora
+    from VibraVid.setup.checker import check_dovi_tool, check_ffmpeg, check_flux, check_mkvmerge, check_velora, check_yt_dlp, check_deno
     from VibraVid.setup.device_install import check_device_prd_path, check_device_wvd_path
     ffmpeg_path, ffprobe_path = check_ffmpeg(download=False)
 
@@ -442,6 +465,8 @@ def show_dependencies(search_functions):
         "dovi_tool": check_dovi_tool(download=False),
         "mkvmerge": check_mkvmerge(download=False),
         "Velora": check_velora(download=False),
+        "yt-dlp": check_yt_dlp(download=False),
+        "deno": check_deno(download=False),
     }
 
     for dep_name, dep_path in deps.items():

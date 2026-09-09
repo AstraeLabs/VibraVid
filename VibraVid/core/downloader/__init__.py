@@ -7,6 +7,7 @@ from .dash import DASH_Downloader
 from .hls import HLS_Downloader
 from .ism import ISM_Downloader
 from .mp4 import MP4_Downloader
+from .yt_dlp_downloader import YTDLPDownloader
 from .util._detect import detect_stream_type
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "ISM_Downloader",
     "MP4_Downloader",
     "Generic_Downloader",
+    "YTDLPDownloader",
     "detect_stream_type",
     "download",
 ]

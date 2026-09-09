@@ -7,10 +7,12 @@ import threading
 from .binary_paths import binary_paths
 from .checker import (
     check_dovi_tool,
+    check_deno,
     check_ffmpeg,
     check_flux,
     check_mkvmerge,
     check_velora,
+    check_yt_dlp,
 )
 from .device_install import check_device_prd_path, check_device_wvd_path
 
@@ -117,6 +119,14 @@ def get_velora_path() -> str:
         _velora_path = check_velora()
     return _velora_path
 
+def get_yt_dlp_path() -> str | None:
+    """Return path to yt-dlp binary, downloading if needed."""
+    return check_yt_dlp()
+
+
+def get_deno_path() -> str | None:
+    """Return path to deno binary, downloading if needed."""
+    return check_deno()
 
 def get_flux_path() -> str | None:
     """Return the resolved `flux` binary path, or None if it isn't available (optional tool)."""
