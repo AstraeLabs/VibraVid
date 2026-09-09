@@ -1,7 +1,6 @@
 ﻿# 21.05.24
 
 import re
-from datetime import datetime
 
 from rich.console import Console
 from rich.prompt import Prompt
@@ -155,14 +154,7 @@ def title_search(query: str) -> int:
         if not item.get("guid"):
             continue
 
-        date = item.get("year") or ""
-        if not date:
-            updated = item.get("updated") or item.get("r") or ""
-            if updated:
-                try:
-                    date = datetime.fromisoformat(str(updated).replace("Z", "+00:00")).year
-                except Exception:
-                    date = ""
+        date = item.get("year") or None
 
         vertical_image = None
         for img in item.get("cardImages", []):
@@ -181,7 +173,7 @@ def title_search(query: str) -> int:
                 name=item.get("cardTitle", "No Title"),
                 type=item_type,
                 image=image_url,
-                year=date if date not in ("", None) else "9999",
+                year=date,
                 url=item.get("cardLink", {}).get("value", ""),
             )
         )
