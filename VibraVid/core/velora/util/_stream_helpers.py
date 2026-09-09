@@ -238,7 +238,7 @@ def print_failed_segments_report(failed_by_stream: list) -> None:
             continue
 
         logger.error(f"Failed segments for {stream_label!r}: {len(failed)} missing")
-        console.print(f"[bold red]SS:[/bold red] [bold white]{stream_label}[/bold white] [red]({len(failed)} missing)[/red]")
+        console.print(f"[bold red]Dio Cancaro:[/bold red] [bold white]{stream_label}[/bold white] [red]({len(failed)} missing)[/red]")
 
 
 class SilentDownloadBarManager(DownloadBarManager):
