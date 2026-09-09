@@ -385,6 +385,45 @@ class GetSerieInfo:
             start += self.FEED_PAGE_SIZE
         return entries
 
+    def _episode_image_from_entry(self, entry):
+        """Return the best feed artwork, falling back to the guid-based CDN URL."""
+        if not isinstance(entry, dict):
+            return self._episode_image(entry)
+
+        thumbnails = entry.get("thumbnails") or {}
+
+        preferred = (
+            "image_keyframe_poster-652x367",
+            "image_keyframe_poster-1280x720",
+            "image_horizontal_cover-704x396",
+        )
+
+        for key in preferred:
+            thumbnail = thumbnails.get(key)
+            if isinstance(thumbnail, dict) and thumbnail.get("url"):
+                return thumbnail["url"]
+
+        candidates = []
+        for key, thumbnail in thumbnails.items():
+            if not isinstance(thumbnail, dict) or not thumbnail.get("url"):
+                continue
+            if not any(kind in key for kind in ("keyframe", "horizontal", "header_poster")):
+                continue
+
+            width = thumbnail.get("width") or 0
+            height = thumbnail.get("height") or 0
+            try:
+                area = int(width) * int(height)
+            except (TypeError, ValueError):
+                area = 0
+
+            candidates.append((area, thumbnail["url"]))
+
+        if candidates:
+            return max(candidates)[1]
+
+        return self._episode_image(entry.get("guid"))
+
     def _get_all_season_episodes(self, season, category_name="programs_feed", client=None):
         """Fetch the full programs feed for the season and return a list of Episode objects for all entries."""
         logger.debug(f"Getting all episodes for season {season['tvSeasonNumber']}")
@@ -423,7 +462,7 @@ class GetSerieInfo:
                         description=entry.get("description", ""),
                         season_number=season.get("tvSeasonNumber"),
                         release_date=self._feed_release_date(entry),
-                        image=self._episode_image(entry.get("guid")),
+                        image=self._episode_image_from_entry(entry),
                     )
                 )
             return episodes
@@ -598,7 +637,7 @@ class GetSerieInfo:
                         description=entry.get("description", ""),
                         season_number=season_number,
                         release_date=self._feed_release_date(entry),
-                        image=self._episode_image(entry.get("guid")),
+                        image=self._episode_image_from_entry(entry),
                     )
                 )
 
