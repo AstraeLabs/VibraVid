@@ -341,18 +341,6 @@ class ConfigManager:
             self._config_data.setdefault("OUTPUT", {})["root_path"] = "/sdcard/Movies/VibraVid"
             logger.info("OUTPUT.root_path defaulted to /sdcard/Movies/VibraVid for Termux compatibility")
 
-    def _ensure_login_defaults(self) -> None:
-        """Ensure the HBO Max login block exists without overwriting stored credentials."""
-        hbomax = self._login_data.get("hbomax")
-        if not isinstance(hbomax, dict):
-            self._login_data["hbomax"] = {"st": ""}
-            self.save_login()
-            return
-
-        if "st" not in hbomax:
-            hbomax["st"] = ""
-            self.save_login()
-
     def _load_login(self) -> None:
         """Load the login configuration file."""
         if not os.path.exists(self.login_file_path):
@@ -364,24 +352,20 @@ class ConfigManager:
                 console.print(f"[yellow]Could not download login.json: {str(e)}")
                 console.print("[yellow]Creating empty login configuration...")
                 self._login_data.clear()
-                self._ensure_login_defaults()
                 return
 
         try:
             with open(self.login_file_path) as f:
                 self._login_data.clear()
                 self._login_data.update(json.load(f))
-            self._ensure_login_defaults()
 
         except json.JSONDecodeError as e:
             console.print(f"[red]Error parsing login JSON: {str(e)}")
             self._login_data.clear()
-            self._ensure_login_defaults()
 
         except Exception as e:
             console.print(f"[red]Error loading login configuration: {str(e)}")
             self._login_data.clear()
-            self._ensure_login_defaults()
 
     def _precache_config_values(self) -> None:
         """Pre-cache commonly used configuration values."""
