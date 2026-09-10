@@ -50,6 +50,19 @@ def _codecs(s) -> str:
     return (getattr(s, "codecs", "") or "").strip().lower()
 
 
+def _is_h265(s) -> bool:
+    return _codecs(s).startswith(("hvc1", "hev1", "hevc", "h265"))
+
+
+def _is_hdr10(s) -> bool:
+    return (getattr(s, "video_range", "") or "").strip().lower() in {"hdr10", "hdr10+"}
+
+
+def _is_encrypted(s) -> bool:
+    drm = getattr(s, "drm", None)
+    return bool(drm and drm.is_encrypted())
+
+
 def _stream_id(s) -> str:
     sid = (getattr(s, "id", "") or "").strip()
     if not sid or sid in ("EXT",) or sid.startswith("vid:"):
@@ -681,12 +694,28 @@ def _normalize_filter_value(value, default: str) -> str:
 
 
 class StreamSelector:
-    def __init__(self, video_filter: str, audio_filter: str, subtitle_filter: str, formatter: BaseFormatter = None):
+    def __init__(
+        self,
+        video_filter: str,
+        audio_filter: str,
+        subtitle_filter: str,
+        formatter: BaseFormatter = None,
+        prefer_h265: bool = False,
+        prefer_hdr10: bool = False,
+        prefer_drm: bool = False,
+        require_drm: bool = False,
+        minimum_video_height: int = 0,
+    ):
         raw_vf = _normalize_filter_value(video_filter, "best").strip()
         self._vf, self._dv_quality = strip_dv_suffix(raw_vf)  # select_video in config.json
         self._af = _normalize_filter_value(audio_filter, "best").strip()
         self._sf = _normalize_filter_value(subtitle_filter, "all").strip()
         self._formatter = formatter or StreamSelectorFormatter()
+        self._prefer_h265 = prefer_h265
+        self._prefer_hdr10 = prefer_hdr10
+        self._prefer_drm = prefer_drm
+        self._require_drm = require_drm
+        self._minimum_video_height = minimum_video_height
 
     def apply(self, streams: list) -> tuple[str, str, str]:
         """Mark stream.selected and return (sv, sa, ss) formatter strings."""
@@ -740,6 +769,37 @@ class StreamSelector:
             else:
                 logger.info(f"StreamSelector video: bitrate=[{spec.bitrate_min},{spec.bitrate_max}] — no match, ignoring range")
 
+        if self._minimum_video_height:
+            eligible = [s for s in videos if _height(s) >= self._minimum_video_height]
+            if eligible:
+                videos = eligible
+                logger.info(
+                    f"StreamSelector video: minimum height {self._minimum_video_height}p "
+                    f"-> {len(videos)} eligible stream(s)"
+                )
+            else:
+                logger.warning(
+                    f"StreamSelector video: no stream meets minimum height "
+                    f"{self._minimum_video_height}p"
+                )
+                result.drop = True
+                return result
+
+        if self._require_drm:
+            encrypted = [s for s in videos if _is_encrypted(s)]
+            if not encrypted:
+                logger.warning("StreamSelector video: no encrypted DRM stream available")
+                result.drop = True
+                return result
+            videos = encrypted
+            logger.info("StreamSelector video: requiring encrypted DRM streams")
+
+        if self._prefer_drm and not spec.select_all:
+            encrypted = [s for s in videos if _is_encrypted(s)]
+            if encrypted:
+                videos = encrypted
+                logger.info("StreamSelector video: preferring encrypted DRM streams")
+
         # Handle explicit "default" or "non-default" filter
         if spec.select_default is not None and not spec.res and not spec.codec and not spec.id and not spec.select_all:
             filtered = [s for s in videos if bool(getattr(s, "default", False)) == spec.select_default]
@@ -772,7 +832,10 @@ class StreamSelector:
             logger.info(f"StreamSelector video: id={spec.id!r} — no match, relaxing")
 
         had_constraints = bool(spec.res or spec.codec)
-        pick_exact = _best if spec.select_best else _worst
+        if spec.select_best and (self._prefer_h265 or self._prefer_hdr10):
+            pick_exact = self._best_with_preferences
+        else:
+            pick_exact = _best if spec.select_best else _worst
         pick_fallback = _best if spec.fallback_to_best else _worst
 
         if spec.res and spec.codec:
@@ -815,6 +878,17 @@ class StreamSelector:
                 result.matched_res = str(actual_h)
         return result
 
+    def _best_with_preferences(self, streams: list):
+        return max(
+            streams,
+            key=lambda stream: (
+                int(self._prefer_hdr10 and _is_hdr10(stream)),
+                int(self._prefer_h265 and _is_h265(stream)),
+                _height(stream),
+                _bitrate(stream),
+            ),
+        ) if streams else None
+
     def _select_audio(self, streams: list, spec: FilterSpec) -> SelectionResult:
         result = SelectionResult(select_best=spec.select_best, extra=dict(spec.extra))
         audios = [s for s in streams if getattr(s, "type", "") == "audio"]
@@ -830,6 +904,12 @@ class StreamSelector:
                 audios = pool
             else:
                 logger.info(f"StreamSelector audio: bitrate=[{spec.bitrate_min},{spec.bitrate_max}] — no match, ignoring range")
+
+        if self._prefer_drm and not spec.select_all:
+            encrypted = [s for s in audios if _is_encrypted(s)]
+            if encrypted:
+                audios = encrypted
+                logger.info("StreamSelector audio: preferring encrypted DRM streams")
 
         # Handle explicit "default" or "non-default" filter
         if (
@@ -1117,7 +1197,7 @@ class StreamSelector:
         logger.info(f"StreamSelector &dv: marked companion {_height(companion)}p/{_codecs(companion)} (quality={quality!r})")
 
 def _best(streams: list):
-    return max(streams, key=_bitrate) if streams else None
+    return max(streams, key=lambda stream: (_height(stream), _bitrate(stream))) if streams else None
 
 
 def _worst(streams: list):

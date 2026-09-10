@@ -384,7 +384,7 @@ class Generic_Downloader(BaseDownloader):
         if dv_quality is not None:
             v_main = v_main or "best"
             non_dv_pool = [s for s in pool if not _is_dv(s)]
-            selector = StreamSelector(v_main, a, sub, formatter=StreamSelectorFormatter())
+            selector = self._build_selector(v_main, a, sub)
             selector.apply(non_dv_pool)
 
             dv_videos = [s for s in pool if _is_dv(s)]
@@ -396,7 +396,7 @@ class Generic_Downloader(BaseDownloader):
                     target_res = FilterSpec.parse(v_main, "video").res
                 selector._mark_dv_companion(dv_videos, dv_quality, target_res)
         else:
-            StreamSelector(v, a, sub, formatter=StreamSelectorFormatter()).apply(pool)
+            self._build_selector(v, a, sub).apply(pool)
 
         # If a DV companion was selected, keep a reference to it for special handling in the download and muxing phases.
         # An explicit-role DV (self._dv_stream already set) takes precedence over &dv auto-detection.
@@ -407,6 +407,20 @@ class Generic_Downloader(BaseDownloader):
                 logger.info(f"&dv: companion selected -> {self._dv_stream}")
 
         return role_streams + [s for s in pool if s.selected]
+
+    def _build_selector(self, video: str, audio: str, subtitle: str) -> StreamSelector:
+        f = self.custom_filters
+        return StreamSelector(
+            video,
+            audio,
+            subtitle,
+            formatter=StreamSelectorFormatter(),
+            prefer_h265=bool(f.get("prefer_h265")),
+            prefer_hdr10=bool(f.get("prefer_hdr10")),
+            prefer_drm=bool(f.get("prefer_drm")),
+            require_drm=bool(f.get("require_drm")),
+            minimum_video_height=int(f.get("minimum_video_height") or 0),
+        )
 
     def _setup_dv_companion(self) -> None:
         """Re download the manifest of the DV companion in a dedicated MediaDownloader, to isolate it from the main video stream and avoid filename collisions on disk (both have the same "{filename}.{ext}")."""
