@@ -177,14 +177,24 @@ class GetSerieInfo:
         if not carousel_links:
             carousel_links = soup.find_all("a", attrs={"data-testid": "carousel-title"})
         if not carousel_links:
-            logger.error(f"No titleCarousel categories found for season {season['tvSeasonNumber']}")
+            carousel_links = [
+                link
+                for link in soup.find_all("a", href=True)
+                if "/episodi_" in link.get("href", "")
+            ]
+        if not carousel_links:
+            logger.error(f"No season categories found for season {season['tvSeasonNumber']}")
             return
 
         season["categories"] = []
         for carousel_link in carousel_links:
             if carousel_link.has_attr("href"):
                 category_title = carousel_link.find("h2")
-                category_name = category_title.text.strip() if category_title else "Unnamed"
+                category_name = (
+                    category_title.text.strip()
+                    if category_title
+                    else carousel_link.get_text(" ", strip=True) or "Unnamed"
+                )
                 if any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
                     continue
                 href = carousel_link["href"]
