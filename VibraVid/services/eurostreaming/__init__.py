@@ -1,6 +1,7 @@
 # 29.05.26
 # By @UrloMythus
 
+import html
 import logging
 import re
 
@@ -52,7 +53,7 @@ def title_search(query: str) -> int:
                 post_resp = client.get(f"{base_url}/wp-json/wp/v2/posts/{post_id}", params={"_fields": "content,title"})
             post_resp.raise_for_status()
             data = post_resp.json()
-            title = data.get("title", {}).get("rendered", "")
+            title = html.unescape(data.get("title", {}).get("rendered", ""))
             content = data.get("content", {}).get("rendered", "")
 
             year_m = _YEAR_RE.search(content)
