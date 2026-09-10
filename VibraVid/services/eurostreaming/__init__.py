@@ -50,11 +50,20 @@ def title_search(query: str) -> int:
 
         try:
             with create_client(headers=headers) as client:
-                post_resp = client.get(f"{base_url}/wp-json/wp/v2/posts/{post_id}", params={"_fields": "content,title"})
+                post_resp = client.get(
+                    f"{base_url}/wp-json/wp/v2/posts/{post_id}",
+                    params={
+                        "_embed": "wp:featuredmedia",
+                        "_fields": "content,title,_embedded",
+                    },
+                )
             post_resp.raise_for_status()
             data = post_resp.json()
             title = html.unescape(data.get("title", {}).get("rendered", ""))
             content = data.get("content", {}).get("rendered", "")
+
+            embedded_media = (data.get("_embedded") or {}).get("wp:featuredmedia") or []
+            image = embedded_media[0].get("source_url") if embedded_media else None
 
             year_m = _YEAR_RE.search(content)
             year = year_m.group(0) if year_m else None
@@ -66,6 +75,7 @@ def title_search(query: str) -> int:
                     type="tv",
                     slug="",
                     year=year,
+                    image=image,
                 )
             )
 
