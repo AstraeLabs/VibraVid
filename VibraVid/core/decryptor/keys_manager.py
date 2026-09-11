@@ -29,6 +29,10 @@ class KeysManager:
                 logger.warning(f"Skipping pair with invalid KID (expected 32 hex chars, got len={len(ckid)}): kid={ckid}")
                 continue
 
+            if ckid == ckey and ckid != "1":
+                logger.warning(f"Skipping key where KID == KEY (always invalid): kid={ckid}")
+                continue
+
             pair = (ckid, ckey)
             if pair not in self._keys:
                 self._keys.append(pair)

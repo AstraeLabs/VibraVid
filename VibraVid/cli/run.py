@@ -96,18 +96,16 @@ def force_exit():
 
 
 def _prescan_site_arg(argv):
-    """Scan raw argv for --site's value before argparse runs."""
+    """Scan raw argv for -i value before argparse runs."""
     for i, tok in enumerate(argv):
-        if tok == "--site" and i + 1 < len(argv):
+        if tok == "-i" and i + 1 < len(argv):
             return argv[i + 1]
-        if tok.startswith("--site="):
-            return tok.split("=", 1)[1]
 
     return None
 
 
 def _resolve_site_module(site_value, search_functions):
-    """Resolve a --site value (name or index) to its loaded module, or None if no match."""
+    """Resolve a -i value (name or index) to its loaded module, or None if no match."""
     if not site_value:
         return None
 
@@ -133,8 +131,8 @@ def _print_site_only_help(site_value, site_module):
     register = getattr(site_module, "register_cli_args", None)
     site_name = getattr(site_module, "__name__", str(site_module)).rsplit(".", 1)[-1]
     mini_parser = argparse.ArgumentParser(
-        prog=f"manual.py --site {site_value} ...",
-        description=f'Site-specific options for "{site_name}" (--site {site_value})',
+        prog=f"manual.py -i {site_value} ...",
+        description=f'Site-specific options for "{site_name}" (-i {site_value})',
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -161,11 +159,10 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Search & selection
     search_group = parser.add_argument_group("Search & selection")
     search_group.add_argument("-s", "--search", default=None, metavar="QUERY", help="Search terms")
-    search_group.add_argument("--site", type=str, metavar="NAME|INDEX", help="Target site (name or index)")
+    search_group.add_argument("-i", dest="site", type=str, metavar="NAME|INDEX", help="Target site (name or index)")
     search_group.add_argument("--global", dest="global_search", action="store_true", help="Search across all sites")
     search_group.add_argument("--category", type=int, metavar="N", help="Category filter for global search\n  1=Anime  2=Movies/Series  3=Series  4=Movies",)
-    search_group.add_argument("--auto-first", action="store_true", help="Auto-select first result (requires --site and --search)")
-    search_group.add_argument("--item", type=int, default=None, metavar="N", help="Select the Nth search result directly, 0-based (requires --site and --search)",)
+    search_group.add_argument("--item", type=int, default=None, metavar="N", help="Select the Nth search result directly, 0-based (requires -i and --search)",)
     search_group.add_argument("--year", type=str, metavar="RANGE", help='Year filter, e.g. "2020" or "1990-2015"')
 
     # ── Series navigation
@@ -248,7 +245,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Queue
     add_queue_arguments(parser)
 
-    # ── Site-specific options (only added, and thus only shown in --help, when --site targets this module).
+    # ── Site-specific options (only added, and thus only shown in --help, when -i targets this module).
     site_option_dests = []
     register = getattr(site_module, "register_cli_args", None) if site_module else None
     if callable(register):
@@ -353,8 +350,8 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
 
     context_tracker.cli_site = args.site
 
-    # Handle auto-first / --item (direct result selection by index, 0 for auto-first)
-    requested_index = 0 if args.auto_first else args.item
+    # Direct result selection by index (--item N, 0 = first result)
+    requested_index = args.item
     if requested_index is not None and search_terms:
         try:
             database = func_to_run(search_terms, get_onlyDatabase=True, selections=selections)
@@ -496,11 +493,11 @@ def main():
         help_requested = _has_help_flag(argv)
         site_module = _resolve_site_module(prescanned_site, search_functions) if prescanned_site else None
 
-        # `--site X --help`: show ONLY that site's own options, skip the generic dump entirely.
+        # `-i X --help`: show ONLY that site's own options, skip the generic dump entirely.
         if help_requested and site_module is not None and callable(getattr(site_module, "register_cli_args", None)):
             _print_site_only_help(prescanned_site, site_module)
 
-        # Plain `--help` (no --site, or a site with nothing site-specific to show): the usual
+        # Plain `--help` (no -i, or a site with nothing site-specific to show): the usual
         # generic parser, plus every other site's options aggregated so they're discoverable.
         extra_site_modules = None
         if help_requested and site_module is None:
@@ -603,7 +600,7 @@ def main():
         if down_handled:
             sys.exit(0 if down_ok else 1)
 
-        # If we reach this point, we're in interactive mode (either normal or with --site specified)
+        # If we reach this point, we're in interactive mode (either normal or with -i specified)
         close_console_flag = None
         if hasattr(args, "close_console") and args.close_console is not None:
             close_console_flag = args.close_console.lower() == "true"

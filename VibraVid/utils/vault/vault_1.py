@@ -60,18 +60,18 @@ class ExternalSupaDBVault:
         """Internal helper: POST to an endpoint, return parsed JSON or None on error."""
         url = f"{self.base_url}/{endpoint}"
         try:
-            logger.debug(f"Post to Supabase endpoint '{endpoint}' with payload: {payload}")
+            logger.debug(f"Post to Claudio endpoint '{endpoint}' with payload: {payload}")
             with self._session_lock:
                 response = self.session.post(url, json=payload)
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            console.print(f"[red]Supabase request error ({endpoint}): {e}")
-            logger.error(f"Supabase request error ({endpoint}): {e}")
+            console.print(f"[red]Claudio request error ({endpoint}): {e}")
+            logger.error(f"Claudio request error ({endpoint}): {e}")
             return None
 
     def track_download(self, title: str, media_type: str, service: str = None) -> bool:
-        """Notify Supabase about a completed download."""
+        """Notify Claudio about a completed download."""
         if not title or not media_type:
             return False
 
@@ -92,7 +92,7 @@ class ExternalSupaDBVault:
             return bool(result.get("success", False))
 
         except Exception as e:
-            logger.error(f"Supabase track_download error: {e}")
+            logger.error(f"Claudio track_download error: {e}")
             return False
 
     def set_keys(self, keys_list: list[str], license_url: str, pssh: str, kid_to_label: dict | None = None) -> int:
@@ -154,7 +154,7 @@ class ExternalSupaDBVault:
             "pssh": pssh,
         }
 
-        logger.debug(f"Supabase get_keys_by_pssh: license_url={base_license_url}, pssh={pssh[:20]}...")
+        logger.debug(f"Claudio get_keys_by_pssh: license_url={base_license_url}, pssh={pssh[:20]}...")
         result = self._post("get-keys", payload)
         logger.debug(f"Vault response for get_keys_by_pssh: {result}")
 

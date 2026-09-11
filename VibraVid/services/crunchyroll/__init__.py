@@ -27,7 +27,7 @@ def register_cli_args(parser) -> list:
     """
     Register CLI options.
     """
-    group = parser.add_argument_group("Crunchyroll options (--site 6)")
+    group = parser.add_argument_group("Crunchyroll options")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Crunchyroll series URL.")
     return ["url"]
 

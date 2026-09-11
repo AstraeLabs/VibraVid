@@ -31,7 +31,7 @@ def register_cli_args(parser) -> list:
     Returns:
         list[str]: the argparse 'dest' names this function registered.
     """
-    group = parser.add_argument_group("Discovery+ options (--site 10)")
+    group = parser.add_argument_group("Discovery+ options")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Discovery+ title URL (show or movie).")
     return ["url"]
 

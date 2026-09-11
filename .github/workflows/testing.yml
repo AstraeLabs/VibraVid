@@ -5,23 +5,17 @@ env:
 
 on:
   push:
-    branches: [ main, master, develop, dev ]
+    branches: ['**']
   pull_request:
-    branches: [ main, master, develop, dev ]
+    branches: ['**']
   workflow_dispatch:
 jobs:
   ruff-lint:
     name: Lint with Ruff
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v7
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.13'
-    - name: Install Ruff
-      run: |
-        python -m pip install ruff
-    - name: Run Ruff check
-      run: |
-        ruff check .
+      - uses: actions/checkout@v7
+      - name: Run Ruff
+        uses: astral-sh/ruff-action@v4.1.0
+        with:
+          args: "check ."

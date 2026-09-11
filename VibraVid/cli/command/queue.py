@@ -58,7 +58,7 @@ def _now_iso() -> str:
 def add_queue_arguments(parser) -> None:
     """CLI-only batch queue. Independent of the GUI's scheduled_downloads and ARR's DB-backed queue."""
     group = parser.add_argument_group("Queue (CLI batch downloads)")
-    group.add_argument("--queue-add", dest="queue_add", action="store_true", help="Enqueue this invocation instead of running it now (requires --down, or --site + --search + --item/--auto-first)")
+    group.add_argument("--queue-add", dest="queue_add", action="store_true", help="Enqueue this invocation instead of running it now (requires --down, or -i + --search + --item)")
     group.add_argument( "--queue-run", dest="queue_run", nargs="?", const=True, default=False, metavar="QUEUE_NAME", help='Process every pending/interrupted queued item, one at a time. Optionally pass a queue name (as shown by --queue-list, e.g. "20260723-152525") to restrict to just that one batch.')
     group.add_argument("--queue-list", dest="queue_list", nargs="?", const=True, default=False, metavar="QUEUE_NAME", help="Without a name: show one summary line per queue (item count, status breakdown, completed or not). With a queue name: list every item in that one queue individually.")
     group.add_argument("--queue-remove", dest="queue_remove", metavar="ID", help="Remove one queued item by id (must not be running)")
@@ -179,11 +179,11 @@ def _is_enqueueable(args) -> tuple:
 
     site = getattr(args, "site", None)
     search = getattr(args, "search", None)
-    has_item = getattr(args, "item", None) is not None or getattr(args, "auto_first", False)
+    has_item = getattr(args, "item", None) is not None
     if site and search and has_item:
         return True, None
 
-    return (False, "enqueue requires either --down, or --site + --search + (--item N | --auto-first) - this invocation would need interactive input")
+    return (False, "enqueue requires either --down, or -i + --search + --item N - this invocation would need interactive input")
 
 
 def _strip_queue_flags(argv: list) -> list:
@@ -248,7 +248,7 @@ def enqueue_down_from_context(url: str, output_path: str) -> None:
     if context_tracker.episode:
         argv += ["--meta-episode", str(context_tracker.episode)]
 
-    fake_args = SimpleNamespace(down=url, global_search=False, site=None, search=None, item=None, auto_first=False)
+    fake_args = SimpleNamespace(down=url, global_search=False, site=None, search=None, item=None)
     enqueue(argv, fake_args)
 
 
