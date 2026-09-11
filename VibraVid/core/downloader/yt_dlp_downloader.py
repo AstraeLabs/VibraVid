@@ -9,8 +9,8 @@ from typing import Any
 
 from rich.console import Console
 
-from VibraVid.setup import get_yt_dlp_path
 from VibraVid.core.ui.bar_manager import DownloadBarManager
+from VibraVid.setup import get_yt_dlp_path
 
 logger = logging.getLogger(__name__)
 console = Console()

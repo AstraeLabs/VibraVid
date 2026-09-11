@@ -450,7 +450,15 @@ def show_dependencies(search_functions):
     console.print(f"  [yellow]Binary:[/] [white]{binary_paths.get_binary_directory()}[/]")
     console.print()
 
-    from VibraVid.setup.checker import check_dovi_tool, check_ffmpeg, check_flux, check_mkvmerge, check_velora, check_yt_dlp, check_deno
+    from VibraVid.setup.checker import (
+        check_deno,
+        check_dovi_tool,
+        check_ffmpeg,
+        check_flux,
+        check_mkvmerge,
+        check_velora,
+        check_yt_dlp,
+    )
     from VibraVid.setup.device_install import check_device_prd_path, check_device_wvd_path
     ffmpeg_path, ffprobe_path = check_ffmpeg(download=False)
 

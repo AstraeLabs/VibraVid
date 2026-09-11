@@ -290,7 +290,7 @@ class HLSParser:
         representatives = [members[0] for members in groups.values()]
 
         logger.info(f"HLSParser: {len(groups)} DRM key group(s) detected:")
-        for idx, (key, members) in enumerate(groups.items(), 1):
+        for idx, (_key, members) in enumerate(groups.items(), 1):
             rep = members[0]
             member_ids = [f"{m.type}:{m.id}" for m in members]
             logger.info(f"  Group {idx}: rep={rep.id!r} | {rep.resolution or rep.language or '?'} | {len(members)} stream(s): {member_ids}")

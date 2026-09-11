@@ -6,8 +6,8 @@ import threading
 
 from .binary_paths import binary_paths
 from .checker import (
-    check_dovi_tool,
     check_deno,
+    check_dovi_tool,
     check_ffmpeg,
     check_flux,
     check_mkvmerge,

@@ -18,9 +18,9 @@ from VibraVid.core.downloader.util._detect import (
 )
 from VibraVid.core.drm.system import DRMType
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.setup import get_deno_path
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_proxy_url
-from VibraVid.setup import get_deno_path
 
 logger = logging.getLogger(__name__)
 console = Console()

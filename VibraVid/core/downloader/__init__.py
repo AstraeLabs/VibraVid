@@ -7,8 +7,8 @@ from .dash import DASH_Downloader
 from .hls import HLS_Downloader
 from .ism import ISM_Downloader
 from .mp4 import MP4_Downloader
-from .yt_dlp_downloader import YTDLPDownloader
 from .util._detect import detect_stream_type
+from .yt_dlp_downloader import YTDLPDownloader
 
 __all__ = [
     "DASH_Downloader",
