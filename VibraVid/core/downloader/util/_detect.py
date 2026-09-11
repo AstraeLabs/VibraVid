@@ -117,13 +117,16 @@ def parse_keys(key_list: list | None) -> list | None:
     return KeysManager(key_list).get_keys_list() or None
 
 
+DEFAULT_DOWNLOAD_DIR = "Video/MyDownloader"
+
+
 def derive_output_path(url: str, output: str | None, extension: str) -> str:
     """Build a final output path: derive a stem from the URL when *output* is empty, and append the configured *extension* when no suffix is present."""
     output = (output or "").strip()
     if not output:
         url_path = urlparse(url).path.rstrip("/")
         stem = Path(url_path).stem or "download"
-        return f"{stem}.{extension}"
+        return str(Path(DEFAULT_DOWNLOAD_DIR) / f"{stem}.{extension}")
     if not Path(output).suffix:
         return f"{output}.{extension}"
     return output

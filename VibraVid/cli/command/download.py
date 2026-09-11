@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.console import Console
 
 from VibraVid.core.downloader.util._detect import (
+    DEFAULT_DOWNLOAD_DIR,
     derive_output_path,
     detect_stream_type,
     parse_headers,
@@ -17,7 +18,9 @@ from VibraVid.core.downloader.util._detect import (
 )
 from VibraVid.core.drm.system import DRMType
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.setup import get_deno_path
 from VibraVid.utils import config_manager
+from VibraVid.utils.http_client import get_proxy_url
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -67,6 +70,16 @@ def handle_direct_download_json(args) -> tuple[bool, bool]:
 def handle_direct_download(args) -> bool:
     """Execute a direct URL download when --down is passed."""
     url: str | None = getattr(args, "down", None)
+    yt_dlp_url: str | None = getattr(args, "yt_dlp_url", None)
+    
+    # Handle --yt-dlp flag
+    if yt_dlp_url:
+        url = yt_dlp_url.strip()
+
+    list_formats = bool(getattr(args, "list_formats", False))
+    if list_formats and not url:
+        return False, False
+
     if not url:
         return False, False
 
@@ -115,19 +128,29 @@ def handle_direct_download(args) -> bool:
     elif drm_pref in ("playready", "pr", DRMType.PLAYREADY):
         drm_choice = DRMType.PLAYREADY
 
-    # Build output path
-    EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
-    output = derive_output_path(url, output, EXTENSION_OUTPUT)
-
     # Normalise key arg: single string → one-element list
     key_arg = keys
 
     # Allow forcing the stream type (e.g. --type mp4)
     forced_type = (getattr(args, "stream_type", None) or "auto").lower()
-    url_type = forced_type if forced_type != "auto" else detect_stream_type(url)
+    
+    # Check if --yt-dlp was used
+    if getattr(args, "yt_dlp_url", None):
+        url_type = "yt-dlp"
+    else:
+        url_type = forced_type if forced_type != "auto" else detect_stream_type(url)
+        # Generic webpages and provider URLs have no media extension. Let
+        # yt-dlp handle those URLs instead of rejecting them as unsupported.
+        if url_type == "unsupported":
+            url_type = "yt-dlp"
+
+    # Keep yt-dlp's original title when no explicit output path was provided.
+    if url_type != "yt-dlp":
+        output = derive_output_path(url, output, config_manager.config.get("PROCESS", "extension"))
 
     # Lazy import to avoid circular dependency
     from VibraVid.core.downloader import DASH_Downloader, HLS_Downloader, ISM_Downloader, MP4_Downloader
+    from VibraVid.core.downloader.yt_dlp_downloader import YTDLPDownloader
 
     try:
         if url_type == "mp4":
@@ -207,6 +230,63 @@ def handle_direct_download(args) -> bool:
 
             if error:
                 logger.error(f"ISM download error: {error}")
+                console.print(f"[red]Dio Cancaro: {error}")
+                return True, False
+
+        elif url_type == "yt-dlp":
+            use_proxy = getattr(args, "use_proxy", False)
+            proxy_url = get_proxy_url() if use_proxy else None
+            list_formats = bool(getattr(args, "list_formats", False))
+            interactive_format = bool(getattr(args, "interactive_format", False))
+
+            if list_formats or interactive_format:
+                dl = YTDLPDownloader(
+                    url=url,
+                    output_dir=str(Path(output).parent) if output else DEFAULT_DOWNLOAD_DIR,
+                    filename=Path(output).stem if output else None,
+                    headers=headers or None,
+                    proxy=proxy_url,
+                    format_spec=getattr(args, "format", None),
+                    subtitle_langs=getattr(args, "sub_langs", "").split(",") if getattr(args, "sub_langs", None) else [],
+                    write_subs=bool(getattr(args, "write_subs", False)),
+                    write_auto_subs=bool(getattr(args, "write_auto_subs", False)),
+                    list_formats=list_formats,
+                    interactive_format=interactive_format,
+                    extract_audio=bool(getattr(args, "extract_audio", False)),
+                    audio_format=getattr(args, "audio_format", None),
+                    audio_quality=getattr(args, "audio_quality", None),
+                    playlist_end=getattr(args, "playlist_end", None),
+                    deno_path=get_deno_path(),
+                )
+                path, cancelled, error = dl.start()
+                if error:
+                    logger.error(f"yt-dlp format listing error: {error}")
+                    console.print(f"[red]Format list error: {error}")
+                    return True, False
+                return True, True
+
+            dl = YTDLPDownloader(
+                url=url,
+                output_dir=str(Path(output).parent) if output else DEFAULT_DOWNLOAD_DIR,
+                filename=Path(output).stem if output else None,
+                headers=headers or None,
+                proxy=proxy_url,
+                format_spec=getattr(args, "format", None),
+                subtitle_langs=getattr(args, "sub_langs", "").split(",") if getattr(args, "sub_langs", None) else [],
+                write_subs=bool(getattr(args, "write_subs", False)),
+                write_auto_subs=bool(getattr(args, "write_auto_subs", False)),
+                list_formats=False,
+                interactive_format=False,
+                extract_audio=bool(getattr(args, "extract_audio", False)),
+                audio_format=getattr(args, "audio_format", None),
+                audio_quality=getattr(args, "audio_quality", None),
+                playlist_end=getattr(args, "playlist_end", None),
+                deno_path=get_deno_path(),
+            )
+            path, cancelled, error = dl.start()
+
+            if error:
+                logger.error(f"yt-dlp download error: {error}")
                 console.print(f"[red]Dio Cancaro: {error}")
                 return True, False
 

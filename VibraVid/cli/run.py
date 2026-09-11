@@ -46,6 +46,8 @@ _VERSION_FLAGS = {
     "FFprobe": ["-version"],
     "dovi_tool": ["--version"],
     "mkvmerge": ["--version"],
+    "yt-dlp": ["--version"],
+    "deno": ["--version"],
 }
 
 _EQUIVALENT_CMD_EXCLUDED_DESTS = {
@@ -94,18 +96,16 @@ def force_exit():
 
 
 def _prescan_site_arg(argv):
-    """Scan raw argv for --site's value before argparse runs."""
+    """Scan raw argv for -i value before argparse runs."""
     for i, tok in enumerate(argv):
-        if tok == "--site" and i + 1 < len(argv):
+        if tok == "-i" and i + 1 < len(argv):
             return argv[i + 1]
-        if tok.startswith("--site="):
-            return tok.split("=", 1)[1]
 
     return None
 
 
 def _resolve_site_module(site_value, search_functions):
-    """Resolve a --site value (name or index) to its loaded module, or None if no match."""
+    """Resolve a -i value (name or index) to its loaded module, or None if no match."""
     if not site_value:
         return None
 
@@ -131,8 +131,8 @@ def _print_site_only_help(site_value, site_module):
     register = getattr(site_module, "register_cli_args", None)
     site_name = getattr(site_module, "__name__", str(site_module)).rsplit(".", 1)[-1]
     mini_parser = argparse.ArgumentParser(
-        prog=f"manual.py --site {site_value} ...",
-        description=f'Site-specific options for "{site_name}" (--site {site_value})',
+        prog=f"manual.py -i {site_value} ...",
+        description=f'Site-specific options for "{site_name}" (-i {site_value})',
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -159,11 +159,10 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Search & selection
     search_group = parser.add_argument_group("Search & selection")
     search_group.add_argument("-s", "--search", default=None, metavar="QUERY", help="Search terms")
-    search_group.add_argument("--site", type=str, metavar="NAME|INDEX", help="Target site (name or index)")
+    search_group.add_argument("-i", dest="site", type=str, metavar="NAME|INDEX", help="Target site (name or index)")
     search_group.add_argument("--global", dest="global_search", action="store_true", help="Search across all sites")
     search_group.add_argument("--category", type=int, metavar="N", help="Category filter for global search\n  1=Anime  2=Movies/Series  3=Series  4=Movies",)
-    search_group.add_argument("--auto-first", action="store_true", help="Auto-select first result (requires --site and --search)")
-    search_group.add_argument("--item", type=int, default=None, metavar="N", help="Select the Nth search result directly, 0-based (requires --site and --search)",)
+    search_group.add_argument("--item", type=int, default=None, metavar="N", help="Select the Nth search result directly, 0-based (requires -i and --search)",)
     search_group.add_argument("--year", type=str, metavar="RANGE", help='Year filter, e.g. "2020" or "1990-2015"')
 
     # ── Series navigation
@@ -193,7 +192,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group = parser.add_argument_group("Direct download (--down)")
     dl_group.add_argument("--down", metavar="URL", help="Stream URL to download directly (MP4 / HLS / DASH / ISM)")
     dl_group.add_argument("--down-json", dest="down_json", metavar="PATH", help="Path to a TRACKS_JSON file (see debug_track_json) — runs every entry's 'cmd' automatically, in sequence.")
-    dl_group.add_argument("--type", dest="stream_type", choices=["auto", "mp4", "hls", "dash", "ism"], default="auto", help="Force the stream type instead of auto-detecting (default: auto)")
+    dl_group.add_argument("--type", dest="stream_type", choices=["auto", "mp4", "hls", "dash", "ism", "yt-dlp"], default="auto", help="Force the stream type instead of auto-detecting (default: auto)")
     dl_group.add_argument("-o", "--output", metavar="PATH", help="Output file path (extension auto-appended if omitted)")
     dl_group.add_argument("--headers", action="append", metavar="Key:Value", help="HTTP header. Repeatable.")
     dl_group.add_argument("--license-url", dest="license_url", metavar="URL", help="DRM license server URL (Widevine / PlayReady)")
@@ -211,21 +210,42 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--meta-season", dest="meta_season", type=int, metavar="N", help="Season number metadata for this --down invocation.")
     dl_group.add_argument("--meta-episode", dest="meta_episode", type=int, metavar="N", help="Episode number metadata for this --down invocation.")
     dl_group.add_argument("--meta-site", dest="meta_site", metavar="NAME", help="Site/service name metadata for this --down invocation (e.g. streamingcommunity).")
-
+    dl_group.add_argument("--yt-dlp", dest="yt_dlp_url", metavar="URL", 
+    help="Download with yt-dlp (supports YouTube, Twitter, Vimeo, etc.)")
+    dl_group.add_argument("--format", dest="format", metavar="SPEC",
+    help="yt-dlp format selector (default: bestvideo+bestaudio/best)")
+    dl_group.add_argument("--list-formats", dest="list_formats", action="store_true",
+    help="List available yt-dlp formats for the URL and exit")
+    dl_group.add_argument("--interactive-format", dest="interactive_format", action="store_true",
+    help="Show the available yt-dlp formats and prompt for the format ID before downloading")
+    dl_group.add_argument("--extract-audio", dest="extract_audio", action="store_true",
+    help="Extract audio with yt-dlp")
+    dl_group.add_argument("--audio-format", dest="audio_format", metavar="FORMAT",
+    help="Audio format for yt-dlp extraction (e.g. mp3, m4a, wav, opus)")
+    dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY",
+    help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k)")
+    dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N",
+    help="Only process the first N entries of a playlist")
+    dl_group.add_argument("--sub-langs", dest="sub_langs", metavar="LANGS",
+    help="Comma-separated subtitle languages (e.g. it,en)")
+    dl_group.add_argument("--write-subs", dest="write_subs", action="store_true",
+    help="Write subtitles")
+    dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true",
+    help="Write auto-generated subtitles")
     # ── Utility
     util_group = parser.add_argument_group("Utility")
     util_group.add_argument("--tui", action="store_true", help="Launch the Textual Terminal User Interface (TUI)")
     util_group.add_argument("--no-log", action="store_true", help="Disable log file for this run")
     util_group.add_argument("--no-manifest-info", action="store_true", help="Don't print the parsed manifest/streams table")
     util_group.add_argument("-UP", "--update", action="store_true", help="Auto-update to latest version (binary only)")
-    util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check FFmpeg/flux/MKVToolNix/Velora against AstraeLabs/Binary and re-download whichever is outdated")
+    util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
     # ── Queue
     add_queue_arguments(parser)
 
-    # ── Site-specific options (only added, and thus only shown in --help, when --site targets this module).
+    # ── Site-specific options (only added, and thus only shown in --help, when -i targets this module).
     site_option_dests = []
     register = getattr(site_module, "register_cli_args", None) if site_module else None
     if callable(register):
@@ -330,8 +350,8 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
 
     context_tracker.cli_site = args.site
 
-    # Handle auto-first / --item (direct result selection by index, 0 for auto-first)
-    requested_index = 0 if args.auto_first else args.item
+    # Direct result selection by index (--item N, 0 = first result)
+    requested_index = args.item
     if requested_index is not None and search_terms:
         try:
             database = func_to_run(search_terms, get_onlyDatabase=True, selections=selections)
@@ -430,7 +450,15 @@ def show_dependencies(search_functions):
     console.print(f"  [yellow]Binary:[/] [white]{binary_paths.get_binary_directory()}[/]")
     console.print()
 
-    from VibraVid.setup.checker import check_dovi_tool, check_ffmpeg, check_flux, check_mkvmerge, check_velora
+    from VibraVid.setup.checker import (
+        check_deno,
+        check_dovi_tool,
+        check_ffmpeg,
+        check_flux,
+        check_mkvmerge,
+        check_velora,
+        check_yt_dlp,
+    )
     from VibraVid.setup.device_install import check_device_prd_path, check_device_wvd_path
     ffmpeg_path, ffprobe_path = check_ffmpeg(download=False)
 
@@ -442,6 +470,8 @@ def show_dependencies(search_functions):
         "dovi_tool": check_dovi_tool(download=False),
         "mkvmerge": check_mkvmerge(download=False),
         "Velora": check_velora(download=False),
+        "yt-dlp": check_yt_dlp(download=False),
+        "deno": check_deno(download=False),
     }
 
     for dep_name, dep_path in deps.items():
@@ -471,11 +501,11 @@ def main():
         help_requested = _has_help_flag(argv)
         site_module = _resolve_site_module(prescanned_site, search_functions) if prescanned_site else None
 
-        # `--site X --help`: show ONLY that site's own options, skip the generic dump entirely.
+        # `-i X --help`: show ONLY that site's own options, skip the generic dump entirely.
         if help_requested and site_module is not None and callable(getattr(site_module, "register_cli_args", None)):
             _print_site_only_help(prescanned_site, site_module)
 
-        # Plain `--help` (no --site, or a site with nothing site-specific to show): the usual
+        # Plain `--help` (no -i, or a site with nothing site-specific to show): the usual
         # generic parser, plus every other site's options aggregated so they're discoverable.
         extra_site_modules = None
         if help_requested and site_module is None:
@@ -578,7 +608,7 @@ def main():
         if down_handled:
             sys.exit(0 if down_ok else 1)
 
-        # If we reach this point, we're in interactive mode (either normal or with --site specified)
+        # If we reach this point, we're in interactive mode (either normal or with -i specified)
         close_console_flag = None
         if hasattr(args, "close_console") and args.close_console is not None:
             close_console_flag = args.close_console.lower() == "true"

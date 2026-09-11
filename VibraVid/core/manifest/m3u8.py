@@ -264,12 +264,21 @@ class HLSParser:
             return
 
         if not self.has_drm:
-            # No DRM expected for this stream: skip the per-key-group DRM resolution entirely
-            # and fetch only one representative child playlist to determine live/VOD status.
+            # No DRM expected for this stream: fetch one representative child playlist
+            # for live/VOD detection AND check for DRM (the caller may have been
+            # unaware that this stream is protected).
             representative = next((s for s in targets if s.type == "video"), targets[0])
             logger.info(f"HLSParser: has_drm=False, fetching single representative playlist for live/VOD detection: {representative.playlist_url}")
-            _, variant_content = self.parse_variant(representative.playlist_url or "")
+            variant_drm, variant_content = self.parse_variant(representative.playlist_url or "")
             is_live = _playlist_is_live(variant_content) if variant_content is not None else None
+
+            if variant_drm and variant_drm.is_encrypted():
+                for dt in advertised:
+                    variant_drm.add_advertised_type(dt)
+                for s in targets:
+                    s.drm = variant_drm
+                logger.info(f"HLSParser: detected DRM in variant despite has_drm=False — {variant_drm!r}")
+
             if is_live is not None:
                 for s in targets:
                     s.is_live = is_live
@@ -279,6 +288,12 @@ class HLSParser:
         for s in targets:
             groups.setdefault(self._drm_group_key(s), []).append(s)
         representatives = [members[0] for members in groups.values()]
+
+        logger.info(f"HLSParser: {len(groups)} DRM key group(s) detected:")
+        for idx, (_key, members) in enumerate(groups.items(), 1):
+            rep = members[0]
+            member_ids = [f"{m.type}:{m.id}" for m in members]
+            logger.info(f"  Group {idx}: rep={rep.id!r} | {rep.resolution or rep.language or '?'} | {len(members)} stream(s): {member_ids}")
 
         def _resolve(stream: Stream):
             variant_drm, variant_content = self.parse_variant(stream.playlist_url or "")
@@ -290,11 +305,10 @@ class HLSParser:
                 is_live = _playlist_is_live(variant_content) if variant_content is not None else None
 
                 if variant_drm and variant_drm.is_encrypted():
-                    # Merge advertised systems so the table reflects every system
-                    # even if the child playlist declares fewer of them.
                     for dt in advertised:
                         variant_drm.add_advertised_type(dt)
-                    logger.debug(f"HLS DRM resolved from child playlist | {rep.id} (+{len(members) - 1} sharing this key group): {variant_drm!r}")
+                    kid = variant_drm.get_kid_display() or "?"
+                    logger.info(f"HLSParser: resolved variant — rep_id={rep.id!r} | KID={kid} | {variant_drm.get_drm_display()}")
 
                 for member in members:
                     if is_live is not None:

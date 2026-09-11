@@ -15,8 +15,8 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 INSTALLATION_LEVELS = {
-    "": ["ffmpeg", "velora", "flux"],
-    "full": ["ffmpeg", "velora", "flux", "dovi_tool", "mkvtoolnix"],
+    "": ["ffmpeg", "velora", "flux", "yt-dlp", "deno"],
+    "full": ["ffmpeg", "velora", "flux", "dovi_tool", "mkvtoolnix", "yt-dlp", "deno"],
 }
 
 
@@ -272,6 +272,98 @@ def check_velora(download: bool = True) -> str | None:
         return None
 
     binary_downloaded = binary_paths.download_binary("velora", binary_exec)
+    if binary_downloaded:
+        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
+        return binary_downloaded
+
+    logger.error(f"Failed to download {binary_exec}")
+    console.print(f"Failed to download {binary_exec}", style="red")
+    return None
+
+
+def check_yt_dlp(download: bool = True) -> str | None:
+    """
+    Check for yt-dlp binary and download if not found.
+    Order: system PATH -> binary directory -> download from GitHub
+    """
+    system_platform = binary_paths.system
+    binary_exec = "yt-dlp.exe" if system_platform == "windows" else "yt-dlp"
+
+    # STEP 1: Check system PATH
+    binary_path = shutil.which(binary_exec)
+    if binary_path:
+        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
+        return binary_path
+
+    # STEP 2: Check local binary directory
+    binary_local = binary_paths.get_binary_path("yt-dlp", binary_exec)
+    if binary_local and os.path.isfile(binary_local):
+        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
+        return binary_local
+
+    if not download:
+        return None
+
+    # Termux-specific check
+    if is_termux():
+        if _should_download("yt-dlp"):
+            binary_downloaded = binary_paths.download_binary("yt-dlp", binary_exec)
+            if binary_downloaded:
+                return binary_downloaded
+        console.print("[red]No prebuilt yt-dlp binary for this Termux device.[/red]")
+        return None
+
+    # STEP 3: Download from AstraeLabs/Binary (only if installation level includes yt-dlp)
+    if not _should_download("yt-dlp"):
+        return None
+
+    binary_downloaded = binary_paths.download_binary("yt-dlp", binary_exec)
+    if binary_downloaded:
+        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
+        return binary_downloaded
+
+    logger.error(f"Failed to download {binary_exec}")
+    console.print(f"Failed to download {binary_exec}", style="red")
+    return None
+
+
+def check_deno(download: bool = True) -> str | None:
+    """
+    Check for deno binary and download if not found.
+    Order: system PATH -> binary directory -> download from GitHub
+    """
+    system_platform = binary_paths.system
+    binary_exec = "deno.exe" if system_platform == "windows" else "deno"
+
+    # STEP 1: Check system PATH
+    binary_path = shutil.which(binary_exec)
+    if binary_path:
+        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
+        return binary_path
+
+    # STEP 2: Check local binary directory
+    binary_local = binary_paths.get_binary_path("deno", binary_exec)
+    if binary_local and os.path.isfile(binary_local):
+        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
+        return binary_local
+
+    if not download:
+        return None
+
+    # Termux-specific check
+    if is_termux():
+        if _should_download("deno"):
+            binary_downloaded = binary_paths.download_binary("deno", binary_exec)
+            if binary_downloaded:
+                return binary_downloaded
+        console.print("[red]No prebuilt deno binary for this Termux device.[/red]")
+        return None
+
+    # STEP 3: Download from AstraeLabs/Binary (only if installation level includes deno)
+    if not _should_download("deno"):
+        return None
+
+    binary_downloaded = binary_paths.download_binary("deno", binary_exec)
     if binary_downloaded:
         logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
         return binary_downloaded

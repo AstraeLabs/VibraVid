@@ -45,21 +45,34 @@ jobs:
               run: |
                   PREV_TAG=$(git tag --sort=-version:refname | head -1 || true)
                   if [ -n "$PREV_TAG" ]; then
-                      COMMITS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%B%n--SEP--" 2>/dev/null || git log --pretty=format:"%B%n--SEP--")
+                      LOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:'%B%x1f%ae%x1e' 2>/dev/null || git log --pretty=format:'%B%x1f%ae%x1e')
                   else
-                      COMMITS=$(git log --pretty=format:"%B%n--SEP--")
+                      LOG=$(git log --pretty=format:'%B%x1f%ae%x1e')
                   fi
 
                   capitalize() { echo "$1" | sed 's/./\u&/' | tr '[:upper:]' '[:lower:]' | sed 's/^./\u&/'; }
 
+                  handle_from_email() {
+                      local email="$1"
+                      local h
+                      h=$(echo "$email" | grep -oE '[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com' | sed -E 's/.*\+//; s/@.*//')
+                      if [ -z "$h" ]; then
+                          h=$(echo "$email" | sed -E 's/@.*//')
+                      fi
+                      echo "$h"
+                  }
+
                   declare -A SECTION_CONTENT
 
-                  process_line() {
-                      local input="$1"
+                  process_record() {
+                      local body="$1"
+                      local handle="$2"
 
-                      # Split on each [TAG] occurrence by inserting a newline before each
                       local normalized
-                      normalized=$(echo "$input" | sed 's/\s*\(\[[A-Za-z0-9_/]*\]\)/\n\1/g')
+                      normalized=$(echo "$body" | sed 's/\s*\(\[[A-Za-z0-9_/]*\]\)/\n\1/g')
+
+                      local attr=""
+                      [ -n "$handle" ] && attr=" by @${handle}"
 
                       while IFS= read -r part; do
                           [ -z "$part" ] && continue
@@ -67,12 +80,13 @@ jobs:
                           TAG=$(echo "$part" | grep -oE '^\[[A-Za-z0-9_/]+\]' | tr -d '[]' | tr '[:lower:]' '[:upper:]')
                           [ -z "$TAG" ] && continue
 
-                          # Skip RELEASE tags
                           echo "$TAG" | grep -qiE '^RELEASE$' && continue
 
                           MSG=$(echo "$part" | sed 's/^\[[^]]*\][[:space:]]*//')
                           MSG=$(echo "$MSG" | sed 's/[[:space:]]*([[:space:]]*#[0-9]*[[:space:]]*)//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                           [ -z "$MSG" ] && continue
+
+                          MSG="${MSG}${attr}"
 
                           DISPLAY=$(capitalize "$TAG")
                           if [ -z "${SECTION_CONTENT[$DISPLAY]+x}" ]; then
@@ -85,11 +99,13 @@ jobs:
                       done <<< "$normalized"
                   }
 
-                  while IFS= read -r line; do
-                      [ -z "$line" ] && continue
-                      [ "$line" = "--SEP--" ] && continue
-                      process_line "$line"
-                  done <<< "$COMMITS"
+                  while IFS= read -r -d $'\x1e' record; do
+                      [ -z "$record" ] && continue
+                      BODY="${record%$'\x1f'*}"
+                      EMAIL="${record##*$'\x1f'}"
+                      HANDLE=$(handle_from_email "$EMAIL")
+                      process_record "$BODY" "$HANDLE"
+                  done <<< "$LOG"
 
                   CHANGELOG=""
                   for SECTION in $(echo "${!SECTION_CONTENT[@]}" | tr ' ' '\n' | sort); do
@@ -246,7 +262,7 @@ jobs:
               with:
                   tag: ${{ needs.prepare.outputs.tag_name }}
                   commit: ${{ github.sha }}
-                  name: ${{ needs.prepare.outputs.is_release == 'true' && format('Release {0}', needs.prepare.outputs.tag_name) || 'Beta Build' }}
+                  name: ${{ needs.prepare.outputs.is_release == 'true' && needs.prepare.outputs.tag_name || 'Beta Build' }}
                   prerelease: ${{ needs.prepare.outputs.is_release == 'false' }}
                   allowUpdates: true
                   replacesArtifacts: true

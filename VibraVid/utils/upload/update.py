@@ -33,6 +33,8 @@ _GENERIC_UPDATABLE_TOOLS = {
     "dovi_tool": ["dovi_tool"],
     "mkvtoolnix": ["mkvmerge", "mkvinfo"],
     "velora": ["velora"],
+    "yt-dlp": ["yt-dlp"],
+    "deno": ["deno"],
 }
 
 def fetch_github_releases():
@@ -154,6 +156,21 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
     """Re-download *tool*'s binaries when AstraeLabs/Binary has published a newer version."""
     remote = binary_paths.get_remote_tool_version(tool)
     if not remote:
+        if tool in {"yt-dlp", "deno"}:
+            from VibraVid.setup.checker import check_deno, check_yt_dlp
+
+            checker = check_yt_dlp if tool == "yt-dlp" else check_deno
+            if checker(download=False):
+                return {
+                    "success": True,
+                    "updated": False,
+                    "message": "up to date.",
+                }
+            return {
+                "success": False,
+                "updated": False,
+                "message": "not installed.",
+            }
         return {"success": False, "message": f"Could not fetch the latest {tool} version."}
 
     local = binary_paths.get_local_tool_version(tool)
@@ -221,7 +238,7 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
 
 def check_all_binaries_update() -> dict:
-    """Refresh every managed third-party binary (FFmpeg, Flux, dovi_tool, MKVToolNix) that is behind the version published in AstraeLabs/Binary."""
+    """Refresh every managed third-party binary published in AstraeLabs/Binary."""
     results = {}
     for tool, exec_names in _GENERIC_UPDATABLE_TOOLS.items():
         try:

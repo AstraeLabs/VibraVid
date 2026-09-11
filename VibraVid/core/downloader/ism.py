@@ -207,24 +207,16 @@ class ISM_Downloader(BaseDownloader):
         """
         Dispatch key-fetch to :class:`DRMManager`.
 
-        * ``"playready"`` → PlayReady only (native ISM DRM)
-        * ``"widevine"``  → Widevine only
+        When the manifest only carries the *other* DRM type, fall back to that type instead of skipping key resolution entirely.
         """
         keys = None
+        effective_pref = self.drm_preference
+        if not drm_psshs.get(effective_pref):
+            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
+            if drm_psshs.get(other):
+                effective_pref = other
 
-        if self.drm_preference == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
-            try:
-                keys = self.drm_manager.get_pr_keys(
-                    drm_psshs[DRMType.PLAYREADY],
-                    self.license_url,
-                    headers=self.license_headers,
-                    key=self.key,
-                    license_data=self.license_data,
-                )
-            except Exception as exc:
-                logger.error(f"PlayReady key fetch failed: {exc}")
-
-        if self.drm_preference == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
+        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
             try:
                 keys = self.drm_manager.get_wv_keys(
                     drm_psshs[DRMType.WIDEVINE],
@@ -236,6 +228,18 @@ class ISM_Downloader(BaseDownloader):
                 )
             except Exception as exc:
                 logger.error(f"Widevine key fetch failed: {exc}")
+
+        if effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
+            try:
+                keys = self.drm_manager.get_pr_keys(
+                    drm_psshs[DRMType.PLAYREADY],
+                    self.license_url,
+                    headers=self.license_headers,
+                    key=self.key,
+                    license_data=self.license_data,
+                )
+            except Exception as exc:
+                logger.error(f"PlayReady key fetch failed: {exc}")
 
         # Manual key supplied directly
         if not keys and self.key:
@@ -280,26 +284,30 @@ class ISM_Downloader(BaseDownloader):
         streams = self.media_downloader.parse_stream(show_table=context_tracker.should_print and not context_tracker.hide_manifest_info)
 
         # ── DRM key fetch ─────────────────────────────────────────────────────
-        if self.license_url or self.key:
-            raw_ism = (
-                str(self.media_downloader.raw_ism)
-                if hasattr(self.media_downloader, "raw_ism") and self.media_downloader.raw_ism
-                else None
-            )
+        raw_ism = (
+            str(self.media_downloader.raw_ism)
+            if hasattr(self.media_downloader, "raw_ism") and self.media_downloader.raw_ism
+            else None
+        )
 
-            # Primary: PSSH / PRO from Stream.drm (populated by ISMParser)
-            drm_psshs = self._collect_drm_from_streams(streams)
+        # Primary: PSSH / PRO from Stream.drm (populated by ISMParser)
+        drm_psshs = self._collect_drm_from_streams(streams)
 
-            # Fallback: re-scan raw manifest via ISMParser
-            if not drm_psshs[DRMType.WIDEVINE] and not drm_psshs[DRMType.PLAYREADY]:
-                logger.info("No PSSH in Stream objects — falling back to ISMParser")
-                drm_psshs = self._collect_drm_from_ism(raw_ism)
+        # Fallback: re-scan raw manifest via ISMParser
+        if not drm_psshs[DRMType.WIDEVINE] and not drm_psshs[DRMType.PLAYREADY]:
+            logger.info("No PSSH in Stream objects — falling back to ISMParser")
+            drm_psshs = self._collect_drm_from_ism(raw_ism)
 
+        is_protected = bool(drm_psshs.get(DRMType.WIDEVINE) or drm_psshs.get(DRMType.PLAYREADY))
+
+        if is_protected:
+            if self.download_id:
+                download_tracker.update_status(self.download_id, "Fetching keys ...")
             keys = self._fetch_keys(drm_psshs)
 
             if keys:
                 self.media_downloader.set_key(keys)
-            elif drm_psshs.get(DRMType.WIDEVINE) or drm_psshs.get(DRMType.PLAYREADY):
+            else:
                 console.print("[red]Warning: DRM detected but no decryption keys found")
         else:
             keys = []
