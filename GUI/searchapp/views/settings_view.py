@@ -11,6 +11,7 @@ import zipfile
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
+from VibraVid.services._base.tv_display_manager import refresh_output_formats
 from VibraVid.utils import config_manager
 
 from .._download_infra import set_max_download_slots
@@ -255,9 +256,10 @@ def save_settings(request: HttpRequest) -> JsonResponse:
 
             try:
                 config_manager.reload_config_only()
+                refresh_output_formats()
             except Exception as exc:
                 logger.exception("Failed to reload config cache after save: %s", exc)
-        
+
         elif file_type == 'login':
             try:
                 config_manager.reload_login_only()
