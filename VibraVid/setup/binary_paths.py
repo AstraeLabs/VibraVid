@@ -16,7 +16,7 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 VERSIONS_FILENAME = ".versions.json"
-LFS_TOOLS = {"ffmpeg", "yt-dlp", "deno"}
+LFS_TOOLS = {"ffmpeg"}
 
 DOWNLOAD_CHUNK_SIZE = 256 * 1024
 

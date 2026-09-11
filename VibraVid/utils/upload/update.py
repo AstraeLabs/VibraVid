@@ -30,6 +30,7 @@ auto_update_check = config_manager.config.get_bool("DEFAULT", "auto_update_check
 timeout = config_manager.config.get_int("REQUESTS", "timeout")
 _GENERIC_UPDATABLE_TOOLS = {
     "ffmpeg": ["ffmpeg", "ffprobe"],
+    "flux": ["flux"],
     "dovi_tool": ["dovi_tool"],
     "mkvtoolnix": ["mkvmerge", "mkvinfo"],
     "velora": ["velora"],
