@@ -9,7 +9,7 @@ from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.utils.language import resolve_locale
-from VibraVid.core.utils.selector import FilterSpec
+from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
 from VibraVid.services._base import Entries, anime_folder, movie_folder, site_constants
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
@@ -86,39 +86,42 @@ def _merge_subtitles(base: list, extra: list) -> list:
 
 def parse_select_audio_filter(select_audio: str) -> list:
     """
-    Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all") to extract language codes.
-
-    Returns:
-        List of resolved locales (e.g., ["it-IT", "en-US"])
-        Empty list = no filter / use all tracks
+    Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all", or exclusive-priority slots "1ita|2eng") to extract locale groups.
     """
     if not select_audio:
         return []
 
-    spec = FilterSpec.parse(select_audio.strip(), "audio")
+    raw = select_audio.strip()
+    slots = split_audio_slots(raw)
 
-    # "for=all" / "all" -> no filter, use every track
-    if spec.select_all or spec.drop:
-        return []
+    if slots is not None:
+        groups_raw = [slots[num] for num in sorted(slots)]
+    else:
+        spec = FilterSpec.parse(raw, "audio")
+        if spec.select_all or spec.drop:
+            return []
+        groups_raw = [spec.langs] if spec.langs else []
 
-    raw_codes = [c.strip() for c in (spec.langs or "").split("|") if c.strip()]
-    if not raw_codes:
-        return []
+    groups = []
+    for langs in groups_raw:
+        raw_codes = [c.strip() for c in langs.split("|") if c.strip()]
+        locales = []
+        seen = set()
+        for code in raw_codes:
+            locale = resolve_locale(code)
 
-    locales = []
-    seen = set()
-    for code in raw_codes:
-        locale = resolve_locale(code)
+            if not locale:
+                console.print(f"[yellow]Warning: language code '{code}' not recognised, skipping")
+                continue
 
-        if locale is None:
-            console.print(f"[yellow]Warning: language code '{code}' not recognised, skipping")
-            continue
+            if locale not in seen:
+                locales.append(locale)
+                seen.add(locale)
 
-        if locale not in seen:
-            locales.append(locale)
-            seen.add(locale)
+        if locales:
+            groups.append(locales)
 
-    return locales
+    return groups
 
 
 def _build_license_headers(base_headers: dict, content_id: str, mpd_url: str, fallback_token: str) -> dict:
@@ -154,12 +157,18 @@ def download_film(select_title: Entries) -> str:
 
     # Extract media ID
     url_id = select_title.get("url").split("/")[-1]
-    preferred_locales = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
+    preferred_groups = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
 
     # Build the locale -> version GUID map from the playback API
     available = client.get_available_versions(url_id)
     time.sleep(2)
     locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
+
+    preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
+    if not preferred_locales and len(preferred_groups) > 1:
+        console.print("[yellow]Skipping — no audio slot matched the requested select_audio filter.")
+        client.close()
+        return None, True, "no audio slot matched select_audio filter"
 
     main_id = url_id
     main_locale = None
@@ -234,14 +243,19 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     url_id = obj_episode.url.split("/")[-1]
     main_guid = getattr(obj_episode, "main_guid", None)
 
-    # Parse preferred audio locales
-    preferred_locales = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
+    # Parse preferred audio locale groups
+    preferred_groups = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
 
     # Build the map of audio locale -> version GUID from the playback API.
     available = client.get_available_versions(url_id)
     time.sleep(2)
     locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
     api_main_guid = next((v["guid"] for v in available if "main" in v.get("roles", [])), None)
+
+    preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
+    if not preferred_locales and len(preferred_groups) > 1:
+        console.print("[yellow]Skipping — no audio slot matched the requested select_audio filter.")
+        return None, True, "no audio slot matched select_audio filter"
 
     # main_guid unlocks the complete subtitle set (prefer the "main" version, else metadata)
     main_guid = main_guid or api_main_guid

@@ -15,7 +15,8 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 INSTALLATION_LEVELS = {
-    "": ["ffmpeg", "velora", "flux", "yt-dlp", "deno"],
+    "": ["ffmpeg", "velora", "flux"],
+    "yt": ["ffmpeg", "velora", "flux", "yt-dlp", "deno"],
     "full": ["ffmpeg", "velora", "flux", "dovi_tool", "mkvtoolnix", "yt-dlp", "deno"],
 }
 

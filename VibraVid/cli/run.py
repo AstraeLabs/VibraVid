@@ -74,9 +74,6 @@ _EQUIVALENT_CMD_EXCLUDED_DESTS = {
     "queue_list",
     "queue_remove",
     "queue_clear",
-    "queue_retry",
-    "queue_retry_all",
-    "queue_delay",
 }
 equivalent_command_builder = EquivalentCommandBuilder(excluded_dests=_EQUIVALENT_CMD_EXCLUDED_DESTS)
 
@@ -167,14 +164,15 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
 
     # ── Series navigation
     series_group = parser.add_argument_group("Series navigation")
-    series_group.add_argument("--season", type=str, default=None, metavar="SEL", help='Season selection, e.g. "1", "1-3", "*"')
-    series_group.add_argument("--episode", type=str, default=None, metavar="SEL", help='Episode selection, e.g. "1", "1-5", "*"')
+    series_group.add_argument("-S", "--season", type=str, default=None, metavar="SEL", help='Season selection, e.g. "1", "1-3", "*"')
+    series_group.add_argument("-E", "--episode", type=str, default=None, metavar="SEL", help='Episode selection, e.g. "1", "1-5", "*"')
 
     # ── Track selection
     track_group = parser.add_argument_group("Track selection")
     track_group.add_argument("-sv", "--video", type=str, metavar="SPEC", help='Video track filter (e.g. "best", "1080p", "r=1080:c=hvc1:f=best")')
     track_group.add_argument("-sa", "--audio", type=str, metavar="SPEC", help='Audio track filter (e.g. "ita|it", "l=ita:c=aac:f=best")')
     track_group.add_argument("-ss", "--subtitle", type=str, metavar="SPEC", help='Subtitle track filter (e.g. "ita|eng")')
+    track_group.add_argument("--skip-no-match", dest="skip_no_match", action="store_true", help="Skip the whole download if -sv/-sa/-ss matches no track, instead of falling back to the best available one")
 
     # ── Download options
     dl_opts = parser.add_argument_group("Download options")
@@ -184,6 +182,10 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument( "--proxy-scope", dest="proxy_scope", type=str, choices=["scrap", "down", "scrap+down"], metavar="scrap|down|scrap+down", help="Where to apply the proxy: scraping only, downloads only, or both")
     dl_opts.add_argument("--close-console", dest="close_console", type=str, choices=["true", "false"],metavar="true|false", help="Exit after last download (overrides config)")
     dl_opts.add_argument("--no-vault-cache", dest="bypass_vault_cache", action="store_const", const=True, default=None, help="Bypass DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)")
+    dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
+    dl_opts.add_argument("--no-livemux", dest="no_livemux", action="store_true", help="Disable the streaming-mux fast path for this run and always fall back to the normal post-download join_media() pass. Fast path is on by default")
+    dl_opts.add_argument("--livemux", dest="force_livemux", action="store_true", help="Force-enable the streaming-mux fast path for this run even if the current service does not opt in via _live_mux = True. Off by default")
+    dl_opts.add_argument("--no-concurrent", dest="no_concurrent", action="store_true", help="Download video, audio and subtitles sequentially instead of simultaneously for this run. Concurrent download is on by default")
     dl_opts.add_argument("--log-decryptor-output", dest="log_decryptor_output", action="store_const", const=True, default=None, help="Write flux's own stdout+stderr lines to the log file as they run, tagged with the engine name (e.g. [FLUX]) instead of [INFO]")
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
@@ -203,6 +205,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--hls-key", dest="hls_key", metavar="HEX|BASE64|FILE", default=None, help="Raw AES-128 key to use instead of fetching URI= from the manifest's #EXT-X-KEY tag.")
     dl_group.add_argument("--hls-iv", dest="hls_iv", metavar="HEX", default=None, help="IV to use instead of the manifest's IV=0x... (or the implicit per-segment IV).")
     add_limit_arguments(dl_group)
+
     dl_group.add_argument("--skip-content-check", dest="skip_content_check", action="store_true", help="Skip the preflight HEAD content-type check for MP4 direct downloads (--type mp4). Needed for single-use download URLs where a HEAD request consumes the link.")
     dl_group.add_argument("--skip-sanitize", dest="skip_sanitize", action="store_true", help="Use the -o output path verbatim (MP4/HLS/DASH/ISM direct downloads), skipping path sanitization (which transliterates non-ASCII characters). Use when the caller already built/created the exact destination path.")
     dl_group.add_argument("--meta-title", dest="meta_title", metavar="TITLE", help='Title metadata for this --down invocation (feeds DB/Vault "Claudio database" caching/upload and other title-dependent hooks, which are otherwise skipped for raw --down downloads). Set automatically on --down entries built by --resolve-only.')
@@ -210,28 +213,18 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--meta-season", dest="meta_season", type=int, metavar="N", help="Season number metadata for this --down invocation.")
     dl_group.add_argument("--meta-episode", dest="meta_episode", type=int, metavar="N", help="Episode number metadata for this --down invocation.")
     dl_group.add_argument("--meta-site", dest="meta_site", metavar="NAME", help="Site/service name metadata for this --down invocation (e.g. streamingcommunity).")
-    dl_group.add_argument("--yt-dlp", dest="yt_dlp_url", metavar="URL", 
-    help="Download with yt-dlp (supports YouTube, Twitter, Vimeo, etc.)")
-    dl_group.add_argument("--format", dest="format", metavar="SPEC",
-    help="yt-dlp format selector (default: bestvideo+bestaudio/best)")
-    dl_group.add_argument("--list-formats", dest="list_formats", action="store_true",
-    help="List available yt-dlp formats for the URL and exit")
-    dl_group.add_argument("--interactive-format", dest="interactive_format", action="store_true",
-    help="Show the available yt-dlp formats and prompt for the format ID before downloading")
-    dl_group.add_argument("--extract-audio", dest="extract_audio", action="store_true",
-    help="Extract audio with yt-dlp")
-    dl_group.add_argument("--audio-format", dest="audio_format", metavar="FORMAT",
-    help="Audio format for yt-dlp extraction (e.g. mp3, m4a, wav, opus)")
-    dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY",
-    help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k)")
-    dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N",
-    help="Only process the first N entries of a playlist")
-    dl_group.add_argument("--sub-langs", dest="sub_langs", metavar="LANGS",
-    help="Comma-separated subtitle languages (e.g. it,en)")
-    dl_group.add_argument("--write-subs", dest="write_subs", action="store_true",
-    help="Write subtitles")
-    dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true",
-    help="Write auto-generated subtitles")
+    dl_group.add_argument("--yt-dlp", dest="yt_dlp_url", metavar="URL", help="Download with yt-dlp (supports YouTube, Twitter, Vimeo, etc.)")
+    dl_group.add_argument("--format", dest="format", metavar="SPEC", help="yt-dlp format selector (default: bestvideo+bestaudio/best)")
+    dl_group.add_argument("--list-formats", dest="list_formats", action="store_true", help="List available yt-dlp formats for the URL and exit")
+    dl_group.add_argument("--interactive-format", dest="interactive_format", action="store_true", help="Show the available yt-dlp formats and prompt for the format ID before downloading")
+    dl_group.add_argument("--extract-audio", dest="extract_audio", action="store_true", help="Extract audio with yt-dlp")
+    dl_group.add_argument("--audio-format", dest="audio_format", metavar="FORMAT", help="Audio format for yt-dlp extraction (e.g. mp3, m4a, wav, opus)")
+    dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY", help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k)")
+    dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N", help="Only process the first N entries of a playlist")
+    dl_group.add_argument("--sub-langs", dest="sub_langs", metavar="LANGS", help="Comma-separated subtitle languages (e.g. it,en)")
+    dl_group.add_argument("--write-subs", dest="write_subs", action="store_true", help="Write subtitles")
+    dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true", help="Write auto-generated subtitles")
+
     # ── Utility
     util_group = parser.add_argument_group("Utility")
     util_group.add_argument("--tui", action="store_true", help="Launch the Textual Terminal User Interface (TUI)")
@@ -582,6 +575,7 @@ def main():
         if args.binary_update:
             from VibraVid.utils.upload.update import check_all_binaries_update
             results = check_all_binaries_update()
+            console.print(f"\n[cyan]Binary update for: [red]{', '.join(results.keys())}")
             for tool, result in results.items():
                 style = "green" if result.get("success") else "red"
                 console.print(f"[{style}]{tool}: {result.get('message')}")
@@ -592,6 +586,11 @@ def main():
         # Propagate CLI download limits to the service flow
         apply_limits(args)
         context_tracker.bypass_vault_cache = getattr(args, "bypass_vault_cache", None)
+        context_tracker.skip_decrypt = bool(getattr(args, "skip_decrypt", False))
+        context_tracker.no_livemux = bool(getattr(args, "no_livemux", False))
+        context_tracker.force_livemux = bool(getattr(args, "force_livemux", False))
+        context_tracker.no_concurrent = bool(getattr(args, "no_concurrent", False))
+        context_tracker.skip_no_match = bool(getattr(args, "skip_no_match", False))
         context_tracker.log_engine_output = getattr(args, "log_decryptor_output", None)
         context_tracker.anonymize_keys = bool(getattr(args, "abc", False))
         context_tracker.resolve_only = bool(getattr(args, "resolve_only", False))

@@ -13,6 +13,7 @@ class KeysManager:
 
     def __init__(self, keys=None) -> None:
         self._keys: list[tuple[str, str]] = []
+        self._rejected: list[str] = []
         if keys:
             self.add_keys(keys)
 
@@ -23,14 +24,17 @@ class KeysManager:
 
             if not self._HEX32_RE.match(ckey):
                 logger.warning(f"Skipping key with invalid format (expected 32 hex chars, got len={len(ckey)}): kid={ckid[:8]}...")
+                self._rejected.append(f"{ckid}:{ckey}")
                 continue
 
             if ckid != "1" and not self._HEX32_RE.match(ckid):
                 logger.warning(f"Skipping pair with invalid KID (expected 32 hex chars, got len={len(ckid)}): kid={ckid}")
+                self._rejected.append(f"{ckid}:{ckey}")
                 continue
 
             if ckid == ckey and ckid != "1":
                 logger.warning(f"Skipping key where KID == KEY (always invalid): kid={ckid}")
+                self._rejected.append(f"{ckid}:{ckey}")
                 continue
 
             pair = (ckid, ckey)
@@ -41,13 +45,16 @@ class KeysManager:
         """Return keys as a list of clean ``"kid:key"`` strings."""
         return [f"{kid}:{key}" for kid, key in self._keys]
 
+    def get_rejected_list(self) -> list[str]:
+        """Raw ``"kid:key"`` strings that failed validation while parsing"""
+        return list(self._rejected)
+
     @staticmethod
     def _clean(value: str) -> str:
         """Canonical form for a KID or KEY: dash-stripped, trimmed, lowercase hex."""
         return str(value).replace("-", "").strip().lower()
 
-    @classmethod
-    def _iter_pairs(cls, keys):
+    def _iter_pairs(self, keys):
         """Yield raw (uncleaned) ``(kid, key)`` pairs from any supported representation."""
         if not keys:
             return
@@ -68,7 +75,7 @@ class KeysManager:
                 yield (keys[0], keys[1])
             else:
                 for item in keys:
-                    yield from cls._iter_pairs(item)
+                    yield from self._iter_pairs(item)
             return
 
         if isinstance(keys, str):
@@ -76,19 +83,23 @@ class KeysManager:
             if not s:
                 return
 
-            matches = list(cls._HEX_PAIR_RE.finditer(s))
+            matches = list(self._HEX_PAIR_RE.finditer(s))
             if matches:
                 remainder = s
                 for m in reversed(matches):
                     remainder = remainder[: m.start()] + " " + remainder[m.end() :]
-                for token in cls._SPLIT_RE.split(remainder):
+
+                for token in self._SPLIT_RE.split(remainder):
                     if token and ":" in token:
                         logger.warning(f"Skipping malformed key segment (expected 32 hex chars on each side of ':'): {token!r}")
+                        kid_raw, _, key_raw = token.partition(":")
+                        self._rejected.append(f"{self._clean(kid_raw)}:{self._clean(key_raw)}")
+
                 yield from (m.groups() for m in matches)
                 return
 
             # Generic path: split on separators, then on the first ':' of each token.
-            for token in cls._SPLIT_RE.split(s):
+            for token in self._SPLIT_RE.split(s):
                 if not token:
                     continue
                 if ":" in token:

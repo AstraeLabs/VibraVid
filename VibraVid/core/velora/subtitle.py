@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from VibraVid.core.utils.codec import AUDIO_EXTENSIONS, SUBTITLE_EXTENSIONS
 from VibraVid.core.utils.language import extract_lang_and_flags, language_variants, resolve_locale, subtitle_flags
 from VibraVid.core.velora.bridge import run_download_plan
+from VibraVid.core.velora.curl_bridge import _fetch_one
 from VibraVid.core.velora.util._subtitle_segments import (
     download_and_merge_subtitle_segments,
     get_subtitle_resolve_workers,
@@ -184,7 +186,14 @@ async def _download_multi_segment_subtitle(client: Any, track: dict, out_path: P
 
 
 async def _process_external_track(
-    client: Any, headers: dict, track: dict, track_type: str, output_dir: Path, bar_manager: Any, stop_check: Any
+    client: Any,
+    headers: dict,
+    track: dict,
+    track_type: str,
+    output_dir: Path,
+    bar_manager: Any,
+    stop_check: Any,
+    on_track_done: Callable[[str, Path | None], None] | None = None,
 ) -> tuple[str, dict | None]:
     lang_raw = (track.get("language") or "unknown").strip()
 
@@ -212,6 +221,8 @@ async def _process_external_track(
 
         if not is_valid_format(fmt, track_type):
             logger.error(f"Skipping {track_type} with invalid format '{fmt}' for {lang_raw}: {track.get('url')}")
+            if on_track_done:
+                on_track_done(track.get("_task_key", f"ext_{track_type}_{base_lang}{flag_suffix}"), None)
             return track_type, None
 
         # ── Build normalised filename ─────────────────────────────
@@ -269,6 +280,12 @@ async def _process_external_track(
             result = results[0] if results else {}
             size = int(result.get("bytes") or 0) if result.get("path") and Path(result["path"]).exists() else None
 
+            if not size and not stop_check():
+                logger.warning(f"{track_type} {lang_raw}: primary backend exhausted its retries -- falling back to curl_cffi")
+                fallback_result = _fetch_one(plan["tasks"][0], plan)
+                if fallback_result.get("event") == "completed" and fallback_result.get("path") and Path(fallback_result["path"]).exists():
+                    size = int(fallback_result.get("bytes") or 0)
+
         if size:
             entry = {
                 "path": str(out_path),
@@ -279,6 +296,8 @@ async def _process_external_track(
                 **language_variants(base_lang),
             }
             logger.info(f"Downloaded {track_type} {lang_raw}: {size} bytes -> {out_path.name}" + (f" ({len(segments)} segments)" if is_multi_segment else ""))
+            if on_track_done:
+                on_track_done(task_key, out_path)
             return track_type, entry
 
         logger.error(f"Failed to download {track_type} {lang_raw} (empty file)")
@@ -291,6 +310,8 @@ async def _process_external_track(
                 "speed": "FAILED",
             }
         )
+        if on_track_done:
+            on_track_done(task_key, None)
         return track_type, None
 
     except Exception as exc:
@@ -304,6 +325,8 @@ async def _process_external_track(
                 "speed": "ERR",
             }
         )
+        if on_track_done:
+            on_track_done(track.get("_task_key", f"ext_{track_type}_{base_lang}{flag_suffix}"), None)
         return track_type, None
 
 
@@ -315,11 +338,16 @@ async def download_external_tracks_with_progress(
     filename: str,
     bar_manager: Any,
     stop_check: Any = None,
+    on_track_done: Callable[[str, Path | None], None] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Download external tracks with manifest resolution, proper filenames, and progress.
 
     Args:
         stop_check: Optional callable that returns True when download should stop.
+        on_track_done: Optional callback invoked once per track as it resolves
+            (task_key, output_path_or_None) -- lets a caller (e.g. the streaming-mux
+            fast path) wait on individual external tracks the same way it already
+            waits on regular audio/subtitle streams.
     """
     ext_subs: list[dict] = []
     ext_auds: list[dict] = []
@@ -350,7 +378,9 @@ async def download_external_tracks_with_progress(
     async with create_async_client(headers=headers) as client:
         if workers <= 1:
             results = [
-                await _process_external_track(client, headers, track, track_type, output_dir, bar_manager, stop_check)
+                await _process_external_track(
+                    client, headers, track, track_type, output_dir, bar_manager, stop_check, on_track_done
+                )
                 for track, track_type in all_tasks
             ]
         else:
@@ -359,7 +389,7 @@ async def download_external_tracks_with_progress(
             async def _bounded(track: dict, track_type: str) -> tuple[str, dict | None]:
                 async with semaphore:
                     return await _process_external_track(
-                        client, headers, track, track_type, output_dir, bar_manager, stop_check
+                        client, headers, track, track_type, output_dir, bar_manager, stop_check, on_track_done
                     )
 
             results = await asyncio.gather(*(_bounded(track, track_type) for track, track_type in all_tasks))

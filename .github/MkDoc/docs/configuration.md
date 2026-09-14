@@ -87,7 +87,7 @@ environment variable above.
 | `auto_update_check` | `true` | Notify you at startup when a new VibraVid version is available |
 | `disable_scraper_cache` | `false` | GUI only: the Django backend caches an already-instantiated site scraper per title for 15 minutes so repeat requests (e.g. opening the same series-detail page) don't re-scrape. |
 | `imp_service` | `["default"]` | Service source paths to load site modules from. `"default"` loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have `__init__.py` defining `indice` and `_useFor`. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name. |
-| `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup |
+| `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup. `""` (base): FFmpeg, Velora, flux. `"yt"`: base + yt-dlp, deno. `"full"`: base + dovi_tool, mkvtoolnix, yt-dlp, deno |
 | `get_me` | `false` | Resolve and print the account name in the login banner (e.g. `Login - Type: Account / User: name`) for services that support it.
 
 **Custom `imp_service` example (local folder):**
@@ -247,7 +247,6 @@ S%(season:02d)/     ->  season folder   S01/
     "segment_delay_seconds": 0,
     "segment_delay_jitter_seconds": 0,
     "subtitle_resolve_workers": 4,
-    "concurrent_download": true,
     "select_video": "best",
     "select_audio": "it|en",
     "select_subtitle": "it|en",
@@ -257,8 +256,7 @@ S%(season:02d)/     ->  season folder   S01/
     "token_refresh_backoff_seconds": 4.0,
     "token_refresh_stall_rounds": 3,
     "embed_poster": false,
-    "cleanup_tmp_folder": true,
-    "skip_post_decrypt": false
+    "cleanup_tmp_folder": true
   }
 }
 ```
@@ -272,11 +270,9 @@ S%(season:02d)/     ->  season folder   S01/
 | `skip_download` | `false` | Skip the download step and process existing files |
 | `thread_count` | `10` | Number of concurrent segment requests for a single stream |
 | `subtitle_resolve_workers` | `4` | Number of HLS subtitle renditions resolved/downloaded concurrently. `1` restores the original strictly-sequential behaviour |
-| `concurrent_download` | `true` | Download video, audio, and subtitles simultaneously |
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 closed captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download |
 | `cleanup_tmp_folder` | `true` | Remove temporary files after download |
 | `embed_poster` | `false` | Embed a poster/still into the downloaded file: the matching TMDB artwork if found, otherwise the site's own poster/still as a fallback |
-| `skip_post_decrypt` | `false` | Debug master switch: when `true`, **no** decryption runs at all — neither the in-flight per-segment path nor the post-download pass — segments are kept encrypted. The output is not playable; keep this `false` for normal use |
 
 
 ### Segment Throttling, Live Streams & Token Refresh
@@ -328,6 +324,7 @@ Native `key=value` filters combine multiple constraints (resolution, codec, bitr
 | `"ita\|best"` | Language with fallback to best | Fallback to best |
 | `"ita\|best,AAC"` | Language + codec with fallback | Fallback to best |
 | `"b=64-192:f=best"` | Bitrate range (kbps) — best within range | Ignores range if no match |
+| `"1ita\|2eng"` | Numbered slots — exclusive priority | Skips the whole download |
 | `"false"` | Skip audio | — |
 
 Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (language + codec + fallback).

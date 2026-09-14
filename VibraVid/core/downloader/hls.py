@@ -423,7 +423,18 @@ class HLS_Downloader(BaseDownloader):
             download_tracker.update_status(self.download_id, "Parsing HLS ...")
 
         streams = self.media_downloader.parse_stream(show_table=context_tracker.should_print and not context_tracker.hide_manifest_info)
+
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+
         self._embedded_cc_streams = self._collect_embedded_cc(streams)
+        if not self._embedded_cc_streams:
+            # The streaming-mux fast path builds a plain ffmpeg command with no
+            # per-input filtering -- embedded CEA-608/708 captions need the
+            # extraction step _join_media_ffmpeg() does, so skip the fast path
+            # whenever there's any to preserve.
+            self._maybe_enable_streaming_mux()
 
         # ── DRM key fetch ─────────────────────────────────────────────────────
         raw_m3u8 = str(self.media_downloader.raw_m3u8) if self.media_downloader.raw_m3u8 else None

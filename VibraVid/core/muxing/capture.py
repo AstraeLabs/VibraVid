@@ -241,6 +241,7 @@ def capture_ffmpeg_real_time(
         log_command(ffmpeg_command, f"Starting ffmpeg process for {description}", log=logger)
         process = subprocess.Popen(
             ffmpeg_command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,

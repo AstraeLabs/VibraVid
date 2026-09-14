@@ -100,13 +100,24 @@ async def download_and_merge_subtitle_segments(client: Any, segments: list[tuple
     """Fetch every subtitle segment concurrently and merge them (in order) into a single WebVTT track, using each segment's nominal (EXTINF) duration to shift segments that restart their clock."""
     import asyncio
 
+    max_retry = config_manager.config.get_int("REQUESTS", "max_retry")
+
     texts: list[str] = [""] * len(segments)
     durations = [dur for _url, dur in segments]
 
     async def _fetch(index: int, url: str) -> None:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        texts[index] = resp.text
+        last_exc: Exception | None = None
+        for attempt in range(max_retry + 1):
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                texts[index] = resp.text
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retry:
+                    await asyncio.sleep(min(1.0 * (attempt + 1), 4.0))
+        logger.warning(f"Subtitle segment failed after {max_retry + 1} attempt(s), skipping it: {url} ({last_exc})")
 
     await asyncio.gather(*(_fetch(i, url) for i, (url, _dur) in enumerate(segments)))
     return merge_vtt_segments(texts, durations=durations)

@@ -13,6 +13,7 @@ from .downloader import download_series
 indice = 12
 _useFor = "Serie"
 _region = ["IT"]
+_live_mux = True
 msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()

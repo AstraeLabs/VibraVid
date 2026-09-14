@@ -534,6 +534,13 @@ class Stream:
             seg_count = len(self.segments)
             segs_s = f"segs={seg_count}" if seg_count else None
             dur_s = f"~{format_duration(self.duration)}" if self.bitrate and self.duration > 0 else None
+            size_s = None
+            if self.bitrate and self.duration > 0:
+                from VibraVid.core.velora.util.formatting import format_size as _format_size
+                est_size = self.compute_estimated_size()
+                if est_size:
+                    size_s = f"~{_format_size(est_size)}"
+            
             kid_s = f"KID={self.drm.get_kid_display()}" if self.drm.is_encrypted() and self.drm.get_kid_display() else None
 
             if self.type == "video":
@@ -552,6 +559,7 @@ class Stream:
                     scan_s,
                     segs_s,
                     dur_s,
+                    size_s,
                     drm,
                     kid_s,
                 ]
@@ -561,12 +569,12 @@ class Stream:
                 sr = f"{self.sample_rate}Hz" if self.sample_rate else None
                 parts = [
                     id_s, lang, self.bitrate_display if self.bitrate else None, codec, ch, sr, flags,
-                    segs_s, dur_s, drm, kid_s,
+                    segs_s, dur_s, size_s, drm, kid_s,
                 ]
 
             else:  # subtitle
                 wvtt_tag = "wvtt-mp4" if self.is_wvtt_mp4 else None
-                parts = [id_s, lang, codec, wvtt_tag, flags, segs_s, dur_s, drm, kid_s]
+                parts = [id_s, lang, codec, wvtt_tag, flags, segs_s, dur_s, size_s, drm, kid_s]
 
             filtered = [p for p in parts if p]
             return f"Stream({self.type} | {' | '.join(filtered)})"

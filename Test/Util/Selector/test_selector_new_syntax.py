@@ -11,6 +11,7 @@ sys.path.insert(0, str(workspace_root))
 
 from mock_streams import (
     create_audio_streams_example1,
+    create_audio_streams_example2,
     create_audio_streams_with_regions,
     create_video_streams_with_dv,
     create_video_streams_with_dv_no_match,
@@ -175,3 +176,50 @@ def test_bare_comma_is_still_primary_codec_split_not_a_language_list():
     multi = FilterSpec.parse("it|en", "audio")
     assert multi.langs == "it|en"
     assert multi.codec is None
+
+
+def test_audio_slot_first_priority_wins_even_if_lower_slot_also_present():
+    # example1 has both ita and eng available -- slot 1 (ita) must win, eng untouched.
+    streams = create_audio_streams_example1()
+    StreamSelector("false", "1ita|2eng", "false").apply(streams)
+    sel = _selected_audio(streams)
+    assert sel, "expected at least one selected audio stream"
+    assert all(s.language == "ita" for s in sel)
+
+
+def test_audio_slot_falls_through_to_next_slot_when_first_absent():
+    # example2 only has eng -- slot 1 (ita) has no match, slot 2 (eng) must win.
+    streams = create_audio_streams_example2()
+    StreamSelector("false", "1ita|2eng", "false").apply(streams)
+    sel = _selected_audio(streams)
+    assert sel, "expected at least one selected audio stream"
+    assert all(s.language == "eng" for s in sel)
+
+
+def test_audio_slot_no_match_skips_whole_download():
+    # Only "fra" present -- neither slot 1 (ita) nor slot 2 (eng) matches anything.
+    streams = [s for s in create_audio_streams_example1() if s.language == "fra"]
+    selector = StreamSelector("false", "1ita|2eng", "false")
+    selector.apply(streams)
+    sel = _selected_audio(streams)
+    assert sel == []
+    assert selector.no_match is True
+
+
+def test_audio_slot_multi_select_within_same_slot():
+    # ita and fra both listed in slot 1 -- both present in example1, both should be selected together.
+    streams = create_audio_streams_example1()
+    StreamSelector("false", "1ita|1fra", "false").apply(streams)
+    sel = _selected_audio(streams)
+    langs = {s.language for s in sel}
+    assert langs == {"ita", "fra"}
+
+
+def test_audio_no_slot_prefix_keeps_legacy_multi_select_behavior():
+    # No numeric prefix at all -- must behave exactly like before: all listed
+    # languages that are present get selected together, no exclusive priority.
+    streams = create_audio_streams_example1()
+    StreamSelector("false", "ita|eng", "false").apply(streams)
+    sel = _selected_audio(streams)
+    langs = {s.language for s in sel}
+    assert langs == {"ita", "eng"}

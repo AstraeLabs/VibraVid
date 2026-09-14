@@ -9,7 +9,7 @@ from typing import Any
 from VibraVid.core.decryptor import Decryptor
 from VibraVid.core.muxing.helper.video import _segment_number
 
-from ._decrypt_pipeline import SKIP_POST_DECRYPT
+from ._decrypt_pipeline import _skip_post_decrypt
 from .util._ism_boxes import ISM_TIMESCALE, build_ism_init_segment
 
 logger = logging.getLogger("manual")
@@ -199,7 +199,7 @@ class IsmPostprocMixin:
 
         logger.info(f"ISM file: {encrypted_temp} ({encrypted_temp.stat().st_size} bytes)")
 
-        if SKIP_POST_DECRYPT:
+        if _skip_post_decrypt():
             logger.info(f"skip_post_decrypt: leaving {encrypted_temp.name} encrypted (raw merged track kept for testing)")
             try:
                 encrypted_temp.rename(out_path)

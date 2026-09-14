@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import Any
 
 from VibraVid.core.ui.bar_manager import console
-from VibraVid.setup import get_flux_path
+from VibraVid.setup import get_ffmpeg_path, get_flux_path
 
 from ._models import EncryptionInfo, detect_encryption_info
 from ._subprocess_runner import _ENGINE_LOG_LEVELS, _log_engine_output_enabled, _strip_profile_lines, run_with_progress
@@ -162,21 +162,25 @@ class _FluxDaemon:
         keys: list[str],
         fragments_info: str | None,
         aes128: bool = False,
+        key_sanity: bool = False,
+        ffmpeg_path: str | None = None,
     ) -> tuple[bool, str | None]:
         """Run one job through the daemon. Returns (ok, error_message)."""
         if self._dead or self._proc.poll() is not None:
             self._dead = True
             return False, "daemon not running"
 
-        job = json.dumps(
-            {
-                "input": input_path,
-                "output": output_path,
-                "keys": keys,
-                "fragments_info": fragments_info,
-                "aes128": aes128,
-            }
-        )
+        job_dict: dict[str, Any] = {
+            "input": input_path,
+            "output": output_path,
+            "keys": keys,
+            "fragments_info": fragments_info,
+            "aes128": aes128,
+        }
+        if key_sanity:
+            job_dict["key_sanity"] = True
+            job_dict["ffmpeg_path"] = ffmpeg_path
+        job = json.dumps(job_dict)
 
         with self._lock:
             try:
@@ -374,8 +378,17 @@ class Decryptor:
         decrypted_path: str,
         normalized_keys: list[tuple[str, str]],
         init_path: str | None = None,
+        key_sanity: bool = False,
     ) -> tuple:
-        """Decrypt a live (streaming) encrypted segment using `flux`"""
+        """Decrypt a live (streaming) encrypted segment using `flux`.
+
+        Args:
+            encrypted_path: Path to the encrypted segment file.
+            decrypted_path: Path where the decrypted segment will be saved.
+            normalized_keys: List of tuples containing (KID, raw_key) pairs for decryption.
+            init_path: Optional path to the initialization segment (if applicable).
+            key_sanity: If True, enables a post-decrypt check for wrong keys.
+        """
         logger.debug(f"decrypt_flux_live(): {os.path.basename(encrypted_path)} -> {os.path.basename(decrypted_path)}")
 
         if not self.flux_path:
@@ -385,13 +398,17 @@ class Decryptor:
             logger.error("flux live decryption requested without usable keys")
             return False, "Error flux: no usable keys", None
 
+        ffmpeg_path = get_ffmpeg_path() if key_sanity else None
         try:
             with _AnsiSafePathGuard(encrypted_path, decrypted_path) as guard:
                 daemon = self._get_flux_daemon()
                 if daemon is not None:
                     keys_arg = [f"{kid.lower()}:{raw_key.lower()}" for kid, raw_key in normalized_keys]
                     daemon_init = init_path if (init_path and os.path.exists(init_path)) else None
-                    ok, err = daemon.decrypt(guard.safe_encrypted_path, guard.safe_output_path, keys_arg, daemon_init)
+                    ok, err = daemon.decrypt(
+                        guard.safe_encrypted_path, guard.safe_output_path, keys_arg, daemon_init,
+                        key_sanity=key_sanity, ffmpeg_path=ffmpeg_path,
+                    )
 
                     if ok:
                         size = os.path.getsize(guard.safe_output_path) if os.path.exists(guard.safe_output_path) else 0
@@ -401,11 +418,17 @@ class Decryptor:
                         logger.debug(f"flux live segment decrypted successfully via daemon: {size} bytes")
                         return True, "flux live segment decrypted", None
 
+                    if key_sanity and err and "key is wrong" in err:
+                        return False, f"Error flux: {err}", None
+
                     logger.debug(f"flux daemon job failed ({err}), falling back to one-shot spawn for this segment")
 
                 cmd = [self.flux_path]
                 if init_path and os.path.exists(init_path):
                     cmd.extend(["--fragments-info", init_path])
+                
+                if key_sanity and ffmpeg_path:
+                    cmd.extend(["--key-sanity-check", "--ffmpeg-path", ffmpeg_path])
 
                 cmd.extend(["-i", guard.safe_encrypted_path, "-o", guard.safe_output_path, "-f", "progressive"])
                 for kid, raw_key in normalized_keys:
@@ -517,9 +540,9 @@ class Decryptor:
             return False
 
     def decrypt_segment_live(
-        self, encrypted_path: str, decrypted_path: str, raw_keys, init_path: str | None = None
+        self, encrypted_path: str, decrypted_path: str, raw_keys, init_path: str | None = None, key_sanity: bool = False
     ) -> tuple:
         """Decrypt a live (streaming) encrypted segment using the provided keys and return a tuple indicating success and an optional error message."""
         norm_keys = KeysManager.normalize(raw_keys)
         logger.debug(f"decrypt_segment_live(): {os.path.basename(encrypted_path)} -> {os.path.basename(decrypted_path)} [LIVE -> flux]")
-        return self._decrypt_flux_live(encrypted_path, decrypted_path, norm_keys, init_path=init_path)
+        return self._decrypt_flux_live(encrypted_path, decrypted_path, norm_keys, init_path=init_path, key_sanity=key_sanity)

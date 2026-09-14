@@ -371,7 +371,6 @@ class ConfigManager:
         """Pre-cache commonly used configuration values."""
         common_keys = [
             ("DOWNLOAD", "thread_count", int),
-            ("DOWNLOAD", "concurrent_download", bool),
             ("DOWNLOAD", "cleanup_tmp_folder", bool),
             ("PROCESS", "use_gpu", bool),
             ("PROCESS", "param_video", str),

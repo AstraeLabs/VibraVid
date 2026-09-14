@@ -283,6 +283,10 @@ class ISM_Downloader(BaseDownloader):
 
         streams = self.media_downloader.parse_stream(show_table=context_tracker.should_print and not context_tracker.hide_manifest_info)
 
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+
         # ── DRM key fetch ─────────────────────────────────────────────────────
         raw_ism = (
             str(self.media_downloader.raw_ism)
@@ -331,6 +335,7 @@ class ISM_Downloader(BaseDownloader):
             download_tracker.update_status(self.download_id, "Downloading ...")
         print()
 
+        self._maybe_enable_streaming_mux()
         status = self.media_downloader.start_download()
 
         # ── Guards → merge → finalize (shared tail)

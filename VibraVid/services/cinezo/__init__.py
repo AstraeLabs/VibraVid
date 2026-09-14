@@ -25,6 +25,13 @@ def title_search(query: str) -> int:
     entries_manager.clear()
     table_show_manager.clear()
 
+    if not tmdb_client.api_key:
+        console.print(
+            "\n[red]This site requires a TMDB API key to search.[white] See "
+            "https://astraelabs.github.io/VibraVid/configuration/#tmdb-api-key for how to set it."
+        )
+        return 0
+
     for m in tmdb_client.search_movies(query):
         poster = f"{_TMDB_IMG}{m['poster_path']}" if m.get("poster_path") else None
         year = (m.get("release_date") or "")[:4] or None

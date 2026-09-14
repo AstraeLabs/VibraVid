@@ -558,6 +558,46 @@ class ContextTracker:
         self.local.bypass_vault_cache = value
 
     @property
+    def skip_decrypt(self) -> bool:
+        return bool(getattr(self.local, "skip_decrypt", False))
+
+    @skip_decrypt.setter
+    def skip_decrypt(self, value):
+        self.local.skip_decrypt = value
+
+    @property
+    def no_livemux(self) -> bool:
+        return bool(getattr(self.local, "no_livemux", False))
+
+    @no_livemux.setter
+    def no_livemux(self, value):
+        self.local.no_livemux = value
+
+    @property
+    def force_livemux(self) -> bool:
+        return bool(getattr(self.local, "force_livemux", False))
+
+    @force_livemux.setter
+    def force_livemux(self, value):
+        self.local.force_livemux = value
+
+    @property
+    def no_concurrent(self) -> bool:
+        return bool(getattr(self.local, "no_concurrent", False))
+
+    @no_concurrent.setter
+    def no_concurrent(self, value):
+        self.local.no_concurrent = value
+
+    @property
+    def skip_no_match(self) -> bool:
+        return bool(getattr(self.local, "skip_no_match", False))
+
+    @skip_no_match.setter
+    def skip_no_match(self, value):
+        self.local.skip_no_match = value
+
+    @property
     def log_engine_output(self):
         return getattr(self.local, "log_engine_output", None)
 

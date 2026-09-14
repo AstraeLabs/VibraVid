@@ -31,18 +31,16 @@
         "segment_delay_seconds": 0,
         "segment_delay_jitter_seconds": 0,
         "subtitle_resolve_workers": 4,
-        "concurrent_download": true,
         "select_video": "best",
-        "select_audio": "it",
-        "select_subtitle": "it",
+        "select_audio": "ita|eng",
+        "select_subtitle": "ita|eng",
         "extract_embedded_cc": false,
         "live_max_empty_polls": 8,
         "max_token_refresh_rounds": 10,
         "token_refresh_backoff_seconds": 4.0,
         "token_refresh_stall_rounds": 3,
         "embed_poster": false,
-        "skip_post_decrypt": false,
-        "cleanup_tmp_folder": true
+        "cleanup_tmp_folder": false
     },
     "PROCESS": {
         "engine": "ffmpeg",
@@ -61,7 +59,7 @@
     },
     "REQUESTS": {
         "timeout": 15,
-        "max_retry": 8,
+        "max_retry": 4,
         "verify": true,
         "use_proxy": false,
         "proxy_scope": "scrap+down",
@@ -75,7 +73,7 @@
         "use_cdm": true,
         "prefer_remote_cdm": false,
         "bypass_vault_cache": false,
-        "log_engine_output": true,
+        "log_engine_output": false,
         "vault": {
             "vault_1": {
                 "url": "https://drm-db.server66.workers.dev",

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import uuid
@@ -40,6 +41,7 @@ MERGE_AUDIO = config_manager.config.get_bool("PROCESS", "merge_audio")
 CLEANUP_TMP = config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder")
 DEBUG_TRACK_JSON = config_manager.config.get_bool("DEFAULT", "debug_track_json")
 DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
+MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg")
 
 
 _written_track_files: list[str] = []
@@ -401,6 +403,39 @@ class BaseDownloader:
 
         return DownloadResult(self.output_path, False, self.error or None)
 
+    def _maybe_enable_streaming_mux(self) -> None:
+        """Called by HLS/DASH/ISM downloaders, after streams are selected but before start_download()"""
+        service_module = sys.modules.get(f"VibraVid.services.{self.site_name}")
+        if not getattr(service_module, "_live_mux", False) and not context_tracker.force_livemux:
+            logger.info(f"streaming_mux: not enabled (service {self.site_name!r} does not opt in via _live_mux = True)")
+            return
+
+        if context_tracker.no_livemux:
+            logger.info("streaming_mux: not enabled (--no-livemux)")
+            return
+        
+        if MUX_ENGINE.lower() != "ffmpeg":
+            logger.info(f"streaming_mux: not enabled (PROCESS.engine={MUX_ENGINE!r} != ffmpeg)")
+            return
+        
+        if os.path.splitext(self.output_path)[1].lower() != ".mkv":
+            logger.info(f"streaming_mux: not enabled (output_path={self.output_path!r} is not .mkv)")
+            return
+
+        media_downloader = getattr(self, "media_downloader", None)
+        if media_downloader is None:
+            logger.info("streaming_mux: not enabled (media_downloader not created yet)")
+            return
+
+        # Check media_downloader.other_tracks (the hybrid-only list, already filtered of
+        # subtitle/extra-audio sidecar entries by the DASH/HLS/ISM downloader by this point)
+        if getattr(media_downloader, "other_tracks", None):
+            logger.info("streaming_mux: not enabled (other_tracks/hybrid output present)")
+            return
+
+        media_downloader.enable_streaming_mux(self.output_path)
+        logger.info(f"streaming_mux: enabled for this download -> {self.output_path}")
+
     def _finish_from_status(self, status: dict) -> "DownloadResult":
         """Common tail for protocols with no post-download step: guards → mux."""
         return self._check_download_status(status) or self._merge_and_finalize(status)
@@ -446,6 +481,18 @@ class BaseDownloader:
             console.print(f"[yellow]{err} — skipping mux.")
             self.error = err
             return None
+
+        streaming_mux_result = getattr(getattr(self, "media_downloader", None), "streaming_mux_result", None)
+        if streaming_mux_result and os.path.exists(streaming_mux_result) and os.path.getsize(streaming_mux_result) > 0:
+            logger.info(f"Using streaming-mux fast-path output, skipping join_media(): {streaming_mux_result}")
+            merged_file = streaming_mux_result
+            if not self._merge_output_ok(merged_file):
+                return None
+            
+            if self.chapters:
+                merged_file = self._inject_chapters(merged_file)
+
+            return self._embed_poster(merged_file)
 
         video_track = status.get("video")
         audio_tracks: list[dict] = list(status.get("audios") or [])
@@ -565,6 +612,8 @@ class BaseDownloader:
             else:
                 self._track_subtitles_for_copy(subtitle_tracks)
 
+        video_duration_hint = video_track.get("duration") if isinstance(video_track, dict) else None
+
         merged_file, result_json = join_media(
             video_path=video_path,
             audio_tracks=audio_tracks_to_merge,
@@ -572,6 +621,7 @@ class BaseDownloader:
             out_path=self.output_path,
             chapters=getattr(self, "chapters", None),
             force_ts_fix=getattr(getattr(self, "media_downloader", None), "_needs_join_ts_fix", False),
+            video_duration_hint=video_duration_hint,
         )
         self.last_merge_result = result_json
         if not self._merge_output_ok(merged_file):

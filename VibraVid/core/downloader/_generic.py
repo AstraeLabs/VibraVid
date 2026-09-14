@@ -24,7 +24,7 @@ from VibraVid.core.utils.selector import (
     _matches_res,
     strip_dv_suffix,
 )
-from VibraVid.core.velora.downloader import SKIP_POST_DECRYPT, MediaDownloader
+from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.core.velora.util._stream_helpers import join_interruptible
 from VibraVid.core.velora.util.formatting import (
     parse_max_segments as _parse_max_segments,
@@ -146,6 +146,7 @@ class Generic_Downloader(BaseDownloader):
         self._active: list[tuple[MediaDownloader, dict[str, Any]]] = []
         self._dv_stream = None
         self._dv_isolated = False
+        self._no_match = False
         self.other_tracks: list = []
         self._direct_sources: list[dict[str, Any]] = []
         logger.info(f"Initialized GENERIC_Downloader with {len(self.sources)} source(s), max_segments={self.max_segments}")
@@ -305,8 +306,16 @@ class Generic_Downloader(BaseDownloader):
                         logger.info(f"Source role '{role}': no stream matches res={video_res}, using full pool")
 
                 stream = max(cands, key=lambda s: getattr(s, "bitrate", 0) or 0)
+
+            # Only `stream` itself, plus any other stream of the SAME type
+            # (to avoid a second, competing auto-pick of e.g. a second video
+            # rendition from this same source), are removed from later
+            # auto-selection.
             for s in md.streams:
-                s.selected = s is stream
+                if s is stream:
+                    s._role_claimed = True
+                elif expected_type and getattr(s, "type", "") == expected_type and not _is_dv(s):
+                    s._role_claimed = True
 
             lang = src.get("language") or src.get("lang")
             name = src.get("name")
@@ -350,6 +359,10 @@ class Generic_Downloader(BaseDownloader):
             role_streams.append(stream)
             logger.info(f"Explicit role '{role}' -> {stream.type} (range={getattr(stream, 'video_range', '')!r}, lang={getattr(stream, 'language', '')!r})")
 
+            # This source's non-claimed streams (other types, or DV video
+            # variants) still flow into normal pool-based auto-selection.
+            auto_parsed.append((md, src))
+
         return role_streams, auto_parsed
 
     def _select(self, parsed: list[tuple[MediaDownloader, dict[str, Any]]]) -> list:
@@ -361,12 +374,20 @@ class Generic_Downloader(BaseDownloader):
         # Sources with an explicit role bypass attribute-based dedup/selection.
         role_streams, parsed = self._apply_explicit_roles(parsed, v)
 
+        # A type already resolved by an explicit role (e.g. "audio") takes
+        # precedence -- any other source's own stream of that same type is
+        # excluded from the pool too, so it can't be auto-picked as a
+        # competing/duplicate second audio (or video, or subtitle) track.
+        claimed_types = {getattr(s, "type", "") for s in role_streams}
+
         # Merge + dedup (keep first occurrence in source order).
         pool: list = []
         seen: set = set()
         for md, _ in parsed:
             for s in md.streams:
-                if getattr(s, "is_external", False):
+                if getattr(s, "is_external", False) or getattr(s, "_role_claimed", False):
+                    continue
+                if getattr(s, "type", "") in claimed_types and not _is_dv(s):
                     continue
                 sig = _track_signature(s)
                 if sig in seen:
@@ -379,6 +400,12 @@ class Generic_Downloader(BaseDownloader):
             for s in md.streams:
                 s.selected = False
 
+        # Explicit-role picks are final regardless of the pool pass below
+        # (they were excluded from `pool` above precisely so nothing can
+        # override them) -- restore their `.selected` flag after the reset.
+        for s in role_streams:
+            s.selected = True
+
         # Check for the &dv companion tag in the video filter. If present, we run a first pass of selection on the non-DV pool with the main video filter.
         v_main, dv_quality = strip_dv_suffix(v)
         if dv_quality is not None:
@@ -386,6 +413,7 @@ class Generic_Downloader(BaseDownloader):
             non_dv_pool = [s for s in pool if not _is_dv(s)]
             selector = self._build_selector(v_main, a, sub)
             selector.apply(non_dv_pool)
+            self._no_match = selector.no_match
 
             dv_videos = [s for s in pool if _is_dv(s)]
             if dv_videos:
@@ -396,7 +424,9 @@ class Generic_Downloader(BaseDownloader):
                     target_res = FilterSpec.parse(v_main, "video").res
                 selector._mark_dv_companion(dv_videos, dv_quality, target_res)
         else:
-            self._build_selector(v, a, sub).apply(pool)
+            selector = self._build_selector(v, a, sub)
+            selector.apply(pool)
+            self._no_match = selector.no_match
 
         # If a DV companion was selected, keep a reference to it for special handling in the download and muxing phases.
         # An explicit-role DV (self._dv_stream already set) takes precedence over &dv auto-detection.
@@ -420,6 +450,7 @@ class Generic_Downloader(BaseDownloader):
             prefer_drm=bool(f.get("prefer_drm")),
             require_drm=bool(f.get("require_drm")),
             minimum_video_height=int(f.get("minimum_video_height") or 0),
+            strict_no_match=context_tracker.skip_no_match,
         )
 
     def _setup_dv_companion(self) -> None:
@@ -511,7 +542,7 @@ class Generic_Downloader(BaseDownloader):
 
             md._session_live_decrypt = (
                 bool(sel)
-                and not SKIP_POST_DECRYPT
+                and not context_tracker.skip_decrypt
                 and all(getattr(s, "supports_live_decryption", False) for s in sel)
             )
             md._prepare_labels()
@@ -680,6 +711,10 @@ class Generic_Downloader(BaseDownloader):
         if not selected and not self._direct_sources:
             console.print("[yellow][HYBRID] No track selected.")
             return DownloadResult(None, True, "no tracks selected")
+
+        if self._no_match:
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
 
         self._active = [
             (md, src)

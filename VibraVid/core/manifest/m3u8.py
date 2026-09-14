@@ -101,6 +101,13 @@ class HLSParser:
                 r = c.get(self.m3u8_url)
                 r.raise_for_status()
                 self.raw_content = r.text
+                effective_url = str(r.url)
+
+            # The playlist host may 302 to a session/edge-specific CDN node --
+            # relative segment/variant URLs must resolve against that final host.
+            if effective_url and effective_url != self.m3u8_url:
+                self._base_url = calc_base_url(effective_url)
+
             logger.info(f"HlsParser: fetched and parsed in {time.time() - start_parsing_time:.2f}s")
             return True
         except Exception as exc:

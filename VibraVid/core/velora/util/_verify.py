@@ -1,15 +1,15 @@
 # 05.05.26
 
+import json
 import logging
 import subprocess
 from pathlib import Path
 
-from VibraVid.setup import get_ffprobe_path
-from VibraVid.utils import dump_to_string
+from VibraVid.setup import get_ffprobe_path, get_flux_path
 from VibraVid.utils.os import os_manager
 
 logger = logging.getLogger(__name__)
-_MP4DUMP_SCAN_BYTES = 1 * 1024 * 1024  # 1 MB
+_FLUX_DUMP_SCAN_BYTES = 1 * 1024 * 1024  # 1 MB
 
 
 def _ffprobe_streams(ffprobe: str, file_path: str) -> tuple[bool, str]:
@@ -68,35 +68,34 @@ def _ffprobe_streams(ffprobe: str, file_path: str) -> tuple[bool, str]:
     return True, summary
 
 
-def _mp4dump_clean(file_path: str) -> tuple[bool, str]:
+def _flux_dump_clean(file_path: str) -> tuple[bool, str]:
     """Return (clean, message). clean=True means no residual encryption boxes."""
     try:
         with open(file_path, "rb") as fh:
-            head = fh.read(_MP4DUMP_SCAN_BYTES)
+            head = fh.read(_FLUX_DUMP_SCAN_BYTES)
 
         with os_manager.temp_binary_file(head, suffix=".mp4") as tmp_path:
-            text = dump_to_string(tmp_path, format="text", verbosity=0)
+            result = subprocess.run(
+                [get_flux_path(), "--dump", "-j", "-i", tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
 
     except Exception as exc:
-        return True, f"mp4dump failed: {exc} (skipped)"
+        return True, f"flux --dump failed: {exc} (skipped)"
 
-    if not text:
-        return True, "mp4dump produced no output (skipped)"
+    if result.returncode != 0 or not result.stdout:
+        return True, "flux --dump produced no output (skipped)"
 
-    # [sinf]/[encv]/[enca]/[encs]/[enct] are the definitive "this track is still
-    # declared CENC-protected" markers (the stsd sample entry itself). [senc]/
-    # [saiz]/[saio] (per-sample auxiliary encryption info, living in each
-    # fragment's moof/traf, not the init) only matter to a demuxer that already
-    # saw sinf/schm say the track is protected
-    _definitive = ("[encv]", "[enca]", "[encs]", "[enct]", "[sinf]")
-    text_lower = text.lower()
-    flagged = [marker for marker in _definitive if marker in text_lower]
-    if flagged:
-        return False, f"residual encryption boxes: {','.join(flagged)}"
+    try:
+        streams = json.loads(result.stdout).get("streams", [])
+    except Exception as exc:
+        return True, f"flux --dump JSON parse failed: {exc} (skipped)"
 
-    _informational = [marker for marker in ("[senc]", "[saiz]", "[saio]") if marker in text_lower]
-    if _informational:
-        return True, f"no residual encryption boxes (harmless leftover: {','.join(_informational)})"
+    # residual_protection_boxes covers the same definitive "this track is still declared CENC-protected"
+    if any(s.get("residual_protection_boxes") for s in streams):
+        return False, "residual encryption boxes present"
     return True, "no residual encryption boxes"
 
 
@@ -113,7 +112,7 @@ def verify_decrypted_media(file_path) -> tuple[bool, str, bool]:
     if not ok:
         return False, ffprobe_msg, "encrypted" in ffprobe_msg.lower()
 
-    clean, mp4dump_msg = _mp4dump_clean(str(p))
+    clean, dump_msg = _flux_dump_clean(str(p))
     if not clean:
-        return False, f"{ffprobe_msg}; {mp4dump_msg}", True
-    return True, f"{ffprobe_msg}; {mp4dump_msg}", False
+        return False, f"{ffprobe_msg}; {dump_msg}", True
+    return True, f"{ffprobe_msg}; {dump_msg}", False

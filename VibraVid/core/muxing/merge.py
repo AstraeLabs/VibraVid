@@ -14,7 +14,13 @@ from mutagen.mp4 import MP4, MP4Cover
 from rich.console import Console
 
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.core.utils.language import extract_lang_and_flags, resolve_ietf, resolve_iso639_1, resolve_iso639_2
+from VibraVid.core.utils.language import (
+    extract_lang_and_flags,
+    resolve_ietf,
+    resolve_iso639_1,
+    resolve_iso639_2,
+    resolve_language_display_name,
+)
 from VibraVid.setup import binary_paths, get_ffmpeg_path, get_mkvmerge_path
 from VibraVid.utils import config_manager, internet_manager
 from VibraVid.utils.image_cache import get_cached_tmdb_image
@@ -663,10 +669,22 @@ def embed_poster(file_path: str, image_url: str | None = None):
 
 
 def _prepare_audio_tracks(
-    video_path: str, audio_tracks: list[dict[str, str]], limit_duration_diff: float = 3
+    video_path: str,
+    audio_tracks: list[dict[str, str]],
+    limit_duration_diff: float = 3,
+    video_duration_hint: float | None = None,
 ) -> tuple[list[dict[str, str]], bool]:
     """
     Validate, order, TS-convert and offset-detect audio tracks before muxing.
+
+    Parameters:
+        video_duration_hint (float, optional): manifest-declared video duration
+            (sum of segment durations), logged when it disagrees with the
+            probed value -- purely diagnostic, NOT used to override ffprobe's
+            own measurement (which can already correct itself via a
+            packet-count fallback, see probe.py, and reflects actually-decodable
+            content better than the manifest can for some sources, e.g.
+            ad-stitched HLS).
 
     Returns:
         tuple: (valid_audio_tracks, use_shortest)
@@ -716,6 +734,16 @@ def _prepare_audio_tracks(
         audio_lang = audio_track.get("name", "unknown")
 
         _, diff, video_duration, audio_duration = check_duration_v_a(video_path, audio_path)
+        if video_duration_hint and abs(video_duration_hint - video_duration) > limit_duration_diff:
+            # Diagnostic only -- NOT trusted over the probed value. The manifest's
+            # declared duration (sum of EXTINF/segment durations) can overstate what's
+            # actually decodable (e.g. ad-stitched HLS where some "segments" the
+            # manifest counts don't carry real playable video past a certain point) --
+            # confirmed by testing: overriding with the manifest here produced a file
+            # that errored on playback past the point ffprobe's own measurement
+            # (post corrupt-duration packet-count fallback, see probe.py) already
+            # correctly identified as the real end of decodable content.
+            logger.info(f"[_prepare_audio_tracks] probed video duration ({video_duration:.2f}s) differs from manifest-declared duration ({video_duration_hint:.2f}s) -- keeping the probed value (manifest duration can overstate actually-decodable content).")
         diff_sec = round(video_duration - audio_duration)
         diff_str = f"+{diff_sec}s" if diff_sec >= 0 else f"{diff_sec}s"
         console.print(f"[yellow]    - [cyan]Audio lang [red]{audio_lang}, [cyan]Video: [red]{round(video_duration)}s, [cyan]Diff: [red]{diff_str}")
@@ -834,6 +862,7 @@ def join_media(
     limit_duration_diff: float = 3,
     chapters: list | None = None,
     force_ts_fix: bool = False,
+    video_duration_hint: float | None = None,
 ):
     """
     Mux video + audio tracks + subtitle tracks in a single ffmpeg or mkvmerge
@@ -846,6 +875,10 @@ def join_media(
         limit_duration_diff (float): Maximum duration difference in seconds (audio vs video, and subtitle vs video) before -shortest / trimming kicks in.
         chapters (list, optional): Chapters to bake into this same merge command (avoids a second full-file remux pass via inject_chapters()). Each entry is ``{"name": str, "seconds": int}``.
         force_ts_fix (bool): Force the same -avoid_negative_ts/-fflags +genpts fix detect_ts_timestamp_issues() would trigger, without needing to run that detector first.
+        video_duration_hint (float, optional): manifest-declared video duration (sum of segment
+            durations) -- purely diagnostic (logged when it disagrees with ffprobe's own
+            measurement); never overrides it, since the manifest can overstate what's actually
+            decodable (e.g. ad-stitched HLS).
 
     Returns:
         tuple: (out_path, result_json)
@@ -853,7 +886,7 @@ def join_media(
     use_shortest = False
     if audio_tracks:
         console.print(f"[cyan]\nMerging [red]{len(audio_tracks)} [cyan]audio track(s)...")
-        audio_tracks, use_shortest = _prepare_audio_tracks(video_path, audio_tracks, limit_duration_diff)
+        audio_tracks, use_shortest = _prepare_audio_tracks(video_path, audio_tracks, limit_duration_diff, video_duration_hint)
     if subtitle_tracks:
         console.print(f"[cyan]\nMerging [red]{len(subtitle_tracks)} [cyan]subtitle track(s)...")
         subtitle_tracks = _prepare_subtitle_tracks(video_path, subtitle_tracks, limit_duration_diff)
@@ -998,7 +1031,7 @@ def _join_media_ffmpeg(
     for i, audio_track in enumerate(audio_tracks):
         lang_source = audio_track.get("language") or audio_track.get("name", "unknown")
         lang_code = resolve_iso639_2(lang_source)
-        track_title = audio_track.get("name") or lang_source
+        track_title = audio_track.get("name") or resolve_language_display_name(lang_source)
 
         ffmpeg_cmd.extend([f"-metadata:s:a:{i}", f"language={lang_code}"])
         ffmpeg_cmd.extend([f"-metadata:s:a:{i}", f"title={track_title}"])

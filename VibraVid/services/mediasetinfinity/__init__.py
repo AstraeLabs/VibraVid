@@ -17,6 +17,7 @@ from .regions import get_region, region_conf
 indice = 3
 _useFor = "Film_Serie"
 _region = ["IT", "ES"]
+_live_mux = True
 msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()

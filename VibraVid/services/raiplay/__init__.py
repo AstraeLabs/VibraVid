@@ -15,6 +15,7 @@ from .downloader import download_film, download_series
 indice = 4
 _useFor = "Film_Serie"
 _region = ["IT"]
+_live_mux = True
 msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()

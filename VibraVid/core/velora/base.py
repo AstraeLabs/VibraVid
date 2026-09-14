@@ -17,7 +17,7 @@ from VibraVid.core.manifest.m3u8 import HLSParser
 from VibraVid.core.manifest.mpd import DashParser
 from VibraVid.core.manifest.stream import Stream
 from VibraVid.core.ui.bar_manager import DownloadBarManager
-from VibraVid.core.ui.tracker import download_tracker
+from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import AUDIO_EXTENSIONS, SUBTITLE_CODEC_MAP, SUBTITLE_EXTENSIONS, VIDEO_EXTENSIONS
 from VibraVid.core.utils.language import LANGUAGE_MAP, language_variants, resolve_locale, subtitle_flags
@@ -273,8 +273,10 @@ class BaseMediaDownloader:
             prefer_drm=bool(f.get("prefer_drm")),
             require_drm=bool(f.get("require_drm")),
             minimum_video_height=int(f.get("minimum_video_height") or 0),
+            strict_no_match=context_tracker.skip_no_match,
         )
         self._sv, self._sa, self._ss = selector.apply(self.streams)
+        self.no_match_skip = selector.no_match
 
     def _effective_filter(self, track_type: str) -> str:
         """Return the active selection filter for *track_type*, preferring custom_filters over config."""
@@ -643,6 +645,17 @@ class BaseMediaDownloader:
             if ext in VIDEO_EXTENSIONS and f.stem.lower() == fname_l:
                 if status["video"] is None:
                     status["video"] = {"path": str(f), "size": f.stat().st_size}
+                    # Manifest-declared duration (sum of segment durations) --
+                    # a trusted reference for the merge step's A/V duration
+                    # check, independent of ffprobe (which can't reliably
+                    # read the duration of a raw concatenated TS with
+                    # discontinuous PTS -- see join_media()'s video_duration_hint).
+                    video_stream = next(
+                        (s for s in getattr(self, "streams", []) or [] if s.type == "video" and s.selected and not s.is_external),
+                        None,
+                    )
+                    if video_stream and video_stream.duration:
+                        status["video"]["duration"] = video_stream.duration
                 continue
 
             # ── audio ────────────────────────────────────────────────────────

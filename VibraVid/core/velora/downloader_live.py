@@ -533,6 +533,9 @@ class LiveDownloadMixin:
         init_path: Path | None = None
         min_update_period: float = 4.0
 
+        # Checked once per track (this track's first media segment) to fail fast on a wrong key.
+        _key_sanity_pending: bool = True
+
         _decryptor = None
         if live_decryption and self.key:
             try:
@@ -543,7 +546,7 @@ class LiveDownloadMixin:
 
         def _decrypt_seg(fp: Path, is_init: bool = False) -> bool:
             """Returns True if segment is usable (decrypted or no-decrypt-needed), False if failed."""
-            nonlocal init_path
+            nonlocal init_path, _key_sanity_pending
             if is_init:
                 init_path = fp
                 logger.debug(f"Live DASH: init segment cached -> {fp.name}")
@@ -552,6 +555,8 @@ class LiveDownloadMixin:
             if not _decryptor or not self.key:
                 return True
 
+            run_key_sanity = _key_sanity_pending
+            _key_sanity_pending = False
             dec_tmp = fp.with_suffix(fp.suffix + ".dec")
             try:
                 ok, message, _data = _decryptor.decrypt_segment_live(
@@ -559,6 +564,7 @@ class LiveDownloadMixin:
                     decrypted_path=str(dec_tmp),
                     raw_keys=self.key,
                     init_path=str(init_path) if init_path and init_path.exists() else None,
+                    key_sanity=run_key_sanity,
                 )
 
                 if not ok:

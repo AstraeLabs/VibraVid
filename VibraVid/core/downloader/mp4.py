@@ -30,7 +30,6 @@ from .util._post_decrypt import PostDownloadDecryptor
 logger = logging.getLogger(__name__)
 
 SKIP_DOWNLOAD = config_manager.config.get_bool("DOWNLOAD", "skip_download")
-SKIP_POST_DECRYPT = config_manager.config.get_bool("DOWNLOAD", "skip_post_decrypt", default=False)
 DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
 SPEED_WINDOW_SECONDS = 1.0
 LIVE_DECRYPT_MIN_SIZE = 100 * 1024 * 1024
@@ -419,7 +418,7 @@ class MP4FileDownloader:
                 # anything that isn't a real self-initializing fMP4, letting the
                 # post-download decrypt pass take over. `skip_post_decrypt` is the
                 # debug override that disables every decrypt path.
-                if live_worth_it and PostDownloadDecryptor.has_keys(self.key) and not SKIP_POST_DECRYPT:
+                if live_worth_it and PostDownloadDecryptor.has_keys(self.key) and not context_tracker.skip_decrypt:
                     out_dir = Path(self._temp_path).resolve().parent
                     self._live_frag = LiveFragMp4Decryptor(fh, self.key, out_dir)
                 self._write_chunks(fh, response, bar_mgr, time.time(), bar_mgr)
@@ -575,7 +574,7 @@ class MP4FileDownloader:
             # fragment it got through before the stop -- detect_encryption()
             # inside _run_decrypt correctly reports "not encrypted" on that
             # already-plaintext partial file)
-            if SKIP_POST_DECRYPT:
+            if context_tracker.skip_decrypt:
                 logger.info(f"skip_post_decrypt: leaving {os.path.basename(self.path)} encrypted (kept for testing)")
             elif self._probe_encrypted or PostDownloadDecryptor.has_keys(self.key):
                 self._run_decrypt(bar_mgr)
@@ -608,7 +607,7 @@ class MP4FileDownloader:
         # decrypted every fragment as it arrived -- see _live_decrypt_done)
         if self._live_decrypt_done:
             logger.info(f"Live fragment decrypt already handled {os.path.basename(self.path)} -- skipping post-download decrypt pass")
-        elif SKIP_POST_DECRYPT:
+        elif context_tracker.skip_decrypt:
             if self._probe_encrypted or PostDownloadDecryptor.has_keys(self.key):
                 logger.info(f"skip_post_decrypt: leaving {os.path.basename(self.path)} encrypted (kept for testing)")
         elif PostDownloadDecryptor.has_keys(self.key):

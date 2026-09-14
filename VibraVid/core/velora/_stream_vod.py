@@ -15,6 +15,7 @@ from VibraVid.utils.os import os_manager
 from .util._dash import build_dash_ranged_segments
 from .util._hls import hls_base_url, parse_hls_variant_playlist
 from .util._stream_helpers import is_valid_frag_init, repair_init_segment, safe_name
+from .util.formatting import format_size
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT = config_manager.config.get_int("REQUESTS", "timeout")
@@ -293,9 +294,15 @@ class VodStreamMixin:
             return
 
         total_dur = sum(seg.get("duration", 0.0) for seg in media_segs)
+        stream.duration = total_dur
         resolved_parts = [f"segs={len(media_segs) + (1 if init_url else 0)}"]
+
         if stream.bitrate and total_dur > 0:
             resolved_parts.append(f"~{format_duration(total_dur)}")
+            size = stream.compute_estimated_size()
+            if size:
+                resolved_parts.append(f"~{format_size(size)}")
+        
         if stream.drm and stream.drm.is_encrypted():
             kid_disp = stream.drm.get_kid_display()
             if kid_disp:

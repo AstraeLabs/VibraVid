@@ -33,6 +33,13 @@ def title_search(query: str) -> int:
     entries_manager.clear()
     table_show_manager.clear()
 
+    if not tmdb.api_key:
+        console.print(
+            "\n[red]This site requires a TMDB API key to search.[white] See "
+            "https://astraelabs.github.io/VibraVid/configuration/#tmdb-api-key for how to set it."
+        )
+        return 0
+
     # Search on TMDB
     movies = tmdb.search_movies(quote_plus(query))
 

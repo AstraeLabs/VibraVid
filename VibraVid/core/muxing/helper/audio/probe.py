@@ -105,6 +105,9 @@ def get_video_duration(file_path: str) -> float:
             if bitrate < 1000:
                 logger.warning(f"[get_video_duration] duration {dur:.1f}s implausible for {size} byte file (bitrate {bitrate:.0f} bit/s) — treating as corrupt")
                 corrupt = True
+            elif bitrate > 200_000_000:
+                logger.warning(f"[get_video_duration] duration {dur:.1f}s implausible for {size} byte file (bitrate {bitrate / 1e6:.0f} Mbit/s) — treating as corrupt")
+                corrupt = True
 
         if dur > 0 and not corrupt:
             return dur

@@ -25,6 +25,7 @@ _WIDEVINE_SYSTEM_ID = _DRMSystems.to_system_id(_DRMSystems.WIDEVINE)
 
 _BITRATE_RE = re.compile(r"\{[Bb]itrate\}")
 _STARTTIME_RE = re.compile(r"\{start[ _][Tt]ime\}|\{[Ss]tart[Tt]ime\}")
+_TECHNICAL_STREAM_NAME_RE = re.compile(r"_(audio|video|subtitle)_|_\d+k?$|^(text|audio|video|subtitle|track|stream)[-_]?\d+$", re.IGNORECASE)
 
 _FOURCC_TO_CODEC: dict[str, str] = {
     "h264": "avc1",
@@ -47,6 +48,10 @@ _FOURCC_TO_CODEC: dict[str, str] = {
 
 def _fourcc_to_codec(fourcc: str) -> str:
     return _FOURCC_TO_CODEC.get((fourcc or "").lower(), (fourcc or "").lower())
+
+
+def _is_technical_stream_name(name: str) -> bool:
+    return bool(name) and bool(_TECHNICAL_STREAM_NAME_RE.search(name.lower()))
 
 
 class ISMParser:
@@ -131,7 +136,14 @@ class ISMParser:
                 r = c.get(self.ism_url)
                 r.raise_for_status()
                 content = r.content
-            
+                effective_url = str(r.url)
+
+            # The manifest host may 302 to a session/edge-specific CDN node (e.g.
+            # a load-balancer redirecting to "ecNN-....cdn...pl") -- fragment URLs
+            # must be resolved against that final host, not the pre-redirect one.
+            if effective_url and effective_url != self.ism_url:
+                self._base_url = self._calc_base_url(effective_url)
+
             self._root, self.raw_content = self._parse_xml(content)
             logger.info(f"ISMParser: fetched and parsed ISM in {time.time() - start_parsing_time:.2f}s")
             return True
@@ -273,7 +285,9 @@ class ISMParser:
         s.bitrate = bitrate
         s.duration = global_duration
         s.is_live = self._manifest_is_live
-        s.drm = global_drm
+
+        # Smooth Streaming/PlayReady protects audio/video sample data only -- subtitle (TTML) StreamIndex entries are never actually encrypted,
+        s.drm = global_drm if stype != "subtitle" else DRMInfo()
 
         # Codec
         s.codecs = _fourcc_to_codec(fourcc) or fourcc
@@ -330,7 +344,7 @@ class ISMParser:
     def _parse_audio_fields(self, ql, s: Stream, lang_raw: str, si_name: str, default_lang: str) -> None:
         s.language = lang_raw or "und"
         s.resolved_language = resolve_locale(lang_raw) if lang_raw else ""
-        s.name = si_name or lang_raw
+        s.name = "" if _is_technical_stream_name(si_name) else (si_name or lang_raw)
 
         sr = ql.get("SamplingRate") or ql.get("AudioSamplingRate") or ""
         if sr:
@@ -350,7 +364,7 @@ class ISMParser:
     def _parse_subtitle_fields(self, ql, s: Stream, lang_raw: str, si_name: str, fourcc: str) -> None:
         s.language = lang_raw or "und"
         s.resolved_language = resolve_locale(lang_raw) if lang_raw else ""
-        s.name = si_name or lang_raw
+        s.name = "" if _is_technical_stream_name(si_name) else (si_name or lang_raw)
 
         # ISM subtitle content is virtually always TTML/DFXP
         fc_low = (fourcc or "").lower()
@@ -363,10 +377,18 @@ class ISMParser:
         url_with_bitrate = _BITRATE_RE.sub(str(bitrate), url_template)
         ref_is_simple = is_simple_relative_ref(url_with_bitrate)
 
+        is_subtitle = stream.type == "subtitle"
         for idx, start_time in enumerate(timeline):
             url = _STARTTIME_RE.sub(str(start_time), url_with_bitrate)
             seg_url = fast_urljoin(self._base_url, url, ref_is_simple)
-            stream.add_segment(Segment(seg_url, idx, "media"))
+            seg = Segment(seg_url, idx, "media")
+            
+            if is_subtitle and self._timescale > 0:
+                if idx + 1 < len(timeline):
+                    seg.duration = (timeline[idx + 1] - start_time) / self._timescale
+                else:
+                    seg.duration = max(0.0, stream.duration - (start_time / self._timescale))
+            stream.add_segment(seg)
 
     def _extract_drm(self, element) -> DRMInfo:
         """

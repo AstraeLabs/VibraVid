@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from VibraVid.core.utils.language import resolve_iso639_1
-from VibraVid.core.utils.selector import FilterSpec
+from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
 from VibraVid.utils import TVShowManager, config_manager
@@ -37,18 +37,28 @@ def _effective_languages() -> list[str]:
     if not select_audio:
         return ["it", "en"]
 
-    spec = FilterSpec.parse(select_audio.strip(), "audio")
-    if spec.select_all or spec.drop:
-        return ["it", "en"]
+    raw = select_audio.strip()
+    slots = split_audio_slots(raw)
 
-    raw_codes = [c.strip() for c in (spec.langs or "").split("|") if c.strip()]
-    languages = []
-    for code in raw_codes:
-        iso = resolve_iso639_1(code)
-        if iso in ("it", "en") and iso not in languages:
-            languages.append(iso)
+    if slots is not None:
+        groups_raw = [slots[num] for num in sorted(slots)]
+    else:
+        spec = FilterSpec.parse(raw, "audio")
+        if spec.select_all or spec.drop:
+            return ["it", "en"]
+        groups_raw = [spec.langs] if spec.langs else []
 
-    return languages or ["it", "en"]
+    for langs in groups_raw:
+        raw_codes = [c.strip() for c in langs.split("|") if c.strip()]
+        languages = []
+        for code in raw_codes:
+            iso = resolve_iso639_1(code)
+            if iso in ("it", "en") and iso not in languages:
+                languages.append(iso)
+        if languages:
+            return languages
+
+    return ["it", "en"]
 
 
 def title_search(query: str) -> int:

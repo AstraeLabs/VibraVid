@@ -189,7 +189,13 @@ def run_with_progress(
     logger.info(f"Starting subprocess for {label}: {' '.join(cmd)}")
     try:
         process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace"
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         process_holder["process"] = process
 

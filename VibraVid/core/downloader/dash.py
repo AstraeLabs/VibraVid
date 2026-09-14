@@ -724,6 +724,10 @@ class DASH_Downloader(BaseDownloader):
         # Parse without showing table so we can annotate the DV companion first
         streams = self.media_downloader.parse_stream(show_table=False)
 
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+
         # StreamSelector marks the DV companion with dv_companion=True when &dv is in the filter
         _dv_companion_stream = next(
             (s for s in streams if getattr(s, "dv_companion", False)),
@@ -832,6 +836,7 @@ class DASH_Downloader(BaseDownloader):
         print()
 
         self.media_downloader.set_key(self.decryption_keys)
+        self._maybe_enable_streaming_mux()
         status = self.media_downloader.start_download()
 
         status_check = self._check_download_status(status)

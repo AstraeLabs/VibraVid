@@ -185,40 +185,61 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
             "message": f"{tool} version baseline recorded ({remote}).",
         }
 
+    managed_dir = os.path.abspath(binary_paths.get_binary_directory())
+    ext = ".exe" if binary_paths.system == "windows" else ""
+
     if local == remote:
-        logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
+        missing = [f"{name}{ext}" for name in exec_names if not binary_paths.get_binary_path(tool, f"{name}{ext}")]
+        if not missing:
+            logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
+            return {
+                "success": True,
+                "updated": False,
+                "local": local,
+                "latest": remote,
+                "message": f"{tool} is up to date ({local}).",
+            }
+
+        console.print(f"[#FFD60A]{tool} is up to date ({local}) but missing locally, reinstalling {len(missing)} binary(ies)...")
+        reinstalled_any = False
+        for binary_name in missing:
+            if binary_paths.download_binary(tool, binary_name):
+                reinstalled_any = True
+
         return {
             "success": True,
-            "updated": False,
+            "updated": reinstalled_any,
             "local": local,
             "latest": remote,
-            "message": f"{tool} is up to date ({local}).",
+            "message": (
+                f"{tool}: reinstalled {len(missing)} missing binary(ies) ({local})."
+                if reinstalled_any
+                else f"{tool}: {len(missing)} binary(ies) missing locally and reinstall failed."
+            ),
         }
 
     console.print(f"[#FFD60A]{tool} outdated (local: {local} -> latest: {remote}), updating...")
 
-    managed_dir = os.path.abspath(binary_paths.get_binary_directory())
-    ext = ".exe" if binary_paths.system == "windows" else ""
     updated_any = False
 
     for name in exec_names:
         binary_name = f"{name}{ext}"
         path = binary_paths.get_binary_path(tool, binary_name)
-        if not path:
-            continue  # not installed locally; nothing to refresh
 
-        # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
-        if os.path.dirname(os.path.abspath(path)) != managed_dir:
-            logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
-            continue
+        if path:
+            # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
+            if os.path.dirname(os.path.abspath(path)) != managed_dir:
+                logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
+                continue
 
-        try:
-            os.remove(path)
-        except OSError as e:
-            logger.warning(f"Failed to remove stale {binary_name}: {e}")
-            continue
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.warning(f"Failed to remove stale {binary_name}: {e}")
+                continue
 
-        binary_paths.invalidate_binary(binary_name)
+            binary_paths.invalidate_binary(binary_name)
+
         if binary_paths.download_binary(tool, binary_name):
             updated_any = True
 
@@ -239,9 +260,13 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
 
 def check_all_binaries_update() -> dict:
-    """Refresh every managed third-party binary published in AstraeLabs/Binary."""
+    """Refresh every managed third-party binary published in AstraeLabs/Binary"""
+    from VibraVid.setup.checker import _should_download
+
     results = {}
     for tool, exec_names in _GENERIC_UPDATABLE_TOOLS.items():
+        if not _should_download(tool):
+            continue
         try:
             results[tool] = check_binary_update(tool, exec_names)
         except Exception as e:

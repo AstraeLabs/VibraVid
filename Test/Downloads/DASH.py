@@ -13,10 +13,12 @@ from VibraVid.utils import config_manager
 from VibraVid.utils import setup_logger
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.drm.system import DRMType
+from VibraVid.core.ui.tracker import context_tracker
 
 
 setup_logger()
 conf_extension = config_manager.config.get("PROCESS", "extension")
+context_tracker.force_livemux = True
 
 
 mpd_url = ""

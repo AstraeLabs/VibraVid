@@ -34,6 +34,7 @@ from VibraVid.utils.http_client import create_client, get_headers
 
 console = Console()
 logger = logging.getLogger(__name__)
+
 _NS = {
     "mpd": "urn:mpeg:dash:schema:mpd:2011",
     "cenc": "urn:mpeg:cenc:2013",
@@ -45,15 +46,20 @@ _TC_MAP = {
     "13": "SDR",
     "14": "SDR",
     "15": "SDR",
-    "16": "PQ",  # SMPTE ST 2084 (HDR10 / Dolby Vision PQ)
-    "18": "HLG",  # ARIB STD-B67
+    "16": "PQ",
+    "18": "HLG",
 }
 _CP_HDR_HINT = {"9"}  # BT.2020 ColourPrimaries
 _FILE_EXT_WHITELIST = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | SUBTITLE_EXTENSIONS | {".mpd", ".m4s", ".cmfv", ".cmfa"}
+
+# Ad detection
 _AD_PATH_RE = re.compile(r"(?:^|/)(?:ad|ads|advert|impression|preroll|midroll|postroll)(?:/|$)", re.IGNORECASE)
 _SEGMENT_TOKEN_RE = re.compile(r"\$(RepresentationID|Number|Time|Bandwidth)(?:%0?(\d+)d)?\$")
 DISABLE_AD_PERIOD_DETECTION = False
 _AD_MAX_DURATION_SECONDS = 31.0
+_AD_HOST_DENYLIST = frozenset({
+    "cf.emea-free.prd.media.max.com",
+})
 
 
 def _norm(v: str | None) -> str:
@@ -153,6 +159,7 @@ def _is_ad_period(
     period_duration: float = 0.0,
 ) -> bool:
     url_is_ad = bool(_AD_PATH_RE.search(period_url or ""))
+    host_is_ad = (urlparse(period_url or "").hostname or "").lower() in _AD_HOST_DENYLIST
     has_drm = period_element.find(".//mpd:ContentProtection", _NS) is not None
 
     xlink_actuate = ""
@@ -168,12 +175,12 @@ def _is_ad_period(
     thumbnail_is_ad = thumbnail_convention_active and not has_thumbnail and period_duration <= _AD_MAX_DURATION_SECONDS
 
     logger.debug(
-        f"_is_ad_period | url={period_url} | url_ad={url_is_ad} | xlink_onload={xlink_is_ad} | asset_ad={asset_is_ad} "
-        f"| has_drm={has_drm} | thumbnail_convention={thumbnail_convention_active} | has_thumbnail={has_thumbnail} "
-        f"| duration={period_duration:.1f}s | thumbnail_ad={thumbnail_is_ad}"
+        f"_is_ad_period | url={period_url} | url_ad={url_is_ad} | host_ad={host_is_ad} | xlink_onload={xlink_is_ad} "
+        f"| asset_ad={asset_is_ad} | has_drm={has_drm} | thumbnail_convention={thumbnail_convention_active} "
+        f"| has_thumbnail={has_thumbnail} | duration={period_duration:.1f}s | thumbnail_ad={thumbnail_is_ad}"
     )
 
-    if (url_is_ad or xlink_is_ad or asset_is_ad) and not has_drm:
+    if (url_is_ad or host_is_ad or xlink_is_ad or asset_is_ad) and not has_drm:
         return True
     return thumbnail_is_ad
 
@@ -297,6 +304,14 @@ class DashParser:
                 r = c.get(self.mpd_url)
                 r.raise_for_status()
                 self.raw_content = r.text
+                effective_url = str(r.url)
+
+            # The manifest host may 302 to a session/edge-specific CDN node --
+            # resolve against that final host before an explicit <BaseURL> (if
+            # any) is applied on top of it in _resolve_base_url().
+            if effective_url and effective_url != self.mpd_url:
+                self._base_url = self._calc_base_url(effective_url)
+
             self._root = ET.fromstring(escape_bare_ampersands(self.raw_content))
             self._resolve_base_url()
             logger.info(f"DashParser: fetched and parsed MPD in {time.time() - start_parsing_time:.2f}s")

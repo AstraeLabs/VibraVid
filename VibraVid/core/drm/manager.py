@@ -68,9 +68,10 @@ class DRMManager:
         header: bool,
         default_label: str | None = None,
         required_kids: set | None = None,
+        failed: list[str] | None = None,
     ) -> None:
         """Display resolved keys in the console, indicating which came from vaults and which were newly extracted."""
-        if not resolved:
+        if not resolved and not failed:
             return
 
         if header:
@@ -105,6 +106,12 @@ class DRMManager:
             console.print(f"    - [red]{kid_val}[white]:[green]{key_val}{suffix}")
             if "*" in log_suffix:
                 logger.info(f"Using {kid_val}:{key_val}")
+
+        for k in failed or []:
+            kid_val, _, key_val = k.partition(":")
+            if anonymize:
+                kid_val, key_val = _anonymize(kid_val), _anonymize(key_val)
+            console.print(f"    - [red]{kid_val}[white]:[green]{key_val} [cyan]| [red]failed")
 
     def _bypass_cache(self) -> bool:
         """Effective bypass-vault-cache flag: per-run CLI override wins over config default."""
@@ -249,13 +256,15 @@ class DRMManager:
         if key:
             manual = KeysManager(key)
             manual_keys = manual.get_keys_list()
+            manual_rejected = manual.get_rejected_list()
 
-            if manual_keys:
+            if manual_keys or manual_rejected:
                 missing = self._missing_kids(all_kids, manual_keys)
                 m_base_license_url = clean_license_url(license_url) or "generic"
                 m_pssh_val = next((i.get("pssh") for i in pssh_list if i.get("pssh")), None)
 
-                self._store_keys(manual_keys, drm_type, m_base_license_url, m_pssh_val, kid_to_label, source=None)
+                if manual_keys:
+                    self._store_keys(manual_keys, drm_type, m_base_license_url, m_pssh_val, kid_to_label, source=None)
                 self._display_keys(
                     manual_keys,
                     [],
@@ -265,9 +274,10 @@ class DRMManager:
                     header=True,
                     default_label="manual",
                     required_kids=set(all_kids),
+                    failed=manual_rejected,
                 )
 
-                if not missing:
+                if manual_keys and not missing:
                     return KeysManager(manual_keys)
 
                 if not license_url:
@@ -353,10 +363,20 @@ class DRMManager:
                 else:
                     cdm_result = None
 
+                cdm_keys: list[str] = []
                 if cdm_result:
                     cdm_keys = cdm_result.get_keys_list()
 
-                    # Merge: vault keys + CDM keys (CDM may return extras like b770…, keep all)
+                    # Keep only the KID(s) we actually asked the CDM to resolve for this PSSH. 
+                    requested_kids = set(missing_kids)
+                    filtered_cdm_keys = [k for k in cdm_keys if k.split(":", 1)[0].strip().lower() in requested_kids]
+                    dropped = len(cdm_keys) - len(filtered_cdm_keys)
+                    if dropped:
+                        logger.warning(f"{drm_type} CDM returned {dropped} extra key(s) not matching the requested KID(s) for this PSSH; discarding before store")
+                    cdm_keys = filtered_cdm_keys
+
+                if cdm_keys:
+                    # Merge: vault keys + CDM keys
                     all_keys = list({k.split(":")[0]: k for k in vault_keys + cdm_keys}.values())
                     logger.info(f"{drm_type} CDM extraction successful: {len(cdm_keys)} new key(s), {len(all_keys)} total")
                     self._store_keys(all_keys, drm_type, base_license_url, pssh_val, kid_to_label, source=None)
