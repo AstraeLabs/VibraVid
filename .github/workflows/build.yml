@@ -45,34 +45,20 @@ jobs:
               run: |
                   PREV_TAG=$(git tag --sort=-version:refname | head -1 || true)
                   if [ -n "$PREV_TAG" ]; then
-                      LOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:'%B%x1f%ae%x1e' 2>/dev/null || git log --pretty=format:'%B%x1f%ae%x1e')
+                      LOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:'%B%x1e' 2>/dev/null || git log --pretty=format:'%B%x1e')
                   else
-                      LOG=$(git log --pretty=format:'%B%x1f%ae%x1e')
+                      LOG=$(git log --pretty=format:'%B%x1e')
                   fi
 
                   capitalize() { echo "$1" | sed 's/./\u&/' | tr '[:upper:]' '[:lower:]' | sed 's/^./\u&/'; }
-
-                  handle_from_email() {
-                      local email="$1"
-                      local h
-                      h=$(echo "$email" | grep -oE '[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com' | sed -E 's/.*\+//; s/@.*//')
-                      if [ -z "$h" ]; then
-                          h=$(echo "$email" | sed -E 's/@.*//')
-                      fi
-                      echo "$h"
-                  }
 
                   declare -A SECTION_CONTENT
 
                   process_record() {
                       local body="$1"
-                      local handle="$2"
 
                       local normalized
                       normalized=$(echo "$body" | sed 's/\s*\(\[[A-Za-z0-9_/]*\]\)/\n\1/g')
-
-                      local attr=""
-                      [ -n "$handle" ] && attr=" by @${handle}"
 
                       while IFS= read -r part; do
                           [ -z "$part" ] && continue
@@ -85,8 +71,6 @@ jobs:
                           MSG=$(echo "$part" | sed 's/^\[[^]]*\][[:space:]]*//')
                           MSG=$(echo "$MSG" | sed 's/[[:space:]]*([[:space:]]*#[0-9]*[[:space:]]*)//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                           [ -z "$MSG" ] && continue
-
-                          MSG="${MSG}${attr}"
 
                           DISPLAY=$(capitalize "$TAG")
                           if [ -z "${SECTION_CONTENT[$DISPLAY]+x}" ]; then
@@ -101,10 +85,7 @@ jobs:
 
                   while IFS= read -r -d $'\x1e' record; do
                       [ -z "$record" ] && continue
-                      BODY="${record%$'\x1f'*}"
-                      EMAIL="${record##*$'\x1f'}"
-                      HANDLE=$(handle_from_email "$EMAIL")
-                      process_record "$BODY" "$HANDLE"
+                      process_record "$record"
                   done <<< "$LOG"
 
                   CHANGELOG=""
