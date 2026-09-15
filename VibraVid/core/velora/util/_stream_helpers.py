@@ -227,6 +227,18 @@ def collect_failed_segments(dl_segs: list, downloaded_paths: list, stream_dir, d
     return failed
 
 
+def build_retry_segments(failed_numbers: list, seg_by_number: dict, fresh_map: dict) -> list:
+    """
+    Build the segments to retry after a failed download round.
+    Uses the refreshed URL when one exists, otherwise the original URL: without a manifest refresh (or when it fails) a transient CDN error (e.g. HTTP 503) still gets retried instead of the segment being dropped.
+    """
+    return [
+        {**seg_by_number[n], "url": (fresh_map or {}).get(n, seg_by_number[n]["url"])}
+        for n in failed_numbers
+        if n in seg_by_number
+    ]
+
+
 def print_failed_segments_report(failed_by_stream: list) -> None:
     """Print a summary of all failed segments after all progress bars are gone."""
     if not failed_by_stream:

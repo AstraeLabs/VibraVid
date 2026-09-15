@@ -39,6 +39,7 @@ from ..decryptor._segment_crypto import decrypt_aes128_file
 from .curl_bridge import _fetch_one
 from .util._cenc_init import strip_cenc_signaling
 from .util._stream_helpers import (
+    build_retry_segments,
     collect_failed_segments,
     describe_key_for_log,
     detect_seg_ext,
@@ -1339,11 +1340,7 @@ class DecryptPipelineMixin:
 
                 failed_numbers = [n for n, _ in failed]
                 fresh_map = seg_url_refresh_fn(failed_numbers)
-                retry_segs = [
-                    {**seg_by_number[n], "url": fresh_map[n]}
-                    for n in failed_numbers
-                    if n in fresh_map and n in seg_by_number
-                ]
+                retry_segs = build_retry_segments(failed_numbers, seg_by_number, fresh_map)
                 if not retry_segs:
                     break
 
