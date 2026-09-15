@@ -645,17 +645,6 @@ class BaseMediaDownloader:
             if ext in VIDEO_EXTENSIONS and f.stem.lower() == fname_l:
                 if status["video"] is None:
                     status["video"] = {"path": str(f), "size": f.stat().st_size}
-                    # Manifest-declared duration (sum of segment durations) --
-                    # a trusted reference for the merge step's A/V duration
-                    # check, independent of ffprobe (which can't reliably
-                    # read the duration of a raw concatenated TS with
-                    # discontinuous PTS -- see join_media()'s video_duration_hint).
-                    video_stream = next(
-                        (s for s in getattr(self, "streams", []) or [] if s.type == "video" and s.selected and not s.is_external),
-                        None,
-                    )
-                    if video_stream and video_stream.duration:
-                        status["video"]["duration"] = video_stream.duration
                 continue
 
             # ── audio ────────────────────────────────────────────────────────

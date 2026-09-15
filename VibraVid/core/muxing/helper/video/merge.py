@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -110,6 +111,44 @@ def binary_merge_segments(paths: list[Path], output_path: Path, merge_logger: lo
         _binary_merge_segments_parallel(valid, output_path, log)
     else:
         _binary_merge_segments_serial(valid, output_path, log)
+
+
+def concat_demux_merge_segments(paths: list[Path], output_path: Path, merge_logger: logging.Logger | None = None) -> bool:
+    """Merge MPEG-TS segments via ffmpeg's -f concat demuxer, treating each segment as its own input instead of raw-byte-appending them (binary_merge_segments())."""
+    from VibraVid.setup import get_ffmpeg_path
+
+    log = merge_logger or logger
+    valid = sorted((p for p in paths if p.exists() and p.stat().st_size > 0), key=_segment_number)
+    if not valid:
+        log.warning("[concat_demux_merge] no valid segments found")
+        return False
+
+    list_path = output_path.with_suffix(output_path.suffix + ".concat_list.txt")
+    try:
+        with open(list_path, "w", encoding="utf-8") as f:
+            for p in valid:
+                escaped = str(p.resolve()).replace("\\", "/").replace("'", "'\\''")
+                f.write(f"file '{escaped}'\n")
+
+        # Keep the real extension on the temp file (…​.concat_tmp.ts, not ….ts.concat_tmp):
+        # ffmpeg picks the output muxer from the extension and refuses an unknown one.
+        tmp_out = output_path.with_name(f"{output_path.stem}.concat_tmp{output_path.suffix}")
+        cmd = [
+            get_ffmpeg_path(), "-v", "warning", "-f", "concat", "-safe", "0", "-i", str(list_path),
+            "-c", "copy", "-avoid_negative_ts", "make_zero", str(tmp_out), "-y",
+        ]
+        t0 = time.monotonic()
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode != 0 or not tmp_out.exists() or tmp_out.stat().st_size == 0:
+            log.warning(f"[concat_demux_merge] ffmpeg concat failed (rc={result.returncode}): {result.stderr[-400:]}")
+            tmp_out.unlink(missing_ok=True)
+            return False
+
+        os.replace(tmp_out, output_path)
+        log.info(f"[concat_demux_merge] {len(valid)} segment(s) merged via concat demuxer -> {output_path.name} in {time.monotonic() - t0:.1f}s")
+        return True
+    finally:
+        list_path.unlink(missing_ok=True)
 
 
 def _binary_merge_segments_serial(

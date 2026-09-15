@@ -19,7 +19,7 @@ from rich.text import Text
 from VibraVid.core.decryptor import Decryptor
 from VibraVid.core.manifest.stream import track_label
 from VibraVid.core.muxing.helper.sub.convert import convert_subtitle, extract_vtt_from_wvtt_mp4
-from VibraVid.core.muxing.helper.video import binary_merge_segments
+from VibraVid.core.muxing.helper.video import binary_merge_segments, concat_demux_merge_segments
 from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
 from VibraVid.core.muxing.streaming_mux import StreamingMuxFeeder
 from VibraVid.core.ui.bar_manager import DownloadBarManager
@@ -1257,6 +1257,7 @@ class DecryptPipelineMixin:
                         if result.get("event") == "completed" and result.get("path"):
                             paths.append(Path(result["path"]))
                             recovered += 1
+                            _handle_download_event(result)
 
                 if recovered:
                     logger.info(f"curl_cffi fallback recovered {recovered}/{len(fallback_tasks)} segment(s)")
@@ -1544,6 +1545,17 @@ class DecryptPipelineMixin:
             binary_merge_segments(paths, out_path, merge_logger=logger)
             logger.debug(f"Binary merge completed -> {out_path.name}")
         logger.info(f"Merge finished -> {out_path.name} in {time.monotonic() - _merge_t0:.1f}s")
+
+        # A raw-byte-concatenated MPEG-TS whose source has a genuine PCR/PTS discontinuity at a segment boundary
+        if not is_plain_subtitle and _total_duration > 0 and out_path.suffix.lower() == ".ts" and out_path.exists():
+            from VibraVid.core.muxing.helper.audio.probe import get_video_duration
+
+            merged_duration = get_video_duration(str(out_path))
+            if merged_duration and merged_duration < _total_duration * 0.95:
+                logger.warning(f"{out_path.name}: merged duration {merged_duration:.1f}s is well short of the manifest's {_total_duration:.1f}s -- likely a mid-stream splice the raw concat can't express. Re-merging via ffmpeg's concat demuxer.")
+                if concat_demux_merge_segments(paths, out_path, merge_logger=logger):
+                    _fixed_duration = get_video_duration(str(out_path))
+                    logger.info(f"{out_path.name}: concat-demuxer re-merge -> {_fixed_duration:.1f}s" if _fixed_duration else f"{out_path.name}: concat-demuxer re-merge done")
 
         if already_decrypted_per_segment:
             for p in paths:

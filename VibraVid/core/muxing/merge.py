@@ -390,6 +390,10 @@ def _strip_drm_boxes(src_path: str) -> str:
     if ext.lower() in (".mkv", ".mka", ".webm"):
         return src_path
 
+    # Raw MPEG-TS never carries ISOBMFF DRM boxes (enca/pssh are MP4-only) 
+    if is_mpegts_file(src_path):
+        return src_path
+
     out_path = f"{base}_nodrm{ext}"
 
     if os.path.exists(out_path):
@@ -518,6 +522,7 @@ def inject_chapters(file_path: str, chapters: list | None = None, temp_dir: str 
         cmd = [get_mkvmerge_path(), "-o", tmp_out, "--chapters", chapter_file, file_path]
         logger.info(f"Running chapter injection (mkvmerge) command: {' '.join(cmd)}")
         total_duration = get_video_duration(file_path)
+        print("")
         result_json = capture_ffmpeg_real_time(cmd, "[yellow]MKVMERGE [cyan]Add chapters", total_duration)
     else:
         chapter_file = _write_ffmetadata_chapters(chapters)
@@ -628,6 +633,7 @@ def embed_poster(file_path: str, image_url: str | None = None):
             ]
             logger.info(f"Running poster embedding (mkvmerge) command: {' '.join(cmd)}")
             total_duration = get_video_duration(file_path)
+            print("")
             result_json = capture_ffmpeg_real_time(cmd, "[yellow]MKVMERGE [cyan]Embed poster", total_duration)
         else:
             cmd = [
@@ -669,22 +675,10 @@ def embed_poster(file_path: str, image_url: str | None = None):
 
 
 def _prepare_audio_tracks(
-    video_path: str,
-    audio_tracks: list[dict[str, str]],
-    limit_duration_diff: float = 3,
-    video_duration_hint: float | None = None,
+    video_path: str, audio_tracks: list[dict[str, str]], limit_duration_diff: float = 3
 ) -> tuple[list[dict[str, str]], bool]:
     """
     Validate, order, TS-convert and offset-detect audio tracks before muxing.
-
-    Parameters:
-        video_duration_hint (float, optional): manifest-declared video duration
-            (sum of segment durations), logged when it disagrees with the
-            probed value -- purely diagnostic, NOT used to override ffprobe's
-            own measurement (which can already correct itself via a
-            packet-count fallback, see probe.py, and reflects actually-decodable
-            content better than the manifest can for some sources, e.g.
-            ad-stitched HLS).
 
     Returns:
         tuple: (valid_audio_tracks, use_shortest)
@@ -734,16 +728,6 @@ def _prepare_audio_tracks(
         audio_lang = audio_track.get("name", "unknown")
 
         _, diff, video_duration, audio_duration = check_duration_v_a(video_path, audio_path)
-        if video_duration_hint and abs(video_duration_hint - video_duration) > limit_duration_diff:
-            # Diagnostic only -- NOT trusted over the probed value. The manifest's
-            # declared duration (sum of EXTINF/segment durations) can overstate what's
-            # actually decodable (e.g. ad-stitched HLS where some "segments" the
-            # manifest counts don't carry real playable video past a certain point) --
-            # confirmed by testing: overriding with the manifest here produced a file
-            # that errored on playback past the point ffprobe's own measurement
-            # (post corrupt-duration packet-count fallback, see probe.py) already
-            # correctly identified as the real end of decodable content.
-            logger.info(f"[_prepare_audio_tracks] probed video duration ({video_duration:.2f}s) differs from manifest-declared duration ({video_duration_hint:.2f}s) -- keeping the probed value (manifest duration can overstate actually-decodable content).")
         diff_sec = round(video_duration - audio_duration)
         diff_str = f"+{diff_sec}s" if diff_sec >= 0 else f"{diff_sec}s"
         console.print(f"[yellow]    - [cyan]Audio lang [red]{audio_lang}, [cyan]Video: [red]{round(video_duration)}s, [cyan]Diff: [red]{diff_str}")
@@ -862,7 +846,6 @@ def join_media(
     limit_duration_diff: float = 3,
     chapters: list | None = None,
     force_ts_fix: bool = False,
-    video_duration_hint: float | None = None,
 ):
     """
     Mux video + audio tracks + subtitle tracks in a single ffmpeg or mkvmerge
@@ -875,10 +858,6 @@ def join_media(
         limit_duration_diff (float): Maximum duration difference in seconds (audio vs video, and subtitle vs video) before -shortest / trimming kicks in.
         chapters (list, optional): Chapters to bake into this same merge command (avoids a second full-file remux pass via inject_chapters()). Each entry is ``{"name": str, "seconds": int}``.
         force_ts_fix (bool): Force the same -avoid_negative_ts/-fflags +genpts fix detect_ts_timestamp_issues() would trigger, without needing to run that detector first.
-        video_duration_hint (float, optional): manifest-declared video duration (sum of segment
-            durations) -- purely diagnostic (logged when it disagrees with ffprobe's own
-            measurement); never overrides it, since the manifest can overstate what's actually
-            decodable (e.g. ad-stitched HLS).
 
     Returns:
         tuple: (out_path, result_json)
@@ -886,7 +865,8 @@ def join_media(
     use_shortest = False
     if audio_tracks:
         console.print(f"[cyan]\nMerging [red]{len(audio_tracks)} [cyan]audio track(s)...")
-        audio_tracks, use_shortest = _prepare_audio_tracks(video_path, audio_tracks, limit_duration_diff, video_duration_hint)
+        audio_tracks, use_shortest = _prepare_audio_tracks(video_path, audio_tracks, limit_duration_diff)
+    
     if subtitle_tracks:
         console.print(f"[cyan]\nMerging [red]{len(subtitle_tracks)} [cyan]subtitle track(s)...")
         subtitle_tracks = _prepare_subtitle_tracks(video_path, subtitle_tracks, limit_duration_diff)
@@ -1239,7 +1219,8 @@ def _join_media_mkvmerge(
     logger.info(f"Running Join Media (mkvmerge) command: {' '.join(cmd)}")
     total_duration = get_video_duration(video_path)
     _join_t0 = time.monotonic()
-    result_json = capture_ffmpeg_real_time(cmd, "[yellow]MKVMERGE [cyan]Join media", total_duration)
+    print("")
+    result_json = capture_ffmpeg_real_time(cmd, "[yellow]MKVMERGE [cyan]Join media", total_duration, output_path=out_path)
     logger.info(f"Join Media (mkvmerge) finished -> {out_path} in {time.monotonic() - _join_t0:.1f}s")
 
     if chapter_file:

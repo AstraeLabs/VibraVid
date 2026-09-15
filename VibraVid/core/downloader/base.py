@@ -612,8 +612,6 @@ class BaseDownloader:
             else:
                 self._track_subtitles_for_copy(subtitle_tracks)
 
-        video_duration_hint = video_track.get("duration") if isinstance(video_track, dict) else None
-
         merged_file, result_json = join_media(
             video_path=video_path,
             audio_tracks=audio_tracks_to_merge,
@@ -621,7 +619,6 @@ class BaseDownloader:
             out_path=self.output_path,
             chapters=getattr(self, "chapters", None),
             force_ts_fix=getattr(getattr(self, "media_downloader", None), "_needs_join_ts_fix", False),
-            video_duration_hint=video_duration_hint,
         )
         self.last_merge_result = result_json
         if not self._merge_output_ok(merged_file):

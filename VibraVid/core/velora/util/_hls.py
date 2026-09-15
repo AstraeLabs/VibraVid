@@ -7,6 +7,36 @@ from urllib.parse import urljoin, urlparse
 logger = logging.getLogger(__name__)
 
 
+_AD_TOKEN_RE = re.compile(r"(?:^|[/_.\-]|%2f)ad(?:[/_.\-]|%2f|$)", re.IGNORECASE)
+
+
+def _looks_like_ad_url(url: str) -> bool:
+    return bool(_AD_TOKEN_RE.search(url))
+
+
+def _drop_ad_discontinuity_groups(segments: list[dict]) -> list[dict]:
+    """Drop segments belonging to an SSAI-stitched ad break."""
+    if not segments:
+        return segments
+
+    groups: dict[int, list[dict]] = {}
+    for seg in segments:
+        groups.setdefault(seg.get("_disc_idx", 0), []).append(seg)
+
+    ad_group_ids = set()
+    for gid, segs in groups.items():
+        ad_count = sum(1 for s in segs if _looks_like_ad_url(s["url"]))
+        if ad_count * 2 >= len(segs):
+            ad_group_ids.add(gid)
+
+    if not ad_group_ids:
+        return segments
+
+    dropped = sum(len(groups[gid]) for gid in ad_group_ids)
+    logger.info(f"HLS: dropped {dropped} segment(s) across {len(ad_group_ids)} ad-break discontinuity group(s)")
+    return [seg for seg in segments if seg.get("_disc_idx", 0) not in ad_group_ids]
+
+
 def hls_base_url(playlist_url: str) -> str:
     """Return the base URL directory for a given HLS playlist URL."""
     p = urlparse(playlist_url)
@@ -31,6 +61,7 @@ def parse_hls_variant_playlist(
     pending_byterange: tuple[int, int] | None = None
     byterange_next_offset = 0
     byterange_prev_url: str | None = None
+    disc_idx = 0
 
     def _ensure_block(init: str | None) -> dict:
         block = {"init": init, "segments": []}
@@ -59,6 +90,9 @@ def parse_hls_variant_playlist(
                 "key_url": urljoin(base_url, uri_m.group(1)) if uri_m else None,
                 "iv": iv_m.group(1).lower().zfill(32) if iv_m else None,
             }
+
+        elif line.startswith("#EXT-X-DISCONTINUITY"):
+            disc_idx += 1
 
         elif line.startswith("#EXT-X-MAP:"):
             uri_m = re.search(r'URI="([^"]+)"', line)
@@ -104,6 +138,7 @@ def parse_hls_variant_playlist(
                         "url": resolved_url,
                         "enc": seg_enc,
                         "duration": seg_duration,
+                        "_disc_idx": disc_idx,
                     }
                     if pending_byterange is not None:
                         start, end = pending_byterange
@@ -124,7 +159,10 @@ def parse_hls_variant_playlist(
     if len(blocks) > 1:
         logger.info(f"HLS playlist has {len(blocks)} init blocks (sizes: {[len(b['segments']) for b in blocks]}); keeping the dominant block with {len(best['segments'])} segments")
 
-    segments = best["segments"]
+    segments = _drop_ad_discontinuity_groups(best["segments"])
+    for seg in segments:
+        seg.pop("_disc_idx", None)
+    
     for seg_num, seg in enumerate(segments):
         seg["number"] = seg_num
 

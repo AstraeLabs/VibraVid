@@ -285,6 +285,18 @@ async def _process_external_track(
                 fallback_result = _fetch_one(plan["tasks"][0], plan)
                 if fallback_result.get("event") == "completed" and fallback_result.get("path") and Path(fallback_result["path"]).exists():
                     size = int(fallback_result.get("bytes") or 0)
+                    size_str = format_size(size)
+                    bar_manager.handle_progress_line(
+                        {
+                            "task_key": task_key,
+                            "label": new_label,
+                            "display_label": display_label,
+                            "pct": 100,
+                            "segments": "1/1",
+                            "size": f"{size_str}/{size_str}",
+                            "speed": "---",
+                        }
+                    )
 
         if size:
             entry = {

@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 
 _RES_TOKEN_RE = re.compile(r"^(\d+)[pP]?$")
 _DV_SUFFIX_RE = re.compile(r"&dv(?:=([^&]*))?", re.IGNORECASE)
-_AUDIO_SLOT_TOKEN_RE = re.compile(r"^(\d+)([A-Za-z][A-Za-z-]*)$")
+_AUDIO_SLOT_TOKEN_RE = re.compile(r"^(\d+)([A-Za-z][A-Za-z_-]*)$")
 _AUDIO_SLOT_RESERVED = {"best", "worst", "all", "false", "default", "non-default"}
 
 
 def split_audio_slots(raw: str) -> dict[int, str] | None:
-    """Detect exclusive-priority audio slots in a select_audio value, e.g. "1ita|2eng"."""
+    """Detect exclusive-priority slots in a select_audio/select_subtitle value, e.g. "1ita|2eng"."""
     r = (raw or "").strip()
     if not r or "=" in r or r.lower() in _AUDIO_SLOT_RESERVED:
         return None
@@ -757,7 +757,6 @@ class StreamSelector:
     def apply(self, streams: list) -> tuple[str, str, str]:
         """Mark stream.selected and return (sv, sa, ss) formatter strings."""
         pv = FilterSpec.parse(self._vf, "video")
-        ps = FilterSpec.parse(self._sf, "subtitle")
 
         rv = self._select_video(streams, pv)
 
@@ -768,7 +767,13 @@ class StreamSelector:
             pa = FilterSpec.parse(self._af, "audio")
             ra = self._select_audio(streams, pa)
 
-        rs = self._select_subtitle(streams, ps)
+        subtitle_slots = split_audio_slots(self._sf)
+        if subtitle_slots is not None:
+            rs = self._select_subtitle_slotted(streams, subtitle_slots)
+        else:
+            ps = FilterSpec.parse(self._sf, "subtitle")
+            rs = self._select_subtitle(streams, ps)
+
         self.no_match = bool(rv.no_match or ra.no_match or rs.no_match)
 
         if self._dv_quality is not None:
@@ -1244,6 +1249,74 @@ class StreamSelector:
             s.selected = True
         result.streams = self._apply_default_filter(subs, spec)
         result.select_all = True
+        return result
+
+    def _select_subtitle_slotted(self, streams: list, slots: dict[int, str]) -> SelectionResult:
+        """Exclusive-priority subtitle selection, e.g. select_subtitle="1ita|2eng"."""
+        result = SelectionResult()
+        subs = [
+            s
+            for s in streams
+            if getattr(s, "type", "") == "subtitle"
+            and (getattr(s, "playlist_url", None) or getattr(s, "segments", None))
+        ]
+        logger.debug(f"Subtitle available: {[f'{_language(s)}({_resolved_language(s)})' for s in subs]} | subtitle slots: {slots}")
+
+        if not subs:
+            result.drop = True
+            return result
+
+        for slot_num in sorted(slots):
+            langs = slots[slot_num]
+            requests = _parse_subtitle_lang_requests(langs)
+            selected: list = []
+            used_ids: set = set()
+
+            for base, req_flags in requests:
+                pool = [s for s in subs if _subtitle_matches_request(s, base, req_flags)]
+                if not pool:
+                    continue
+
+                if req_flags:
+                    pick = sorted(pool, key=_subtitle_pref_score, reverse=True)[0]
+                    sid = _stream_id(pick) or id(pick)
+                    if sid in used_ids:
+                        continue
+                    used_ids.add(sid)
+                    pick.selected = True
+                    selected.append(pick)
+                    continue
+
+                # Plain language slot (e.g. "1it"): keep one best track per subtitle
+                # variant, same as the non-slot plain-language branch above.
+                variants: dict = {}
+                for s in pool:
+                    vkey = _subtitle_variant_key(s)
+                    variants.setdefault(vkey, []).append(s)
+
+                for vpool in variants.values():
+                    pick = sorted(vpool, key=_subtitle_pref_score, reverse=True)[0]
+                    sid = _stream_id(pick) or id(pick)
+                    if sid in used_ids:
+                        continue
+                    used_ids.add(sid)
+                    pick.selected = True
+                    selected.append(pick)
+
+            if not selected:
+                logger.info(f"StreamSelector subtitle slot {slot_num} lang={langs!r} — no match, trying next slot")
+                continue
+
+            result.streams = selected
+            result.matched_langs = _actual_langs(selected) or langs
+            result.matched_ids = _collect_ids(selected)
+            result.select_all = len(selected) > 1
+            logger.info(f"StreamSelector subtitle slot {slot_num} lang={langs!r} — matched {len(selected)} stream(s), ignoring lower-priority slots")
+            return result
+
+        logger.info(f"StreamSelector subtitle: no slot among {slots} matched — skipping whole download")
+        result.drop = True
+        result.no_match = True
         return result
 
     # ── Internal helpers ───────────────────────────────────────────────────────
