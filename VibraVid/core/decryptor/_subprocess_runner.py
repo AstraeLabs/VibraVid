@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -14,7 +15,16 @@ from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
-_ENGINE_LOG_LEVELS = {"BENTO4": 21, "SHAKA": 22, "FLUX": 23}
+_ENGINE_LOG_LEVELS = {"FLUX": 23}
+_TAIL_SEEK_NOISE = re.compile(
+    r"co located POCs unavailable|"
+    r"reference picture missing during reorder|"
+    r"Missing reference picture|"
+    r"non-existing (PPB|SL|DPB)|"
+    r"error while decoding MB \d+"
+)
+
+
 for _engine_name, _level in _ENGINE_LOG_LEVELS.items():
     logging.addLevelName(_level, _engine_name)
 
@@ -31,21 +41,24 @@ def _strip_profile_lines(text: str) -> str:
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("[profile]"))
 
 
-def _tail_decode_check(output_path: str, seconds: float = 2.0, full: bool = False) -> str | None:
-    """Decode *output_path* with ffmpeg to catch a decrypt engine reporting exit-0/non-empty-file
-    on genuinely corrupt content. ``full`` decodes start-to-end instead of just the tail --
-    audio files are cheap enough to fully verify (a 60MB track takes ~1-2s), and the tail-only
-    check has been observed to pass files whose corruption is spread through the body rather
-    than concentrated at the end (flux, under heavy real-pipeline concurrency, has produced
-    exit-0/right-size output with a ~99% frame decode-error rate that only a full decode caught)."""
+def _tail_decode_check(output_path: str, seconds: float = 4.0, full: bool = False, _retry_depth: int = 0) -> str | None:
+    """
+    Decode *output_path* with ffmpeg to catch a decrypt engine reporting exit-0/non-empty-file on genuinely corrupt content.
+
+    Uses a tail window (default 4s) for video, or full decode for audio.
+    Automatically retries with a larger window if the only errors are benign H264 seek-artifacts.
+    """
     ffmpeg = get_ffmpeg_path()
     if not ffmpeg:
         return None
-    cmd = [ffmpeg, "-v", "error"]
+
+    cmd = [ffmpeg, "-v", "error", "-fflags", "+discardcorrupt"]
     if not full:
         cmd += ["-sseof", f"-{seconds}"]
     cmd += ["-i", output_path, "-f", "null", "-"]
+
     try:
+        logger.info(f"{'full' if full else 'tail'} decode check for {output_path}: running ffmpeg cmd: {' '.join(cmd)}")
         proc = subprocess.run(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -56,8 +69,28 @@ def _tail_decode_check(output_path: str, seconds: float = 2.0, full: bool = Fals
     except Exception as exc:
         logger.debug(f"{'full' if full else 'tail'} decode check could not run for {output_path}: {exc}")
         return None
+
     stderr_text = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
-    return stderr_text or None
+    if not stderr_text:
+        return None
+
+    # Filter out lines that are only H264 seek noise, and retry with a longer tail if that's all we see.
+    lines = [ln.strip() for ln in stderr_text.splitlines() if ln.strip()]
+    real_errors = [ln for ln in lines if not _TAIL_SEEK_NOISE.search(ln)]
+
+    if not real_errors and lines and not full and _retry_depth < 2:
+        retry_seconds = seconds * 2
+        logger.debug(f"tail decode check for {output_path}: only H264 seek noise at {seconds}s, retrying with {retry_seconds}s")
+        
+        return _tail_decode_check(
+            output_path,
+            seconds=retry_seconds,
+            full=full,
+            _retry_depth=_retry_depth + 1,
+        )
+
+    return "\n".join(real_errors) if real_errors else None
+
 
 
 def _render_bar(percent: int, length: int = 10) -> str:
@@ -153,9 +186,16 @@ def run_with_progress(
 
     stderr_lines: list[str] = []
     stdout_lines: list[str] = []
+    logger.info(f"Starting subprocess for {label}: {' '.join(cmd)}")
     try:
         process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace"
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         process_holder["process"] = process
 

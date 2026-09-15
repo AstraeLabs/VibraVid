@@ -21,9 +21,9 @@ from VibraVid.core.velora.util.formatting import (
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
-from ..decryptor._segment_crypto import decrypt_aes128
+from ..decryptor._segment_crypto import decrypt_aes128_file
 from .util._hls import hls_base_url, parse_hls_live_playlist
-from .util._stream_helpers import detect_seg_ext, merged_segment_ext
+from .util._stream_helpers import detect_seg_ext, is_valid_frag_init, merged_segment_ext, repair_init_segment
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT: int = config_manager.config.get_int("REQUESTS", "timeout")
@@ -37,6 +37,33 @@ def _sleep_interruptible(seconds: float, stop_check, poll: float = 0.25) -> None
         if stop_check():
             break
         time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+
+
+def _repair_init_file(path: Path, headers: dict | None) -> None:
+    """Overwrite *path* in place if its content isn't a valid ftyp+moov init segment."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return
+    
+    redirect_url = repair_init_segment(data)
+    if not redirect_url:
+        return
+    
+    try:
+        logger.debug(f"Live DASH: init segment wasn't a real MP4, retrying via extracted URL: {redirect_url}")
+        with create_client(headers=headers or {}, timeout=REQUEST_TIMEOUT, follow_redirects=True) as c:
+            r = c.get(redirect_url)
+            r.raise_for_status()
+            data = r.content
+        if not is_valid_frag_init(data):
+            logger.warning(f"Live DASH: init segment still not a valid ftyp+moov after following extracted redirect URL: {redirect_url}")
+            return
+        
+        path.write_bytes(data)
+        logger.info(f"Live DASH: init segment repaired via extracted redirect URL -> {path.name}")
+    except Exception as exc:
+        logger.warning(f"Live DASH: init segment repair failed, keeping original (decrypt may fail): {exc}")
 
 
 def _emit_live_progress(
@@ -76,6 +103,7 @@ def _reset_live_timestamps(out_path: Path) -> None:
     ]
 
     try:
+        logger.info(f"Live DASH: resetting timestamps to zero for {out_path.name} with cmd: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
             logger.warning(f"Live DASH: timestamp reset skipped (ffmpeg rc={result.returncode}) — keeping original {out_path.name}")
@@ -172,7 +200,7 @@ class LiveDownloadMixin:
             if len(key_data) != 16:
                 logger.warning(f"AES-128 key length {len(key_data)} bytes (expected 16) for {key_url}")
             key_cache[key_url] = key_data
-            logger.info(f"Live HLS AES-128 key fetched: iv={iv} key={key_data.hex()}")
+            logger.info(f"Live HLS AES-128 key fetched{iv}:{key_data.hex()}")
             return key_data
 
         def _decrypt_segment(fp: Path, seg_meta: dict) -> None:
@@ -191,9 +219,8 @@ class LiveDownloadMixin:
             seg_number = int(seg_meta.get("number", 0))
             logger.debug(f"AES-128 live-decrypt seg={fp.name} iv={enc.get('iv')}")
 
-            decrypted = decrypt_aes128(fp.read_bytes(), key_data, enc.get("iv"), seg_number)
             tmp = fp.with_suffix(fp.suffix + ".dec")
-            tmp.write_bytes(decrypted)
+            decrypt_aes128_file(fp, tmp, key_data, enc.get("iv"), seg_number)
 
             for attempt in range(1, 6):
                 try:
@@ -506,6 +533,9 @@ class LiveDownloadMixin:
         init_path: Path | None = None
         min_update_period: float = 4.0
 
+        # Checked once per track (this track's first media segment) to fail fast on a wrong key.
+        _key_sanity_pending: bool = True
+
         _decryptor = None
         if live_decryption and self.key:
             try:
@@ -516,7 +546,7 @@ class LiveDownloadMixin:
 
         def _decrypt_seg(fp: Path, is_init: bool = False) -> bool:
             """Returns True if segment is usable (decrypted or no-decrypt-needed), False if failed."""
-            nonlocal init_path
+            nonlocal init_path, _key_sanity_pending
             if is_init:
                 init_path = fp
                 logger.debug(f"Live DASH: init segment cached -> {fp.name}")
@@ -525,6 +555,8 @@ class LiveDownloadMixin:
             if not _decryptor or not self.key:
                 return True
 
+            run_key_sanity = _key_sanity_pending
+            _key_sanity_pending = False
             dec_tmp = fp.with_suffix(fp.suffix + ".dec")
             try:
                 ok, message, _data = _decryptor.decrypt_segment_live(
@@ -532,6 +564,7 @@ class LiveDownloadMixin:
                     decrypted_path=str(dec_tmp),
                     raw_keys=self.key,
                     init_path=str(init_path) if init_path and init_path.exists() else None,
+                    key_sanity=run_key_sanity,
                 )
 
                 if not ok:
@@ -656,7 +689,10 @@ class LiveDownloadMixin:
                         init_entry["headers"] = {"Range": f"bytes={init_seg.byte_range}"}
 
                     init_paths = _download_batch([init_entry])
-                    if init_paths:
+                    if init_paths and init_paths[0].exists():
+                        req_headers = dict(headers)
+                        req_headers.update(init_entry.get("headers") or {})
+                        _repair_init_file(init_paths[0], req_headers)
                         _decrypt_seg(init_paths[0], is_init=True)
                         all_paths.extend(init_paths)
                         seg_index = 1

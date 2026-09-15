@@ -5,25 +5,30 @@ import struct
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from VibraVid.core.ui.bar_manager import DownloadBarManager
+from VibraVid.core.decryptor import Decryptor, KeysManager
+from VibraVid.core.manifest.stream import format_duration
+from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
+from VibraVid.utils.os import os_manager
 
 from .util._dash import build_dash_ranged_segments
 from .util._hls import hls_base_url, parse_hls_variant_playlist
-from .util._stream_helpers import is_valid_frag_init, safe_name
+from .util._stream_helpers import is_valid_frag_init, repair_init_segment, safe_name
+from .util.formatting import format_size
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT = config_manager.config.get_int("REQUESTS", "timeout")
 
 
-def _frag_init_probe(dl_segs: list[dict], headers: dict) -> bool:
-    """Fetch the stream's first init (or, failing that, first media) segment
-    and check it's a real ftyp+moov fragmented-MP4 init rather than an
-    opaque byte-range slice of one unsegmented file -- see `is_valid_frag_init`."""
+def _frag_init_probe(dl_segs: list[dict], headers: dict) -> tuple[bool, str | None]:
+    """Fetch the stream's first init (or, failing that, first media) segment,
+    check it's a real ftyp+moov fragmented-MP4 init rather than an opaque
+    byte-range slice of one unsegmented file (see `is_valid_frag_init`), and
+    opportunistically extract the KID from those same bytes."""
     candidate = next((s for s in dl_segs if s.get("seg_type") == "init"), None) or (dl_segs[0] if dl_segs else None)
     if not candidate:
-        return False
+        return False, None
     try:
         req_headers = dict(headers)
         req_headers.update(candidate.get("headers") or {})
@@ -31,10 +36,31 @@ def _frag_init_probe(dl_segs: list[dict], headers: dict) -> bool:
             r = c.get(candidate["url"])
             r.raise_for_status()
             data = r.content
+
+            # Some CDNs answer an init-segment request with 200 OK + a small
+            # JS/JSON body embedding the real signed URL instead of an HTTP
+            # redirect
+            redirect_url = repair_init_segment(data)
+            if redirect_url:
+                logger.debug(f"init probe got a non-MP4 body, retrying via extracted URL: {redirect_url}")
+                r = c.get(redirect_url)
+                r.raise_for_status()
+                data = r.content
     except Exception as exc:
         logger.debug(f"live-decrypt init probe failed, assuming not live-safe: {exc}")
-        return False
-    return is_valid_frag_init(data)
+        return False, None
+
+    if not is_valid_frag_init(data):
+        return False, None
+
+    kid = None
+    try:
+        with os_manager.temp_binary_file(data, suffix=".mp4") as tmp_path:
+            kid = Decryptor().detect_encryption(tmp_path)[1]
+    except Exception as exc:
+        logger.debug(f"KID extraction from probed init failed: {exc}")
+
+    return True, kid
 
 
 class VodStreamMixin:
@@ -151,10 +177,65 @@ class VodStreamMixin:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def _has_matching_key(self, stream) -> bool:
+        """True if this stream can be downloaded: unencrypted, no KID known yet from the
+        manifest (resolved later, e.g. PSSH-only DASH), a bare placeholder key was supplied
+        (resolved against the detected KID at decrypt time), or a provided key's KID matches
+        one of the KIDs the manifest already told us this stream needs."""
+        drm = getattr(stream, "drm", None)
+        if drm is None or not drm.is_encrypted():
+            return True
+
+        if not KeysManager.normalize(self.key):
+            return False
+
+        required_kids = {k.lower() for k in drm.get_all_kids() if k}
+        if not required_kids:
+            return True
+
+        return any(self._key_matches_kid(kid) for kid in required_kids)
+
+    def _needs_kid_probe(self, stream) -> bool:
+        """True when this stream is encrypted and we have keys to try, but the manifest didn't tell us the KID"""
+        drm = getattr(stream, "drm", None)
+        if drm is None or not drm.is_encrypted():
+            return False
+        if not KeysManager.normalize(self.key):
+            return False
+        return not any(k for k in drm.get_all_kids())
+
+    def _key_matches_kid(self, kid: str) -> bool:
+        """True if a provided key covers *kid*, or a bare placeholder key was supplied (resolved against the detected KID at decrypt time)."""
+        norm_keys = KeysManager.normalize(self.key)
+        if not norm_keys:
+            return False
+        if len(norm_keys) == 1 and norm_keys[0][0] == "1":
+            return True
+        return any(k == kid.lower() for k, _ in norm_keys)
+
+    def _skip_stream_no_key(self, stream, required: str) -> None:
+        """Log and report a track skipped pre-download for lack of a matching key. Never downloaded, so it's simply absent from the merge -- not a decrypt failure, doesn't block muxing the rest."""
+        label = self._decrypt_track_label(stream)
+        logger.error(f"Skipping {label}: no provided key matches required KID(s) {required}")
+        console.print(f"[red]Skipping {label}:[/red] no key for required KID {required}")
+        with self._decrypt_failures_lock:
+            self.decrypt_failures.append(
+                {"label": label, "track": label, "message": f"no key for required KID(s): {required}", "skipped": True}
+            )
+        
+        # Unblock anything waiting on this track (e.g. the streaming-mux fast path), which
+        # would otherwise sit idle for the full size-estimated timeout before giving up.
+        self._record_track_done(self._stream_task_key(stream), None)
+
     # ------------------------------------------------------------------
     # Dispatch per stream type
     # ------------------------------------------------------------------
     def _download_stream(self, stream, bar_manager: DownloadBarManager) -> None:
+        if not self._has_matching_key(stream):
+            required = ", ".join(stream.drm.get_all_kids()) if stream.drm else "unknown"
+            self._skip_stream_no_key(stream, required)
+            return
+
         effective_live = self._session_live_decrypt
 
         if self.manifest_type == "HLS":
@@ -216,6 +297,22 @@ class VodStreamMixin:
             logger.error(f"HLS variant playlist has no segments: {playlist_url}")
             return
 
+        total_dur = sum(seg.get("duration", 0.0) for seg in media_segs)
+        stream.duration = total_dur
+        resolved_parts = [f"segs={len(media_segs) + (1 if init_url else 0)}"]
+
+        if stream.bitrate and total_dur > 0:
+            resolved_parts.append(f"~{format_duration(total_dur)}")
+            size = stream.compute_estimated_size()
+            if size:
+                resolved_parts.append(f"~{format_size(size)}")
+        
+        if stream.drm and stream.drm.is_encrypted():
+            kid_disp = stream.drm.get_kid_display()
+            if kid_disp:
+                resolved_parts.append(f"KID={kid_disp}")
+        logger.info(f"HLS resolved | id={stream.id!r} | {' | '.join(resolved_parts)}")
+
         dl_segs: list[dict] = []
         if init_url:
             dl_segs.append({"url": init_url, "number": 0, "seg_type": "init", "enc": {"method": "NONE"}})
@@ -232,6 +329,12 @@ class VodStreamMixin:
                     "headers": seg.get("headers", {}),
                 }
             )
+
+        if self._needs_kid_probe(stream):
+            _, probed_kid = _frag_init_probe(dl_segs, all_headers)
+            if probed_kid and not self._key_matches_kid(probed_kid):
+                self._skip_stream_no_key(stream, probed_kid)
+                return
 
         seg_start, seg_end = self.max_segments if isinstance(self.max_segments, tuple) else (0, self.max_segments)
         if seg_start > 0 or seg_end is not None:
@@ -422,12 +525,21 @@ class VodStreamMixin:
         # Single-file byte-range DASH: every media segment is a byte range of ONE file.
         byte_range_single_file = bool(media_segments) and all(s.byte_range for s in media_segments)
         effective_live = live_decryption
+        probed_kid: str | None = None
         if byte_range_single_file and live_decryption:
-            if _frag_init_probe(dl_segs, all_headers):
+            is_frag_init, probed_kid = _frag_init_probe(dl_segs, all_headers)
+            if is_frag_init:
                 logger.info("DASH byte-range stream, but the init is a real ftyp+moov fragment -- live per-segment decrypt enabled")
             else:
                 effective_live = False
                 logger.info("DASH byte-range single-file stream: decrypting after merge (not per-segment)")
+
+        if probed_kid is None and self._needs_kid_probe(stream):
+            _, probed_kid = _frag_init_probe(dl_segs, all_headers)
+
+        if probed_kid and not self._key_matches_kid(probed_kid):
+            self._skip_stream_no_key(stream, probed_kid)
+            return
 
         self._download_stream_generic(
             dl_segs,
@@ -528,14 +640,23 @@ class VodStreamMixin:
         # independently -- unless the first segment turns out to be a real
         # ftyp+moov init (see `_frag_init_probe`), same check as DASH.
         effective_live = live_decryption
+        probed_kid: str | None = None
         if is_single_file:
             effective_live = False
         elif byte_range_single_file and live_decryption:
-            if _frag_init_probe(dl_segs, all_headers):
+            is_frag_init, probed_kid = _frag_init_probe(dl_segs, all_headers)
+            if is_frag_init:
                 logger.info("ISM byte-range stream, but the init is a real ftyp+moov fragment -- live per-segment decrypt enabled")
             else:
                 effective_live = False
                 logger.info("ISM byte-range single-file stream: decrypting after merge (not per-segment)")
+
+        if probed_kid is None and self._needs_kid_probe(stream):
+            _, probed_kid = _frag_init_probe(dl_segs, all_headers)
+
+        if probed_kid and not self._key_matches_kid(probed_kid):
+            self._skip_stream_no_key(stream, probed_kid)
+            return
 
         self._download_stream_generic(
             dl_segs, stream, "ism", "mp4", bar_manager, live_decryption=effective_live, seg_url_refresh_fn=_refresh_ism_seg_urls

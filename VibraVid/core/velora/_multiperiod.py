@@ -57,6 +57,7 @@ def _run_ffmpeg_concat(list_path: Path, out_path: Path, codec_args: list[str]) -
         cmd += ["-f", "mp4"]
     cmd.append(str(out_path))
 
+    logger.info(f"Running _run_ffmpeg_concat for {os.path.basename(out_path)} with cmd: {' '.join(cmd)}")
     return subprocess.run(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -235,6 +236,7 @@ class MultiPeriodMixin:
                     else:
                         logger.warning(f"[multiperiod] Period {order_idx} decryption failed - keeping raw merge")
                         dec_path.unlink(missing_ok=True)
+                        
                 except Exception as exc:
                     logger.error(f"[multiperiod] Period {order_idx} decryption error: {exc}")
                     try:

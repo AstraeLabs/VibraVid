@@ -31,13 +31,13 @@ def _extract_mono_wav(
         output_wav,
     ]
 
+    logger.info(f"Running _extract_mono_wav for {os.path.basename(input_path)} with cmd: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             logger.error("_extract_mono_wav ffmpeg failed: %s", result.stderr[-400:])
             return False
         return os.path.exists(output_wav) and os.path.getsize(output_wav) > 0
-
     except subprocess.TimeoutExpired:
         logger.error("_extract_mono_wav: FFmpeg timeout for %s", input_path)
         return False

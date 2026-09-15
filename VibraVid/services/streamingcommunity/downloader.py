@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from VibraVid.core.downloader import HLS_Downloader
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.player.vixcloud import ENABLE_VIXCLOUD_API_V2, VideoSource
 from VibraVid.provider.tmdb import tmdb_client
 from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
@@ -27,16 +28,17 @@ def download_film(select_title: Entries) -> str:
     Downloads a film using the provided Entries information.
     """
     start_message()
+    skip_ts = bool((context_tracker.site_options or {}).get("skip_ts"))
 
     scraper = None
-    if config_manager.config.get_bool("DEFAULT", "skip_ts_versions") or tmdb_client.api_key:
+    if skip_ts or tmdb_client.api_key:
         scraper = GetSerieInfo(
             f"{site_constants.FULL_URL}/{select_title.provider_language}",
             media_id=select_title.id,
             series_name=select_title.slug,
         )
 
-    if config_manager.config.get_bool("DEFAULT", "skip_ts_versions") and scraper is not None and scraper.is_cam():
+    if skip_ts and scraper is not None and scraper.is_cam():
         console.print(f"[yellow][SKIP] Download aborted: TS/CAM version detected for '{select_title.name}'")
         return None
 

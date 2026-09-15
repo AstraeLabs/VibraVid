@@ -95,6 +95,11 @@ def _get_playready_keys_local_cdm(
     license_request_fn=None,
 ):
     """Extract PlayReady keys using local or remote CDM device."""
+    if license_url is None and license_request_fn is None:
+        logger.error("PlayReady: no license_url and no license_request_fn — cannot request a license, skipping CDM")
+        console.print("[red]No license URL and no custom license request function — skipping CDM extraction.")
+        return None
+
     from pyplayready.cdm import Cdm
     from pyplayready.device import Device
     from pyplayready.remote.remotecdm import RemoteCdm

@@ -6,13 +6,15 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
+from typing import NamedTuple
 
 from rich.console import Console
 
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
 from VibraVid.core.muxing import (
     build_hybrid_output,
     embed_poster,
@@ -24,10 +26,12 @@ from VibraVid.core.muxing.helper.audio import audio_ext_for_codec
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.muxing.helper.video.hybrid import download_other_tracks
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
-from VibraVid.utils.storage_upload.hook import upload_after
+from VibraVid.utils.proc import run_logged
+from VibraVid.utils.storage_upload.hook import is_cached, try_fetch, upload_after
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -37,9 +41,37 @@ MERGE_SUBTITLES = config_manager.config.get_bool("PROCESS", "merge_subtitle")
 MERGE_AUDIO = config_manager.config.get_bool("PROCESS", "merge_audio")
 CLEANUP_TMP = config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder")
 DEBUG_TRACK_JSON = config_manager.config.get_bool("DEFAULT", "debug_track_json")
+DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
+MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg")
 
 
 _written_track_files: list[str] = []
+
+
+class DownloadResult(NamedTuple):
+    """Outcome of a downloader ``start()``."""
+    path: str | None
+    stopped: bool
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.path is not None and not self.stopped and not self.error
+
+    @classmethod
+    def from_raw(cls, result: object) -> "DownloadResult":
+        """Coerce a legacy return value (None, 2-tuple or 3-tuple) into a DownloadResult."""
+        if isinstance(result, DownloadResult):
+            return result
+        if result is None:
+            return cls(None, True, "no result")
+        if isinstance(result, tuple):
+            path = result[0] if len(result) >= 1 else None
+            stopped = bool(result[1]) if len(result) >= 2 else True
+            error = result[2] if len(result) >= 3 else None
+            return cls(path, stopped, error)
+        # A bare truthy value (e.g. a path string) -> treat as success.
+        return cls(str(result), False, None)
 
 
 def get_written_track_files() -> list[str]:
@@ -309,6 +341,106 @@ class BaseDownloader:
             and not status.get("subtitles")
             and not status.get("external_subtitles")
         )
+    
+    def _precheck(self, manifest_url: str) -> "DownloadResult | None":
+        """Common short-circuits every protocol runs before its own pipeline.
+
+        Returns a terminal :class:`DownloadResult` to hand straight back, or
+        ``None`` to signal "keep going". Also creates the output directory.
+        """
+        if self.file_already_exists:
+            console.print("[yellow]File already exists.")
+            return DownloadResult(self.output_path, False, None)
+
+        if context_tracker.resolve_only:
+            from VibraVid.cli.command.queue import enqueue_down_from_context
+
+            enqueue_down_from_context(manifest_url, self.output_path)
+            return DownloadResult(self.output_path, False, None)
+
+        if is_cached():
+            console.print("[dim]Skipping — already in cache.")
+            return DownloadResult(self.output_path, False, None)
+
+        if try_fetch(self.output_path):
+            return DownloadResult(self.output_path, False, None)
+
+        os_manager.create_path(self.output_dir)
+        return None
+
+    def _fail(self, error: str) -> "DownloadResult":
+        """Record a failed terminal state on the tracker and return it."""
+        if self.download_id:
+            download_tracker.complete_download(self.download_id, success=False, error=error)
+        return DownloadResult(None, True, error)
+
+    def _check_download_status(self, status: dict) -> "DownloadResult | None":
+        """Guard the raw download ``status``: return a terminal DownloadResult for
+        a cancelled/empty run, or ``None`` when there is media to mux."""
+        if status.get("error") == "cancelled":
+            return self._fail("cancelled")
+        if self._no_media_downloaded(status):
+            logger.error("No media downloaded")
+            return self._fail("No media downloaded")
+        return None
+
+    def _merge_and_finalize(self, status: dict) -> "DownloadResult":
+        """Mux the downloaded tracks, move to the final path and return the result."""
+        if self.download_id:
+            download_tracker.update_status(self.download_id, "Muxing ...")
+
+        final_file = self._merge_files(status)
+        if not final_file:
+            if self.download_id and download_tracker.is_stopped(self.download_id):
+                return self._fail("cancelled")
+            merge_error = self.error or "Merge failed"
+            logger.error(merge_error)
+            return self._fail(merge_error)
+
+        self._finalize(final_file=final_file)
+        if DELAY_SS > 0:
+            console.print(f"\n[green]Sleeping {DELAY_SS} seconds before finishing...")
+            time.sleep(DELAY_SS)
+
+        return DownloadResult(self.output_path, False, self.error or None)
+
+    def _maybe_enable_streaming_mux(self) -> None:
+        """Called by HLS/DASH/ISM downloaders, after streams are selected but before start_download()"""
+        lazy = load_search_functions().get(f"{self.site_name}_search")
+        service_module = lazy.get_module() if lazy else None
+        if not getattr(service_module, "_live_mux", False) and not context_tracker.force_livemux:
+            logger.info(f"streaming_mux: not enabled (service {self.site_name!r} does not opt in via _live_mux = True)")
+            return
+
+        if context_tracker.no_livemux:
+            logger.info("streaming_mux: not enabled (--no-livemux)")
+            return
+        
+        if MUX_ENGINE.lower() != "ffmpeg":
+            logger.info(f"streaming_mux: not enabled (PROCESS.engine={MUX_ENGINE!r} != ffmpeg)")
+            return
+        
+        if os.path.splitext(self.output_path)[1].lower() != ".mkv":
+            logger.info(f"streaming_mux: not enabled (output_path={self.output_path!r} is not .mkv)")
+            return
+
+        media_downloader = getattr(self, "media_downloader", None)
+        if media_downloader is None:
+            logger.info("streaming_mux: not enabled (media_downloader not created yet)")
+            return
+
+        # Check media_downloader.other_tracks (the hybrid-only list, already filtered of
+        # subtitle/extra-audio sidecar entries by the DASH/HLS/ISM downloader by this point)
+        if getattr(media_downloader, "other_tracks", None):
+            logger.info("streaming_mux: not enabled (other_tracks/hybrid output present)")
+            return
+
+        media_downloader.enable_streaming_mux(self.output_path, chapters=self.chapters)
+        logger.info(f"streaming_mux: enabled for this download -> {self.output_path}")
+
+    def _finish_from_status(self, status: dict) -> "DownloadResult":
+        """Common tail for protocols with no post-download step: guards → mux."""
+        return self._check_download_status(status) or self._merge_and_finalize(status)
 
     def _move_to_final_location(self, final_file: str) -> None:
         """
@@ -333,10 +465,10 @@ class BaseDownloader:
     def _decrypt_failure_message(self) -> str | None:
         """"Decryption failed - track(s) still encrypted: ..." from  media_downloader.decrypt_failures, or None if every track decrypted OK."""
         md = getattr(self, "media_downloader", None)
-        failures = list(getattr(md, "decrypt_failures", []) or [])
+        failures = [f for f in (getattr(md, "decrypt_failures", []) or []) if not f.get("skipped")]
         if not failures:
             return None
-        
+
         labels = ", ".join(dict.fromkeys(f.get("label") or f.get("track") or "?" for f in failures))
         return f"Decryption failed - track(s) still encrypted: {labels}"
 
@@ -351,6 +483,21 @@ class BaseDownloader:
             console.print(f"[yellow]{err} — skipping mux.")
             self.error = err
             return None
+
+        media_downloader = getattr(self, "media_downloader", None)
+        streaming_mux_result = getattr(media_downloader, "streaming_mux_result", None)
+        if streaming_mux_result and os.path.exists(streaming_mux_result) and os.path.getsize(streaming_mux_result) > 0:
+            logger.info(f"Using streaming-mux fast-path output, skipping join_media(): {streaming_mux_result}")
+            merged_file = streaming_mux_result
+            if not self._merge_output_ok(merged_file):
+                return None
+
+            # The fast path already injects chapters only fall back to the separate
+            # mkvmerge/ffmpeg _inject_chapters() step if that didn't happen.
+            if self.chapters and not getattr(media_downloader, "streaming_mux_chapters_injected", False):
+                merged_file = self._inject_chapters(merged_file)
+
+            return self._embed_poster(merged_file)
 
         video_track = status.get("video")
         audio_tracks: list[dict] = list(status.get("audios") or [])
@@ -601,12 +748,10 @@ class BaseDownloader:
     def _remux_audio(self, src: str, dst: str) -> None:
         """Remux audio to change container without re-encoding, using FFmpeg. Falls back to raw move on failure."""
         try:
-            proc = subprocess.run(
+            proc = run_logged(
                 [get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-c:a", "copy", dst],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                "Remux audio", log=logger,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
 
             if proc.returncode == 0 and os.path.exists(dst):
@@ -627,7 +772,7 @@ class BaseDownloader:
                 return True
 
             md = getattr(self, "media_downloader", None)
-            failures = list(getattr(md, "decrypt_failures", []) or [])
+            failures = [f for f in (getattr(md, "decrypt_failures", []) or []) if not f.get("skipped")]
             detail = failures[0].get("message", "") if failures else ""
             logger.error(f"Decryption verification FAILED for {os.path.basename(self.output_path or '')}: {err} ({detail})")
 
@@ -638,30 +783,19 @@ class BaseDownloader:
             logger.warning(f"Output verification skipped due to error: {exc}")
             return True
 
-    _MEDIA_PLACEHOLDERS = (
-        "%(quality)",
-        "%(language)",
-        "%(video_codec)",
-        "%(audio_codec)",
-        "%(audio_flags)",
-        "%(sub_flags)",
-    )
+    _MEDIA_PLACEHOLDERS = MEDIA_PLACEHOLDERS
 
     @classmethod
     def _strip_media_tokens(cls, path: str) -> str:
         """Remove unresolved media-token placeholders from *path*"""
-        root, ext = os.path.splitext(path)
-        for ph in cls._MEDIA_PLACEHOLDERS:
-            root = root.replace(f" [{ph}]", "").replace(f"[{ph}]", "")
-            root = root.replace(f" ({ph})", "").replace(f"({ph})", "")
-            root = root.replace(ph, "")
-        root = root.replace("  ", " ").rstrip(" .")
-        return root + ext
+        return strip_media_tokens(path)
 
     def _finalize(self, *, final_file: str) -> None:
         """Common tail for start(): move to final location."""
         if final_file and os.path.exists(final_file):
             self._move_to_final_location(final_file)
+
+        cached_height: int | None = None
 
         # The working file was downloaded/muxed under a clean name (media tokens stripped).
         template = getattr(self, "_final_name_template", self.output_path)
@@ -669,6 +803,7 @@ class BaseDownloader:
             try:
                 metadata = get_media_metadata(self.output_path)
                 logger.info(f"Metadata for dynamic rename: {metadata}")
+                cached_height = metadata.get("height", 0)
 
                 replacements = {
                     "quality": metadata.get("quality", ""),
@@ -726,7 +861,7 @@ class BaseDownloader:
             if missing:
                 logger.warning(f"Skipping vault upload for {base_name}: {missing} segment(s) missing")
             else:
-                height = get_media_metadata(self.output_path).get("height", 0)
+                height = cached_height if cached_height is not None else get_media_metadata(self.output_path).get("height", 0)
                 if height < 1080:
                     logger.warning(f"Skipping vault upload for {base_name}: resolution below 1080p ({height}p)")
                 else:
@@ -741,6 +876,6 @@ class BaseDownloader:
             )
 
         if CLEANUP_TMP:
-            shutil.rmtree(self.output_dir, ignore_errors=True)
+            os_manager.fast_rmtree(self.output_dir)
 
         execute_hooks("post_run")

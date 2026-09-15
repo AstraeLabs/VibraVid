@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 
+def _drm_preference(playback_info: dict) -> str:
+    """Get the preferred DRM type based on the playback info."""
+    return DRMType.WIDEVINE if playback_info.get("drm_type") == "widevine" else DRMType.PLAYREADY
+
+
 def _compute_event_duration(scrape_content) -> float | None:
     """
     Derive the scheduled duration (seconds) of a live event from its EPG window
@@ -74,7 +79,7 @@ def download_live(select_title: Entries):
         license_url=playback_info["license"],
         license_headers=playback_info.get("license_headers", {}),
         output_path=os.path.join(live_path, live_name),
-        drm_preference=DRMType.PLAYREADY,
+        drm_preference=_drm_preference(playback_info),
         max_time=event_duration,
     ).start()
 
@@ -109,7 +114,7 @@ def download_film(select_title: Entries):
         license_url=playback_info["license"],
         license_headers=playback_info.get("license_headers", {}),
         output_path=os.path.join(movie_path, movie_name),
-        drm_preference=DRMType.PLAYREADY,
+        drm_preference=_drm_preference(playback_info),
     ).start()
 
 
@@ -140,7 +145,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         license_url=playback_info["license"],
         license_headers=playback_info.get("license_headers", {}),
         output_path=os.path.join(episode_path, episode_name),
-        drm_preference=DRMType.PLAYREADY,
+        drm_preference=_drm_preference(playback_info),
     ).start()
 
 

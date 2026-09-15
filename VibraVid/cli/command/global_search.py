@@ -208,7 +208,7 @@ def select_from_consolidated_results(all_media_items, manager: TVShowManager):
 
     total = len(all_media_items)
     while True:
-        last = manager.run(force_int_input=True, max_int_input=total)
+        last = manager.run()
         if last is None or str(last).lower() in ["q", "quit"]:
             manager.clear()
             console.print("\n[red]Selection cancelled by user.")

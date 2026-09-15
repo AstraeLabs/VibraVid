@@ -6,13 +6,13 @@ import threading
 
 from .binary_paths import binary_paths
 from .checker import (
-    check_bento4,
+    check_deno,
     check_dovi_tool,
     check_ffmpeg,
     check_flux,
     check_mkvmerge,
-    check_shaka_packager,
     check_velora,
+    check_yt_dlp,
 )
 from .device_install import check_device_prd_path, check_device_wvd_path
 
@@ -32,11 +32,9 @@ def _drop_cached(*names: str) -> None:
 is_binary_installation = getattr(sys, "frozen", False)
 _ffmpeg_path = None
 _ffprobe_path = None
-_bento4_decrypt_path = None
 _wvd_path = None
 _prd_path = None
 _velora_path = None
-_shaka_packager_path = None
 _dovi_tool_path = None
 _mkvmerge_path = None
 _flux_path = None
@@ -52,8 +50,8 @@ def _initialize_paths():
     - After the first initialization, every getter returns instantly with zero locking overhead (outer ``if _initialized`` check).
     - During the first initialization, only one thread runs the checks
     """
-    global _ffmpeg_path, _ffprobe_path, _bento4_decrypt_path
-    global _wvd_path, _prd_path, _velora_path, _shaka_packager_path
+    global _ffmpeg_path, _ffprobe_path
+    global _wvd_path, _prd_path, _velora_path
     global _dovi_tool_path, _mkvmerge_path, _flux_path
     global _initialized
 
@@ -67,11 +65,9 @@ def _initialize_paths():
             return
 
         _ffmpeg_path, _ffprobe_path = check_ffmpeg()
-        _bento4_decrypt_path = check_bento4()
         _wvd_path = check_device_wvd_path()
         _prd_path = check_device_prd_path()
         _velora_path = check_velora()
-        _shaka_packager_path = check_shaka_packager()
         _dovi_tool_path = check_dovi_tool()
         _mkvmerge_path = check_mkvmerge()
         _flux_path = check_flux()
@@ -102,16 +98,6 @@ def get_ffprobe_path() -> str:
     return _ffprobe_path
 
 
-def get_bento4_decrypt_path() -> str:
-    global _bento4_decrypt_path
-    if not _initialized:
-        _initialize_paths()
-    if not _is_alive(_bento4_decrypt_path):
-        _drop_cached("mp4decrypt")
-        _bento4_decrypt_path = check_bento4()
-    return _bento4_decrypt_path
-
-
 def get_wvd_path() -> str:
     if not _initialized:
         _initialize_paths()
@@ -133,16 +119,14 @@ def get_velora_path() -> str:
         _velora_path = check_velora()
     return _velora_path
 
+def get_yt_dlp_path() -> str | None:
+    """Return path to yt-dlp binary, downloading if needed."""
+    return check_yt_dlp()
 
-def get_shaka_packager_path() -> str:
-    global _shaka_packager_path
-    if not _initialized:
-        _initialize_paths()
-    if not _is_alive(_shaka_packager_path):
-        _drop_cached("packager")
-        _shaka_packager_path = check_shaka_packager()
-    return _shaka_packager_path
 
+def get_deno_path() -> str | None:
+    """Return path to deno binary, downloading if needed."""
+    return check_deno()
 
 def get_flux_path() -> str | None:
     """Return the resolved `flux` binary path, or None if it isn't available (optional tool)."""

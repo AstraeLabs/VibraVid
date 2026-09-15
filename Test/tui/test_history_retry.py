@@ -50,7 +50,7 @@ async def test_retry_reuses_persisted_cli_search_and_item(monkeypatch):
     assert len(items) == 1
     argv = items[0]["argv"]
 
-    assert argv[argv.index("--site") + 1] == "mysite"
+    assert argv[argv.index("-i") + 1] == "mysite"
     assert argv[argv.index("-s") + 1] == "some title exact query"
     assert argv[argv.index("--item") + 1] == "3"
 

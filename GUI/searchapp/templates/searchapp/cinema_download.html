@@ -113,6 +113,7 @@
 	var URL_POSTERS   = "{% url 'resolve_tmdb_posters' %}";
 	var CSRF          = "{{ csrf_token }}";
 	var esc = CN.esc, titleize = CN.titleize, duotone = CN.duotone, pct = CN.pct;
+	var posterCache = {};
 
 	function outcome(d) {
 		var status = String(d.status || "").toLowerCase();
@@ -361,8 +362,7 @@
 		document.getElementById("cn-hero-line").textContent = d.path || "";
 
 		document.getElementById("cn-hero-pct").innerHTML = p.toFixed(0) + "<span>%</span>";
-		document.getElementById("cn-hero-of").textContent =
-			[d.size, d.segments ? "segments " + d.segments : ""].filter(Boolean).join(" · ");
+		document.getElementById("cn-hero-of").textContent = d.size || "";
 		document.getElementById("cn-hero-bar").style.width = p + "%";
 
 		var facts = [];

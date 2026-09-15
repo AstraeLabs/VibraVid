@@ -43,6 +43,7 @@ covered in the
 | 🪝 [Hook System](https://astraelabs.github.io/VibraVid/hooks/) | Run custom scripts on download lifecycle events |
 | 🐳 [Docker](https://astraelabs.github.io/VibraVid/docker/) | Compose, custom ports/paths, private network deployment |
 | 🖥️ [NAS Deployment](https://astraelabs.github.io/VibraVid/nas/) | Synology, TrueNAS, Unraid |
+| 🌍 [Supported Sites](https://astraelabs.github.io/VibraVid/supported-sites/) | Full list of supported streaming services |
 | 🔑 [Login Guide](https://astraelabs.github.io/VibraVid/login/) | Authentication for supported services |
 
 

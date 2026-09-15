@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
-from VibraVid.core.ui.tracker import download_tracker
+from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.velora.bridge import run_download_plan
 from VibraVid.core.velora.curl_bridge import run_download_plan_curl_cffi
 from VibraVid.core.velora.subtitle import download_external_tracks_with_progress
@@ -32,12 +31,10 @@ from .util._stream_helpers import (
 )
 
 logger = logging.getLogger("manual")
-CONCURRENT_DL = config_manager.config.get_bool("DOWNLOAD", "concurrent_download")
 THREAD_COUNT = config_manager.config.get_int("DOWNLOAD", "thread_count")
 RETRY_COUNT = config_manager.config.get_int("REQUESTS", "max_retry")
 REQUEST_TIMEOUT = config_manager.config.get_int("REQUESTS", "timeout")
 VERIFY_TLS = config_manager.config.get_bool("REQUESTS", "verify")
-REALTIME_DECRYPT = config_manager.config.get_bool("DOWNLOAD", "realtime_decrypt")
 SEGMENT_DELAY_SECONDS = max(0.0, config_manager.config.get_float("DOWNLOAD", "segment_delay_seconds"))
 SEGMENT_DELAY_JITTER_SECONDS = max(0.0, config_manager.config.get_float("DOWNLOAD", "segment_delay_jitter_seconds"))
 
@@ -96,6 +93,45 @@ class MediaDownloader(
         self.decrypt_failures: list = []
         self._decrypt_failures_lock = threading.Lock()
 
+        # Per-stream "this track is fully written to its final output_dir path" signal, set by _download_stream_generic() just before it returns.
+        self._track_done_events: dict[str, threading.Event] = {}
+        self._track_results: dict[str, Path | None] = {}
+        self._track_done_lock = threading.Lock()
+
+        # Set via enable_streaming_mux() by the outer downloader (VibraVid.core.downloader.*) BEFORE start_download() is called
+        self._streaming_mux_output_path: str | None = None
+        self._streaming_mux_chapters: list = []
+
+        # Set by the video stream's own _download_stream_generic() call if the fast path
+        # actually completed successfully.
+        self.streaming_mux_result: str | None = None
+        
+        # Set True by _try_start_streaming_mux_inner() if it injected the downloader's
+        # queued chapters into the same ffmpeg pass -- lets the caller (BaseDownloader._merge_files)
+        # skip the separate mkvmerge/ffmpeg _inject_chapters() post-processing step.
+        self.streaming_mux_chapters_injected: bool = False
+
+    def enable_streaming_mux(self, output_path: str, chapters: list | None = None) -> None:
+        self._streaming_mux_output_path = output_path
+        self._streaming_mux_chapters = list(chapters or [])
+
+    def _track_done_event(self, task_key: str) -> threading.Event:
+        with self._track_done_lock:
+            event = self._track_done_events.get(task_key)
+            if event is None:
+                event = threading.Event()
+                self._track_done_events[task_key] = event
+            return event
+
+    def _record_track_done(self, task_key: str, out_path: Path | None) -> None:
+        with self._track_done_lock:
+            self._track_results[task_key] = out_path
+        self._track_done_event(task_key).set()
+
+    def _get_track_result(self, task_key: str) -> Path | None:
+        with self._track_done_lock:
+            return self._track_results.get(task_key)
+
     def start_download(self, show_progress: bool = True) -> dict[str, Any]:
         if self.download_id:
             download_tracker.update_status(self.download_id, "Downloading ...")
@@ -109,28 +145,14 @@ class MediaDownloader(
         all_support_live = all(s.supports_live_decryption for s in selected_media) if selected_media else False
         flux_available = bool(get_flux_path())
 
-        if all_support_live and selected_media and REALTIME_DECRYPT and flux_available:
+        # Live (in-flight) decryption is automatic: it engages whenever every
+        # selected stream is truly segmented (a real init/moov per the manifest).
+        # The per-stream `_frag_init_probe()` in `_stream_vod.py` downgrades to the
+        # post-download decrypt pass if the first init turns out not to be a valid
+        # ftyp+moov, so there is no config knob to get wrong.
+        if all_support_live and selected_media and flux_available and not context_tracker.skip_decrypt:
             self._session_live_decrypt = True
             logger.info("All selected streams support live decryption — using in-flight decryption.")
-        else:
-            self._session_live_decrypt = False
-            if selected_media and not all_support_live:
-                logger.info("SAMPLE-AES/CBCS detected — using post-merge decryption with Shaka Packager.")
-                no_keys = (
-                    self.key is None
-                    or (isinstance(self.key, KeysManager) and not self.key.get_keys_list())
-                    or (isinstance(self.key, str) and not self.key.strip())
-                    or (isinstance(self.key, (list, tuple)) and not self.key)
-                )
-
-                if no_keys:
-                    console.print("[red]Warning:[/red] SAMPLE-AES/CBCS streams detected but no keys provided.")
-                    logger.error("No keys provided for post-download decryption — merged file will remain encrypted.")
-
-            elif selected_media and all_support_live and not flux_available:
-                logger.info("flux not available — using post-merge decryption with Shaka/Bento4.")
-            else:
-                logger.info("Using post-download decryption.")
 
         ext_result: dict[str, Any] = {"ext_subs": [], "ext_auds": []}
         spawned_threads: list[threading.Thread] = []
@@ -159,6 +181,7 @@ class MediaDownloader(
                                 self.filename,
                                 bar_manager,
                                 stop_check=self._stop_check,
+                                on_track_done=self._record_track_done,
                             )
                         )
                         ext_result["ext_subs"] = subs
@@ -171,7 +194,21 @@ class MediaDownloader(
                         self._unregister_loop(ext_loop)
                         ext_loop.close()
 
+                # context_tracker is threading.local()-backed, so a freshly spawned thread
+                # starts with the defaults, not the parent's values -- capture them here
+                # and reapply inside each worker (same pattern as capture.py's _output_worker).
+                _parent_skip_decrypt = context_tracker.skip_decrypt
+                _parent_no_livemux = context_tracker.no_livemux
+                _parent_force_livemux = context_tracker.force_livemux
+                _parent_no_concurrent = context_tracker.no_concurrent
+                _parent_log_engine_output = context_tracker.log_engine_output
+
                 def _run_stream(s) -> None:
+                    context_tracker.skip_decrypt = _parent_skip_decrypt
+                    context_tracker.no_livemux = _parent_no_livemux
+                    context_tracker.force_livemux = _parent_force_livemux
+                    context_tracker.no_concurrent = _parent_no_concurrent
+                    context_tracker.log_engine_output = _parent_log_engine_output
                     try:
                         self._download_stream(s, bar_manager)
                     except Exception as exc:
@@ -181,7 +218,7 @@ class MediaDownloader(
                 is_live_session = any(getattr(s, "is_live", False) for s in selected_media)
                 media_hard_timeout = float("inf") if is_live_session else 7200.0
 
-                if CONCURRENT_DL:
+                if not context_tracker.no_concurrent:
                     ext_thread = threading.Thread(target=_run_externals, daemon=True)
                     spawned_threads.append(ext_thread)
                     ext_thread.start()

@@ -280,7 +280,7 @@ def build_hvcc(codec_private: bytes) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# AVC (H.264): pass through Bento4-style avcC bytes when present
+# AVC (H.264): pass through standard avcC bytes when present
 # ---------------------------------------------------------------------------
 def build_avcc(codec_private: bytes) -> bytes:
     """

@@ -2,7 +2,6 @@
 
 import base64
 import re
-import struct
 
 
 def normalize_kid(kid) -> str:
@@ -11,9 +10,13 @@ def normalize_kid(kid) -> str:
 
 
 def accumulate_content_key(keys_list: list, extracted_kids: set, kid_raw, key_raw) -> None:
-    """Format a CDM key as ``"kid:key"""
+    """Format a CDM key as ``"kid:key"``. Drops all-zero keys -- CDMs (Widevine/PlayReady)"""
+    key = normalize_kid(key_raw)
+    if not key or set(key) == {"0"}:
+        return
+    
     kid = normalize_kid(kid_raw)
-    formatted = f"{kid}:{normalize_kid(key_raw)}"
+    formatted = f"{kid}:{key}"
     if formatted not in keys_list:
         keys_list.append(formatted)
         extracted_kids.add(kid)
@@ -137,16 +140,13 @@ class _DRMSystems(dict):
     @staticmethod
     def build_widevine_pssh_from_kid(kid_hex: str) -> str:
         """Synthesize minimal Widevine v0 PSSH box from KID hex."""
-        kid = normalize_kid(kid_hex)
-        if len(kid) != 32:
-            raise ValueError(f"KID must be 32 hex chars, got {len(kid)}: {kid_hex!r}")
+        from uuid import UUID
 
-        kid_bytes = bytes.fromhex(kid)
-        wv_system_id = bytes.fromhex(_SYSTEMS_DATA["WIDEVINE"][0])
-        data = b"\x12\x10" + kid_bytes
-        inner = b"\x00\x00\x00\x00" + wv_system_id + struct.pack(">I", len(data)) + data
-        box = struct.pack(">I", 8 + len(inner)) + b"pssh" + inner
-        return base64.b64encode(box).decode("ascii")
+        from pywidevine.pssh import PSSH
+
+        kid = normalize_kid(kid_hex)
+        pssh = PSSH.new(system_id=PSSH.SystemId.Widevine, key_ids=[UUID(bytes=bytes.fromhex(kid))])
+        return pssh.dumps()
 
 
 KNOWN_DRM_SYSTEMS = {data[0]: data[1] for data in _SYSTEMS_DATA.values()}

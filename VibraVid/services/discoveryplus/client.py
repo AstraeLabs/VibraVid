@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from typing import Any
 
 from VibraVid.services._base.login_status import ACCOUNT, ANONYMOUS, print_login
 from VibraVid.utils import config_manager
@@ -88,10 +89,8 @@ class DiscoveryPlus:
             part for part in (attributes.get("firstName"), attributes.get("lastName")) if part
         )
 
-    def get_playback_info(self, edit_id: str) -> dict[str, str]:
-        """
-        Get manifest and license URLs for a given edit_id.
-        """
+    def _playback_info_request(self, edit_id: str, cdms: list[dict]) -> dict:
+        """One playbackInfo call, requesting only the given DRM system(s)."""
         payload = {
             "appBundle": "com.wbd.stream",
             "applicationSessionId": self.device_id,
@@ -129,9 +128,7 @@ class DiscoveryPlus:
                         "hdrFormats": ["hdr10", "hdr10plus", "dolbyvision", "dolbyvision5", "dolbyvision8", "hlg"],
                     },
                 },
-                "contentProtection": {
-                    "contentDecryptionModules": [{"drmKeySystem": "playready", "maxSecurityLevel": "SL3000"}]
-                },
+                "contentProtection": {"contentDecryptionModules": cdms},
                 "manifests": {"formats": {"dash": {}}},
             },
             "consumptionType": "streaming",
@@ -149,22 +146,32 @@ class DiscoveryPlus:
             "userPreferences": {},
         }
 
-        url = f"{self.base_url}/playback-orchestrator/any/playback-orchestrator/v1/playbackInfo"
+        url = "https://default.any-any.prd.api.discoveryplus.com/any/playback/v1/playbackInfo"
         with create_client(headers=self.headers, cookies=self.cookies) as client:
             response = client.post(url, json=payload)
         response.raise_for_status()
-        data = response.json()
+        return response.json()
+
+    def get_playback_info(self, edit_id: str) -> dict[str, Any]:
+        """Get manifest and license URLs for a given edit_id."""
+        data = self._playback_info_request(edit_id, [{"drmKeySystem": "playready", "maxSecurityLevel": "SL3000"}])
+        schemes = data.get("drm", {}).get("schemes", {}) or data.get("fallback", {}).get("drm", {}).get("schemes", {}) or {}
+
+        if "playready" not in schemes:
+            data = self._playback_info_request(
+                edit_id, [{"drmKeySystem": "widevine", "maxSecurityLevel": "l3"}, {"drmKeySystem": "clearkey"}]
+            )
+            schemes = data.get("drm", {}).get("schemes", {}) or data.get("fallback", {}).get("drm", {}).get("schemes", {}) or {}
 
         # Extract manifest and license
         main_manifest = data.get("manifest", {}).get("url")
         fallback_manifest = data.get("fallback", {}).get("manifest", {}).get("url", "").replace("_fallback", "")
         manifest = main_manifest or fallback_manifest
 
-        license_url = data.get("drm", {}).get("schemes", {}).get("playready", {}).get("licenseUrl") or data.get(
-            "fallback", {}
-        ).get("drm", {}).get("schemes", {}).get("playready", {}).get("licenseUrl")
+        drm_type = "playready" if "playready" in schemes else ("widevine" if "widevine" in schemes else None)
+        license_url = schemes.get(drm_type, {}).get("licenseUrl") if drm_type else None
 
-        return {"manifest": manifest, "license": license_url, "type": "dash", "license_headers": {}}
+        return {"manifest": manifest, "license": license_url, "type": "dash", "license_headers": {}, "drm_type": drm_type}
 
 
 def get_client():

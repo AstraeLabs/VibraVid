@@ -183,10 +183,24 @@ class EntriesManager:
 
     def add(self, media: Entries) -> None:
 
-        # Logic to fetch year if 9999
+        # MUSIC: Remove duplicates based on name, artist, album, and type
+        media_name = str(getattr(media, "name", "") or "").strip().lower()
+        media_artist = str(getattr(media, "artist", "") or "").strip().lower()
+        media_album = str(getattr(media, "album", "") or "").strip().lower()
+        media_type = str(getattr(media, "type", "") or "").strip().lower()
+        if media_name:
+            for existing in self.media_list:
+                if (
+                    str(getattr(existing, "name", "") or "").strip().lower() == media_name
+                    and str(getattr(existing, "artist", "") or "").strip().lower() == media_artist
+                    and str(getattr(existing, "album", "") or "").strip().lower() == media_album
+                    and str(getattr(existing, "type", "") or "").strip().lower() == media_type
+                ):
+                    return
+
+        # FILM / TV: Fetch year if it's "9999" and TMDB API key is available
         if media.year == "9999" and not tmdb_client.api_key:
             media.year = str(datetime.now().year)
-
         elif media.year == "9999":
             if media.slug and media.slug != "":
                 logger.info(f"Fetching year for slug: {media.slug}, type: {media.type}")

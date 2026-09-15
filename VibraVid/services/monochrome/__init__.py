@@ -10,7 +10,7 @@ from rich.prompt import Prompt
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.provider.amazon import amazon_music
 from VibraVid.services._base import Entries, EntriesManager, site_constants
-from VibraVid.services._base.site_search_manager import base_process_search_result, base_search
+from VibraVid.services._base.site_search_manager import base_process_search_result, make_search_entrypoints
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import TVShowManager
 
@@ -162,23 +162,9 @@ def process_search_result(select_title, selections=None, scrape_serie=None):
     )
 
 
-def search(
-    string_to_search: str = None,
-    get_onlyDatabase: bool = False,
-    direct_item: dict = None,
-    selections: dict = None,
-    scrape_serie=None,
-):
-    """Wrapper for the generalized search function."""
-    return base_search(
-        title_search_func=title_search,
-        process_result_func=process_search_result,
-        media_search_manager=entries_manager,
-        table_show_manager=table_show_manager,
-        site_name=site_constants.SITE_NAME,
-        string_to_search=string_to_search,
-        get_onlyDatabase=get_onlyDatabase,
-        direct_item=direct_item,
-        selections=selections,
-        scrape_serie=scrape_serie,
-    )
+search, _ = make_search_entrypoints(
+    title_search=title_search,
+    entries_manager=entries_manager,
+    table_show_manager=table_show_manager,
+    process_result=process_search_result,
+)

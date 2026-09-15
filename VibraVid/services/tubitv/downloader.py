@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
+from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
@@ -29,7 +30,7 @@ def extract_content_id(url: str) -> str:
     return None
 
 
-def download_film(select_title: Entries) -> tuple[str, bool]:
+def download_film(select_title: Entries) -> DownloadResult:
     """
     Downloads a film using the provided Entries information.
     """
@@ -40,21 +41,21 @@ def download_film(select_title: Entries) -> tuple[str, bool]:
     content_id = extract_content_id(select_title.url)
     if not content_id:
         console.print("[red]Error: Could not extract content ID from URL")
-        return None, True
+        return DownloadResult(None, True)
 
     # Get bearer token
     try:
         bearer_token = get_bearer_token()
     except Exception as e:
         console.print(f"[red]Error getting bearer token: {e}")
-        return None, True
+        return DownloadResult(None, True)
 
     # Get master playlist URL
     try:
         master_playlist, license_url, custom_headers = get_playback_url(content_id, bearer_token)
     except Exception as e:
         console.print(f"[red]Error getting playback URL: {e}")
-        return None, True
+        return DownloadResult(None, True)
 
     # Define the filename and path for the downloaded film
     path_components, filename = map_movie_path(select_title.name, select_title.year)
@@ -92,7 +93,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         master_playlist, license_url, custom_headers = get_playback_url(obj_episode.id, bearer_token)
     except Exception as e:
         console.print(f"[red]Error getting playback URL: {e}")
-        return None, True
+        return DownloadResult(None, True)
 
     # Download the episode
     return DASH_Downloader(

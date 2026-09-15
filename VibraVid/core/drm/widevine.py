@@ -107,6 +107,11 @@ def _get_widevine_keys(
     license_request_fn: Callable[[bytes, dict], bytes] | None = None,
 ):
     """Extract Widevine keys using local or remote CDM device."""
+    if license_url is None and license_request_fn is None:
+        logger.error("Widevine: no license_url and no license_request_fn — cannot request a license, skipping CDM")
+        console.print("[red]No license URL and no custom license request function — skipping CDM extraction.")
+        return None
+
     from pywidevine.cdm import Cdm
     from pywidevine.device import Device, DeviceTypes
     from pywidevine.pssh import PSSH

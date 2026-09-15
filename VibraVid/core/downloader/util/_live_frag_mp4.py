@@ -29,6 +29,7 @@ class LiveFragMp4Decryptor:
         self._frag_dec_path = tmp_dir / "live_frag_dec.bin"
         self._batch_buf = bytearray()
         self.failed_reason: str | None = None
+        self._key_sanity_pending = True
 
     @property
     def abandoned(self) -> bool:
@@ -68,13 +69,13 @@ class LiveFragMp4Decryptor:
         try:
             protected_init_path.write_bytes(init_bytes)
             decryptor = Decryptor()
-            mode, kid, pssh, *_rest = decryptor.detect_encryption(str(protected_init_path))
+            encrypted, kid, pssh, scheme = decryptor.detect_encryption(str(protected_init_path))
         except Exception as exc:
             self.failed_reason = f"init probe failed: {exc}"
             self._decided = "abandon"
             return
 
-        if mode is None:
+        if not encrypted:
             # Not encrypted -- MP4 direct download has no separate merge pass
             # to skip by going live, so there's nothing to gain here.
             self._decided = "abandon"
@@ -84,7 +85,7 @@ class LiveFragMp4Decryptor:
         if kid and not KeysManager.is_zero_kid(kid):
             from VibraVid.core.drm.manager import DRMManager
 
-            resolved = DRMManager().resolve_flat_key(kid, pssh, self._key, drm_type=mode or "mp4")
+            resolved = DRMManager().resolve_flat_key(kid, pssh, self._key, drm_type=scheme or "mp4")
             if resolved:
                 resolved_key = resolved[0]
 
@@ -107,7 +108,7 @@ class LiveFragMp4Decryptor:
         self._decryptor = decryptor
         self._resolved_key = resolved_key
         self._decided = "decrypt"
-        logger.debug(f"Live fMP4 decrypt engaged (kid={kid}, mode={mode})")
+        logger.debug(f"Live fMP4 decrypt engaged (kid={kid}, scheme={scheme})")
 
     def _flush_pending(self) -> None:
         if not self._pending:
@@ -127,14 +128,20 @@ class LiveFragMp4Decryptor:
     def _decrypt_and_write(self, raw: bytes) -> None:
         assert self._decryptor is not None
         self._frag_raw_path.write_bytes(raw)
+        run_key_sanity = self._key_sanity_pending
+        self._key_sanity_pending = False
+
         ok, message, _data = self._decryptor.decrypt_segment_live(
             encrypted_path=str(self._frag_raw_path),
             decrypted_path=str(self._frag_dec_path),
             raw_keys=self._resolved_key,
             init_path=str(self._protected_init_path),
+            key_sanity=run_key_sanity,
         )
+
         if not ok or not self._frag_dec_path.exists():
             raise RuntimeError(f"live fragment decrypt failed: {message}")
+
         self._out_fh.write(self._frag_dec_path.read_bytes())
 
     def finish(self) -> bytes:
@@ -160,6 +167,7 @@ class LiveFragMp4Decryptor:
             # stays None on the "not encrypted"/"no key" abandon outcomes)
             # since `_decide()` writes this file before either outcome is known.
             paths.append(self._tmp_dir / "live_init_protected.mp4")
+        
         for p in paths:
             try:
                 if p.exists():

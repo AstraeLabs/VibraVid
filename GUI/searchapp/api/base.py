@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.utils import config_manager
 
 
@@ -74,6 +75,16 @@ class BaseStreamingAPI(ABC):
     def __init__(self):
         self.site_name: str = ""
         self.base_url: str = ""
+        self._search_fn = None
+
+    def _get_search_fn(self):
+        """Lazy-load the service's ``search`` entry point via the source-agnostic loader"""
+        if self._search_fn is None:
+            lazy = load_search_functions().get(f"{self.site_name}_search")
+            if lazy is None:
+                raise ModuleNotFoundError(f"No module named '{self.site_name}' (not found in any imp_service source)")
+            self._search_fn = lazy
+        return self._search_fn
 
     def _get_cache_key(self, media_item: Entries) -> str:
         """Generate a unique key for the scraper cache."""

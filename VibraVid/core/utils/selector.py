@@ -6,11 +6,33 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES, get_codec_token
+from VibraVid.core.utils.language import resolve_iso639_1, resolve_iso639_2, resolve_locale
 
 logger = logging.getLogger(__name__)
 
 _RES_TOKEN_RE = re.compile(r"^(\d+)[pP]?$")
 _DV_SUFFIX_RE = re.compile(r"&dv(?:=([^&]*))?", re.IGNORECASE)
+_AUDIO_SLOT_TOKEN_RE = re.compile(r"^(\d+)([A-Za-z][A-Za-z_-]*)$")
+_AUDIO_SLOT_RESERVED = {"best", "worst", "all", "false", "default", "non-default"}
+
+
+def split_audio_slots(raw: str) -> dict[int, str] | None:
+    """Detect exclusive-priority slots in a select_audio/select_subtitle value, e.g. "1ita|2eng"."""
+    r = (raw or "").strip()
+    if not r or "=" in r or r.lower() in _AUDIO_SLOT_RESERVED:
+        return None
+
+    tokens = [t.strip() for t in re.split(r"[|\s]+", r) if t.strip()]
+    if not any(_AUDIO_SLOT_TOKEN_RE.match(t) for t in tokens):
+        return None
+
+    slots: dict[int, list[str]] = {}
+    for t in tokens:
+        m = _AUDIO_SLOT_TOKEN_RE.match(t)
+        slot_num, lang = (int(m.group(1)), m.group(2)) if m else (1, t)
+        slots.setdefault(slot_num, []).append(lang)
+
+    return {num: "|".join(langs) for num, langs in slots.items()}
 
 
 def strip_dv_suffix(video_filter: str) -> tuple[str, str | None]:
@@ -48,6 +70,19 @@ def _resolved_language(s) -> str:
 
 def _codecs(s) -> str:
     return (getattr(s, "codecs", "") or "").strip().lower()
+
+
+def _is_h265(s) -> bool:
+    return _codecs(s).startswith(("hvc1", "hev1", "hevc", "h265"))
+
+
+def _is_hdr10(s) -> bool:
+    return (getattr(s, "video_range", "") or "").strip().lower() in {"hdr10", "hdr10+"}
+
+
+def _is_encrypted(s) -> bool:
+    drm = getattr(s, "drm", None)
+    return bool(drm and drm.is_encrypted())
 
 
 def _stream_id(s) -> str:
@@ -289,6 +324,7 @@ class SelectionResult:
     extra: dict = field(default_factory=dict)
 
     drop: bool = False
+    no_match: bool = False
     select_all: bool = False
     select_best: bool = True
 
@@ -528,25 +564,32 @@ def _matches_lang(s, langs: str) -> bool:
     Supports:
     - pipe-separated tokens:  "ita|it"
     - space-separated tokens: "ita it"  (treated identically)
-    - ISO 639-2 three-letter codes (eng, ita, fra ...) matched against
-      ISO 639-1 + region tags (en-US, it-IT, fr-FR ...) by trying the
-      two-letter prefix.
+    - ISO 639-1 (it, en), ISO 639-2 (ita, eng), BCP-47/region tags (it-IT, en-US) and full language names (Italiano, English) on either side
     """
     tokens = [t.strip().lower() for t in re.split(r"[|\s]+", langs) if t.strip()]
     sl = _language(s)
     rl = _resolved_language(s)
+    sl_iso = resolve_iso639_2(sl) if sl else "und"
+    rl_iso = resolve_iso639_2(rl) if rl else "und"
+
     for t in tokens:
-        if t == sl or t in sl:
-            return True
-        if rl and (t == rl or t in rl):
+        if t == sl or t == rl:
             return True
 
-        if len(t) == 3 and t.isalpha():
-            t2 = t[:2]
-            if t2 == sl or t2 in sl:
+        if "-" in t or "_" in t:
+            # Region-qualified token (e.g. "en-au"): normalizing to base ISO
+            # 639-2 would collapse every regional variant into one ("en-US"
+            # and "en-AU" both -> "eng"), losing the distinction the token
+            # is asking for. Compare canonical BCP-47 locales instead.
+            t_locale = (resolve_locale(t) or t).replace("_", "-").lower()
+            rl_locale = (resolve_locale(rl) or rl).replace("_", "-").lower() if rl else ""
+            if rl_locale and t_locale == rl_locale:
                 return True
-            if rl and (t2 == rl or t2 in rl):
-                return True
+            continue  # no base-language fallback for region-qualified tokens
+
+        t_iso = resolve_iso639_2(t)
+        if t_iso != "und" and (t_iso == sl_iso or t_iso == rl_iso):
+            return True
     return False
 
 
@@ -616,7 +659,11 @@ def _canon_lang_token(token: str) -> str:
         return ""
     base = t.split("-", 1)[0]
     if len(base) == 3 and base.isalpha():
-        return base[:2]
+        # Naively truncating an ISO 639-2 code to its first two letters only
+        # happens to work for some languages (ita->it, eng->en) but is wrong
+        # for others (pol->po instead of pl, spa->sp instead of es) -- use
+        # the real ISO 639-2 -> 639-1 mapping instead.
+        return resolve_iso639_1(base) or base[:2]
     return base
 
 
@@ -681,22 +728,53 @@ def _normalize_filter_value(value, default: str) -> str:
 
 
 class StreamSelector:
-    def __init__(self, video_filter: str, audio_filter: str, subtitle_filter: str, formatter: BaseFormatter = None):
+    def __init__(
+        self,
+        video_filter: str,
+        audio_filter: str,
+        subtitle_filter: str,
+        formatter: BaseFormatter = None,
+        prefer_h265: bool = False,
+        prefer_hdr10: bool = False,
+        prefer_drm: bool = False,
+        require_drm: bool = False,
+        minimum_video_height: int = 0,
+        strict_no_match: bool = False,
+    ):
         raw_vf = _normalize_filter_value(video_filter, "best").strip()
         self._vf, self._dv_quality = strip_dv_suffix(raw_vf)  # select_video in config.json
         self._af = _normalize_filter_value(audio_filter, "best").strip()
         self._sf = _normalize_filter_value(subtitle_filter, "all").strip()
         self._formatter = formatter or StreamSelectorFormatter()
+        self._prefer_h265 = prefer_h265
+        self._prefer_hdr10 = prefer_hdr10
+        self._prefer_drm = prefer_drm
+        self._require_drm = require_drm
+        self._minimum_video_height = minimum_video_height
+        self._strict_no_match = strict_no_match
+        self.no_match = False
 
     def apply(self, streams: list) -> tuple[str, str, str]:
         """Mark stream.selected and return (sv, sa, ss) formatter strings."""
         pv = FilterSpec.parse(self._vf, "video")
-        pa = FilterSpec.parse(self._af, "audio")
-        ps = FilterSpec.parse(self._sf, "subtitle")
 
         rv = self._select_video(streams, pv)
-        ra = self._select_audio(streams, pa)
-        rs = self._select_subtitle(streams, ps)
+
+        audio_slots = split_audio_slots(self._af)
+        if audio_slots is not None:
+            ra = self._select_audio_slotted(streams, audio_slots)
+        else:
+            pa = FilterSpec.parse(self._af, "audio")
+            ra = self._select_audio(streams, pa)
+
+        subtitle_slots = split_audio_slots(self._sf)
+        if subtitle_slots is not None:
+            rs = self._select_subtitle_slotted(streams, subtitle_slots)
+        else:
+            ps = FilterSpec.parse(self._sf, "subtitle")
+            rs = self._select_subtitle(streams, ps)
+
+        self.no_match = bool(rv.no_match or ra.no_match or rs.no_match)
 
         if self._dv_quality is not None:
             videos = [s for s in streams if getattr(s, "type", "") == "video"]
@@ -740,6 +818,37 @@ class StreamSelector:
             else:
                 logger.info(f"StreamSelector video: bitrate=[{spec.bitrate_min},{spec.bitrate_max}] — no match, ignoring range")
 
+        if self._minimum_video_height:
+            eligible = [s for s in videos if _height(s) >= self._minimum_video_height]
+            if eligible:
+                videos = eligible
+                logger.info(
+                    f"StreamSelector video: minimum height {self._minimum_video_height}p "
+                    f"-> {len(videos)} eligible stream(s)"
+                )
+            else:
+                logger.warning(
+                    f"StreamSelector video: no stream meets minimum height "
+                    f"{self._minimum_video_height}p"
+                )
+                result.drop = True
+                return result
+
+        if self._require_drm:
+            encrypted = [s for s in videos if _is_encrypted(s)]
+            if not encrypted:
+                logger.warning("StreamSelector video: no encrypted DRM stream available")
+                result.drop = True
+                return result
+            videos = encrypted
+            logger.info("StreamSelector video: requiring encrypted DRM streams")
+
+        if self._prefer_drm and not spec.select_all:
+            encrypted = [s for s in videos if _is_encrypted(s)]
+            if encrypted:
+                videos = encrypted
+                logger.info("StreamSelector video: preferring encrypted DRM streams")
+
         # Handle explicit "default" or "non-default" filter
         if spec.select_default is not None and not spec.res and not spec.codec and not spec.id and not spec.select_all:
             filtered = [s for s in videos if bool(getattr(s, "default", False)) == spec.select_default]
@@ -752,6 +861,9 @@ class StreamSelector:
                 return result
             logger.info(f"StreamSelector video: no stream with default={spec.select_default}")
             result.drop = True
+
+            if self._strict_no_match:
+                result.no_match = True
             return result
 
         if spec.drop or not videos:
@@ -769,24 +881,42 @@ class StreamSelector:
             pool = [s for s in videos if _matches_id(s, spec.id)]
             if pool:
                 return self._mark_one_video(pool, _best if spec.select_best else _worst, result)
+            
             logger.info(f"StreamSelector video: id={spec.id!r} — no match, relaxing")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         had_constraints = bool(spec.res or spec.codec)
-        pick_exact = _best if spec.select_best else _worst
+        if spec.select_best and (self._prefer_h265 or self._prefer_hdr10):
+            pick_exact = self._best_with_preferences
+        else:
+            pick_exact = _best if spec.select_best else _worst
         pick_fallback = _best if spec.fallback_to_best else _worst
 
         if spec.res and spec.codec:
             pool = [s for s in videos if _matches_res(s, spec.res) and _matches_codec(s, spec.codec)]
             if pool:
                 return self._mark_one_video(pool, pick_exact, result, spec.res, spec.codec)
+            
             logger.info(f"StreamSelector video: res={spec.res}+codec={spec.codec} — no match, relaxing")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         if spec.codec:
             pool = [s for s in videos if _matches_codec(s, spec.codec)]
             if pool:
                 result.select_best = spec.fallback_to_best
                 return self._mark_one_video(pool, pick_fallback, result, codec=spec.codec)
+            
             logger.info(f"StreamSelector video: codec={spec.codec} — no match, relaxing")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         if spec.res:
             pool = [s for s in videos if _matches_res(s, spec.res)]
@@ -795,7 +925,12 @@ class StreamSelector:
                     result.select_best = spec.fallback_to_best
                     return self._mark_one_video(pool, pick_fallback, result, spec.res)
                 return self._mark_one_video(pool, pick_exact, result, spec.res)
+            
             logger.info(f"StreamSelector video: res={spec.res} — no match, falling back")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         if spec.res and not spec.explicit_fallback:
             s = _nearest_by_res(videos, spec.res)
@@ -815,6 +950,17 @@ class StreamSelector:
                 result.matched_res = str(actual_h)
         return result
 
+    def _best_with_preferences(self, streams: list):
+        return max(
+            streams,
+            key=lambda stream: (
+                int(self._prefer_hdr10 and _is_hdr10(stream)),
+                int(self._prefer_h265 and _is_h265(stream)),
+                _height(stream),
+                _bitrate(stream),
+            ),
+        ) if streams else None
+
     def _select_audio(self, streams: list, spec: FilterSpec) -> SelectionResult:
         result = SelectionResult(select_best=spec.select_best, extra=dict(spec.extra))
         audios = [s for s in streams if getattr(s, "type", "") == "audio"]
@@ -830,6 +976,12 @@ class StreamSelector:
                 audios = pool
             else:
                 logger.info(f"StreamSelector audio: bitrate=[{spec.bitrate_min},{spec.bitrate_max}] — no match, ignoring range")
+
+        if self._prefer_drm and not spec.select_all:
+            encrypted = [s for s in audios if _is_encrypted(s)]
+            if encrypted:
+                audios = encrypted
+                logger.info("StreamSelector audio: preferring encrypted DRM streams")
 
         # Handle explicit "default" or "non-default" filter
         if (
@@ -847,8 +999,12 @@ class StreamSelector:
                 result.matched_ids = _collect_ids(selected)
                 logger.info(f"StreamSelector audio: selected {len(selected)} stream(s) with default={spec.select_default}")
                 return result
+
             logger.info(f"StreamSelector audio: no stream(s) with default={spec.select_default}")
             result.drop = True
+            if self._strict_no_match:
+                result.no_match = True
+
             return result
 
         if spec.select_all and not spec.langs and not spec.codec and not spec.id:
@@ -869,7 +1025,12 @@ class StreamSelector:
                 if spec.select_all:
                     result.select_all = True
                 return result
+
             logger.info(f"StreamSelector audio: id={spec.id!r} — no match, relaxing")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         if spec.langs and spec.codec:
             pool = [s for s in audios if _matches_lang(s, spec.langs) and _matches_codec(s, spec.codec)]
@@ -883,7 +1044,12 @@ class StreamSelector:
                 if spec.select_all:
                     result.select_all = True
                 return result
+
             logger.info(f"StreamSelector audio: lang={spec.langs!r}+codec={spec.codec} — no match, relaxing")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         if spec.codec:
             pool = [s for s in audios if _matches_codec(s, spec.codec)]
@@ -903,8 +1069,12 @@ class StreamSelector:
                 if spec.select_all:
                     result.select_all = True
                 return result
+
             logger.info(f"StreamSelector audio: codec={spec.codec} not available — dropping")
             result.drop = True
+            if self._strict_no_match:
+                result.no_match = True
+
             return result
 
         if spec.langs:
@@ -918,7 +1088,13 @@ class StreamSelector:
                 if spec.select_all:
                     result.select_all = True
                 return result
+
             logger.info(f"StreamSelector audio: lang={spec.langs!r} — no match, falling back to best available")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
+
             self._mark_best_per_lang(audios, spec.select_best)
             selected = [s for s in audios if s.selected]
             result.streams = self._apply_default_filter(selected, spec)
@@ -930,6 +1106,36 @@ class StreamSelector:
         selected = [s for s in audios if s.selected]
         result.streams = self._apply_default_filter(selected, spec)
         result.matched_ids = _collect_ids(result.streams)
+        return result
+
+    def _select_audio_slotted(self, streams: list, slots: dict[int, str]) -> SelectionResult:
+        """Exclusive-priority audio selection, e.g. select_audio="1ita|2eng"."""
+        result = SelectionResult()
+        audios = [s for s in streams if getattr(s, "type", "") == "audio"]
+        logger.debug(f"Audio available: {[f'{_language(s)}({_resolved_language(s)})/{_codecs(s)}' for s in audios]} | audio slots: {slots}")
+
+        if not audios:
+            result.drop = True
+            return result
+
+        for slot_num in sorted(slots):
+            langs = slots[slot_num]
+            pool = [s for s in audios if _matches_lang(s, langs)]
+            if not pool:
+                logger.info(f"StreamSelector audio slot {slot_num} lang={langs!r} — no match, trying next slot")
+                continue
+
+            self._mark_best_per_lang(pool, True)
+            selected = [s for s in pool if s.selected]
+            result.streams = selected
+            result.matched_langs = _actual_langs(selected) or langs
+            result.matched_ids = _collect_ids(selected)
+            logger.info(f"StreamSelector audio slot {slot_num} lang={langs!r} — matched {len(selected)} stream(s), ignoring lower-priority slots")
+            return result
+
+        logger.info(f"StreamSelector audio: no slot among {slots} matched — skipping whole download")
+        result.drop = True
+        result.no_match = True
         return result
 
     def _select_subtitle(self, streams: list, spec: FilterSpec) -> SelectionResult:
@@ -957,8 +1163,12 @@ class StreamSelector:
                 result.select_all = len(selected) > 1
                 logger.info(f"StreamSelector subtitle: selected {len(selected)} stream(s) with default={spec.select_default}")
                 return result
+
             logger.info(f"StreamSelector subtitle: no stream(s) with default={spec.select_default}")
             result.drop = True
+            if self._strict_no_match:
+                result.no_match = True
+            
             return result
 
         if spec.id:
@@ -970,7 +1180,12 @@ class StreamSelector:
                 result.matched_ids = _collect_ids(result.streams)
                 result.select_all = True
                 return result
+
             logger.info(f"StreamSelector subtitle: id={spec.id!r} — no match, relaxing")
+            if self._strict_no_match:
+                result.drop = True
+                result.no_match = True
+                return result
 
         if spec.select_all and not spec.langs:
             for s in subs:
@@ -1025,12 +1240,83 @@ class StreamSelector:
 
             logger.info(f"StreamSelector subtitle: lang={spec.langs!r} — no match, dropping")
             result.drop = True
+            if self._strict_no_match:
+                result.no_match = True
+            
             return result
 
         for s in subs:
             s.selected = True
         result.streams = self._apply_default_filter(subs, spec)
         result.select_all = True
+        return result
+
+    def _select_subtitle_slotted(self, streams: list, slots: dict[int, str]) -> SelectionResult:
+        """Exclusive-priority subtitle selection, e.g. select_subtitle="1ita|2eng"."""
+        result = SelectionResult()
+        subs = [
+            s
+            for s in streams
+            if getattr(s, "type", "") == "subtitle"
+            and (getattr(s, "playlist_url", None) or getattr(s, "segments", None))
+        ]
+        logger.debug(f"Subtitle available: {[f'{_language(s)}({_resolved_language(s)})' for s in subs]} | subtitle slots: {slots}")
+
+        if not subs:
+            result.drop = True
+            return result
+
+        for slot_num in sorted(slots):
+            langs = slots[slot_num]
+            requests = _parse_subtitle_lang_requests(langs)
+            selected: list = []
+            used_ids: set = set()
+
+            for base, req_flags in requests:
+                pool = [s for s in subs if _subtitle_matches_request(s, base, req_flags)]
+                if not pool:
+                    continue
+
+                if req_flags:
+                    pick = sorted(pool, key=_subtitle_pref_score, reverse=True)[0]
+                    sid = _stream_id(pick) or id(pick)
+                    if sid in used_ids:
+                        continue
+                    used_ids.add(sid)
+                    pick.selected = True
+                    selected.append(pick)
+                    continue
+
+                # Plain language slot (e.g. "1it"): keep one best track per subtitle
+                # variant, same as the non-slot plain-language branch above.
+                variants: dict = {}
+                for s in pool:
+                    vkey = _subtitle_variant_key(s)
+                    variants.setdefault(vkey, []).append(s)
+
+                for vpool in variants.values():
+                    pick = sorted(vpool, key=_subtitle_pref_score, reverse=True)[0]
+                    sid = _stream_id(pick) or id(pick)
+                    if sid in used_ids:
+                        continue
+                    used_ids.add(sid)
+                    pick.selected = True
+                    selected.append(pick)
+
+            if not selected:
+                logger.info(f"StreamSelector subtitle slot {slot_num} lang={langs!r} — no match, trying next slot")
+                continue
+
+            result.streams = selected
+            result.matched_langs = _actual_langs(selected) or langs
+            result.matched_ids = _collect_ids(selected)
+            result.select_all = len(selected) > 1
+            logger.info(f"StreamSelector subtitle slot {slot_num} lang={langs!r} — matched {len(selected)} stream(s), ignoring lower-priority slots")
+            return result
+
+        logger.info(f"StreamSelector subtitle: no slot among {slots} matched — skipping whole download")
+        result.drop = True
+        result.no_match = True
         return result
 
     # ── Internal helpers ───────────────────────────────────────────────────────
@@ -1117,7 +1403,7 @@ class StreamSelector:
         logger.info(f"StreamSelector &dv: marked companion {_height(companion)}p/{_codecs(companion)} (quality={quality!r})")
 
 def _best(streams: list):
-    return max(streams, key=_bitrate) if streams else None
+    return max(streams, key=lambda stream: (_height(stream), _bitrate(stream))) if streams else None
 
 
 def _worst(streams: list):

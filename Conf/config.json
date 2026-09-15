@@ -8,8 +8,7 @@
         "auto_update_check": true,
         "disable_scraper_cache": false,
         "imp_service": ["default"],
-        "installation": "drm",
-        "skip_ts_versions": false,
+        "installation": "",
         "get_me": false
     },
     "OUTPUT": {
@@ -32,18 +31,15 @@
         "segment_delay_seconds": 0,
         "segment_delay_jitter_seconds": 0,
         "subtitle_resolve_workers": 4,
-        "realtime_decrypt": true,
-        "concurrent_download": true,
         "select_video": "best",
-        "select_audio": "it",
-        "select_subtitle": "it",
+        "select_audio": "ita|eng",
+        "select_subtitle": "ita|eng",
         "extract_embedded_cc": false,
         "live_max_empty_polls": 8,
         "max_token_refresh_rounds": 10,
         "token_refresh_backoff_seconds": 4.0,
         "token_refresh_stall_rounds": 3,
         "embed_poster": false,
-        "skip_post_decrypt": false,
         "cleanup_tmp_folder": true
     },
     "PROCESS": {
@@ -51,7 +47,7 @@
         "use_gpu": false,
         "param_video": ["-c:v","libx265","-crf","28","-preset","medium"],
         "param_audio": ["-c:a","libopus","-b:a","128k"],
-        "param_song_ffmpeg": [],
+        "param_song": [],
         "param_final": ["-c","copy"],
         "audio_order": [],
         "subtitle_order": [],
@@ -63,7 +59,7 @@
     },
     "REQUESTS": {
         "timeout": 15,
-        "max_retry": 8,
+        "max_retry": 4,
         "verify": true,
         "use_proxy": false,
         "proxy_scope": "scrap+down",
@@ -71,7 +67,6 @@
             "http": "http://localhost:8888",
             "https": "http://localhost:8888"
         },
-        "flaresolverr_url": "http://localhost:8191",
         "bypasser_url": "http://localhost:8192"
     },
     "DRM": {

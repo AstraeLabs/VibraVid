@@ -37,6 +37,7 @@ def extract_embedded_cc(video_path: str, output_srt_path: str) -> str | None:
         work_name,
     ]
 
+    logger.info(f"Running extract_embedded_cc for {video_name} with cmd: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=video_dir, encoding="utf-8", errors="replace")
     except Exception as e:

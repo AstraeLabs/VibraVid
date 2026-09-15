@@ -44,6 +44,7 @@ def normalize_timestamps(src_path: Path, log: logging.Logger | None = None) -> P
     cmd.append(str(norm_path))
 
     try:
+        logger.info(f"Running normalize_timestamps for {os.path.basename(src_path)} with cmd: {' '.join(cmd)}")
         result = subprocess.run(
             cmd,
             stdout=subprocess.DEVNULL,

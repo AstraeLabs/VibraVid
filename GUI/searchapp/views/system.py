@@ -54,6 +54,24 @@ def registry_status(request: HttpRequest) -> JsonResponse:
     })
 
 
+@require_http_methods(["GET"])
+def site_cli_options_schema(request: HttpRequest) -> JsonResponse:
+    """Describe the custom CLI options a given site's register_cli_args() exposes."""
+    from ._shared import get_site_extra_args_schema
+
+    site = (request.GET.get("site") or "").strip()
+    if not site:
+        return JsonResponse({"error": "Missing 'site' parameter"}, status=400)
+
+    try:
+        args = get_site_extra_args_schema(site)
+    except Exception as exc:
+        logger.exception("Failed to load CLI options schema for site '%s'", site)
+        return JsonResponse({"error": str(exc)}, status=500)
+
+    return JsonResponse({"args": args})
+
+
 @require_http_methods(["POST"])
 def reload_config(request: HttpRequest) -> JsonResponse:
     try:
@@ -127,7 +145,7 @@ def check_updates(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["POST"])
 def trigger_binaries_update(request: HttpRequest) -> JsonResponse:
-    """Check FFmpeg, Bento4, Shaka Packager, dovi_tool, MKVToolNix and Velora"""
+    """Check FFmpeg, dovi_tool, MKVToolNix and Velora"""
     from VibraVid.utils.upload.update import check_all_binaries_update
 
     try:
@@ -152,4 +170,7 @@ def trigger_update(request: HttpRequest) -> JsonResponse:
 
     return JsonResponse(result)
 
-__all__ = ['registry_status', 'reload_config', 'check_updates', 'trigger_binaries_update', 'trigger_update']
+__all__ = [
+    'registry_status', 'site_cli_options_schema', 'reload_config',
+    'check_updates', 'trigger_binaries_update', 'trigger_update',
+]

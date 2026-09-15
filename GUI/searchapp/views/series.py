@@ -23,13 +23,17 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["GET", "POST"])
 def series_detail(request: HttpRequest) -> HttpResponse:
     """Show series detail page with seasons and episodes."""
-    # --- POST: handle download requests ---
-    if request.method == "POST":
+    # --- POST with a download_type: handle download requests ---
+    if request.method == "POST" and request.POST.get("download_type"):
         return _handle_series_download(request)
 
-    # --- GET: show series detail page ---
-    source_alias = request.GET.get("source_alias")
-    item_payload_raw = request.GET.get("item_payload")
+    # --- GET, or POST without download_type: show series detail page ---
+    if request.method == "POST":
+        source_alias = request.POST.get("source_alias")
+        item_payload_raw = request.POST.get("item_payload")
+    else:
+        source_alias = request.GET.get("source_alias")
+        item_payload_raw = request.GET.get("item_payload")
 
     if not source_alias or not item_payload_raw:
         messages.error(request, "Missing parameters.")
@@ -133,6 +137,8 @@ def series_detail(request: HttpRequest) -> HttpResponse:
 
             seasons_data.append({
                 "number": season.number,
+                "name": season.name,
+                "image": season.image,
                 "episode_count": season.episode_count,
                 "episodes": episodes_data,
                 "owned_count": owned_here,

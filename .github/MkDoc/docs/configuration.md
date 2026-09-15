@@ -72,7 +72,6 @@ environment variable above.
     "disable_scraper_cache": false,
     "imp_service": ["default"],
     "installation": "",
-    "skip_ts_versions": false,
     "get_me": false
   }
 }
@@ -88,8 +87,7 @@ environment variable above.
 | `auto_update_check` | `true` | Notify you at startup when a new VibraVid version is available |
 | `disable_scraper_cache` | `false` | GUI only: the Django backend caches an already-instantiated site scraper per title for 15 minutes so repeat requests (e.g. opening the same series-detail page) don't re-scrape. |
 | `imp_service` | `["default"]` | Service source paths to load site modules from. `"default"` loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have `__init__.py` defining `indice` and `_useFor`. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name. |
-| `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup: `""` (default) downloads FFmpeg, Velora, Flux, Shaka Packager and Bento4 (the decrypt engines, see [`DRM.decrypt_engine_map`](#drm)); `"drm"` is the same minus Flux; `"full"` adds Dovi Tool and MKVToolNix on top of the default |
-| `skip_ts_versions` | `false` | StreamingCommunity only: skip `.ts`/CAM releases when a better version isn't otherwise detected. |
+| `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup. `""` (base): FFmpeg, Velora, flux. `"yt"`: base + yt-dlp, deno. `"full"`: base + dovi_tool, mkvtoolnix, yt-dlp, deno |
 | `get_me` | `false` | Resolve and print the account name in the login banner (e.g. `Login - Type: Account / User: name`) for services that support it.
 
 **Custom `imp_service` example (local folder):**
@@ -249,8 +247,6 @@ S%(season:02d)/     ->  season folder   S01/
     "segment_delay_seconds": 0,
     "segment_delay_jitter_seconds": 0,
     "subtitle_resolve_workers": 4,
-    "realtime_decrypt": true,
-    "concurrent_download": true,
     "select_video": "best",
     "select_audio": "it|en",
     "select_subtitle": "it|en",
@@ -260,8 +256,7 @@ S%(season:02d)/     ->  season folder   S01/
     "token_refresh_backoff_seconds": 4.0,
     "token_refresh_stall_rounds": 3,
     "embed_poster": false,
-    "cleanup_tmp_folder": true,
-    "skip_post_decrypt": false
+    "cleanup_tmp_folder": true
   }
 }
 ```
@@ -275,12 +270,10 @@ S%(season:02d)/     ->  season folder   S01/
 | `skip_download` | `false` | Skip the download step and process existing files |
 | `thread_count` | `10` | Number of concurrent segment requests for a single stream |
 | `subtitle_resolve_workers` | `4` | Number of HLS subtitle renditions resolved/downloaded concurrently. `1` restores the original strictly-sequential behaviour |
-| `realtime_decrypt` | `true` | Decrypt each segment as it downloads and stream-merge it straight into the output file, instead of decrypting/merging the whole file once at the end |
-| `concurrent_download` | `true` | Download video, audio, and subtitles simultaneously |
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 closed captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download |
 | `cleanup_tmp_folder` | `true` | Remove temporary files after download |
 | `embed_poster` | `false` | Embed a poster/still into the downloaded file: the matching TMDB artwork if found, otherwise the site's own poster/still as a fallback |
-| `skip_post_decrypt` | `false` | Leave the downloaded file encrypted instead of decrypting it after download. Useful for debugging DRM/key issues, not for normal use — the output isn't directly playable |
+
 
 ### Segment Throttling, Live Streams & Token Refresh
 
@@ -331,6 +324,7 @@ Native `key=value` filters combine multiple constraints (resolution, codec, bitr
 | `"ita\|best"` | Language with fallback to best | Fallback to best |
 | `"ita\|best,AAC"` | Language + codec with fallback | Fallback to best |
 | `"b=64-192:f=best"` | Bitrate range (kbps) — best within range | Ignores range if no match |
+| `"1ita\|2eng"` | Numbered slots — exclusive priority | Skips the whole download |
 | `"false"` | Skip audio | — |
 
 Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (language + codec + fallback).
@@ -369,7 +363,7 @@ The DV track is muxed as an additional video track via mkvmerge.
     "use_gpu": false,
     "param_video": ["-c:v", "libx265", "-crf", "28", "-preset", "medium"],
     "param_audio": ["-c:a", "libopus", "-b:a", "128k"],
-    "param_song_ffmpeg": [],
+    "param_song": [],
     "param_final": ["-c", "copy"],
     "audio_order": [],
     "subtitle_order": [],
@@ -388,7 +382,7 @@ The DV track is muxed as an additional video track via mkvmerge.
 | `use_gpu` | `false` | Enable hardware acceleration. GPU type is auto-detected at runtime: `cuda` (NVIDIA), `qsv` (Intel), `vaapi` (AMD) |
 | `param_video` | H.265/HEVC | FFmpeg video encoding parameters, e.g. `["-c:v", "libx265", "-crf", "28", "-preset", "medium"]` |
 | `param_audio` | Opus 128k | FFmpeg audio encoding parameters, e.g. `["-c:a", "libopus", "-b:a", "128k"]` |
-| `param_song_ffmpeg` | `[]` | FFmpeg re-encode parameters applied to downloaded music tracks (e.g. `monochrome`). |
+| `param_song` | `[]` | FFmpeg re-encode parameters applied to downloaded music tracks (e.g. `monochrome`). |
 | `param_final` | `["-c", "copy"]` | Final FFmpeg parameters. When set, takes full precedence over `param_video` and `param_audio` |
 | `audio_order` | `[]` | Order of audio tracks in the output, e.g. `["ita", "eng"]` |
 | `subtitle_order` | `[]` | Order of subtitle tracks in the output, e.g. `["ita", "eng"]` |
@@ -480,8 +474,7 @@ Any invalid value falls back to `scrap+down`. Override per run from the CLI with
 | `use_cdm` | `true` | Enable CDM-based key extraction. When `false`, only database/vault lookups are attempted |
 | `prefer_remote_cdm` | `false` | Prefer remote CDM services (see [Remote CDM Services](#remote-cdm-services) below) over local device files |
 | `bypass_vault_cache` | `false` | Skip the DRM key vault lookup and force a fresh CDM license request every run, instead of reusing a previously-seen key. |
-| `log_engine_output` | `false` | Log the decrypt engine's (flux/Bento4/Shaka) own stdout/stderr output — equivalent to the CLI's `--log-decryptor-output`. Off by default since it's verbose; useful when a decrypt is failing and you need the raw engine output |
-| `decrypt_engine_map` | — | Optional per-scheme decrypt engine override, e.g. `{"cbc1": "bento4"}`. The engine is otherwise picked automatically from the detected CENC scheme, preferring flux for `cenc`/`cens`/`cbcs`/`cbc1` and Shaka for `fps`, and falling through to the next engine in that scheme's priority order if the preferred one's binary isn't available. Values: `flux`, `bento4`, `shaka`. Requires that engine's binary to be available — see `installation` above |
+| `log_engine_output` | `false` | Log the decrypt engine's own stdout/stderr output — equivalent to the CLI's `--log-decryptor-output`. Off by default since it's verbose; useful when a decrypt is failing and you need the raw engine output |
 | `vault` | — | Optional external DRM key store(s), queried before CDM extraction |
 
 ### Multiple / self-hosted DRM vaults

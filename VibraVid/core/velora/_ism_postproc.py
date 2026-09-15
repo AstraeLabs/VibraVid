@@ -6,15 +6,11 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from rich.markup import escape
-
 from VibraVid.core.decryptor import Decryptor
 from VibraVid.core.muxing.helper.video import _segment_number
-from VibraVid.core.ui.bar_manager import console
 
-from ._decrypt_pipeline import SKIP_POST_DECRYPT
+from ._decrypt_pipeline import _skip_post_decrypt
 from .util._ism_boxes import ISM_TIMESCALE, build_ism_init_segment
-from .util._verify import verify_decrypted_media
 
 logger = logging.getLogger("manual")
 
@@ -203,7 +199,7 @@ class IsmPostprocMixin:
 
         logger.info(f"ISM file: {encrypted_temp} ({encrypted_temp.stat().st_size} bytes)")
 
-        if SKIP_POST_DECRYPT:
+        if _skip_post_decrypt():
             logger.info(f"skip_post_decrypt: leaving {encrypted_temp.name} encrypted (raw merged track kept for testing)")
             try:
                 encrypted_temp.rename(out_path)
@@ -242,18 +238,6 @@ class IsmPostprocMixin:
         if not (ok and out_path.exists() and out_path.stat().st_size > 0):
             logger.error("ISM post-processing decryption failed")
             return False
-
-        verify_ok, verify_msg, still_encrypted = verify_decrypted_media(out_path)
-        if not verify_ok:
-            logger.error(f"Post-mux verification failed for {out_path.name}: {verify_msg}")
-            if still_encrypted:
-                label = self._decrypt_track_label(stream)
-                short = verify_msg.split(";", 1)[0].strip()
-                console.print(escape(f"Decryption FAILED for {label}: {short};"))
-                with self._decrypt_failures_lock:
-                    self.decrypt_failures.append({"label": label, "track": out_path.name, "message": verify_msg})
-            return False
-        logger.info(f"Check post-mux OK for{out_path.name}: {verify_msg}")
 
         # Finalize at 100%, keeping the decrypt status/segment/size (don't revert to Merge).
         bar_manager.handle_progress_line({"task_key": task_key, "pct": 100})

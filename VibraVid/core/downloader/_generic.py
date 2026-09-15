@@ -35,7 +35,7 @@ from VibraVid.core.velora.util.formatting import (
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
-from .base import BaseDownloader
+from .base import BaseDownloader, DownloadResult
 from .mp4 import MP4_Downloader
 
 console = Console()
@@ -146,6 +146,7 @@ class Generic_Downloader(BaseDownloader):
         self._active: list[tuple[MediaDownloader, dict[str, Any]]] = []
         self._dv_stream = None
         self._dv_isolated = False
+        self._no_match = False
         self.other_tracks: list = []
         self._direct_sources: list[dict[str, Any]] = []
         logger.info(f"Initialized GENERIC_Downloader with {len(self.sources)} source(s), max_segments={self.max_segments}")
@@ -305,8 +306,16 @@ class Generic_Downloader(BaseDownloader):
                         logger.info(f"Source role '{role}': no stream matches res={video_res}, using full pool")
 
                 stream = max(cands, key=lambda s: getattr(s, "bitrate", 0) or 0)
+
+            # Only `stream` itself, plus any other stream of the SAME type
+            # (to avoid a second, competing auto-pick of e.g. a second video
+            # rendition from this same source), are removed from later
+            # auto-selection.
             for s in md.streams:
-                s.selected = s is stream
+                if s is stream:
+                    s._role_claimed = True
+                elif expected_type and getattr(s, "type", "") == expected_type and not _is_dv(s):
+                    s._role_claimed = True
 
             lang = src.get("language") or src.get("lang")
             name = src.get("name")
@@ -350,6 +359,10 @@ class Generic_Downloader(BaseDownloader):
             role_streams.append(stream)
             logger.info(f"Explicit role '{role}' -> {stream.type} (range={getattr(stream, 'video_range', '')!r}, lang={getattr(stream, 'language', '')!r})")
 
+            # This source's non-claimed streams (other types, or DV video
+            # variants) still flow into normal pool-based auto-selection.
+            auto_parsed.append((md, src))
+
         return role_streams, auto_parsed
 
     def _select(self, parsed: list[tuple[MediaDownloader, dict[str, Any]]]) -> list:
@@ -361,12 +374,20 @@ class Generic_Downloader(BaseDownloader):
         # Sources with an explicit role bypass attribute-based dedup/selection.
         role_streams, parsed = self._apply_explicit_roles(parsed, v)
 
+        # A type already resolved by an explicit role (e.g. "audio") takes
+        # precedence -- any other source's own stream of that same type is
+        # excluded from the pool too, so it can't be auto-picked as a
+        # competing/duplicate second audio (or video, or subtitle) track.
+        claimed_types = {getattr(s, "type", "") for s in role_streams}
+
         # Merge + dedup (keep first occurrence in source order).
         pool: list = []
         seen: set = set()
         for md, _ in parsed:
             for s in md.streams:
-                if getattr(s, "is_external", False):
+                if getattr(s, "is_external", False) or getattr(s, "_role_claimed", False):
+                    continue
+                if getattr(s, "type", "") in claimed_types and not _is_dv(s):
                     continue
                 sig = _track_signature(s)
                 if sig in seen:
@@ -379,13 +400,20 @@ class Generic_Downloader(BaseDownloader):
             for s in md.streams:
                 s.selected = False
 
+        # Explicit-role picks are final regardless of the pool pass below
+        # (they were excluded from `pool` above precisely so nothing can
+        # override them) -- restore their `.selected` flag after the reset.
+        for s in role_streams:
+            s.selected = True
+
         # Check for the &dv companion tag in the video filter. If present, we run a first pass of selection on the non-DV pool with the main video filter.
         v_main, dv_quality = strip_dv_suffix(v)
         if dv_quality is not None:
             v_main = v_main or "best"
             non_dv_pool = [s for s in pool if not _is_dv(s)]
-            selector = StreamSelector(v_main, a, sub, formatter=StreamSelectorFormatter())
+            selector = self._build_selector(v_main, a, sub)
             selector.apply(non_dv_pool)
+            self._no_match = selector.no_match
 
             dv_videos = [s for s in pool if _is_dv(s)]
             if dv_videos:
@@ -396,7 +424,9 @@ class Generic_Downloader(BaseDownloader):
                     target_res = FilterSpec.parse(v_main, "video").res
                 selector._mark_dv_companion(dv_videos, dv_quality, target_res)
         else:
-            StreamSelector(v, a, sub, formatter=StreamSelectorFormatter()).apply(pool)
+            selector = self._build_selector(v, a, sub)
+            selector.apply(pool)
+            self._no_match = selector.no_match
 
         # If a DV companion was selected, keep a reference to it for special handling in the download and muxing phases.
         # An explicit-role DV (self._dv_stream already set) takes precedence over &dv auto-detection.
@@ -407,6 +437,21 @@ class Generic_Downloader(BaseDownloader):
                 logger.info(f"&dv: companion selected -> {self._dv_stream}")
 
         return role_streams + [s for s in pool if s.selected]
+
+    def _build_selector(self, video: str, audio: str, subtitle: str) -> StreamSelector:
+        f = self.custom_filters
+        return StreamSelector(
+            video,
+            audio,
+            subtitle,
+            formatter=StreamSelectorFormatter(),
+            prefer_h265=bool(f.get("prefer_h265")),
+            prefer_hdr10=bool(f.get("prefer_hdr10")),
+            prefer_drm=bool(f.get("prefer_drm")),
+            require_drm=bool(f.get("require_drm")),
+            minimum_video_height=int(f.get("minimum_video_height") or 0),
+            strict_no_match=context_tracker.skip_no_match,
+        )
 
     def _setup_dv_companion(self) -> None:
         """Re download the manifest of the DV companion in a dedicated MediaDownloader, to isolate it from the main video stream and avoid filename collisions on disk (both have the same "{filename}.{ext}")."""
@@ -495,7 +540,11 @@ class Generic_Downloader(BaseDownloader):
                         console.print(f"[bold red][!] WARNING[/bold red] Source '[yellow]{label}[/yellow]': track [yellow]{track_label}[/yellow] needs KID(s) [magenta]{', '.join(track_kids)}[/magenta] ")
                         logger.error(f"Generic source '{label}': track {track_label} KID(s) {track_kids} not covered by provided keys")
 
-            md._session_live_decrypt = bool(sel) and all(getattr(s, "supports_live_decryption", False) for s in sel)
+            md._session_live_decrypt = (
+                bool(sel)
+                and not context_tracker.skip_decrypt
+                and all(getattr(s, "supports_live_decryption", False) for s in sel)
+            )
             md._prepare_labels()
 
         def _safe_download(md, stream, bm) -> None:
@@ -628,22 +677,19 @@ class Generic_Downloader(BaseDownloader):
 
         return status
 
-    def start(self) -> tuple[str | None, bool, str | None]:
+    def start(self) -> DownloadResult:
         try:
             return self._start()
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupt received — stopping all sources...")
             logger.warning("KeyboardInterrupt during hybrid pipeline")
             self._stop_all()
+            return self._fail("cancelled")
 
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-            return None, True, "cancelled"
-
-    def _start(self) -> tuple[str | None, bool, str | None]:
+    def _start(self) -> DownloadResult:
         if self.file_already_exists:
             console.print("[yellow]File already exists.")
-            return self.output_path, False, None
+            return DownloadResult(self.output_path, False, None)
 
         os_manager.create_path(self.output_dir)
 
@@ -653,7 +699,7 @@ class Generic_Downloader(BaseDownloader):
         # ── 1) Parse every source (manifest-based sources here; plain .mp4/.m4a/... sources are split off into self._direct_sources instead)
         parsed = self._parse_sources()
         if not parsed and not self._direct_sources:
-            return None, True, "no sources parsed"
+            return DownloadResult(None, True, "no sources parsed")
 
         # ── 2-3) Merge + dedup + single selection (only meaningful for manifest sources)
         selected = self._select(parsed) if parsed else []
@@ -664,7 +710,11 @@ class Generic_Downloader(BaseDownloader):
 
         if not selected and not self._direct_sources:
             console.print("[yellow][HYBRID] No track selected.")
-            return None, True, "no tracks selected"
+            return DownloadResult(None, True, "no tracks selected")
+
+        if self._no_match:
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
 
         self._active = [
             (md, src)
@@ -682,24 +732,17 @@ class Generic_Downloader(BaseDownloader):
         if self.download_id:
             download_tracker.update_status(self.download_id, "Downloading ...")
 
-        if self._direct_sources:
-            if not self._download_direct_sources():
-                if self.download_id:
-                    download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-                return None, True, "cancelled"
+        if self._direct_sources and not self._download_direct_sources():
+            return self._fail("cancelled")
 
         if not self._run_downloads():
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-            return None, True, "cancelled"
+            return self._fail("cancelled")
 
         # ── 5) Mux
         status = self._collect_status()
         if self._no_media_downloaded(status):
             logger.error("No media downloaded")
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="No media downloaded")
-            return None, True, "No media downloaded"
+            return self._fail("No media downloaded")
 
         if self.download_id:
             download_tracker.update_status(self.download_id, "Muxing ...")
@@ -711,10 +754,7 @@ class Generic_Downloader(BaseDownloader):
 
         final_file = self._merge_files(status)
         if not final_file:
-            merge_error = self.error or "Merge failed"
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error=merge_error)
-            return None, True, merge_error
+            return self._fail(self.error or "Merge failed")
 
         self._finalize(final_file=final_file)
-        return self.output_path, False, None
+        return DownloadResult(self.output_path, False, self.error or None)

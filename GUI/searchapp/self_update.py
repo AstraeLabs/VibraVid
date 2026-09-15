@@ -137,6 +137,7 @@ def _update_docker() -> dict:
 
     # Read compose labels + image ref of the running container.
     try:
+        logger.info(f"Inspecting container {cid} for compose labels and image reference...")
         raw = subprocess.check_output(
             [docker, "inspect", "--format", "{{json .Config.Labels}}\n{{.Config.Image}}", cid],
             text=True,
@@ -218,6 +219,8 @@ def _update_docker() -> dict:
         "-c",
         script,
     ]
+
+    logger.info(f"Launching Docker self-update helper: {helper}")
     try:
         subprocess.run(
             helper, check=True, timeout=30, capture_output=True, text=True,
@@ -270,6 +273,7 @@ def _update_source() -> dict:
         return {"success": False, "needs_manual": True, "message": "Source installation without git: update manually."}
 
     # No remote -> nothing to pull (common for source downloads).
+    logger.info(f"Checking git remotes for repo {repo}...")
     try:
         remotes = subprocess.check_output(
             [git, "-C", repo, "remote"], text=True, timeout=15,

@@ -80,7 +80,7 @@ class LazySearchModule:
                             added_paths.append(path)
 
                     try:
-                        logger.info(f"Loading module '{self.module_name}' from custom path: {self.base_path}")
+                        logger.debug(f"Loading module '{self.module_name}' from custom path: {self.base_path}")
                         spec = importlib.util.spec_from_file_location(
                             self.module_name,
                             os.path.join(self.base_path, self.module_name, "__init__.py"),
@@ -107,7 +107,7 @@ class LazySearchModule:
                 if self._use_for is None:
                     raise AttributeError(f"Module '{self.module_name}' does not define '_useFor'")
 
-                logger.info(f"Successfully loaded module '{self.module_name}' from source '{self.source}'")
+                logger.debug(f"Successfully loaded module '{self.module_name}' from source '{self.source}'")
             except Exception as e:
                 console.print(f"[red]Failed to load module {self.module_name} from source '{self.source}': {str(e)}")
                 raise
@@ -206,7 +206,7 @@ def load_search_functions() -> dict[str, LazySearchModule]:
             logger.error(f"Import source path not found: {base_path}")
             continue
 
-        logger.info(f"Loading site modules from source '{source_label}': {base_path}")
+        logger.debug(f"Loading site modules from source '{source_label}': {base_path}")
 
         # Escape base_path for glob to handle paths with special characters like brackets
         escaped_base_path = os_manager.get_glob_path(base_path)

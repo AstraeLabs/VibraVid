@@ -166,6 +166,8 @@ class DownloadBarManager:
                 parsed.get("segments"),
                 label=label,
                 display_label=parsed.get("display_label"),
+                quality=parsed.get("quality"),
+                language=parsed.get("language"),
             )
 
         # ── Update Rich progress bar ───────────────────────────────────────

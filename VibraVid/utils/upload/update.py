@@ -30,11 +30,12 @@ auto_update_check = config_manager.config.get_bool("DEFAULT", "auto_update_check
 timeout = config_manager.config.get_int("REQUESTS", "timeout")
 _GENERIC_UPDATABLE_TOOLS = {
     "ffmpeg": ["ffmpeg", "ffprobe"],
-    "bento4": ["mp4decrypt", "mp4dump"],
-    "shaka_packager": ["packager"],
+    "flux": ["flux"],
     "dovi_tool": ["dovi_tool"],
     "mkvtoolnix": ["mkvmerge", "mkvinfo"],
     "velora": ["velora"],
+    "yt-dlp": ["yt-dlp"],
+    "deno": ["deno"],
 }
 
 def fetch_github_releases():
@@ -156,6 +157,21 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
     """Re-download *tool*'s binaries when AstraeLabs/Binary has published a newer version."""
     remote = binary_paths.get_remote_tool_version(tool)
     if not remote:
+        if tool in {"yt-dlp", "deno"}:
+            from VibraVid.setup.checker import check_deno, check_yt_dlp
+
+            checker = check_yt_dlp if tool == "yt-dlp" else check_deno
+            if checker(download=False):
+                return {
+                    "success": True,
+                    "updated": False,
+                    "message": "up to date.",
+                }
+            return {
+                "success": False,
+                "updated": False,
+                "message": "not installed.",
+            }
         return {"success": False, "message": f"Could not fetch the latest {tool} version."}
 
     local = binary_paths.get_local_tool_version(tool)
@@ -169,40 +185,61 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
             "message": f"{tool} version baseline recorded ({remote}).",
         }
 
+    managed_dir = os.path.abspath(binary_paths.get_binary_directory())
+    ext = ".exe" if binary_paths.system == "windows" else ""
+
     if local == remote:
-        logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
+        missing = [f"{name}{ext}" for name in exec_names if not binary_paths.get_binary_path(tool, f"{name}{ext}")]
+        if not missing:
+            logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
+            return {
+                "success": True,
+                "updated": False,
+                "local": local,
+                "latest": remote,
+                "message": f"{tool} is up to date ({local}).",
+            }
+
+        console.print(f"[#FFD60A]{tool} is up to date ({local}) but missing locally, reinstalling {len(missing)} binary(ies)...")
+        reinstalled_any = False
+        for binary_name in missing:
+            if binary_paths.download_binary(tool, binary_name):
+                reinstalled_any = True
+
         return {
             "success": True,
-            "updated": False,
+            "updated": reinstalled_any,
             "local": local,
             "latest": remote,
-            "message": f"{tool} is up to date ({local}).",
+            "message": (
+                f"{tool}: reinstalled {len(missing)} missing binary(ies) ({local})."
+                if reinstalled_any
+                else f"{tool}: {len(missing)} binary(ies) missing locally and reinstall failed."
+            ),
         }
 
     console.print(f"[#FFD60A]{tool} outdated (local: {local} -> latest: {remote}), updating...")
 
-    managed_dir = os.path.abspath(binary_paths.get_binary_directory())
-    ext = ".exe" if binary_paths.system == "windows" else ""
     updated_any = False
 
     for name in exec_names:
         binary_name = f"{name}{ext}"
         path = binary_paths.get_binary_path(tool, binary_name)
-        if not path:
-            continue  # not installed locally; nothing to refresh
 
-        # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
-        if os.path.dirname(os.path.abspath(path)) != managed_dir:
-            logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
-            continue
+        if path:
+            # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
+            if os.path.dirname(os.path.abspath(path)) != managed_dir:
+                logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
+                continue
 
-        try:
-            os.remove(path)
-        except OSError as e:
-            logger.warning(f"Failed to remove stale {binary_name}: {e}")
-            continue
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.warning(f"Failed to remove stale {binary_name}: {e}")
+                continue
 
-        binary_paths.invalidate_binary(binary_name)
+            binary_paths.invalidate_binary(binary_name)
+
         if binary_paths.download_binary(tool, binary_name):
             updated_any = True
 
@@ -223,9 +260,13 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
 
 def check_all_binaries_update() -> dict:
-    """Refresh every managed third-party binary (FFmpeg, Bento4, Shaka Packager, dovi_tool, MKVToolNix) that is behind the version published in AstraeLabs/Binary."""
+    """Refresh every managed third-party binary published in AstraeLabs/Binary"""
+    from VibraVid.setup.checker import _should_download
+
     results = {}
     for tool, exec_names in _GENERIC_UPDATABLE_TOOLS.items():
+        if not _should_download(tool):
+            continue
         try:
             results[tool] = check_binary_update(tool, exec_names)
         except Exception as e:

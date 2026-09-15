@@ -5,7 +5,6 @@ from ._log_buffer import install_startup_buffer
 
 install_startup_buffer()
 
-from ._mp4dump import dump_to_string, mp4dump
 from .config import config_manager
 from .console import TVShowManager, start_message
 from .logger import get_log_file_path, logger, setup_logger
@@ -21,6 +20,4 @@ __all__ = [
     "setup_logger",
     "logger",
     "get_log_file_path",
-    "mp4dump",
-    "dump_to_string",
 ]

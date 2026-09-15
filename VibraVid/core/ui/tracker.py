@@ -156,12 +156,19 @@ class DownloadTracker(metaclass=SingletonMeta):
         status: str = None,
         label: str = None,
         display_label: str = None,
+        quality: str = None,
+        language: str = None,
     ):
         with self._lock:
             if download_id in self.downloads:
                 dl = self.downloads[download_id]
                 dl["status"] = status or "downloading"
                 dl["last_update"] = time.time()
+
+                if quality:
+                    dl["quality"] = quality
+                if language:
+                    dl["language"] = language
 
                 # Get or create task state
                 if task_key not in dl["tasks"]:
@@ -419,7 +426,8 @@ class ContextTracker:
     @is_gui.setter
     def is_gui(self, value):
         self.local.is_gui = value
-        ContextTracker._global_is_gui = value
+        if value:
+            ContextTracker._global_is_gui = True
 
     @property
     def is_cancelled_callback(self):
@@ -550,6 +558,46 @@ class ContextTracker:
         self.local.bypass_vault_cache = value
 
     @property
+    def skip_decrypt(self) -> bool:
+        return bool(getattr(self.local, "skip_decrypt", False))
+
+    @skip_decrypt.setter
+    def skip_decrypt(self, value):
+        self.local.skip_decrypt = value
+
+    @property
+    def no_livemux(self) -> bool:
+        return bool(getattr(self.local, "no_livemux", False))
+
+    @no_livemux.setter
+    def no_livemux(self, value):
+        self.local.no_livemux = value
+
+    @property
+    def force_livemux(self) -> bool:
+        return bool(getattr(self.local, "force_livemux", False))
+
+    @force_livemux.setter
+    def force_livemux(self, value):
+        self.local.force_livemux = value
+
+    @property
+    def no_concurrent(self) -> bool:
+        return bool(getattr(self.local, "no_concurrent", False))
+
+    @no_concurrent.setter
+    def no_concurrent(self, value):
+        self.local.no_concurrent = value
+
+    @property
+    def skip_no_match(self) -> bool:
+        return bool(getattr(self.local, "skip_no_match", False))
+
+    @skip_no_match.setter
+    def skip_no_match(self, value):
+        self.local.skip_no_match = value
+
+    @property
     def log_engine_output(self):
         return getattr(self.local, "log_engine_output", None)
 
@@ -649,22 +697,3 @@ class ContextTracker:
 # Global instance
 download_tracker = DownloadTracker()
 context_tracker = ContextTracker()
-
-
-def open_context_download(title: str, path: str = None, default_type: str = "Film") -> str | None:
-    """Register the download described by ``context_tracker`` as active."""
-    download_id = context_tracker.download_id
-    if not download_id:
-        return None
-
-    download_tracker.start_download(
-        download_id,
-        title or "Download",
-        context_tracker.site_name or "Unknown",
-        context_tracker.media_type or default_type,
-        path=path,
-    )
-    download_tracker.update_status(download_id, "Downloading ...")
-    return download_id
-
-

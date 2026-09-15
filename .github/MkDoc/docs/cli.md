@@ -72,6 +72,9 @@ python manual.py --site streamingcommunity --search "interstellar" -sa "eng"
 # Subtitles
 python manual.py --site streamingcommunity --search "interstellar" -ss "eng"
 
+# Skip the whole download if the requested filter matches no track
+python manual.py --site streamingcommunity --search "interstellar" -sa "deu" --skip-no-match
+
 # Output container (overrides PROCESS.extension from config.json for this run)
 python manual.py --site streamingcommunity --search "interstellar" --extension mp4
 ```
@@ -125,6 +128,11 @@ python manual.py --down "https://example.com/master.m3u8" --type hls \
 python manual.py --down "https://example.com/manifest.mpd" --type dash \
   --license-url "https://example.com/wv/license" --drm widevine \
   --headers "Authorization: Bearer <token>" -o "./Video/movie.mkv"
+
+# DASH with a DRM license server that also needs its own HTTP header (repeatable, like --headers)
+python manual.py --down "https://example.com/manifest.mpd" --type dash \
+  --license-url "https://example.com/wv/license" --drm widevine \
+  --license-headers "Authorization: Bearer <token>" -o "./Video/movie.mkv"
 
 # Grab just a clip: segments 10-50, or the 00:01:00-00:05:00 time range
 python manual.py --down "https://example.com/master.m3u8" --type hls \
@@ -208,12 +216,59 @@ python manual.py --down "https://example.com/master.m3u8" --type hls \
 `--resolve-only` sets these automatically on the `--down` entry it produces, so this is mostly
 needed when hand-building a `--down`/`--down-json` invocation yourself.
 
+## Direct Download via yt-dlp (`--yt-dlp`)
+
+Download from any site yt-dlp supports bypassing site search entirely — separate from `--down`, which is for direct HLS/DASH/ISM/MP4 URLs.
+
+```bash
+# Basic download
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." -o "./Video/clip.mp4"
+
+# Pick a specific format instead of the default bestvideo+bestaudio/best
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --format "best[height<=720]"
+
+# List available formats and exit, or pick one interactively
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --list-formats
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --interactive-format
+
+# Extract audio only
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --extract-audio \
+  --audio-format mp3 --audio-quality 0
+
+# Subtitles
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --write-subs --sub-langs it,en
+python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --write-auto-subs
+
+# Only the first N entries of a playlist
+python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist-end 5
+```
+
+| Flag | Effect |
+|---|---|
+| `--yt-dlp <URL>` | Download this URL with yt-dlp instead of the site-search/`--down` flow |
+| `--format <SPEC>` | yt-dlp format selector (default: `bestvideo+bestaudio/best`) |
+| `--list-formats` | List available formats for the URL and exit |
+| `--interactive-format` | Show available formats and prompt for the format ID before downloading |
+| `--extract-audio` | Extract audio only |
+| `--audio-format <FORMAT>` | Audio format for extraction (e.g. `mp3`, `m4a`, `wav`, `opus`) |
+| `--audio-quality <QUALITY>` | Audio quality for extraction (e.g. `0`, `5`, `8k`) |
+| `--playlist-end <N>` | Only process the first N entries of a playlist |
+| `--sub-langs <LANGS>` | Comma-separated subtitle languages (e.g. `it,en`) |
+| `--write-subs` | Write subtitles |
+| `--write-auto-subs` | Write auto-generated subtitles |
+
 ## Advanced Options
 
 | Flag | Effect |
 |---|---|
 | `--use-curl-cffi` | Download segments via curl_cffi (browser TLS impersonation) instead of Velora — for sites where individual segments are Cloudflare-protected |
 | `--no-vault-cache` | Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens) |
+| `--no-decrypt` | Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass) |
+| `--no-livemux` | Disable the streaming-mux fast path for this run, always falling back to the normal post-download `join_media()` pass. On by default |
+| `--livemux` | Force-enable the streaming-mux fast path for this run even if the current service does not opt in via `_live_mux = True`. Off by default |
+| `--no-concurrent` | Download video, audio and subtitles sequentially instead of simultaneously for this run. Concurrent download is on by default |
+| `--skip-no-match` | Skip the whole download if `-sv`/`-sa`/`-ss` matches no track, instead of falling back to the best available one |
+| `--log-decryptor-output` | Write flux's own stdout+stderr lines to the log file as they run, tagged with the engine name (e.g. `[FLUX]`) instead of `[INFO]` |
 | `--abc` | Anonymize printed KID:KEY pairs in the console/log, masking alternating characters with `?` |
 | `--hls-method AES_128\|NONE` | Override the HLS segment encryption method, ignoring the manifest's own `#EXT-X-KEY` tag (or supplying one when it has none). `NONE` treats every segment as already clear; `AES_128` forces AES-128-CBC (pair with `--hls-key`/`--hls-iv`) |
 | `--hls-key <HEX\|BASE64\|FILE>` | Raw AES-128 key to use instead of fetching `URI=` from the manifest's `#EXT-X-KEY` tag |
@@ -221,7 +276,7 @@ needed when hand-building a `--down`/`--down-json` invocation yourself.
 | `--skip-content-check` | Skip the preflight HEAD content-type check for MP4 direct downloads (`--type mp4`) — needed for single-use download URLs where a HEAD request consumes the link |
 | `--skip-sanitize` | Use the `-o` output path verbatim (MP4/HLS/DASH/ISM direct downloads), skipping path sanitization (transliteration of non-ASCII characters) |
 | `--no-manifest-info` | Don't print the parsed manifest/streams table |
-| `--binary-update` | Check FFmpeg/Bento4/Shaka Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download whichever is outdated |
+| `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download whichever is outdated |
 | `--resolve-only` | Resolve and cache the manifest (keys, license, playlist) without actually downloading — pairs with `--down-json`/the queue to download later without re-resolving |
 | `--tui` | Launch the Textual terminal UI instead of the plain CLI flow |
 | `-UP`, `--update` | Auto-update to the latest release (binary builds only) |
@@ -258,14 +313,6 @@ python manual.py --queue-clear
 
 # Process every pending (or interrupted) item in order
 python manual.py --queue-run
-
-# A failed item is never retried automatically - re-queue it explicitly
-python manual.py --queue-retry <ID>
-python manual.py --queue-retry-all
-
-# Optional extra pause between items, on top of DOWNLOAD.delay_after_download
-# (which each download already sleeps for on its own before exiting)
-python manual.py --queue-run --queue-delay 15
 ```
 
 !!! note

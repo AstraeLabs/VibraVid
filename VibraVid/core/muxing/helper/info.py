@@ -52,7 +52,8 @@ class Mediainfo:
         args = [binary, "-hide_banner"]
         if is_mpegts_file(file):
             args += ["-f", "mpegts"]
-        
+
+        logger.info(f"Running ffprobe command: {' '.join(args + ['-i', file])}")
         args += ["-i", file]
         proc = await asyncio.create_subprocess_exec(
             *args,

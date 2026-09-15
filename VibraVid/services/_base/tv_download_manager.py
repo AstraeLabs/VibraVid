@@ -7,6 +7,7 @@ from typing import Any
 from rich.console import Console
 from rich.prompt import Prompt
 
+from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.services._base import tmdb_artwork
 from VibraVid.services._base.tv_display_manager import (
@@ -182,6 +183,13 @@ def process_episode_download(
         console.print(f"[red]No episodes found for season {index_season_selected}")
         return
 
+    # Track per-episode outcomes so a season where nothing downloaded is
+    # reported as a failure (non-zero CLI exit / "Failed" in the GUI) instead
+    # of silently completing.
+    failed_episodes: list[int] = []
+    downloaded_any = False
+    last_error: str | None = None
+
     if download_all:
         context_tracker.cli_episode_selection = "*"
         for i_episode in range(1, episodes_count + 1):
@@ -208,22 +216,10 @@ def process_episode_download(
             except Exception as e:
                 logger.exception("Error downloading episode %s of season %s", i_episode, index_season_selected)
                 console.print(f"[red]Error downloading episode {i_episode} of season {index_season_selected}: {e}")
-                stopped = True
-                result = (None, True)
+                result = DownloadResult(None, True, str(e) or e.__class__.__name__)
 
-            # Support callbacks returning either (path, stopped) or (path, stopped, error)
-            stopped = True
-            error_msg = None
-            if isinstance(result, tuple):
-                if len(result) == 2:
-                    _, stopped = result
-                elif len(result) >= 3:
-                    _, stopped, error_msg = result[0], result[1], result[2]
-                else:
-                    _ = result[0] if result else None
-                    stopped = True
-            else:
-                stopped = True
+            res = DownloadResult.from_raw(result)
+            stopped, error_msg = res.stopped, res.error
 
             # If callback signalled stop/failure, surface returned error (if any)
             if _is_user_stop_requested() or stopped:
@@ -232,6 +228,10 @@ def process_episode_download(
                 if error_msg:
                     console.print(f"[red]Error: {error_msg}")
                 console.print(f"[yellow]Warning: episode {i_episode} failed for season {index_season_selected}.")
+                failed_episodes.append(i_episode)
+                last_error = error_msg or last_error
+            else:
+                downloaded_any = True
 
     else:
         # Display episodes list and manage user selection
@@ -312,21 +312,10 @@ def process_episode_download(
             except Exception as e:
                 logger.exception("Error downloading episode %s of season %s", i_episode, index_season_selected)
                 console.print(f"[red]Error downloading episode {i_episode} of season {index_season_selected}: {e}")
-                stopped = True
-                result = (None, True)
+                result = DownloadResult(None, True, str(e) or e.__class__.__name__)
 
-            # Support callbacks returning either (path, stopped) or (path, stopped, error)
-            stopped = True
-            error_msg = None
-            if isinstance(result, tuple):
-                if len(result) == 2:
-                    _, stopped = result
-                elif len(result) >= 3:
-                    _, stopped, error_msg = result[0], result[1], result[2]
-                else:
-                    stopped = True
-            else:
-                stopped = True
+            res = DownloadResult.from_raw(result)
+            stopped, error_msg = res.stopped, res.error
 
             # If callback signalled stop/failure, surface returned error (if any)
             if stopped or _is_user_stop_requested():
@@ -335,3 +324,22 @@ def process_episode_download(
                 if error_msg:
                     console.print(f"[red]Error: {error_msg}")
                 console.print(f"[yellow]Warning: episode {i_episode} failed for season {index_season_selected}.")
+                failed_episodes.append(i_episode)
+                last_error = error_msg or last_error
+            else:
+                downloaded_any = True
+
+    if failed_episodes:
+        detail = f" - {last_error}" if last_error else ""
+        summary = (
+            f"{len(failed_episodes)} episode(s) failed for season "
+            f"{index_season_selected} (episodes {failed_episodes}){detail}"
+        )
+        
+        if not downloaded_any:
+            # Nothing downloaded for this season: propagate so the CLI exits
+            # non-zero and the GUI marks the download Failed instead of Done.
+            raise RuntimeError(summary)
+        
+        console.print(f"[yellow]{summary}")
+        logger.warning(summary)

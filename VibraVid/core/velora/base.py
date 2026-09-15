@@ -17,7 +17,7 @@ from VibraVid.core.manifest.m3u8 import HLSParser
 from VibraVid.core.manifest.mpd import DashParser
 from VibraVid.core.manifest.stream import Stream
 from VibraVid.core.ui.bar_manager import DownloadBarManager
-from VibraVid.core.ui.tracker import download_tracker
+from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import AUDIO_EXTENSIONS, SUBTITLE_CODEC_MAP, SUBTITLE_EXTENSIONS, VIDEO_EXTENSIONS
 from VibraVid.core.utils.language import LANGUAGE_MAP, language_variants, resolve_locale, subtitle_flags
@@ -263,8 +263,20 @@ class BaseMediaDownloader:
         v_cfg = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
         a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
         s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
-        selector = StreamSelector(v_cfg, a_cfg, s_cfg, formatter=StreamSelectorFormatter())
+        selector = StreamSelector(
+            v_cfg,
+            a_cfg,
+            s_cfg,
+            formatter=StreamSelectorFormatter(),
+            prefer_h265=bool(f.get("prefer_h265")),
+            prefer_hdr10=bool(f.get("prefer_hdr10")),
+            prefer_drm=bool(f.get("prefer_drm")),
+            require_drm=bool(f.get("require_drm")),
+            minimum_video_height=int(f.get("minimum_video_height") or 0),
+            strict_no_match=context_tracker.skip_no_match,
+        )
         self._sv, self._sa, self._ss = selector.apply(self.streams)
+        self.no_match_skip = selector.no_match
 
     def _effective_filter(self, track_type: str) -> str:
         """Return the active selection filter for *track_type*, preferring custom_filters over config."""
@@ -350,6 +362,11 @@ class BaseMediaDownloader:
         sel_video = [s for s in self.streams if s.type == "video" and s.selected and not s.is_external]
         sel_audio = [s for s in self.streams if s.type == "audio" and s.selected and not s.is_external]
         sel_subs = [s for s in self.streams if s.type == "subtitle" and s.selected and not s.is_external]
+
+        # A track whose KID isn't covered by any provided key will never be downloaded
+        # (see _has_matching_key/_skip_stream_no_key)
+        sel_audio = [s for s in sel_audio if self._has_matching_key(s)]
+        sel_subs = [s for s in sel_subs if self._has_matching_key(s)]
 
         # Keep only one subtitle stream per language+flag variant (e.g. "en", "en-forced", "en-sdh", etc.)
         _seen_sub_variants: set[str] = set()
@@ -670,7 +687,7 @@ class BaseMediaDownloader:
                 )
                 continue
 
-            # ── plain-text DASH subtitles (vtt, ttml, srt, …) ───────────────
+            # ── plain-text DASH subtitles (vtt, ttml, srt) ───────────────
             # Naming: {filename}.{lang}.{ext}  e.g. "show.cs-cz.vtt"
             if ext in SUBTITLE_EXTENSIONS and stem_lower.startswith(fname_l + "."):
                 lang_part = stem_lower[len(fname_l) + 1 :]  # e.g. "cs-cz"

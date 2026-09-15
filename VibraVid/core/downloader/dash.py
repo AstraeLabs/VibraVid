@@ -27,9 +27,8 @@ from VibraVid.core.velora.util.formatting import (
 from VibraVid.setup import get_prd_path, get_wvd_path, resolve_service_cdm_paths
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.http_client import create_client, get_headers
-from VibraVid.utils.storage_upload.hook import is_cached, try_fetch
 
-from .base import BaseDownloader
+from .base import BaseDownloader, DownloadResult
 from .util._drm_probe import PROBE_BYTES_FAST, DRMProbe
 
 console = Console()
@@ -245,6 +244,9 @@ class DASH_Downloader(BaseDownloader):
         self.decryption_keys = []
         self.media_downloader = None
         self.custom_filters: dict | None = None
+        self.display_min_video_height: int | None = None
+        self.display_only_drm_video = False
+        self.display_only_drm_audio = False
         self._probe = DRMProbe()
 
     def _collect_drm_from_streams(self, streams: list, check_selected: bool = True) -> dict[str, list[dict]]:
@@ -344,11 +346,6 @@ class DASH_Downloader(BaseDownloader):
                             }
                         )
 
-            if collected_kids:
-                kid_str = ", ".join(sorted(collected_kids))
-                dt_str = "+".join(collected_dts)
-                logger.info(f"DASH DRM collected from stream: {s.id or 'unnamed'} | type={s.type} | KID={kid_str} | {dt_str}")
-
         # Merge every selected track's label onto each surviving entry so a key
         # shared across tracks is stored with the full quality it unlocks
         # (e.g. "video 2160p + audio IT" instead of only the first track's label).
@@ -406,7 +403,7 @@ class DASH_Downloader(BaseDownloader):
                 if not init_seg:
                     continue
 
-                encrypted, _scheme, _drm_names, kid, pssh_b64 = self._probe.probe(
+                encrypted, _scheme, _is_widevine, kid, pssh_b64 = self._probe.probe(
                     init_seg.url, self.mpd_headers, client, size=PROBE_BYTES_FAST
                 )
                 if not encrypted or not kid:
@@ -443,10 +440,21 @@ class DASH_Downloader(BaseDownloader):
             logger.warning("DRM mismatch: preference=playready but only Widevine PSSH found.")
 
     def _fetch_keys(self, drm_psshs: dict[str, list[dict]]) -> list[str]:
-        """Dispatch key fetch to DRMManager using the configured drm_preference."""
-        keys = None
+        """Dispatch key fetch to DRMManager using the configured drm_preference.
 
-        if self.drm_preference == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
+        When the manifest only carries the *other* DRM type (see
+        ``_warn_drm_mismatch``), fall back to that type instead of skipping key
+        resolution entirely -- otherwise a manually-provided key never reaches
+        DRMManager and is used "blind"
+        """
+        keys = None
+        effective_pref = self.drm_preference
+        if not drm_psshs.get(effective_pref):
+            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
+            if drm_psshs.get(other):
+                effective_pref = other
+
+        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
             keys = self.drm_manager.get_wv_keys(
                 drm_psshs[DRMType.WIDEVINE],
                 self.license_url,
@@ -457,7 +465,7 @@ class DASH_Downloader(BaseDownloader):
                 license_request_fn=self.license_request_fn,
             )
 
-        if self.drm_preference == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
+        if effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
             keys = self.drm_manager.get_pr_keys(
                 drm_psshs[DRMType.PLAYREADY],
                 self.license_url,
@@ -514,7 +522,13 @@ class DASH_Downloader(BaseDownloader):
         eff_hdrs = license_hdrs or self.license_headers
 
         keys = None
-        if self.drm_preference == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
+        effective_pref = self.drm_preference
+        if not drm_psshs.get(effective_pref):
+            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
+            if drm_psshs.get(other):
+                effective_pref = other
+
+        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
             keys = self.drm_manager.get_wv_keys(
                 drm_psshs[DRMType.WIDEVINE],
                 eff_url,
@@ -524,7 +538,7 @@ class DASH_Downloader(BaseDownloader):
                 license_request_fn=self.license_request_fn,
             )
 
-        elif self.drm_preference == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
+        elif effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
             keys = self.drm_manager.get_pr_keys(
                 drm_psshs[DRMType.PLAYREADY],
                 eff_url,
@@ -648,33 +662,18 @@ class DASH_Downloader(BaseDownloader):
                 console.print(f"[yellow]Warning on extra audio {audio_language}: {e}")
                 logger.exception(f"Extra audio download failed for {audio_language}")
             finally:
-                shutil.rmtree(audio_temp_dir, ignore_errors=True)
+                os_manager.fast_rmtree(audio_temp_dir)
 
         return external_audios, external_subtitles
 
-    def start(self) -> tuple[str | None, bool, str | None]:
+    def start(self) -> DownloadResult:
         """
         Execute the full DASH download pipeline.
         Returns ``(output_path, cancelled)`` — cancelled=True means abort.
         """
-        if self.file_already_exists:
-            console.print("[yellow]File already exists.")
-            return self.output_path, False, None
-
-        if context_tracker.resolve_only:
-            from VibraVid.cli.command.queue import enqueue_down_from_context
-
-            enqueue_down_from_context(self.mpd_url, self.output_path)
-            return self.output_path, False, None
-
-        if is_cached():
-            console.print("[dim]Skipping — already in cache.")
-            return self.output_path, False, None
-
-        if try_fetch(self.output_path):
-            return self.output_path, False, None
-
-        os_manager.create_path(self.output_dir)
+        precheck = self._precheck(self.mpd_url)
+        if precheck is not None:
+            return precheck
 
         try:
             self.media_players = MediaPlayers(self.output_dir)
@@ -725,6 +724,10 @@ class DASH_Downloader(BaseDownloader):
         # Parse without showing table so we can annotate the DV companion first
         streams = self.media_downloader.parse_stream(show_table=False)
 
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+
         # StreamSelector marks the DV companion with dv_companion=True when &dv is in the filter
         _dv_companion_stream = next(
             (s for s in streams if getattr(s, "dv_companion", False)),
@@ -743,7 +746,40 @@ class DASH_Downloader(BaseDownloader):
                 _was_selected = _dv_companion_stream.selected
                 _dv_companion_stream.selected = True
 
-            console.print(build_table(streams))
+            display_streams = streams
+            if self.display_min_video_height is not None:
+                def _display_height(stream) -> int:
+                    height = getattr(stream, "height", 0) or 0
+                    if height:
+                        return int(height)
+                    resolution = getattr(stream, "resolution", "") or ""
+                    try:
+                        return int(resolution.split("x")[-1])
+                    except (TypeError, ValueError):
+                        return 0
+
+                display_streams = [
+                    stream
+                    for stream in display_streams
+                    if getattr(stream, "type", "") != "video"
+                    or _display_height(stream) >= self.display_min_video_height
+                ]
+            if self.display_only_drm_video:
+                display_streams = [
+                    stream
+                    for stream in display_streams
+                    if getattr(stream, "type", "") != "video"
+                    or bool(getattr(stream, "drm", None) and stream.drm.is_encrypted())
+                ]
+            if self.display_only_drm_audio:
+                display_streams = [
+                    stream
+                    for stream in display_streams
+                    if getattr(stream, "type", "") != "audio"
+                    or bool(getattr(stream, "drm", None) and stream.drm.is_encrypted())
+                ]
+
+            console.print(build_table(display_streams))
             if _dv_companion_stream is not None and _was_selected is not None:
                 _dv_companion_stream.selected = _was_selected
 
@@ -785,7 +821,7 @@ class DASH_Downloader(BaseDownloader):
                 self.error = "Failed to fetch decryption keys"
                 if self.download_id:
                     download_tracker.complete_download(self.download_id, success=False, error=self.error)
-                return None, True, self.error
+                return DownloadResult(None, True, self.error)
 
         # ── Download
         self._log_tracks_json(streams, self.decryption_keys, self.mpd_url)
@@ -793,25 +829,19 @@ class DASH_Downloader(BaseDownloader):
             if DELAY_SS > 0:
                 console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
                 time.sleep(DELAY_SS)
-            return self.output_path, False, None
+            return DownloadResult(self.output_path, False, None)
 
         if self.download_id:
             download_tracker.update_status(self.download_id, "Downloading ...")
         print()
 
         self.media_downloader.set_key(self.decryption_keys)
+        self._maybe_enable_streaming_mux()
         status = self.media_downloader.start_download()
 
-        if status.get("error") == "cancelled":
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-            return None, True, "cancelled"
-
-        if self._no_media_downloaded(status):
-            logger.error("No media downloaded")
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="No media downloaded")
-            return None, True, "No media downloaded"
+        status_check = self._check_download_status(status)
+        if status_check is not None:
+            return status_check
 
         # ── Extra audio MPD
         if self._dash_audio_tracks and AUDIO_FILTER != "false":
@@ -828,27 +858,5 @@ class DASH_Downloader(BaseDownloader):
                         status["subtitles"].append(sub)
                         existing.add(sub.get("path"))
 
-        # ── Merge
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Muxing ...")
-
-        final_file = self._merge_files(status)
-        if not final_file:
-            if self.download_id and download_tracker.is_stopped(self.download_id):
-                download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-                return None, True, "cancelled"
-            
-            merge_error = self.error or "Merge failed"
-            logger.error(merge_error)
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error=merge_error)
-            return None, True, merge_error
-
-        self._finalize(final_file=final_file)
-        if DELAY_SS > 0:
-            console.print(f"\n[green]Sleeping {DELAY_SS} seconds before finishing...")
-            time.sleep(DELAY_SS)
-
-        if self.error:
-            return self.output_path, False, self.error
-        return self.output_path, False, None
+        # ── Merge / finalize (shared tail)
+        return self._merge_and_finalize(status)

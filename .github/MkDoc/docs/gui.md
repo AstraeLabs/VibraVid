@@ -120,7 +120,7 @@ When a newer release is available the UI shows an update banner. The version che
 applies it in place. For Docker one-click updates (Docker socket requirement) see the
 [Docker guide](docker.md).
 
-Separately, `api/binaries/update/` checks FFmpeg/Bento4/Shaka Packager/dovi_tool/MKVToolNix/
+Separately, `api/binaries/update/` checks FFmpeg/Flux/dovi_tool/MKVToolNix/
 Velora against AstraeLabs/Binary and re-downloads whichever is outdated — the GUI counterpart
 to the CLI's `--binary-update` flag.
 

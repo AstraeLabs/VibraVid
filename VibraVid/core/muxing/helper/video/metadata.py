@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import subprocess
 
 from VibraVid.core.muxing.helper._ffprobe_cache import ffprobe_cached
@@ -38,6 +39,7 @@ def _disposition_flags(disposition: dict) -> list:
 def get_media_metadata(file_path: str) -> dict:
     """Extract quality (resolution), languages, codecs and flags from a media file using ffprobe."""
     cmd = [get_ffprobe_path(), "-v", "error", "-show_streams", "-print_format", "json", file_path]
+    logger.info(f"Running get_media_metadata for {os.path.basename(file_path)} with cmd: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace")

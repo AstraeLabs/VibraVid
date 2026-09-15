@@ -96,13 +96,9 @@ class TVShowManager:
 
         self.console.print(table)
 
-    def run(self, force_int_input: bool = False, max_int_input: int = 0) -> str:
+    def run(self) -> str:
         """
         Run the TV show manager application.
-
-        Parameters:
-            force_int_input(bool): If True, only accept integer inputs from 0 to max_int_input
-            max_int_input (int): range of row to show
 
         Returns:
             str: Last command executed before breaking out of the loop.
@@ -140,13 +136,8 @@ class TVShowManager:
             # Pagination prompt
             self.console.print("[green]Press [red]Enter [green]for next page, [red]'q' [green]to quit.")
 
-            if not force_int_input:
-                prompt_msg = "\n[cyan]Insert media index [yellow]'1'[cyan], [yellow]'*' [cyan]to download all media, [yellow]'1-2' [cyan]for a range of media or [yellow]'3-*' [cyan]to download from a specific index to the end"
-                key = Prompt.ask(prompt_msg)
-            else:
-                choices = [""] + [str(i) for i in range(max_int_input + 1)] + ["q", "quit"]
-                prompt_msg = "[cyan]Insert media [red]index"
-                key = Prompt.ask(prompt_msg, choices=choices, show_choices=False)
+            prompt_msg = "\n[cyan]Insert media index [yellow]'1'[cyan], [yellow]'*' [cyan]to download all media, [yellow]'1-2' [cyan]for a range of media or [yellow]'3-*' [cyan]to download from a specific index to the end"
+            key = Prompt.ask(prompt_msg)
 
             last_command = key
 

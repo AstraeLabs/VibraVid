@@ -76,7 +76,7 @@ def _bypasser_url() -> str | None:
 def _solve_via_bypasser(url: str, timeout: int) -> str:
     """Solve the Turnstile widget via the docker/bypasser sidecar over HTTP."""
     endpoint = _bypasser_url()
-    logger.info(f"[monochrome/amazon] solving Cloudflare Turnstile via bypasser sidecar ({endpoint})…")
+    logger.info(f"[monochrome/amazon] solving Cloudflare Turnstile via bypasser sidecar ({endpoint})")
     client = create_client(browser=None, timeout=timeout + 15, proxies={})
     try:
         try:
@@ -158,7 +158,7 @@ def get_track_link(title: str, duration: int, album: str, artist: str, quality: 
 
         # Retry once if the JWT was rejected (401) — it may have expired or been revoked.
         if resp.status_code == 401:
-            logger.info("[monochrome/amazon] JWT rejected, refreshing and retrying once…")
+            logger.info("[monochrome/amazon] JWT rejected, refreshing and retrying once")
             jwt = get_jwt(force_refresh=True)
             resp = client.get(AMAZON_API_URL, headers={"X-Turnstile-JWT": jwt}, params=params, timeout=30)
 

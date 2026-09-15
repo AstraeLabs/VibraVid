@@ -118,18 +118,26 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
 
     from VibraVid.utils.upload.version import __version__
 
+    from ._shared import get_site_extra_args_schema
+
     categories = get_site_categories()
     providers = []
     for name in sorted(get_available_sites()):
         providers.append({"name": name, "category": categories.get(name, "")})
+
+    cli_option_providers = []
+    for p in providers:
+        try:
+            if get_site_extra_args_schema(p["name"]):
+                cli_option_providers.append(p)
+        except Exception:
+            logger.exception("Impossibile leggere le opzioni CLI per '%s'", p["name"])
 
     disabled = [
         s.strip() for s in (os.environ.get("VIBRAVID_DISABLED_SITES") or "").split(",") if s.strip()
     ]
 
     services = [
-        {"name": "FlareSolverr", "detail": "Cloudflare challenges",
-         "on": bool(os.environ.get("FLARESOLVERR_URL"))},
         {"name": "Bypasser", "detail": "Turnstile for Amazon Music",
          "on": bool(os.environ.get("BYPASSER_URL"))},
     ]
@@ -167,6 +175,7 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
     return render(request, "searchapp/cinema_system.html", {
         "nav_active": "settings",
         "providers": providers,
+        "cli_option_providers": cli_option_providers,
         "disabled_sites": disabled,
         "services": services,
         "arr": arr,
@@ -178,6 +187,13 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
     })
 
 
+def cinema_logs(request: HttpRequest) -> HttpResponse:
+    """Logs: browse and view app / ARR log files."""
+    return render(request, "searchapp/cinema_logs.html", {
+        "nav_active": "logs",
+    })
+
+
 __all__ = [
-    "cinema_download", "cinema_search", "cinema_watchlist", "cinema_system",
+    "cinema_download", "cinema_search", "cinema_watchlist", "cinema_system", "cinema_logs",
 ]

@@ -1,8 +1,5 @@
 # 29.05.26
 
-import importlib
-
-from VibraVid.services._base.site_loader import get_folder_name
 from VibraVid.services.eurostreaming.scrapper import GetSerieInfo
 from VibraVid.utils import config_manager
 
@@ -14,13 +11,6 @@ class EurostreamingAPI(BaseStreamingAPI):
         super().__init__()
         self.site_name = "eurostreaming"
         self._search_fn = None
-
-    def _get_search_fn(self):
-        """Lazy-load the search function from the services package."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
 
     def _get_base_url(self) -> str:
         """Get the base URL for Eurostreaming from the configuration."""

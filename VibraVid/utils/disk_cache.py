@@ -28,14 +28,13 @@ def cache_path(service: str, name: str) -> str:
     return os.path.join(config_manager.base_path, ".cache", "services", service, f"{name}.json")
 
 
-def load(service: str, name: str) -> dict | None:
-    """Load a service's disk-persisted cache dict. None if missing/corrupt."""
+def load(service: str, name: str):
+    """Load a service's disk-persisted cache value (any JSON type). None if missing/corrupt."""
     path = cache_path(service, name)
     with _lock_for(path):
         try:
             with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-            return data if isinstance(data, dict) else None
+                return json.load(fh)
         except Exception:
             return None
 

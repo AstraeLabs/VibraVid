@@ -12,27 +12,12 @@ from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.provider.musiclyric import get_lyrics
 from VibraVid.services._base import Entries, site_constants
 from VibraVid.services._base.tv_display_manager import map_song_path
-from VibraVid.utils import config_manager
 
 from . import amazon
 from .amazon import AmazonError
 
 console = Console()
 logger = logging.getLogger(__name__)
-
-
-def _amazon_bypass_enabled() -> bool:
-    try:
-        return config_manager.config.get_bool("MONOCHROME", "amazon_bypass", default=True)
-    except Exception:
-        return True
-
-
-def _amazon_quality() -> str:
-    try:
-        return config_manager.config.get("MONOCHROME", "amazon_quality", str, default="UHD")
-    except Exception:
-        return "UHD"
 
 
 def _download_via_amazon(select_title) -> str | None:
@@ -65,7 +50,7 @@ def _download_via_amazon(select_title) -> str | None:
     console.print(f"[cyan]Searching on amazon for: [yellow]{artist} - {title}[/yellow]")
     try:
         resp = amazon.get_track_link(
-            title=title, duration=int(duration), album=album, artist=artist, quality=_amazon_quality()
+            title=title, duration=int(duration), album=album, artist=artist, quality="UHD"
         )
     except AmazonError as e:
         logger.warning(f"[monochrome/amazon] resolve failed: {e}")
@@ -81,7 +66,7 @@ def _download_via_amazon(select_title) -> str | None:
         return None
 
     key_hex = amazon.extract_decryption_key(resp)
-    logger.info(f"[monochrome/amazon] match found for {artist!r} - {title!r}: stream_url={stream_url[:80]!r}… encrypted={bool(key_hex)}")
+    logger.info(f"[monochrome/amazon] match found for {artist} - {title}: stream_url={stream_url} encrypted={bool(key_hex)}")
 
     path_components, filename = map_song_path(
         artist=artist, album=album, title=title, year=year, track_number=track_number
@@ -126,21 +111,18 @@ def _download_via_amazon(select_title) -> str | None:
         album_artist=album_artist,
         lyrics=(lyrics_result or {}).get("lyrics"),
     )
-    logger.info(f"[monochrome/amazon] done: {final_path} (exists={os.path.exists(final_path)})")
     return final_path
 
 
 def download_song(select_title) -> str | None:
     """Download a monochrome track via the Amazon Music CDN bypass (see amazon.py)"""
     title = getattr(select_title, "title", "") or getattr(select_title, "name", "")
-
-    if _amazon_bypass_enabled():
-        try:
-            path = _download_via_amazon(select_title)
-            if path:
-                return path
-        except Exception:
-            logger.error(f"[monochrome/amazon] path crashed for {select_title.name!r}")
+    try:
+        path = _download_via_amazon(select_title)
+        if path:
+            return path
+    except Exception:
+        logger.exception(f"[monochrome/amazon] path crashed for {select_title.name!r}")
 
     message = f"No source found to download '{title}'."
     logger.info(f"[monochrome] {message}")

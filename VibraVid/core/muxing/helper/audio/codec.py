@@ -37,7 +37,9 @@ def _detect_audio_codec(path: str) -> str:
     ffprobe_path = get_ffprobe_path()
     if not ffprobe_path:
         return ""
+    
     try:
+        logger.info(f"Running ffprobe to detect audio codec for {os.path.basename(path)} with cmd: {ffprobe_path} -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 {path}")
         result = subprocess.run(
             [
                 ffprobe_path,
@@ -99,6 +101,8 @@ def fix_container_mismatch(path: str) -> str:
         correct_ext,
         fixed_path,
     ]
+    
+    logger.info(f"Running container mismatch fix for {os.path.basename(path)} with cmd: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, encoding="utf-8", errors="replace")
         if result.returncode == 0 and os.path.exists(fixed_path) and os.path.getsize(fixed_path) > 0:

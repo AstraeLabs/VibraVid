@@ -27,8 +27,6 @@ class ClaudioTracker:
             title_str = (title or "").strip() or "://generic"
             media_type_str = (media_type or "").strip()
             site_str = (site or "").strip().lower()
-            logger.info(f"ClaudioTracker: title={title_str} type={media_type_str} service={site_str}")
-            result = claudio_vault.track_download(title_str, media_type_str, site_str)
-            logger.info(f"ClaudioTracker result: {result}")
+            _ = claudio_vault.track_download(title_str, media_type_str, site_str)
         except Exception as exc:
             logger.error(f"ClaudioTracker error: {exc}", exc_info=True)

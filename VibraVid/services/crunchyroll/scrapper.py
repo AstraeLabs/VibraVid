@@ -65,7 +65,7 @@ def _episode_languages(episode_data: dict) -> str | None:
         if short and short not in langs:
             langs.append(short)
 
-    return ",".join(langs) if langs else None
+    return ",".join(f"{lg}(dub)" for lg in langs) if langs else None
 
 
 def _episode_main_guid(episode_data: dict) -> str | None:
@@ -134,7 +134,7 @@ def _assign_display_numbers(episodes: list[dict]) -> list[dict]:
 
 
 class GetSerieInfo:
-    def __init__(self, series_id: str, *, locale: str = "it-IT", preferred_audio_language: str = "it-IT"):
+    def __init__(self, series_id: str, *, locale: str | None = None, preferred_audio_language: str = "it-IT"):
         """Initialize series scraper with minimal API calls."""
         self.series_id = series_id
         self.seasons_manager = SeasonManager()
@@ -279,48 +279,6 @@ class GetSerieInfo:
             )
 
         return season.episodes.episodes
-
-    def _get_episode_audio_locales(self, episode_id: str) -> tuple[list[str], dict[str, str], str | None]:
-        """
-        Get available audio locales WITHOUT calling playback API.
-        Uses cached metadata from episode list API call.
-
-        Returns:
-            Tuple[List[str], Dict[str, str], Optional[str]]: (audio_locales, urls_by_locale, main_guid)
-        """
-        cached_data = self._metadata_cache.get(episode_id)
-
-        if cached_data:
-            meta = cached_data.get("episode_metadata", {}) or {}
-            versions = meta.get("versions") or cached_data.get("versions") or []
-
-            if versions:
-                main_guid = None
-
-                # First pass: find main track (for complete subtitles)
-                for v in versions:
-                    roles = v.get("roles", [])
-                    if "main" in roles:
-                        main_guid = v.get("guid")
-                        break
-
-                # Second pass: find preferred audio locale
-                audio_locales = []
-                urls_by_locale = {}
-                seen_locales = set()
-
-                for v in versions:
-                    locale = v.get("audio_locale")
-                    guid = v.get("guid")
-                    if locale and guid and locale not in seen_locales:
-                        seen_locales.add(locale)
-                        audio_locales.append(locale)
-                        urls_by_locale[locale] = f"{self.client.web_base_url}/watch/{guid}"
-
-                if audio_locales:
-                    return audio_locales, urls_by_locale, main_guid
-
-        return [], {episode_id: f"{self.client.web_base_url}/watch/{episode_id}"}, None
 
     # ------------- FOR GUI -------------
     def getNumberSeason(self) -> int:

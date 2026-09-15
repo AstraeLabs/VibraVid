@@ -28,7 +28,7 @@ vibravid --tui
 - **Automatic i18n Localization (IT / EN)** — Automatic OS system language detection (Italian and English) with full bilingual support across all UI screens, data tables, modals, action bars, and keyboard guides.
 - **Interactive Queue & Batch Manager** — Add, remove, reorder, and retry batch download jobs with custom CLI arguments and tags.
 - **Live Stream & Download Progress Tracking** — Real-time progress indicators, speed, segment counts, track/stream details, and completed file actions (Open Folder / Launch File).
-- **System & DRM Inspector** — Diagnostics tab inspecting external binary dependencies (`ffmpeg`, `mp4decrypt`, `aria2c`, etc.), Widevine DRM CDM device status, an application log viewer, and an Updates tab (app version/info + check-for-update).
+- **System & DRM Inspector** — Diagnostics tab inspecting external binary dependencies (`ffmpeg`, `flux`, `mkvmerge`, etc.), Widevine DRM CDM device status, an application log viewer, and an Updates tab (app version/info + check-for-update).
 - **Full Keyboard & Mouse Navigation** — Directional arrow key navigation, contextual shortcuts (`a` select all, `u` clear, `Space` toggle, `ESC` back, `?` help), and mouse click support.
 
 ## TUI Screen Map

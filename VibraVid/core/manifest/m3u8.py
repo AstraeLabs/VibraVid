@@ -15,7 +15,7 @@ from rich.console import Console
 from VibraVid.core.drm.system import _DRMSystems
 from VibraVid.core.manifest._utils import calc_base_url, save_raw_manifest
 from VibraVid.core.manifest.stream import DRMInfo, DRMType, Stream
-from VibraVid.core.utils.codec import infer_video_range
+from VibraVid.core.utils.codec import VIDEO_CODEC_PREFIXES, infer_video_range
 from VibraVid.core.utils.language import resolve_locale
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
@@ -101,6 +101,13 @@ class HLSParser:
                 r = c.get(self.m3u8_url)
                 r.raise_for_status()
                 self.raw_content = r.text
+                effective_url = str(r.url)
+
+            # The playlist host may 302 to a session/edge-specific CDN node --
+            # relative segment/variant URLs must resolve against that final host.
+            if effective_url and effective_url != self.m3u8_url:
+                self._base_url = calc_base_url(effective_url)
+
             logger.info(f"HlsParser: fetched and parsed in {time.time() - start_parsing_time:.2f}s")
             return True
         except Exception as exc:
@@ -142,7 +149,7 @@ class HLSParser:
                         if stream.id not in seen_ids:
                             seen_ids.add(stream.id)
                             streams.append(stream)
-                            logger.info(f"HLS add | {stream}")
+                            logger.info(f"{stream}")
                 i += 2
                 continue
 
@@ -156,7 +163,7 @@ class HLSParser:
                         if s.id not in seen_ids:
                             seen_ids.add(s.id)
                             streams.append(s)
-                            logger.info(f"HLS add | {s}")
+                            logger.info(f"{s}")
 
                 elif typ == "SUBTITLES":
                     s = self._parse_media_tag(line, "subtitle", master_drm)
@@ -164,7 +171,7 @@ class HLSParser:
                         if s.id not in seen_ids:
                             seen_ids.add(s.id)
                             streams.append(s)
-                            logger.info(f"HLS add | {s}")
+                            logger.info(f"{s}")
 
                 elif typ == "CLOSED-CAPTIONS":
                     s = self._parse_media_tag(line, "subtitle", master_drm)
@@ -180,7 +187,7 @@ class HLSParser:
                         if s.id not in seen_ids:
                             seen_ids.add(s.id)
                             streams.append(s)
-                            logger.info(f"HLS add | {s}")
+                            logger.info(f"{s}")
 
             i += 1
 
@@ -191,12 +198,19 @@ class HLSParser:
         self._resolve_drm(streams, master_drm)
 
         for stream in streams:
-            enc_method = (stream.encryption_method or "").lower() if stream.encryption_method else ""
+            enc_method = (stream.encryption_method or "").lower().replace("_", "-") if stream.encryption_method else ""
 
-            if enc_method.startswith(("sample-aes", "sample_aes")) or enc_method in ("cbcs", "cbc1", "cens"):
+            if enc_method in ("aes-128", "aes-128-cbc"):
+                # Whole-segment AES-128 (almost always MPEG-TS): the in-flight
+                # fragment-MP4 decryptor can't handle it — it has to go through the
+                # dedicated per-segment AES path in the post-download pass.
+                stream.supports_live_decryption = False
+                logger.debug(f"Stream {stream.id}: AES-128 - post-download decrypt only")
+            elif enc_method.startswith("sample-aes") or enc_method in ("cbcs", "cbc1", "cens", "cenc"):
                 stream.supports_live_decryption = True
-                logger.debug(f"Stream {stream.id}: SAMPLE-AES detected - using live per-segment decryption")
+                logger.debug(f"Stream {stream.id}: {enc_method or 'CENC'} - live per-segment decryption")
             else:
+                # clear, or fMP4 CENC signalled elsewhere
                 stream.supports_live_decryption = True
 
         manifest_live = any(s.is_live for s in streams)
@@ -257,12 +271,21 @@ class HLSParser:
             return
 
         if not self.has_drm:
-            # No DRM expected for this stream: skip the per-key-group DRM resolution entirely
-            # and fetch only one representative child playlist to determine live/VOD status.
+            # No DRM expected for this stream: fetch one representative child playlist
+            # for live/VOD detection AND check for DRM (the caller may have been
+            # unaware that this stream is protected).
             representative = next((s for s in targets if s.type == "video"), targets[0])
             logger.info(f"HLSParser: has_drm=False, fetching single representative playlist for live/VOD detection: {representative.playlist_url}")
-            _, variant_content = self.parse_variant(representative.playlist_url or "")
+            variant_drm, variant_content = self.parse_variant(representative.playlist_url or "")
             is_live = _playlist_is_live(variant_content) if variant_content is not None else None
+
+            if variant_drm and variant_drm.is_encrypted():
+                for dt in advertised:
+                    variant_drm.add_advertised_type(dt)
+                for s in targets:
+                    s.drm = variant_drm
+                logger.info(f"HLSParser: detected DRM in variant despite has_drm=False — {variant_drm!r}")
+
             if is_live is not None:
                 for s in targets:
                     s.is_live = is_live
@@ -272,6 +295,12 @@ class HLSParser:
         for s in targets:
             groups.setdefault(self._drm_group_key(s), []).append(s)
         representatives = [members[0] for members in groups.values()]
+
+        logger.info(f"HLSParser: {len(groups)} DRM key group(s) detected:")
+        for idx, (_key, members) in enumerate(groups.items(), 1):
+            rep = members[0]
+            member_ids = [f"{m.type}:{m.id}" for m in members]
+            logger.info(f"  Group {idx}: rep={rep.id!r} | {rep.resolution or rep.language or '?'} | {len(members)} stream(s): {member_ids}")
 
         def _resolve(stream: Stream):
             variant_drm, variant_content = self.parse_variant(stream.playlist_url or "")
@@ -283,11 +312,10 @@ class HLSParser:
                 is_live = _playlist_is_live(variant_content) if variant_content is not None else None
 
                 if variant_drm and variant_drm.is_encrypted():
-                    # Merge advertised systems so the table reflects every system
-                    # even if the child playlist declares fewer of them.
                     for dt in advertised:
                         variant_drm.add_advertised_type(dt)
-                    logger.debug(f"HLS DRM resolved from child playlist | {rep.id} (+{len(members) - 1} sharing this key group): {variant_drm!r}")
+                    kid = variant_drm.get_kid_display() or "?"
+                    logger.info(f"HLSParser: resolved variant — rep_id={rep.id!r} | KID={kid} | {variant_drm.get_drm_display()}")
 
                 for member in members:
                     if is_live is not None:
@@ -324,6 +352,17 @@ class HLSParser:
         m = re.search(r'CODECS="([^"]+)"', line)
         if m:
             s.codecs = m.group(1)
+
+        # An #EXT-X-STREAM-INF that declares CODECS but none of them is a video
+        # codec, and carries no RESOLUTION, is an audio-only variant (e.g.
+        # Unified Streaming's ".../...-audio=65000.m3u8"). Leaving it typed as
+        # "video" makes `-sv worst` pick it and download an audio-only file.
+        if s.codecs and not s.resolution:
+            codec_tokens = [c.strip().lower() for c in s.codecs.split(",") if c.strip()]
+            if codec_tokens and not any(
+                tok.startswith(VIDEO_CODEC_PREFIXES) for tok in codec_tokens
+            ):
+                s.type = "audio"
 
         vr = self._attr(line, "VIDEO-RANGE", "").upper()
         s.video_range = vr if vr else _infer_video_range_from_codecs(s.codecs)
@@ -435,7 +474,7 @@ class HLSParser:
         s.playlist_url = self.m3u8_url
         s.id = _make_video_id(s)
         s.is_live = (total_dur > 0) and _playlist_is_live(self.raw_content or "")
-        logger.info(f"HLS add | {s}")
+        logger.info(f"{s}")
         return [s] + existing
 
     def _parse_drm_tags(self, content: str) -> DRMInfo:
@@ -456,9 +495,25 @@ class HLSParser:
         if method_m and method_m.group(1).upper() != "NONE":
             info.method = method_m.group(1)
 
-        key_re = re.compile(r'#EXT-X-(?:SESSION-)?KEY:(.*?)URI="([^"]+)"', re.IGNORECASE | re.DOTALL)
+        # Capture the whole attribute list of each key line, then pull URI out of
+        # it — attributes such as KEYFORMAT="urn:uuid:edef8ba9-..." routinely come
+        # *after* URI="...", so a pre-URI-only capture misses the DRM-system hint.
+        key_line_re = re.compile(r'#EXT-X-(?:SESSION-)?KEY:([^\r\n]+)', re.IGNORECASE)
+        uri_re = re.compile(r'URI="([^"]+)"', re.IGNORECASE)
 
-        for attrs, full_uri in key_re.findall(content):
+        for attrs in key_line_re.findall(content):
+            uri_m = uri_re.search(attrs)
+            if not uri_m:
+                continue
+            full_uri = uri_m.group(1)
+
+            # KEYID=0x<hex> on the key line is the content KID. Widevine key
+            # extraction filters the licensed keys by this KID, so losing it
+            # here means "no key for required KID" downstream.
+            keyid_m = re.search(r'KEYID=0x([0-9A-Fa-f]{16,})', attrs, re.IGNORECASE)
+            if keyid_m and not info.kid:
+                info.set_kid(keyid_m.group(1))
+
             try:
                 if full_uri.startswith("data:"):
                     b64 = full_uri.split(",", 1)[-1].strip()

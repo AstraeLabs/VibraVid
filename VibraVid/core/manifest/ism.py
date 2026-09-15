@@ -25,6 +25,7 @@ _WIDEVINE_SYSTEM_ID = _DRMSystems.to_system_id(_DRMSystems.WIDEVINE)
 
 _BITRATE_RE = re.compile(r"\{[Bb]itrate\}")
 _STARTTIME_RE = re.compile(r"\{start[ _][Tt]ime\}|\{[Ss]tart[Tt]ime\}")
+_TECHNICAL_STREAM_NAME_RE = re.compile(r"_(audio|video|subtitle)_|_\d+k?$|^(text|audio|video|subtitle|track|stream)[-_]?\d+$", re.IGNORECASE)
 
 _FOURCC_TO_CODEC: dict[str, str] = {
     "h264": "avc1",
@@ -47,6 +48,10 @@ _FOURCC_TO_CODEC: dict[str, str] = {
 
 def _fourcc_to_codec(fourcc: str) -> str:
     return _FOURCC_TO_CODEC.get((fourcc or "").lower(), (fourcc or "").lower())
+
+
+def _is_technical_stream_name(name: str) -> bool:
+    return bool(name) and bool(_TECHNICAL_STREAM_NAME_RE.search(name.lower()))
 
 
 class ISMParser:
@@ -77,14 +82,32 @@ class ISMParser:
             path += "/"
         return f"{p.scheme}://{p.netloc}{path}"
 
+    @staticmethod
+    def _parse_xml(raw: bytes | str) -> "tuple[ET.Element, str]":
+        """Parse Smooth Streaming XML, honouring the ``<?xml encoding=...?>`` declaration / BOM."""
+        if isinstance(raw, str):
+            data = raw.encode("utf-8")
+        else:
+            data = raw
+        
+        root = ET.fromstring(data)  # bytes -> encoding taken from the XML decl / BOM
+        for enc in ("utf-8-sig", "utf-16", "latin-1"):
+            try:
+                text = data.decode(enc)
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        else:
+            text = data.decode("utf-8", errors="replace")
+        return root, text
+
     def fetch_manifest(self) -> bool:
         """Fetch (or use injected) manifest XML and parse it into ``self._root``."""
         start_parsing_time = time.time()
 
         if self._injected:
-            self.raw_content = self._injected
             try:
-                self._root = ET.fromstring(self.raw_content)
+                self._root, self.raw_content = self._parse_xml(self._injected)
                 logger.info(f"ISMParser: injected XML parsed in {time.time() - start_parsing_time:.2f}s")
                 return True
             except ET.ParseError as exc:
@@ -96,9 +119,8 @@ class ISMParser:
                 from urllib.request import url2pathname
 
                 local_path = Path(url2pathname(urlparse(self.ism_url).path))
-                self.raw_content = local_path.read_text(encoding="utf-8")
                 self._base_url = local_path.parent.as_uri() + "/"
-                self._root = ET.fromstring(self.raw_content)
+                self._root, self.raw_content = self._parse_xml(local_path.read_bytes())
                 logger.info(f"ISMParser: local ISM manifest in {time.time() - start_parsing_time:.2f}s")
                 return True
             except Exception as exc:
@@ -113,8 +135,16 @@ class ISMParser:
             with create_client(headers=hdrs, timeout=timeout, follow_redirects=True) as c:
                 r = c.get(self.ism_url)
                 r.raise_for_status()
-                self.raw_content = r.text
-            self._root = ET.fromstring(self.raw_content)
+                content = r.content
+                effective_url = str(r.url)
+
+            # The manifest host may 302 to a session/edge-specific CDN node (e.g.
+            # a load-balancer redirecting to "ecNN-....cdn...pl") -- fragment URLs
+            # must be resolved against that final host, not the pre-redirect one.
+            if effective_url and effective_url != self.ism_url:
+                self._base_url = self._calc_base_url(effective_url)
+
+            self._root, self.raw_content = self._parse_xml(content)
             logger.info(f"ISMParser: fetched and parsed ISM in {time.time() - start_parsing_time:.2f}s")
             return True
         except Exception as exc:
@@ -184,7 +214,7 @@ class ISMParser:
                 )
                 if s is not None:
                     streams.append(s)
-                    logger.info(f"ISM add | {s}")
+                    logger.info(f"{s}")
 
         if self._manifest_is_live:
             for s in streams:
@@ -255,7 +285,9 @@ class ISMParser:
         s.bitrate = bitrate
         s.duration = global_duration
         s.is_live = self._manifest_is_live
-        s.drm = global_drm
+
+        # Smooth Streaming/PlayReady protects audio/video sample data only -- subtitle (TTML) StreamIndex entries are never actually encrypted,
+        s.drm = global_drm if stype != "subtitle" else DRMInfo()
 
         # Codec
         s.codecs = _fourcc_to_codec(fourcc) or fourcc
@@ -312,7 +344,7 @@ class ISMParser:
     def _parse_audio_fields(self, ql, s: Stream, lang_raw: str, si_name: str, default_lang: str) -> None:
         s.language = lang_raw or "und"
         s.resolved_language = resolve_locale(lang_raw) if lang_raw else ""
-        s.name = si_name or lang_raw
+        s.name = "" if _is_technical_stream_name(si_name) else (si_name or lang_raw)
 
         sr = ql.get("SamplingRate") or ql.get("AudioSamplingRate") or ""
         if sr:
@@ -332,7 +364,7 @@ class ISMParser:
     def _parse_subtitle_fields(self, ql, s: Stream, lang_raw: str, si_name: str, fourcc: str) -> None:
         s.language = lang_raw or "und"
         s.resolved_language = resolve_locale(lang_raw) if lang_raw else ""
-        s.name = si_name or lang_raw
+        s.name = "" if _is_technical_stream_name(si_name) else (si_name or lang_raw)
 
         # ISM subtitle content is virtually always TTML/DFXP
         fc_low = (fourcc or "").lower()
@@ -345,10 +377,18 @@ class ISMParser:
         url_with_bitrate = _BITRATE_RE.sub(str(bitrate), url_template)
         ref_is_simple = is_simple_relative_ref(url_with_bitrate)
 
+        is_subtitle = stream.type == "subtitle"
         for idx, start_time in enumerate(timeline):
             url = _STARTTIME_RE.sub(str(start_time), url_with_bitrate)
             seg_url = fast_urljoin(self._base_url, url, ref_is_simple)
-            stream.add_segment(Segment(seg_url, idx, "media"))
+            seg = Segment(seg_url, idx, "media")
+            
+            if is_subtitle and self._timescale > 0:
+                if idx + 1 < len(timeline):
+                    seg.duration = (timeline[idx + 1] - start_time) / self._timescale
+                else:
+                    seg.duration = max(0.0, stream.duration - (start_time / self._timescale))
+            stream.add_segment(seg)
 
     def _extract_drm(self, element) -> DRMInfo:
         """

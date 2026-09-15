@@ -57,9 +57,10 @@ _SUBTITLE_EXTENSIONS = (
     "aac",
     "mp3",
 )
-_SUBTITLE_EXT_NORMALISED = {
-    "webvtt": "vtt",
-}
+_SUBTITLE_EXT_NORMALISED = {"webvtt": "vtt"}
+_REDIRECT_URL_RE = re.compile(r"""https?:\\?/\\?/[^\s"'<>]+""")
+_FRAGMENT_LEADING_BOX_TYPES = frozenset({b"moof", b"mdat", b"styp", b"sidx", b"free", b"skip", b"emsg", b"prft"})
+_RANGE_HEADER_RE = re.compile(r"bytes=(\d+)-(\d+)")
 
 
 def _ext_from_url_canon(url: str, extensions: tuple, default: str = "") -> str:
@@ -107,6 +108,49 @@ def is_valid_frag_init(data: bytes) -> bool:
             return True
         off += size
     return seen_ftyp and seen_moov
+
+
+def extract_redirect_url(data: bytes) -> str | None:
+    """Best-effort extraction of a real media URL from a response body that isn't a valid init segment."""
+    if len(data) > 8192:
+        return None
+    try:
+        text = data.decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+    m = _REDIRECT_URL_RE.search(text)
+    if not m:
+        return None
+    url = m.group(0).replace("\\/", "/").replace("\\u0026", "&")
+    return url or None
+
+
+def repair_init_segment(data: bytes) -> str | None:
+    """If *data* is not a valid ftyp+moov init segment (see `is_valid_frag_init`), return a candidate real URL parsed out of the body for the caller to re-fetch (see `extract_redirect_url`)."""
+    if is_valid_frag_init(data):
+        return None
+    return extract_redirect_url(data)
+
+
+def parse_range_header(range_header: str | None) -> tuple[int, int] | None:
+    """Parse a `Range: bytes=start-end` header (the single-range form VibraVid emits internally for byte-range DASH SegmentList addressing) into an inclusive ``(start, end)`` int pair."""
+    if not range_header:
+        return None
+    m = _RANGE_HEADER_RE.fullmatch(range_header.strip())
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def looks_like_bare_fragment(data: bytes) -> bool:
+    """True if *data* starts with a top-level box type a bare moof+mdat
+    media fragment. False for a self-initializing document
+    (ftyp-first -- a whole standalone MP4 instead of just the requested
+    byte range, e.g. when a CDN redirect drops the Range header) or
+    anything that isn't recognizable ISOBMFF at all."""
+    if len(data) < 8:
+        return False
+    return data[4:8] in _FRAGMENT_LEADING_BOX_TYPES
 
 
 def merged_segment_ext(sample_url: str, default: str = "ts") -> str:
@@ -194,7 +238,7 @@ def print_failed_segments_report(failed_by_stream: list) -> None:
             continue
 
         logger.error(f"Failed segments for {stream_label!r}: {len(failed)} missing")
-        console.print(f"[bold red]SS:[/bold red] [bold white]{stream_label}[/bold white] [red]({len(failed)} missing)[/red]")
+        console.print(f"[bold red]Dio Cancaro:[/bold red] [bold white]{stream_label}[/bold white] [red]({len(failed)} missing)[/red]")
 
 
 class SilentDownloadBarManager(DownloadBarManager):

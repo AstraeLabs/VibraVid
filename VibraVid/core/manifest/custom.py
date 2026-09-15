@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from rich.console import Console
 
+from VibraVid.core.drm.system import DRMType
 from VibraVid.core.manifest._utils import calc_base_url, fast_urljoin_auto, save_raw_manifest
 from VibraVid.core.manifest.stream import Segment, Stream
 from VibraVid.core.utils.language import resolve_locale
@@ -192,6 +193,16 @@ class CustomParser:
             s.drm.set_kid(str(drm["kid"]))
             if drm.get("type"):
                 s.drm.display_type = str(drm["type"])  # cosmetic only, see DRMInfo.display_type
+
+        pssh = drm.get("pssh") if isinstance(drm, dict) else None
+        if pssh:
+            dt = DRMType.from_scheme(drm.get("type"))
+            if dt == DRMType.UNKNOWN:
+                dt = DRMType.WIDEVINE
+            try:
+                s.drm.set_pssh(str(pssh), drm_type_hint=dt)
+            except Exception as exc:
+                logger.debug(f"CustomParser: failed to set pssh for track {s.id}: {exc}")
 
         number = 0
         init_seg = self._build_init(track.get("init"))

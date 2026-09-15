@@ -17,6 +17,26 @@ logger = logging.getLogger(__name__)
 MOVIE_FORMAT = config_manager.config.get("OUTPUT", "movie_format")
 EPISODE_FORMAT = config_manager.config.get("OUTPUT", "episode_format")
 SONG_FORMAT = config_manager.config.get("OUTPUT", "song_format", default=None)
+
+
+def refresh_output_formats() -> None:
+    """Re-read MOVIE_FORMAT/EPISODE_FORMAT/SONG_FORMAT from config.
+
+    These are cached as module-level constants (read once at import time)
+    for CLI runs, where the process is short-lived and this is harmless.
+    In the long-running GUI/Docker server, saving a new format from
+    Settings calls config_manager.reload_config_only() - which refreshes
+    the config cache itself, but does nothing for names that already
+    copied a value out of it at import time. Without this, an edited
+    output format silently keeps using whatever was in effect when the
+    server started, until the next full restart.
+    """
+    global MOVIE_FORMAT, EPISODE_FORMAT, SONG_FORMAT
+    MOVIE_FORMAT = config_manager.config.get("OUTPUT", "movie_format")
+    EPISODE_FORMAT = config_manager.config.get("OUTPUT", "episode_format")
+    SONG_FORMAT = config_manager.config.get("OUTPUT", "song_format", default=None)
+
+
 _MEDIA_TOKENS = {"quality", "language", "video_codec", "audio_codec"}
 _TMDB_TOKENS = (
     "%(tmdb_id)",

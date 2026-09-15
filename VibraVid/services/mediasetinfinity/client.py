@@ -157,6 +157,23 @@ class MediasetAPI:
             pairs[match.group(1)] = f"${match.group(2)}"
         return pairs
 
+    def _is_valid_search_hash(self, sha256_hash: str) -> bool:
+        """Probe the search persisted-query with *sha256_hash*"""
+        params = {
+            "extensions": f'{{"persistedQuery":{{"version":1,"sha256Hash":"{sha256_hash}"}}}}',
+            "variables": '{"first":1,"property":"search","query":"a","uxReference":"filteredSearch"}',
+        }
+        try:
+            with create_client(headers=self.generate_request_headers()) as client:
+                response = client.get(self.conf["graphql_url"], params=params)
+            if response.status_code != 200:
+                return False
+            data = response.json()
+            return bool(data.get("data", {}).get("getSearchPage")) and not data.get("errors")
+        except Exception as e:
+            logger.debug(f"_is_valid_search_hash: probe failed for {sha256_hash[:12]}...: {e}")
+            return False
+
     def getHash2c(self):
         from .regions import REGIONS
 
@@ -169,7 +186,22 @@ class MediasetAPI:
             return None
 
         pairs = self.extract_pairs_from_scripts(scripts)
-        return list(pairs.keys())[-5]
+        keys = list(pairs.keys())
+        if not keys:
+            return None
+
+        # Un po' una logica del cazzo ma di solito è la *-5
+        default_idx = -5 if len(keys) >= 5 else 0
+        order = sorted(range(len(keys)), key=lambda i: abs((i - len(keys)) - default_idx))
+        for idx in order:
+            candidate = keys[idx]
+            if self._is_valid_search_hash(candidate):
+                if idx != (default_idx % len(keys)):
+                    logger.info(f"getHash2c: search hash shifted position (index {idx}, expected {default_idx}) -- self-corrected")
+                return candidate
+
+        logger.warning("getHash2c: no candidate hash validated against the search API")
+        return keys[default_idx]
 
     def generate_request_headers(self):
         return {
