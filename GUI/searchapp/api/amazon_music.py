@@ -21,13 +21,6 @@ class AmazonMusicAPI(BaseStreamingAPI):
         """Load site configuration."""
         self.base_url = None
 
-    def _get_search_fn(self):
-        """Lazy-load the service search function from the services package."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
-
     def _get_album_scraper(self, media_item: Entries):
         """Build and fetch an AlbumScraper for an album Entries item."""
         module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}.scrapper")

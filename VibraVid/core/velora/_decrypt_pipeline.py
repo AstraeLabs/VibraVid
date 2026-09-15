@@ -18,7 +18,13 @@ from rich.text import Text
 
 from VibraVid.core.decryptor import Decryptor
 from VibraVid.core.manifest.stream import track_label
+from VibraVid.core.muxing.helper.chapters import persist_chapters_file, sort_chapters, write_ffmetadata_chapters
 from VibraVid.core.muxing.helper.sub.convert import convert_subtitle, extract_vtt_from_wvtt_mp4
+from VibraVid.core.muxing.helper.sub.disposition import (
+    SubtitleDispositionInfo,
+    build_subtitle_disposition_args,
+    get_configured_disposition_language,
+)
 from VibraVid.core.muxing.helper.video import binary_merge_segments, concat_demux_merge_segments
 from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
 from VibraVid.core.muxing.streaming_mux import StreamingMuxFeeder
@@ -352,6 +358,20 @@ class DecryptPipelineMixin:
         for p in subtitle_paths:
             cmd += ["-i", str(p)]
 
+        # Chapters (if the downloader queued any) -- injected as an extra ffmetadata input
+        # in this same ffmpeg pass, mirroring join_media()'s own chapter_input_idx handling in merge.py
+        chapter_input_idx: int | None = None
+        raw_chapters = getattr(self, "_streaming_mux_chapters", None)
+        if raw_chapters:
+            chapters = sort_chapters(raw_chapters)
+            if chapters[0]["seconds"] > 0:
+                chapters = [{"name": "Intro", "seconds": 0}] + chapters
+            
+            persist_chapters_file(chapters, getattr(self, "temp_dir", None))
+            self._streaming_mux_chapter_file = write_ffmetadata_chapters(chapters)
+            chapter_input_idx = 1 + len(audio_paths) + len(subtitle_paths)
+            cmd += ["-f", "ffmetadata", "-i", self._streaming_mux_chapter_file]
+
         cmd += ["-map", "0:v:0"]
         video_codecs = (getattr(video_stream, "codecs", "") or "").lower()
         if any(p in video_codecs for p in ("hev", "hvc", "dvh", "dvhe")):
@@ -372,6 +392,20 @@ class DecryptPipelineMixin:
                 lang_source = entry.resolved_language or entry.language or "und"
                 title = getattr(entry, "name", "") or resolve_language_display_name(lang_source)
             return title, resolve_iso639_2(lang_source)
+
+        def _subtitle_disposition_info(entry: Any) -> "SubtitleDispositionInfo":
+            """Normalize one subtitle entry into the shared SubtitleDispositionInfo"""
+            if isinstance(entry, dict):
+                lang_source = entry.get("language") or entry.get("name") or ""
+                forced = bool(entry.get("forced"))
+                sdh = bool(entry.get("sdh"))
+                cc = bool(entry.get("cc"))
+            else:
+                lang_source = entry.resolved_language or entry.language or ""
+                forced = bool(getattr(entry, "forced", False))
+                sdh = bool(getattr(entry, "is_sdh", False))
+                cc = bool(getattr(entry, "is_cc", False))
+            return SubtitleDispositionInfo(language=lang_source, forced=forced, sdh=sdh, cc=cc)
 
         def _subtitle_title_and_iso_lang(entry: Any) -> tuple[str, str]:
             """Subtitle title is a bit more complex: if the track is marked forced, SDH, or CC, we append that to the title. If the track has no name, we use the language display name as the base title (same fallback as audio)."""
@@ -413,6 +447,15 @@ class DecryptPipelineMixin:
             cmd += [f"-metadata:s:s:{i}", f"language={lang}"]
             cmd += [f"-metadata:s:s:{i}", f"handler_name={title}"]
 
+        # Subtitle dispositions (forced/hearing_impaired/config-driven default) -- shared with join_media()'s 
+        cmd += build_subtitle_disposition_args(
+            [_subtitle_disposition_info(e) for e in subtitle_entries],
+            get_configured_disposition_language(),
+        )
+
+        if chapter_input_idx is not None:
+            cmd += ["-map_metadata", str(chapter_input_idx)]
+
         cmd += ["-c", "copy"]
         if subtitle_paths:
             cmd += ["-c:s", "srt"]
@@ -427,11 +470,25 @@ class DecryptPipelineMixin:
             logger.warning(f"streaming_mux: failed to start ffmpeg: {exc}")
             return None
 
+        # Not confirmed until _finish_streaming_mux_inner() sees the fast-path output actually succeed -- if it falls back to the normal mux instead
+        self._streaming_mux_chapter_pending = chapter_input_idx is not None
+
         logger.info(f"streaming_mux: started early cross-track mux -> {output_path}")
         return feeder
 
     def _finish_streaming_mux(self, feeder: "StreamingMuxFeeder", live_merge_ok: bool) -> None:
         """Finalize the streaming-mux fast path, if it was started. If *live_merge_ok* is False, abort the fast path and fall back to the normal mux."""
+        try:
+            self._finish_streaming_mux_inner(feeder, live_merge_ok)
+        finally:
+            chapter_file = getattr(self, "_streaming_mux_chapter_file", None)
+            if chapter_file:
+                try:
+                    os.unlink(chapter_file)
+                except OSError:
+                    pass
+
+    def _finish_streaming_mux_inner(self, feeder: "StreamingMuxFeeder", live_merge_ok: bool) -> None:
         if not live_merge_ok:
             feeder.abort()
             feeder.finish()
@@ -451,6 +508,7 @@ class DecryptPipelineMixin:
             return
 
         self.streaming_mux_result = output_path
+        self.streaming_mux_chapters_injected = bool(getattr(self, "_streaming_mux_chapter_pending", False))
         logger.info(f"streaming_mux: fast-path cross-track mux succeeded -> {output_path}")
 
     def _download_stream_generic(

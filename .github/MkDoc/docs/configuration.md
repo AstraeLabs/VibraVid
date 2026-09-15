@@ -363,7 +363,7 @@ The DV track is muxed as an additional video track via mkvmerge.
     "use_gpu": false,
     "param_video": ["-c:v", "libx265", "-crf", "28", "-preset", "medium"],
     "param_audio": ["-c:a", "libopus", "-b:a", "128k"],
-    "param_song_ffmpeg": [],
+    "param_song": [],
     "param_final": ["-c", "copy"],
     "audio_order": [],
     "subtitle_order": [],
@@ -382,7 +382,7 @@ The DV track is muxed as an additional video track via mkvmerge.
 | `use_gpu` | `false` | Enable hardware acceleration. GPU type is auto-detected at runtime: `cuda` (NVIDIA), `qsv` (Intel), `vaapi` (AMD) |
 | `param_video` | H.265/HEVC | FFmpeg video encoding parameters, e.g. `["-c:v", "libx265", "-crf", "28", "-preset", "medium"]` |
 | `param_audio` | Opus 128k | FFmpeg audio encoding parameters, e.g. `["-c:a", "libopus", "-b:a", "128k"]` |
-| `param_song_ffmpeg` | `[]` | FFmpeg re-encode parameters applied to downloaded music tracks (e.g. `monochrome`). |
+| `param_song` | `[]` | FFmpeg re-encode parameters applied to downloaded music tracks (e.g. `monochrome`). |
 | `param_final` | `["-c", "copy"]` | Final FFmpeg parameters. When set, takes full precedence over `param_video` and `param_audio` |
 | `audio_order` | `[]` | Order of audio tracks in the output, e.g. `["ita", "eng"]` |
 | `subtitle_order` | `[]` | Order of subtitle tracks in the output, e.g. `["ita", "eng"]` |

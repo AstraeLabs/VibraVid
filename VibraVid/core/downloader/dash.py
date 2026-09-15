@@ -662,7 +662,7 @@ class DASH_Downloader(BaseDownloader):
                 console.print(f"[yellow]Warning on extra audio {audio_language}: {e}")
                 logger.exception(f"Extra audio download failed for {audio_language}")
             finally:
-                shutil.rmtree(audio_temp_dir, ignore_errors=True)
+                os_manager.fast_rmtree(audio_temp_dir)
 
         return external_audios, external_subtitles
 

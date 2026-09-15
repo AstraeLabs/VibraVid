@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import re
-import shutil
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -20,7 +19,7 @@ from VibraVid.core.muxing.helper.video import get_media_metadata, is_mpegts_file
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import resolve_ietf
 from VibraVid.setup import get_dovi_tool_path, get_ffmpeg_path, get_ffprobe_path, get_mkvmerge_path
-from VibraVid.utils import config_manager
+from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.proc import run_logged
 
 console = Console()
@@ -484,6 +483,6 @@ def build_hybrid_output(
     logger.info(f"Hybrid output created: {output_file}")
 
     if CLEANUP_TMP:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        os_manager.fast_rmtree(work_dir)
 
     return str(output_file)

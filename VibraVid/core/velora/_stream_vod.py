@@ -222,6 +222,10 @@ class VodStreamMixin:
             self.decrypt_failures.append(
                 {"label": label, "track": label, "message": f"no key for required KID(s): {required}", "skipped": True}
             )
+        
+        # Unblock anything waiting on this track (e.g. the streaming-mux fast path), which
+        # would otherwise sit idle for the full size-estimated timeout before giving up.
+        self._record_track_done(self._stream_task_key(stream), None)
 
     # ------------------------------------------------------------------
     # Dispatch per stream type

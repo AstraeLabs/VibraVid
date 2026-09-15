@@ -18,13 +18,6 @@ class MonochromeAPI(BaseStreamingAPI):
         self.base_url = None
         self._search_fn = None
 
-    def _get_search_fn(self):
-        """Lazy-load the service search function."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
-
     def _get_album_scraper(self, media_item: Entries):
         """Resolve the album tracklist directly from Amazon Music (no lucida.to involved)."""
         album_mod = importlib.import_module(f"VibraVid.{get_folder_name()}.monochrome.album")

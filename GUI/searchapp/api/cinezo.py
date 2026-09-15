@@ -1,8 +1,5 @@
 # 17.04.26
 
-import importlib
-
-from VibraVid.services._base.site_loader import get_folder_name
 from VibraVid.services.cinezo.scrapper import GetSerieInfo
 
 from .base import BaseStreamingAPI, Entries, Episode, Season
@@ -13,13 +10,6 @@ class CinezoAPI(BaseStreamingAPI):
         super().__init__()
         self.site_name = "cinezo"
         self._search_fn = None
-
-    def _get_search_fn(self):
-        """Lazy-load the service search function."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
 
     def search(self, query: str) -> list[Entries]:
         """Search for movies and series on Cinezo."""

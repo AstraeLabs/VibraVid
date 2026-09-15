@@ -363,6 +363,11 @@ class BaseMediaDownloader:
         sel_audio = [s for s in self.streams if s.type == "audio" and s.selected and not s.is_external]
         sel_subs = [s for s in self.streams if s.type == "subtitle" and s.selected and not s.is_external]
 
+        # A track whose KID isn't covered by any provided key will never be downloaded
+        # (see _has_matching_key/_skip_stream_no_key)
+        sel_audio = [s for s in sel_audio if self._has_matching_key(s)]
+        sel_subs = [s for s in sel_subs if self._has_matching_key(s)]
+
         # Keep only one subtitle stream per language+flag variant (e.g. "en", "en-forced", "en-sdh", etc.)
         _seen_sub_variants: set[str] = set()
         _unique_subs: list[Stream] = []

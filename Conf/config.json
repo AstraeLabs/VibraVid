@@ -40,14 +40,14 @@
         "token_refresh_backoff_seconds": 4.0,
         "token_refresh_stall_rounds": 3,
         "embed_poster": false,
-        "cleanup_tmp_folder": false
+        "cleanup_tmp_folder": true
     },
     "PROCESS": {
         "engine": "ffmpeg",
         "use_gpu": false,
         "param_video": ["-c:v","libx265","-crf","28","-preset","medium"],
         "param_audio": ["-c:a","libopus","-b:a","128k"],
-        "param_song_ffmpeg": [],
+        "param_song": [],
         "param_final": ["-c","copy"],
         "audio_order": [],
         "subtitle_order": [],

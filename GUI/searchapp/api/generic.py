@@ -3,8 +3,6 @@
 import logging
 from typing import Any
 
-from VibraVid.services._base.site_loader import load_search_functions
-
 from .base import BaseStreamingAPI, Entries, Episode, Season
 
 logger = logging.getLogger(__name__)
@@ -33,17 +31,6 @@ class GenericStreamingAPI(BaseStreamingAPI):
         self.site_name = type(self).site_name
         self.base_url = type(self).base_url
         self._search_fn = None
-
-    def _get_search_fn(self):
-        """Lazy-load the service's ``search`` entry point."""
-        if self._search_fn is None:
-            lazy = load_search_functions().get(f"{self.site_name}_search")
-            if lazy is None:
-                raise ModuleNotFoundError(
-                    f"No module named '{self.site_name}' (not found in any imp_service source)"
-                )
-            self._search_fn = lazy
-        return self._search_fn
 
     def _build_entry(self, item_dict: dict[str, Any]) -> Entries:
         """Map one raw scraper item dict to an Entries. Override to customise."""

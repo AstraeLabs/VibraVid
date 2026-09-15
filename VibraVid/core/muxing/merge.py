@@ -2,7 +2,6 @@
 
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -15,9 +14,7 @@ from rich.console import Console
 
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import (
-    extract_lang_and_flags,
     resolve_ietf,
-    resolve_iso639_1,
     resolve_iso639_2,
     resolve_language_display_name,
 )
@@ -27,7 +24,32 @@ from VibraVid.utils.image_cache import get_cached_tmdb_image
 
 from .capture import capture_ffmpeg_real_time
 from .helper.audio import check_duration_v_a, detect_audio_offset, get_video_duration, has_audio
-from .helper.sub import convert_subtitle, extract_vtt_from_wvtt_mp4, get_subtitle_duration, trim_subtitle_to_duration
+from .helper.chapters import (
+    dedupe_chapters as _dedupe_chapters,
+)
+from .helper.chapters import (
+    persist_chapters_file as _persist_chapters_file,
+)
+from .helper.chapters import (
+    sort_chapters as _sort_chapters,
+)
+from .helper.chapters import (
+    write_ffmetadata_chapters as _write_ffmetadata_chapters,
+)
+from .helper.chapters import (
+    write_ogm_chapters as _write_ogm_chapters,
+)
+from .helper.sub import (
+    SubtitleDispositionInfo,
+    build_subtitle_disposition_args,
+    convert_subtitle,
+    extract_vtt_from_wvtt_mp4,
+    get_subtitle_duration,
+    trim_subtitle_to_duration,
+)
+from .helper.sub import (
+    disposition_lang_matches as _disposition_lang_matches,
+)
 from .helper.video import (
     convert_ts_to_mp4,
     detect_ts_timestamp_issues,
@@ -47,21 +69,6 @@ if isinstance(SUBTITLE_DISPOSITION_LANGUAGE, list):
 
 _GPU_TYPE_CACHE = None
 MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower()
-
-
-def _disposition_lang_matches(subtitle_lang_raw: str, config_lang_raw: str, track_info: dict | None = None) -> bool:
-    if not subtitle_lang_raw or not config_lang_raw:
-        return False
-
-    sub_base, sub_flags = extract_lang_and_flags(subtitle_lang_raw, track_info)
-    cfg_base, cfg_flags = extract_lang_and_flags(config_lang_raw)
-
-    sub_iso2 = resolve_iso639_1(sub_base) or sub_base.split("-")[0].lower()
-    cfg_iso2 = resolve_iso639_1(cfg_base) or cfg_base.split("-")[0].lower()
-    if not sub_iso2 or sub_iso2 != cfg_iso2:
-        return False
-
-    return cfg_flags.issubset(sub_flags)
 
 
 def _get_param_video() -> list:
@@ -414,72 +421,6 @@ def _strip_drm_boxes(src_path: str) -> str:
 
     logger.info(f"[strip_drm_boxes] strip OK: {os.path.basename(out_path)}")
     return out_path
-
-
-def _sort_chapters(chapters: list) -> list:
-    """Return chapters ordered by their start time."""
-    return sorted(chapters, key=lambda c: c["seconds"])
-
-
-_GENERIC_CHAPTER_NAME_RE = re.compile(r"^chapter\s*\d+$", re.IGNORECASE)
-
-
-def _dedupe_chapters(sorted_chapters: list) -> list:
-    """Drop chapters sharing a start time with the previous one"""
-    deduped = []
-    for ch in sorted_chapters:
-        if deduped and ch["seconds"] == deduped[-1]["seconds"]:
-            if _GENERIC_CHAPTER_NAME_RE.match(deduped[-1].get("name", "")) and not _GENERIC_CHAPTER_NAME_RE.match(
-                ch.get("name", "")
-            ):
-                deduped[-1] = ch
-            continue
-        deduped.append(ch)
-    return deduped
-
-
-def _write_ffmetadata_chapters(chapters: list) -> str:
-    sorted_chs = _dedupe_chapters(_sort_chapters(chapters))
-    lines = [";FFMETADATA1", ""]
-    for i, ch in enumerate(sorted_chs):
-        start_ms = ch["seconds"] * 1000
-        end_ms = sorted_chs[i + 1]["seconds"] * 1000 - 1 if i + 1 < len(sorted_chs) else start_ms + 999999000
-        end_ms = max(end_ms, start_ms + 1)  # guarantee END > START even if callers skip _dedupe_chapters
-        lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={start_ms}", f"END={end_ms}", f"title={ch['name']}", ""]
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".ffmeta", delete=False, encoding="utf-8") as f:
-        f.write("\n".join(lines))
-        return f.name
-
-
-def _write_ogm_chapters(chapters: list) -> str:
-    sorted_chs = _dedupe_chapters(_sort_chapters(chapters))
-    lines = []
-    for i, ch in enumerate(sorted_chs, 1):
-        h, rem = divmod(int(ch["seconds"]), 3600)
-        m, s = divmod(rem, 60)
-        lines += [f"CHAPTER{i:02d}={h:02d}:{m:02d}:{s:02d}.000", f"CHAPTER{i:02d}NAME={ch['name']}"]
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".ogm", delete=False, encoding="utf-8") as f:
-        f.write("\n".join(lines))
-        return f.name
-
-
-def _persist_chapters_file(chapters: list, temp_dir: str | None) -> None:
-    """Write a `chapters.txt` sidecar (OGM `CHAPTERxx=`/`CHAPTERxxNAME=` format)"""
-    if not chapters or not temp_dir:
-        return
-
-    persist_path = os.path.join(temp_dir, "chapters.txt")
-    tmp_chapter_file = _write_ogm_chapters(chapters)
-    try:
-        shutil.copyfile(tmp_chapter_file, persist_path)
-        logger.info(f"[chapters] persisted sidecar -> {persist_path}")
-    except OSError as e:
-        logger.warning(f"[chapters] failed to persist sidecar {persist_path}: {e}")
-    finally:
-        try:
-            os.unlink(tmp_chapter_file)
-        except OSError:
-            pass
 
 
 def _format_timestamp(seconds) -> str:
@@ -1090,42 +1031,24 @@ def _join_media_ffmpeg(
         else:
             ffmpeg_cmd.extend(["-shortest", "-strict", "experimental"])
 
-    # Disposizioni subtitle
-    # Passo 1: reset everything to 0
-    for idx in range(len(subtitle_tracks)):
-        ffmpeg_cmd.extend([f"-disposition:s:{idx}", "0"])
-    
+    # Subtitle disposition: hearing_impaired for embedded CC streams (if any)
     for n in range(len(embedded_cc_streams)):
         ffmpeg_cmd.extend([f"-disposition:s:{len(subtitle_tracks) + n}", "hearing_impaired"])
 
-    # Passo 2: auto-flags (forced / hearing_impaired) da suffissi nel nome lingua
-    # "_forced" -> forced,  "_cc" o "_sdh" -> hearing_impaired
-    for idx, subtitle in enumerate(subtitle_tracks):
-        lang_lower = subtitle.get("language", "").lower()
-        is_forced = "_forced" in lang_lower or bool(subtitle.get("forced"))
-        is_hi = "_sdh" in lang_lower or "_cc" in lang_lower or bool(subtitle.get("sdh")) or bool(subtitle.get("cc"))
-        if is_forced or is_hi:
-            disp_parts = []
-            if is_forced:
-                disp_parts.append("forced")
-            if is_hi:
-                disp_parts.append("hearing_impaired")
-            ffmpeg_cmd.extend([f"-disposition:s:{idx}", "+".join(disp_parts)])
-
-    # Passo 3: config-driven default (SUBTITLE_DISPOSITION_LANGUAGE, es. "ita_forced")
-    # Questo sovrascrive l'eventuale flag precedente per la traccia corrispondente.
-    if SUBTITLE_DISPOSITION_LANGUAGE and subtitle_tracks:
-        config_lang = SUBTITLE_DISPOSITION_LANGUAGE.lower().strip()
-        for idx, subtitle in enumerate(subtitle_tracks):
-            subtitle_lang = subtitle.get("language", "")
-            if _disposition_lang_matches(subtitle_lang, config_lang, subtitle):
-                disp = "default"
-                if "_forced" in config_lang or "-forced" in config_lang:
-                    disp += "+forced"
-                if "_sdh" in config_lang or "_cc" in config_lang or "-sdh" in config_lang or "-cc" in config_lang:
-                    disp += "+hearing_impaired"
-                ffmpeg_cmd.extend([f"-disposition:s:{idx}", disp])
-                break
+    ffmpeg_cmd.extend(
+        build_subtitle_disposition_args(
+            [
+                SubtitleDispositionInfo(
+                    language=subtitle.get("language", ""),
+                    forced=bool(subtitle.get("forced")),
+                    sdh=bool(subtitle.get("sdh")),
+                    cc=bool(subtitle.get("cc")),
+                )
+                for subtitle in subtitle_tracks
+            ],
+            SUBTITLE_DISPOSITION_LANGUAGE,
+        )
+    )
 
     ffmpeg_cmd.extend(_build_global_metadata_flags())
     if chapter_input_idx is not None:

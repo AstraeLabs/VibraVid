@@ -13,7 +13,7 @@ from .probe import get_video_duration
 from .tagging import tag_track
 
 logger = logging.getLogger(__name__)
-ffmpeg_params = config_manager.config.get_list("PROCESS", "param_song_ffmpeg", default=None)
+ffmpeg_params = config_manager.config.get_list("PROCESS", "param_song", default=None)
 
 
 def convert_audio(input_path: str, ffmpeg_params: list[str]) -> str | None:

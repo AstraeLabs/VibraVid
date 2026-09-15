@@ -100,13 +100,20 @@ class MediaDownloader(
 
         # Set via enable_streaming_mux() by the outer downloader (VibraVid.core.downloader.*) BEFORE start_download() is called
         self._streaming_mux_output_path: str | None = None
-        
+        self._streaming_mux_chapters: list = []
+
         # Set by the video stream's own _download_stream_generic() call if the fast path
         # actually completed successfully.
         self.streaming_mux_result: str | None = None
+        
+        # Set True by _try_start_streaming_mux_inner() if it injected the downloader's
+        # queued chapters into the same ffmpeg pass -- lets the caller (BaseDownloader._merge_files)
+        # skip the separate mkvmerge/ffmpeg _inject_chapters() post-processing step.
+        self.streaming_mux_chapters_injected: bool = False
 
-    def enable_streaming_mux(self, output_path: str) -> None:
+    def enable_streaming_mux(self, output_path: str, chapters: list | None = None) -> None:
         self._streaming_mux_output_path = output_path
+        self._streaming_mux_chapters = list(chapters or [])
 
     def _track_done_event(self, task_key: str) -> threading.Event:
         with self._track_done_lock:

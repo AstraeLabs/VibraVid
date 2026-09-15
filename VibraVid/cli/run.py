@@ -21,6 +21,7 @@ from VibraVid.cli.command.queue import add_queue_arguments, handle_queue_dispatc
 from VibraVid.core.downloader.base import get_written_track_files
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import load_search_functions
+from VibraVid.services._base.site_extra_args import resolve_persisted_site_options
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.setup.system import (
     _initialize_paths,
@@ -306,6 +307,20 @@ def apply_config_updates(args):
 
     if persistent_updates:
         config_manager.save_config()
+
+
+def build_site_options(args, parser, site_option_dests, site_module_name):
+    """Merge this run's site-specific CLI values with the site's persisted `extra_args` (login.json)"""
+    persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
+    site_options = {"drm": getattr(args, "drm", None)}
+    for dest in site_option_dests:
+        cli_val = getattr(args, dest, None)
+        if cli_val != parser.get_default(dest):
+            site_options[dest] = cli_val  # explicit CLI flag wins
+        else:
+            site_options[dest] = persisted.get(dest, cli_val)
+
+    return site_options
 
 
 def build_function_mappings(search_functions):
@@ -594,9 +609,8 @@ def main():
         context_tracker.log_engine_output = getattr(args, "log_decryptor_output", None)
         context_tracker.anonymize_keys = bool(getattr(args, "abc", False))
         context_tracker.resolve_only = bool(getattr(args, "resolve_only", False))
-        site_options = {"drm": getattr(args, "drm", None)}
-        site_options.update({dest: getattr(args, dest, None) for dest in site_option_dests})
-        context_tracker.site_options = site_options
+        site_module_name = site_module.__name__.rsplit(".", 1)[-1] if site_module is not None else None
+        context_tracker.site_options = build_site_options(args, parser, site_option_dests, site_module_name)
 
         # ── Direct download (--down / --down-json) — handled before interactive site selection ──
         down_json_handled, down_json_ok = handle_direct_download_json(args)

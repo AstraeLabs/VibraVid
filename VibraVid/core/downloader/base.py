@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import shutil
-import sys
 import threading
 import time
 import uuid
@@ -15,6 +14,7 @@ from typing import NamedTuple
 
 from rich.console import Console
 
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
 from VibraVid.core.muxing import (
     build_hybrid_output,
     embed_poster,
@@ -26,6 +26,7 @@ from VibraVid.core.muxing.helper.audio import audio_ext_for_codec
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.muxing.helper.video.hybrid import download_other_tracks
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
@@ -405,7 +406,8 @@ class BaseDownloader:
 
     def _maybe_enable_streaming_mux(self) -> None:
         """Called by HLS/DASH/ISM downloaders, after streams are selected but before start_download()"""
-        service_module = sys.modules.get(f"VibraVid.services.{self.site_name}")
+        lazy = load_search_functions().get(f"{self.site_name}_search")
+        service_module = lazy.get_module() if lazy else None
         if not getattr(service_module, "_live_mux", False) and not context_tracker.force_livemux:
             logger.info(f"streaming_mux: not enabled (service {self.site_name!r} does not opt in via _live_mux = True)")
             return
@@ -433,7 +435,7 @@ class BaseDownloader:
             logger.info("streaming_mux: not enabled (other_tracks/hybrid output present)")
             return
 
-        media_downloader.enable_streaming_mux(self.output_path)
+        media_downloader.enable_streaming_mux(self.output_path, chapters=self.chapters)
         logger.info(f"streaming_mux: enabled for this download -> {self.output_path}")
 
     def _finish_from_status(self, status: dict) -> "DownloadResult":
@@ -482,14 +484,17 @@ class BaseDownloader:
             self.error = err
             return None
 
-        streaming_mux_result = getattr(getattr(self, "media_downloader", None), "streaming_mux_result", None)
+        media_downloader = getattr(self, "media_downloader", None)
+        streaming_mux_result = getattr(media_downloader, "streaming_mux_result", None)
         if streaming_mux_result and os.path.exists(streaming_mux_result) and os.path.getsize(streaming_mux_result) > 0:
             logger.info(f"Using streaming-mux fast-path output, skipping join_media(): {streaming_mux_result}")
             merged_file = streaming_mux_result
             if not self._merge_output_ok(merged_file):
                 return None
-            
-            if self.chapters:
+
+            # The fast path already injects chapters only fall back to the separate
+            # mkvmerge/ffmpeg _inject_chapters() step if that didn't happen.
+            if self.chapters and not getattr(media_downloader, "streaming_mux_chapters_injected", False):
                 merged_file = self._inject_chapters(merged_file)
 
             return self._embed_poster(merged_file)
@@ -778,30 +783,19 @@ class BaseDownloader:
             logger.warning(f"Output verification skipped due to error: {exc}")
             return True
 
-    _MEDIA_PLACEHOLDERS = (
-        "%(quality)",
-        "%(language)",
-        "%(video_codec)",
-        "%(audio_codec)",
-        "%(audio_flags)",
-        "%(sub_flags)",
-    )
+    _MEDIA_PLACEHOLDERS = MEDIA_PLACEHOLDERS
 
     @classmethod
     def _strip_media_tokens(cls, path: str) -> str:
         """Remove unresolved media-token placeholders from *path*"""
-        root, ext = os.path.splitext(path)
-        for ph in cls._MEDIA_PLACEHOLDERS:
-            root = root.replace(f" [{ph}]", "").replace(f"[{ph}]", "")
-            root = root.replace(f" ({ph})", "").replace(f"({ph})", "")
-            root = root.replace(ph, "")
-        root = root.replace("  ", " ").rstrip(" .")
-        return root + ext
+        return strip_media_tokens(path)
 
     def _finalize(self, *, final_file: str) -> None:
         """Common tail for start(): move to final location."""
         if final_file and os.path.exists(final_file):
             self._move_to_final_location(final_file)
+
+        cached_height: int | None = None
 
         # The working file was downloaded/muxed under a clean name (media tokens stripped).
         template = getattr(self, "_final_name_template", self.output_path)
@@ -809,6 +803,7 @@ class BaseDownloader:
             try:
                 metadata = get_media_metadata(self.output_path)
                 logger.info(f"Metadata for dynamic rename: {metadata}")
+                cached_height = metadata.get("height", 0)
 
                 replacements = {
                     "quality": metadata.get("quality", ""),
@@ -866,7 +861,7 @@ class BaseDownloader:
             if missing:
                 logger.warning(f"Skipping vault upload for {base_name}: {missing} segment(s) missing")
             else:
-                height = get_media_metadata(self.output_path).get("height", 0)
+                height = cached_height if cached_height is not None else get_media_metadata(self.output_path).get("height", 0)
                 if height < 1080:
                     logger.warning(f"Skipping vault upload for {base_name}: resolution below 1080p ({height}p)")
                 else:
@@ -881,6 +876,6 @@ class BaseDownloader:
             )
 
         if CLEANUP_TMP:
-            shutil.rmtree(self.output_dir, ignore_errors=True)
+            os_manager.fast_rmtree(self.output_dir)
 
         execute_hooks("post_run")

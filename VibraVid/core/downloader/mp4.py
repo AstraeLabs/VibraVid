@@ -12,6 +12,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
 from VibraVid.core.muxing import embed_poster, inject_chapters
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
@@ -647,25 +648,12 @@ class MP4FileDownloader:
 
         return self.path, self._interrupt.kill_download, None
 
-    _MEDIA_PLACEHOLDERS = (
-        "%(quality)",
-        "%(language)",
-        "%(video_codec)",
-        "%(audio_codec)",
-        "%(audio_flags)",
-        "%(sub_flags)",
-    )
+    _MEDIA_PLACEHOLDERS = MEDIA_PLACEHOLDERS
 
     @classmethod
     def _strip_media_tokens(cls, path: str) -> str:
-        """Remove unresolved media-token placeholders from *path* (mirrors BaseDownloader)."""
-        root, ext = os.path.splitext(path)
-        for ph in cls._MEDIA_PLACEHOLDERS:
-            root = root.replace(f" [{ph}]", "").replace(f"[{ph}]", "")
-            root = root.replace(f" ({ph})", "").replace(f"({ph})", "")
-            root = root.replace(ph, "")
-        root = root.replace("  ", " ").rstrip(" .")
-        return root + ext
+        """Remove unresolved media-token placeholders from *path* (shared with BaseDownloader)."""
+        return strip_media_tokens(path)
 
     def _resolve_media_tokens(self) -> None:
         """Probe the finished file and resolve media tokens (quality/codec/language) in self.path.
