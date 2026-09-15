@@ -106,6 +106,16 @@ def _reads_as_self_initializing_mp4(path: Path) -> bool:
     return len(head) == 8 and head[4:8] == b"ftyp"
 
 
+def _reads_as_plaintext_ts(path: Path) -> bool:
+    """True if *path* already starts with the MPEG-TS sync byte (0x47) -- i.e. it is already decrypted (or was never encrypted), so decrypting it again would corrupt it."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(1)
+    except OSError:
+        return False
+    return head == b"\x47"
+
+
 def _skip_post_decrypt() -> bool:
     """Debug switch (--no-decrypt CLI flag): leave segments encrypted, no decrypt at all."""
     return context_tracker.skip_decrypt
@@ -673,6 +683,15 @@ class DecryptPipelineMixin:
             if method != "AES-128":
                 return
 
+            if _reads_as_plaintext_ts(fp):
+                # A "skipped" download event (segment already on disk from a
+                # previous, interrupted run) still reaches here -- if it was
+                # already decrypted, decrypting it again would corrupt it.
+                logger.debug(f"HLS AES-128: {fp.name} already looks decrypted, skipping")
+                if _live_merger_box[0] is not None:
+                    _live_merger_box[0].submit(seg.get("number"), fp)
+                return
+
             key_data = enc.get("key_bytes")
             if key_data is None:
                 key_url = enc.get("key_url")
@@ -905,8 +924,6 @@ class DecryptPipelineMixin:
                 try:
                     if decrypt_aborted["reason"] is not None:
                         continue
-                    if item.get("skipped"):
-                        continue
                     path_value = item.get("path")
                     if not path_value:
                         continue
@@ -918,8 +935,21 @@ class DecryptPipelineMixin:
                         logger.debug(f"Segment completion without metadata match: {fp}")
                         continue
 
+                    _seg_method = str((seg.get("enc") or {}).get("method") or "NONE").upper()
+                    if item.get("skipped") and not (protocol_lower == "hls" and _seg_method == "AES-128"):
+                        # A "skipped" event means this segment file already existed on
+                        # disk (resume) -- it may be a leftover from a previous,
+                        # interrupted run that never got decrypted. Only the HLS
+                        # AES-128 path below can cheaply tell whether it was already
+                        # decrypted (_reads_as_plaintext_ts), so it's safe to let those
+                        # through; the DASH/ISM CENC and HLS SAMPLE-AES live-decrypt
+                        # paths have no equivalent idempotency check yet, so keep
+                        # skipping those to avoid corrupting an already-decrypted
+                        # fragment.
+                        continue
+
                     if protocol_lower == "hls":
-                        _hls_method = str((seg.get("enc") or {}).get("method") or "NONE").upper()
+                        _hls_method = _seg_method
                         if _hls_method == "AES-128":
                             _decrypt_hls_segment(fp, seg)
                             continue
@@ -1232,9 +1262,11 @@ class DecryptPipelineMixin:
             if not path_value:
                 return
 
-            if event.get("skipped"):
-                return
-
+            # A "skipped" event means the segment file already existed on disk
+            # (resume) -- it still needs to go through the decrypt worker,
+            # since a leftover file from an interrupted/failed run may never
+            # have been decrypted (see _reads_as_plaintext_ts / _reads_as_self_initializing_mp4
+            # guards in the per-protocol decrypt functions for the idempotency check).
             if decrypt_threads:
                 decrypt_queue.put(dict(event))
 
