@@ -1,0 +1,1508 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DRM HLS/DASH downloader documentation">
+      
+      
+      
+      
+        <link rel="prev" href="../configuration/">
+      
+      
+        <link rel="next" href="../supported-sites/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>CLI Usage - VibraVid</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-usage" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VibraVid" class="md-header__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VibraVid
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI Usage
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VibraVid" class="md-nav__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VibraVid
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#series-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Series Selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#year-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Year Filter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stream-track-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream Track Overrides
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console-behaviour-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console Behaviour Override
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#show-dependency-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show Dependency Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#direct-download-by-url-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Download by URL (--down)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Direct Download by URL (--down)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-json-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom JSON Manifest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-replay-from-a-tracks_json-file-down-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch Replay from a TRACKS_JSON file (--down-json)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attaching-metadata-to-a-direct-download-meta-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attaching metadata to a direct download (--meta-*)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#direct-download-via-yt-dlp-yt-dlp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Download via yt-dlp (--yt-dlp)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#download-queue-queue-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Download Queue (--queue-*)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Search
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-sites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Sites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web GUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARR Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../login/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Login
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#series-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Series Selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#year-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Year Filter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stream-track-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream Track Overrides
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console-behaviour-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console Behaviour Override
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#show-dependency-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show Dependency Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#direct-download-by-url-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Download by URL (--down)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Direct Download by URL (--down)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-json-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom JSON Manifest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-replay-from-a-tracks_json-file-down-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch Replay from a TRACKS_JSON file (--down-json)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attaching-metadata-to-a-direct-download-meta-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attaching metadata to a direct download (--meta-*)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#direct-download-via-yt-dlp-yt-dlp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Download via yt-dlp (--yt-dlp)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#download-queue-queue-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Download Queue (--queue-*)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Search
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cli-usage">CLI Usage</h1>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>TMDB-based filename tokens (<code>%(tmdb_id)</code>, <code>%(original_title)</code>, etc.) and poster embedding
+require a TMDB API key — see <a href="../configuration/#tmdb-api-key">TMDB API Key</a> for setup.</p>
+</div>
+<h2 id="basic-commands">Basic Commands</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Show help and available sites</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>-h
+
+<span class="c1"># Search and download</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span>
+
+<span class="c1"># Auto-download the first result</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--auto-first
+
+<span class="c1"># Select a specific result by index (0-based) instead of the first</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--item<span class="w"> </span><span class="m">2</span>
+
+<span class="c1"># Use a site by its index number</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span><span class="m">0</span><span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span>
+
+<span class="c1"># Skip TS/CAM releases (StreamingCommunity only)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--skip-ts
+
+<span class="c1"># Disable the log file for this run</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--no-log
+</code></pre></div>
+<h2 id="series-selection">Series Selection</h2>
+<p>Use <code>--season</code> and <code>--episode</code> to skip interactive prompts:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Specific episode</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"breaking bad"</span><span class="w"> </span>--auto-first<span class="w"> </span>--season<span class="w"> </span><span class="m">1</span><span class="w"> </span>--episode<span class="w"> </span><span class="m">3</span>
+
+<span class="c1"># Range of episodes</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"breaking bad"</span><span class="w"> </span>--auto-first<span class="w"> </span>--season<span class="w"> </span><span class="m">1</span><span class="w"> </span>--episode<span class="w"> </span><span class="s2">"1-5"</span>
+
+<span class="c1"># All episodes of a season</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"breaking bad"</span><span class="w"> </span>--auto-first<span class="w"> </span>--season<span class="w"> </span><span class="m">1</span><span class="w"> </span>--episode<span class="w"> </span><span class="s2">"*"</span>
+
+<span class="c1"># All episodes of all seasons</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"breaking bad"</span><span class="w"> </span>--auto-first<span class="w"> </span>--season<span class="w"> </span><span class="s2">"*"</span>
+
+<span class="c1"># Multiple seasons</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"breaking bad"</span><span class="w"> </span>--auto-first<span class="w"> </span>--season<span class="w"> </span><span class="s2">"1-3"</span>
+</code></pre></div>
+<h2 id="year-filter">Year Filter</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Exact year</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"dune"</span><span class="w"> </span>--year<span class="w"> </span><span class="m">2021</span>
+
+<span class="c1"># Year range</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"batman"</span><span class="w"> </span>--year<span class="w"> </span><span class="s2">"1990-2015"</span>
+</code></pre></div>
+<h2 id="stream-track-overrides">Stream Track Overrides</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Video resolution</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>-sv<span class="w"> </span><span class="m">1080</span>
+
+<span class="c1"># Audio language</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>-sa<span class="w"> </span><span class="s2">"eng"</span>
+
+<span class="c1"># Subtitles</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>-ss<span class="w"> </span><span class="s2">"eng"</span>
+
+<span class="c1"># Skip the whole download if the requested filter matches no track</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>-sa<span class="w"> </span><span class="s2">"deu"</span><span class="w"> </span>--skip-no-match
+
+<span class="c1"># Output container (overrides PROCESS.extension from config.json for this run)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--extension<span class="w"> </span>mp4
+</code></pre></div>
+<p>See <a href="../configuration/#stream-selection-filters">Stream Selection Filters</a> for the full
+<code>-sv</code>/<code>-sa</code>/<code>-ss</code> filter syntax (resolution, codec, bitrate, language, Dolby Vision companion).</p>
+<h2 id="console-behaviour-override">Console Behaviour Override</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Keep console open (loop mode)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--close-console<span class="w"> </span><span class="nb">false</span>
+
+<span class="c1"># Close console after download</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--close-console<span class="w"> </span><span class="nb">true</span>
+</code></pre></div>
+<h2 id="proxy">Proxy</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Use the configured proxy for everything (default scope)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--use_proxy
+
+<span class="c1"># Proxy only the downloads (Velora), scrape directly</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--use_proxy<span class="w"> </span>--proxy-scope<span class="w"> </span>down
+
+<span class="c1"># Proxy only the scraping, download directly</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--use_proxy<span class="w"> </span>--proxy-scope<span class="w"> </span>scrap
+</code></pre></div>
+<h2 id="show-dependency-paths">Show Dependency Paths</h2>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>manual.py<span class="w"> </span>--dep
+</code></pre></div>
+<h2 id="direct-download-by-url-down">Direct Download by URL (<code>--down</code>)</h2>
+<p>Download a stream directly from its URL, bypassing site search entirely. The stream type is
+auto-detected (MP4 / HLS / DASH / ISM) or can be forced with <code>--type</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Simple MP4 / auto-detected stream</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/video.mp4"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/clip.mp4"</span>
+
+<span class="c1"># HLS with a known decryption key</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/master.m3u8"</span><span class="w"> </span>--type<span class="w"> </span>hls<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--key<span class="w"> </span><span class="s2">"&lt;KID&gt;:&lt;KEY&gt;"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/movie.mkv"</span>
+
+<span class="c1"># DASH with a DRM license server (Widevine)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/manifest.mpd"</span><span class="w"> </span>--type<span class="w"> </span>dash<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--license-url<span class="w"> </span><span class="s2">"https://example.com/wv/license"</span><span class="w"> </span>--drm<span class="w"> </span>widevine<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--headers<span class="w"> </span><span class="s2">"Authorization: Bearer &lt;token&gt;"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/movie.mkv"</span>
+
+<span class="c1"># DASH with a DRM license server that also needs its own HTTP header (repeatable, like --headers)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/manifest.mpd"</span><span class="w"> </span>--type<span class="w"> </span>dash<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--license-url<span class="w"> </span><span class="s2">"https://example.com/wv/license"</span><span class="w"> </span>--drm<span class="w"> </span>widevine<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--license-headers<span class="w"> </span><span class="s2">"Authorization: Bearer &lt;token&gt;"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/movie.mkv"</span>
+
+<span class="c1"># Grab just a clip: segments 10-50, or the 00:01:00-00:05:00 time range</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/master.m3u8"</span><span class="w"> </span>--type<span class="w"> </span>hls<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-segments<span class="w"> </span><span class="s2">"10-50"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/clip.mkv"</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/master.m3u8"</span><span class="w"> </span>--type<span class="w"> </span>hls<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-time<span class="w"> </span><span class="s2">"00:01:00-00:05:00"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/clip.mkv"</span>
+</code></pre></div>
+<h3 id="custom-json-manifest">Custom JSON Manifest</h3>
+<p><code>--down</code> also accepts a local path or URL pointing at a <strong>custom JSON manifest</strong> — a plain
+stream description for sources that don't expose a real HLS/DASH/ISM manifest. It's
+auto-detected when the target is a <code>.json</code> file/URL containing the <code>"vibravid_manifest"</code>
+marker, no <code>--type</code> needed.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"vibravid_manifest"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://cdn.example.com/movie/"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"duration"</span><span class="p">:</span><span class="w"> </span><span class="mf">5410.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"tracks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"video"</span><span class="p">,</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"codecs"</span><span class="p">:</span><span class="w"> </span><span class="s2">"avc1.640028"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"width"</span><span class="p">:</span><span class="w"> </span><span class="mi">1920</span><span class="p">,</span><span class="w"> </span><span class="nt">"height"</span><span class="p">:</span><span class="w"> </span><span class="mi">1080</span><span class="p">,</span><span class="w"> </span><span class="nt">"bitrate"</span><span class="p">:</span><span class="w"> </span><span class="mi">4500000</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"init"</span><span class="p">:</span><span class="w"> </span><span class="s2">"init_video.mp4"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"segments"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"chunk_video_$Number$.m4s"</span><span class="p">,</span><span class="w"> </span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="mi">1352</span><span class="p">,</span><span class="w"> </span><span class="nt">"duration"</span><span class="p">:</span><span class="w"> </span><span class="mf">4.0</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audio"</span><span class="p">,</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"eng"</span><span class="p">,</span><span class="w"> </span><span class="nt">"codecs"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mp4a.40.2"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"init"</span><span class="p">:</span><span class="w"> </span><span class="s2">"init_audio.mp4"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"segments"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"list"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"seg0.m4s"</span><span class="p">,</span><span class="w"> </span><span class="s2">"seg1.m4s"</span><span class="p">,</span><span class="w"> </span><span class="s2">"seg2.m4s"</span><span class="p">]}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/manifest.json"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/movie.mkv"</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"./local_manifest.json"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/movie.mkv"</span>
+</code></pre></div>
+<p>Segment modes for a track's <code>segments</code> field:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Fields</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list</code></td>
+<td>array of URLs, or objects with <code>url</code>/<code>size</code>/<code>duration</code>/<code>range</code></td>
+<td>explicit segment list</td>
+</tr>
+<tr>
+<td><code>template</code></td>
+<td><code>template</code>, <code>start</code>, <code>step</code> (or <code>duration</code>), <code>end</code> (or <code>count</code>)</td>
+<td>DASH-style <code>$Number$</code> / <code>$Time$</code> / <code>$RepresentationID$</code> placeholder expansion</td>
+</tr>
+<tr>
+<td><code>ranges</code> / <code>chunk</code></td>
+<td><code>url</code> + explicit <code>ranges</code> array, or <code>chunk</code> + <code>size</code> to auto-split</td>
+<td>byte-range segments carved out of a single file</td>
+</tr>
+</tbody>
+</table>
+<p><code>init</code> accepts a URL string, an object (<code>url</code>, <code>range</code>), or inline base64 (<code>data</code>) for the
+initialization segment. Placeholders support zero-padding, e.g. <code>$Number%05d$</code>; <code>$$</code> escapes
+a literal <code>$</code>.</p>
+<h3 id="batch-replay-from-a-tracks_json-file-down-json">Batch Replay from a TRACKS_JSON file (<code>--down-json</code>)</h3>
+<p><code>--down-json</code> runs every entry's <code>cmd</code> from a <code>TRACKS_JSON</code> debug file (see
+<code>debug_track_json</code> in <a href="../configuration/">Configuration</a>) in sequence, instead of a single
+<code>--down</code> invocation:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>manual.py<span class="w"> </span>--down-json<span class="w"> </span><span class="s2">"./debug/tracks_20260821.json"</span>
+</code></pre></div>
+<h3 id="attaching-metadata-to-a-direct-download-meta-">Attaching metadata to a direct download (<code>--meta-*</code>)</h3>
+<p>A plain <code>--down</code> has no title/type/season/episode context, so title-dependent hooks and the
+Vault upload/lookup are skipped by default for it. Pass <code>--meta-*</code> flags to attach that context
+so those still work:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/master.m3u8"</span><span class="w"> </span>--type<span class="w"> </span>hls<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--key<span class="w"> </span><span class="s2">"&lt;KID&gt;:&lt;KEY&gt;"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/Movie (2024)/movie.mkv"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--meta-title<span class="w"> </span><span class="s2">"Movie Name"</span><span class="w"> </span>--meta-type<span class="w"> </span>Film<span class="w"> </span>--meta-site<span class="w"> </span>streamingcommunity
+
+<span class="c1"># TV episode</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/master.m3u8"</span><span class="w"> </span>--type<span class="w"> </span>hls<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--key<span class="w"> </span><span class="s2">"&lt;KID&gt;:&lt;KEY&gt;"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/Show/Season 01/episode.mkv"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--meta-title<span class="w"> </span><span class="s2">"Show Name"</span><span class="w"> </span>--meta-type<span class="w"> </span>TV<span class="w"> </span>--meta-season<span class="w"> </span><span class="m">1</span><span class="w"> </span>--meta-episode<span class="w"> </span><span class="m">3</span>
+</code></pre></div>
+<p><code>--resolve-only</code> sets these automatically on the <code>--down</code> entry it produces, so this is mostly
+needed when hand-building a <code>--down</code>/<code>--down-json</code> invocation yourself.</p>
+<h2 id="direct-download-via-yt-dlp-yt-dlp">Direct Download via yt-dlp (<code>--yt-dlp</code>)</h2>
+<p>Download from any site yt-dlp supports bypassing site search entirely — separate from <code>--down</code>, which is for direct HLS/DASH/ISM/MP4 URLs.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Basic download</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/clip.mp4"</span>
+
+<span class="c1"># Pick a specific format instead of the default bestvideo+bestaudio/best</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>--format<span class="w"> </span><span class="s2">"best[height&lt;=720]"</span>
+
+<span class="c1"># List available formats and exit, or pick one interactively</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>--list-formats
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>--interactive-format
+
+<span class="c1"># Extract audio only</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>--extract-audio<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--audio-format<span class="w"> </span>mp3<span class="w"> </span>--audio-quality<span class="w"> </span><span class="m">0</span>
+
+<span class="c1"># Subtitles</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>--write-subs<span class="w"> </span>--sub-langs<span class="w"> </span>it,en
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/watch?v=..."</span><span class="w"> </span>--write-auto-subs
+
+<span class="c1"># Only the first N entries of a playlist</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--yt-dlp<span class="w"> </span><span class="s2">"https://www.youtube.com/playlist?list=..."</span><span class="w"> </span>--playlist-end<span class="w"> </span><span class="m">5</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--yt-dlp &lt;URL&gt;</code></td>
+<td>Download this URL with yt-dlp instead of the site-search/<code>--down</code> flow</td>
+</tr>
+<tr>
+<td><code>--format &lt;SPEC&gt;</code></td>
+<td>yt-dlp format selector (default: <code>bestvideo+bestaudio/best</code>)</td>
+</tr>
+<tr>
+<td><code>--list-formats</code></td>
+<td>List available formats for the URL and exit</td>
+</tr>
+<tr>
+<td><code>--interactive-format</code></td>
+<td>Show available formats and prompt for the format ID before downloading</td>
+</tr>
+<tr>
+<td><code>--extract-audio</code></td>
+<td>Extract audio only</td>
+</tr>
+<tr>
+<td><code>--audio-format &lt;FORMAT&gt;</code></td>
+<td>Audio format for extraction (e.g. <code>mp3</code>, <code>m4a</code>, <code>wav</code>, <code>opus</code>)</td>
+</tr>
+<tr>
+<td><code>--audio-quality &lt;QUALITY&gt;</code></td>
+<td>Audio quality for extraction (e.g. <code>0</code>, <code>5</code>, <code>8k</code>)</td>
+</tr>
+<tr>
+<td><code>--playlist-end &lt;N&gt;</code></td>
+<td>Only process the first N entries of a playlist</td>
+</tr>
+<tr>
+<td><code>--sub-langs &lt;LANGS&gt;</code></td>
+<td>Comma-separated subtitle languages (e.g. <code>it,en</code>)</td>
+</tr>
+<tr>
+<td><code>--write-subs</code></td>
+<td>Write subtitles</td>
+</tr>
+<tr>
+<td><code>--write-auto-subs</code></td>
+<td>Write auto-generated subtitles</td>
+</tr>
+</tbody>
+</table>
+<h2 id="advanced-options">Advanced Options</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--use-curl-cffi</code></td>
+<td>Download segments via curl_cffi (browser TLS impersonation) instead of Velora — for sites where individual segments are Cloudflare-protected</td>
+</tr>
+<tr>
+<td><code>--no-vault-cache</code></td>
+<td>Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)</td>
+</tr>
+<tr>
+<td><code>--no-decrypt</code></td>
+<td>Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass)</td>
+</tr>
+<tr>
+<td><code>--no-livemux</code></td>
+<td>Disable the streaming-mux fast path for this run, always falling back to the normal post-download <code>join_media()</code> pass. On by default</td>
+</tr>
+<tr>
+<td><code>--livemux</code></td>
+<td>Force-enable the streaming-mux fast path for this run even if the current service does not opt in via <code>_live_mux = True</code>. Off by default</td>
+</tr>
+<tr>
+<td><code>--no-concurrent</code></td>
+<td>Download video, audio and subtitles sequentially instead of simultaneously for this run. Concurrent download is on by default</td>
+</tr>
+<tr>
+<td><code>--skip-no-match</code></td>
+<td>Skip the whole download if <code>-sv</code>/<code>-sa</code>/<code>-ss</code> matches no track, instead of falling back to the best available one</td>
+</tr>
+<tr>
+<td><code>--log-decryptor-output</code></td>
+<td>Write flux's own stdout+stderr lines to the log file as they run, tagged with the engine name (e.g. <code>[FLUX]</code>) instead of <code>[INFO]</code></td>
+</tr>
+<tr>
+<td><code>--abc</code></td>
+<td>Anonymize printed KID:KEY pairs in the console/log, masking alternating characters with <code>?</code></td>
+</tr>
+<tr>
+<td><code>--hls-method AES_128\|NONE</code></td>
+<td>Override the HLS segment encryption method, ignoring the manifest's own <code>#EXT-X-KEY</code> tag (or supplying one when it has none). <code>NONE</code> treats every segment as already clear; <code>AES_128</code> forces AES-128-CBC (pair with <code>--hls-key</code>/<code>--hls-iv</code>)</td>
+</tr>
+<tr>
+<td><code>--hls-key &lt;HEX\|BASE64\|FILE&gt;</code></td>
+<td>Raw AES-128 key to use instead of fetching <code>URI=</code> from the manifest's <code>#EXT-X-KEY</code> tag</td>
+</tr>
+<tr>
+<td><code>--hls-iv &lt;HEX&gt;</code></td>
+<td>IV to use instead of the manifest's <code>IV=0x...</code> (or the implicit per-segment IV)</td>
+</tr>
+<tr>
+<td><code>--skip-content-check</code></td>
+<td>Skip the preflight HEAD content-type check for MP4 direct downloads (<code>--type mp4</code>) — needed for single-use download URLs where a HEAD request consumes the link</td>
+</tr>
+<tr>
+<td><code>--skip-sanitize</code></td>
+<td>Use the <code>-o</code> output path verbatim (MP4/HLS/DASH/ISM direct downloads), skipping path sanitization (transliteration of non-ASCII characters)</td>
+</tr>
+<tr>
+<td><code>--no-manifest-info</code></td>
+<td>Don't print the parsed manifest/streams table</td>
+</tr>
+<tr>
+<td><code>--binary-update</code></td>
+<td>Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download whichever is outdated</td>
+</tr>
+<tr>
+<td><code>--resolve-only</code></td>
+<td>Resolve and cache the manifest (keys, license, playlist) without actually downloading — pairs with <code>--down-json</code>/the queue to download later without re-resolving</td>
+</tr>
+<tr>
+<td><code>--tui</code></td>
+<td>Launch the Textual terminal UI instead of the plain CLI flow</td>
+</tr>
+<tr>
+<td><code>-UP</code>, <code>--update</code></td>
+<td>Auto-update to the latest release (binary builds only)</td>
+</tr>
+<tr>
+<td><code>--version</code></td>
+<td>Print the installed version and exit</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1"># Resolve now, download later: cache the manifest/keys without downloading</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--item<span class="w"> </span><span class="m">0</span><span class="w"> </span>--resolve-only
+
+<span class="c1"># Launch the TUI instead of the classic prompt-driven flow</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--tui
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># Manual AES-128 override, e.g. for a manifest missing its own #EXT-X-KEY tag</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/master.m3u8"</span><span class="w"> </span>--type<span class="w"> </span>hls<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--hls-method<span class="w"> </span>AES_128<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--hls-key<span class="w"> </span><span class="s2">"0011223344556677889900112233445566"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--hls-iv<span class="w"> </span><span class="s2">"00000000000000000000000000000001"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-o<span class="w"> </span><span class="s2">"./Video/clip.mkv"</span>
+</code></pre></div>
+<h2 id="download-queue-queue-">Download Queue (<code>--queue-*</code>)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Queue instead of downloading now</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--site<span class="w"> </span>streamingcommunity<span class="w"> </span>--search<span class="w"> </span><span class="s2">"interstellar"</span><span class="w"> </span>--item<span class="w"> </span><span class="m">0</span><span class="w"> </span>--queue-add
+python<span class="w"> </span>manual.py<span class="w"> </span>--down<span class="w"> </span><span class="s2">"https://example.com/movie.mkv"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"./Video/movie.mkv"</span><span class="w"> </span>--queue-add
+
+<span class="c1"># Inspect / manage the queue</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-list
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-remove<span class="w"> </span>&lt;ID&gt;
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-clear
+
+<span class="c1"># Process every pending (or interrupted) item in order</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-run
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Only invocations that would already complete without any prompt can be queued; anything
+ambiguous (e.g. <code>--global</code>, or a site search with no <code>--item</code>/<code>--auto-first</code>) is rejected at
+enqueue time.</p>
+</div>
+<p>Items enqueued together share one auto-generated queue name (e.g. <code>20260723-152525</code>, shown
+by <code>--queue-list</code>). Most queue commands accept that name to target just one batch instead of
+every queue, and a run can be further narrowed to specific item ids:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Target one specific batch</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-run<span class="w"> </span><span class="m">20260723</span>-152525
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-list<span class="w"> </span><span class="m">20260723</span>-152525
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-clear<span class="w"> </span><span class="m">20260723</span>-152525
+
+<span class="c1"># Restrict a run to specific item ids (as shown by --queue-list)</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-run<span class="w"> </span>--queue-ids<span class="w"> </span>abc12345,def67890
+
+<span class="c1"># Interactively pick which queue to run from a numbered list</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--queue-select
+</code></pre></div>
+<h2 id="global-search">Global Search</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Global search</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--global<span class="w"> </span>-s<span class="w"> </span><span class="s2">"cars"</span>
+
+<span class="c1"># Filter by category</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--category<span class="w"> </span><span class="m">1</span><span class="w">    </span><span class="c1"># Anime</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--category<span class="w"> </span><span class="m">2</span><span class="w">    </span><span class="c1"># Movies &amp; Series</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--category<span class="w"> </span><span class="m">3</span><span class="w">    </span><span class="c1"># Series only</span>
+python<span class="w"> </span>manual.py<span class="w"> </span>--category<span class="w"> </span><span class="m">4</span><span class="w">    </span><span class="c1"># Movies only</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.indexes", "navigation.expand", "navigation.top", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

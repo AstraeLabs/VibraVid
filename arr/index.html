@@ -1,0 +1,1407 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DRM HLS/DASH downloader documentation">
+      
+      
+      
+      
+        <link rel="prev" href="../telegram/">
+      
+      
+        <link rel="next" href="../hooks/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>ARR Integration - VibraVid</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#arr-integration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VibraVid" class="md-header__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VibraVid
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ARR Integration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VibraVid" class="md-nav__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VibraVid
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-sites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Sites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web GUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARR Integration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARR Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-integrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported integrations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webhook-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhook setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-and-automatic-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual and automatic sync
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-mapping-essential-for-split-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path mapping — essential for split environments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sonarr-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sonarr workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#radarr-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Radarr workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-and-folder-structure-always-delegated-to-sonarrradarr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naming and folder structure — always delegated to Sonarr/Radarr
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../login/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Login
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-integrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported integrations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webhook-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhook setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-and-automatic-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual and automatic sync
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-mapping-essential-for-split-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path mapping — essential for split environments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sonarr-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sonarr workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#radarr-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Radarr workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-and-folder-structure-always-delegated-to-sonarrradarr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naming and folder structure — always delegated to Sonarr/Radarr
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="arr-integration">ARR Integration</h1>
+<p>The <code>ARR</code> block enables VibraVid to work as an automation layer between <strong>Seerr/Jellyseerr</strong>, <strong>Sonarr</strong>, <strong>Radarr</strong>, and the final media library. When enabled, VibraVid polls Sonarr/Radarr for missing media, receives webhook events, downloads through its provider pipeline, and reports the resulting files back so that Sonarr/Radarr can import them.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>The ARR integration requires the VibraVid web GUI to be running. All polling loops,
+webhook listeners, and download workers are managed by the Django application server.
+The CLI (<code>vibraNid</code> / <code>python -m VibraVid</code>) does not start the ARR stack.</p>
+</div>
+<p>Typical flow:</p>
+<div class="highlight"><pre><span></span><code>Seerr / Jellyseerr
+    ↓ user requests a movie or series
+Sonarr / Radarr
+    ↓ media is added and marked as missing
+VibraVid ARR
+    ↓ detects missing media through polling or webhooks
+VibraVid downloader
+    ↓ searches and downloads through the configured provider or through the provider selected by tag
+Sonarr / Radarr
+    ↓ rescans/imports the downloaded file
+Media library
+    ↓ Jellyfin/Plex can detect the final file
+</code></pre></div>
+<h2 id="supported-integrations">Supported integrations</h2>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Seerr/Jellyseerr</strong></td>
+<td>Handles user requests and sends approval/pending webhook events</td>
+</tr>
+<tr>
+<td><strong>Sonarr</strong></td>
+<td>Manages TV series, missing episodes, episode metadata, rescans and imports</td>
+</tr>
+<tr>
+<td><strong>Radarr</strong></td>
+<td>Manages movies, missing movie metadata, rescans and imports</td>
+</tr>
+<tr>
+<td><strong>VibraVid</strong></td>
+<td>Searches, downloads and hands files back to Sonarr/Radarr</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration-reference">Configuration reference</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"ARR"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"enable_polling"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"enable_seerr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"enable_sonarr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"enable_radarr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"polling_interval"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"full_resync_interval"</span><span class="p">:</span><span class="w"> </span><span class="mi">21600</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"max_concurrent_downloads"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"webhook_priority_enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"native_webhook_priority_window_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"seerr_fallback_delay_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"download_italian_anime_default"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"provider_fallback"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"streamingcommunity"</span><span class="p">,</span><span class="w"> </span><span class="s2">"animeunity"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"path_mapping"</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span>
+<span class="w">    </span><span class="nt">"sonarr"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="nt">"api_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"radarr"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="nt">"api_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"seerr"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"webhook_secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"sonarr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"webhook_secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"radarr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"webhook_secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td><code>false</code></td>
+<td>Enables the ARR integration globally</td>
+</tr>
+<tr>
+<td><code>enable_polling</code></td>
+<td><code>false</code></td>
+<td>Periodically scans Sonarr/Radarr for missing media</td>
+</tr>
+<tr>
+<td><code>enable_seerr_webhook</code></td>
+<td><code>false</code></td>
+<td>Enables the Seerr/Jellyseerr webhook endpoint</td>
+</tr>
+<tr>
+<td><code>enable_sonarr_webhook</code></td>
+<td><code>false</code></td>
+<td>Enables the Sonarr native webhook endpoint</td>
+</tr>
+<tr>
+<td><code>enable_radarr_webhook</code></td>
+<td><code>false</code></td>
+<td>Enables the Radarr native webhook endpoint</td>
+</tr>
+<tr>
+<td><code>polling_interval</code></td>
+<td><code>300</code></td>
+<td>Seconds between incremental polling cycles</td>
+</tr>
+<tr>
+<td><code>full_resync_interval</code></td>
+<td><code>21600</code></td>
+<td>Seconds between full reconciliation syncs</td>
+</tr>
+<tr>
+<td><code>max_concurrent_downloads</code></td>
+<td><code>1</code></td>
+<td>Maximum parallel ARR-triggered downloads</td>
+</tr>
+<tr>
+<td><code>webhook_priority_enabled</code></td>
+<td><code>true</code></td>
+<td>Native Sonarr/Radarr webhooks take priority over Seerr to avoid duplicates</td>
+</tr>
+<tr>
+<td><code>native_webhook_priority_window_seconds</code></td>
+<td><code>120</code></td>
+<td>Dedup window for near-simultaneous webhook events</td>
+</tr>
+<tr>
+<td><code>seerr_fallback_delay_seconds</code></td>
+<td><code>20</code></td>
+<td>Delay before processing a Seerr event when a native webhook may follow</td>
+</tr>
+<tr>
+<td><code>download_italian_anime_default</code></td>
+<td><code>true</code></td>
+<td>When an anime provider returns both an original and an <code>(ITA)</code> dubbed version, prefer the Italian dub</td>
+</tr>
+<tr>
+<td><code>provider_fallback</code></td>
+<td><code>[]</code></td>
+<td>Ordered list of providers tried in sequence when the primary provider finds no match. If empty, <code>streamingcommunity</code> is the built-in default</td>
+</tr>
+<tr>
+<td><code>path_mapping</code></td>
+<td><code>{}</code></td>
+<td>Translates VibraVid host paths to the paths seen by Radarr/Sonarr containers. Leave empty when both services share the same filesystem view</td>
+</tr>
+<tr>
+<td><code>sonarr.url</code></td>
+<td>—</td>
+<td>Base URL of the Sonarr instance, e.g. <code>http://sonarr:8989</code></td>
+</tr>
+<tr>
+<td><code>sonarr.api_key</code></td>
+<td>—</td>
+<td>Sonarr API key</td>
+</tr>
+<tr>
+<td><code>radarr.url</code></td>
+<td>—</td>
+<td>Base URL of the Radarr instance, e.g. <code>http://radarr:7878</code></td>
+</tr>
+<tr>
+<td><code>radarr.api_key</code></td>
+<td>—</td>
+<td>Radarr API key</td>
+</tr>
+<tr>
+<td><code>seerr.webhook_secret</code></td>
+<td>—</td>
+<td>Secret expected in Seerr/Jellyseerr webhook requests</td>
+</tr>
+<tr>
+<td><code>sonarr_webhook.webhook_secret</code></td>
+<td>—</td>
+<td>Secret expected in Sonarr webhook requests</td>
+</tr>
+<tr>
+<td><code>radarr_webhook.webhook_secret</code></td>
+<td>—</td>
+<td>Secret expected in Radarr webhook requests</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>All ARR settings can also be edited directly from the VibraVid web GUI under
+<strong>Settings -&gt; Configuration editor</strong>, without touching <code>config.json</code> manually.</p>
+</div>
+<p>These keys can also be set via environment variables (useful in Docker):</p>
+<div class="highlight"><pre><span></span><code><span class="nv">USE_ARR_SERVICES</span><span class="o">=</span><span class="nb">true</span>
+<span class="nv">SONARR_URL</span><span class="o">=</span>http://sonarr:8989
+<span class="nv">SONARR_API_KEY</span><span class="o">=</span>your-key
+<span class="nv">RADARR_URL</span><span class="o">=</span>http://radarr:7878
+<span class="nv">RADARR_API_KEY</span><span class="o">=</span>your-key
+<span class="nv">SEERR_WEBHOOK_SECRET</span><span class="o">=</span>your-secret
+<span class="nv">SONARR_WEBHOOK_SECRET</span><span class="o">=</span>your-secret
+<span class="nv">RADARR_WEBHOOK_SECRET</span><span class="o">=</span>your-secret
+
+<span class="c1"># Less commonly needed, but also read from the environment:</span>
+<span class="nv">ENABLE_ARR_POLLING</span><span class="o">=</span><span class="nb">true</span><span class="w">               </span><span class="c1"># enable_polling</span>
+<span class="nv">ARR_POLLING_INTERVAL</span><span class="o">=</span><span class="m">300</span><span class="w">              </span><span class="c1"># polling_interval (seconds)</span>
+<span class="nv">ARR_FULL_RESYNC_INTERVAL</span><span class="o">=</span><span class="m">21600</span><span class="w">        </span><span class="c1"># full_resync_interval (seconds)</span>
+<span class="nv">ENABLE_SEERR_WEBHOOK</span><span class="o">=</span><span class="nb">true</span><span class="w">             </span><span class="c1"># enable_seerr_webhook</span>
+<span class="nv">ENABLE_SONARR_WEBHOOK</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># enable_sonarr_webhook</span>
+<span class="nv">ENABLE_RADARR_WEBHOOK</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># enable_radarr_webhook</span>
+<span class="nv">ARR_MAX_CONCURRENT_DOWNLOADS</span><span class="o">=</span><span class="m">1</span><span class="w">        </span><span class="c1"># max_concurrent_downloads</span>
+<span class="nv">ARR_WEBHOOK_PRIORITY_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">     </span><span class="c1"># webhook_priority_enabled</span>
+<span class="nv">ARR_NATIVE_WEBHOOK_PRIORITY_WINDOW_SECONDS</span><span class="o">=</span><span class="m">120</span><span class="w">  </span><span class="c1"># native_webhook_priority_window_seconds</span>
+<span class="nv">ARR_SEERR_FALLBACK_DELAY_SECONDS</span><span class="o">=</span><span class="m">20</span><span class="w">   </span><span class="c1"># seerr_fallback_delay_seconds</span>
+</code></pre></div>
+<p>Each of these mirrors the identically-named <code>ARR.*</code> key in <code>config.json</code> (comment shows the
+matching key) — set either the env var or the config key, not both.</p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Strict TMDB/TVDB identity matching (used when resolving Sonarr/Radarr items) requires a
+TMDB API key — see <a href="../configuration/#tmdb-api-key">TMDB API Key</a> for setup.</p>
+</div>
+<h2 id="webhook-setup">Webhook setup</h2>
+<p>VibraVid exposes one webhook endpoint per ARR application. Add <strong>one connection only</strong> per app — adding multiple webhooks for the same app causes duplicate processing.</p>
+<p>When the GUI/Django server is running, the ARR integration exposes dedicated webhook endpoints:</p>
+<div class="highlight"><pre><span></span><code>POST /api/arr/webhook/seerr/
+POST /api/arr/webhook/sonarr/
+POST /api/arr/webhook/radarr/
+</code></pre></div>
+<p>Each endpoint can be protected with its own webhook secret. Configure the same secret both in VibraVid and in the corresponding external service.</p>
+<p><strong>Radarr</strong> -&gt; Settings -&gt; Connect -&gt; Webhook</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL</td>
+<td><code>http://&lt;vibravid-host&gt;:&lt;port&gt;/api/arr/webhook/radarr/</code></td>
+</tr>
+<tr>
+<td>Triggers</td>
+<td>On Movie Added, On Movie File Delete</td>
+</tr>
+<tr>
+<td>Secret</td>
+<td>any value mirrored in <code>radarr_webhook.webhook_secret</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sonarr</strong> -&gt; Settings -&gt; Connect -&gt; Webhook</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL</td>
+<td><code>http://&lt;vibravid-host&gt;:&lt;port&gt;/api/arr/webhook/sonarr/</code></td>
+</tr>
+<tr>
+<td>Triggers</td>
+<td>On Series Add, On Episode File Delete</td>
+</tr>
+<tr>
+<td>Secret</td>
+<td>any value mirrored in <code>sonarr_webhook.webhook_secret</code></td>
+</tr>
+</tbody>
+</table>
+<p>Then enable in <code>config.json</code>:
+<div class="highlight"><pre><span></span><code><span class="nt">"enable_sonarr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="nt">"enable_radarr_webhook"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Webhooks and polling can be used together: webhooks trigger an immediate download when
+media is added, polling acts as a safety net for items that arrive without a webhook event.</p>
+</div>
+<h2 id="manual-and-automatic-sync">Manual and automatic sync</h2>
+<p>ARR can process media in two ways:</p>
+<ol>
+<li><strong>Polling</strong> — VibraVid periodically asks Sonarr/Radarr for wanted or missing media.</li>
+<li><strong>Webhooks</strong> — VibraVid reacts immediately when Seerr, Sonarr or Radarr sends an event.</li>
+</ol>
+<p>Both modes can be enabled together. Native Sonarr/Radarr webhooks can be prioritized over Seerr events to reduce duplicate processing.</p>
+<h2 id="provider-selection">Provider selection</h2>
+<p>VibraVid determines which provider to use for each item through two mechanisms — you can use one or both.</p>
+<p><strong>Method 1 — Per-item tag (advanced, requires tagging each title)</strong></p>
+<p>Add a tag directly to the movie or series in Sonarr/Radarr using the format <code>provider-&lt;site&gt;</code>. VibraVid reads the tag at download time and uses that provider regardless of the fallback list. This is useful when specific titles are only available on a particular service.</p>
+<p>Tags are created in Sonarr/Radarr under Settings -&gt; Tags, then assigned to individual series or movies from their edit page.</p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>provider-animeunity</code></td>
+<td>Uses AnimeUnity for that title</td>
+</tr>
+<tr>
+<td><code>provider-&lt;site&gt;</code></td>
+<td>Uses any supported VibraVid site for that title</td>
+</tr>
+<tr>
+<td><code>hold</code> / <code>pausa</code></td>
+<td>Skips the item until the tag is removed</td>
+</tr>
+<tr>
+<td><code>skip-s1</code>, <code>skip-s2</code>, ...</td>
+<td>Skips a specific season of a series</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Method 2 — Global fallback list (recommended, zero per-title configuration)</strong></p>
+<p>Configure <code>provider_fallback</code> with an ordered list of providers. VibraVid tries them in sequence and stops at the first that finds a matching title. No tagging required — add as many providers as you want as safety nets.</p>
+<p>Recommended full configuration (covers general content, anime, and niche services):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"provider_fallback"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">"streamingcommunity"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"animeunity"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"discoveryplus"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"discovery"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"dmax"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"nove"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"realtime"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"mediasetinfinity"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"raiplay"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"homegardentv"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"foodnetwork"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"animeworld"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"crunchyroll"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"primevideo"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"tubitv"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"cinezo"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"mostraguarda"</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>If <code>provider_fallback</code> is empty or omitted, VibraVid tries <code>streamingcommunity</code> only and fails if the title is not found there.</p>
+<p><strong>Italian dub preference (<code>download_italian_anime_default</code>)</strong></p>
+<p>When <code>true</code>, if the selected provider returns both an original-language version and an <code>(ITA)</code> dubbed version of the same title, VibraVid automatically picks the Italian dub. This applies regardless of which method selected the provider.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"download_italian_anime_default"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+</code></pre></div>
+<h2 id="path-mapping-essential-for-split-environments">Path mapping — essential for split environments</h2>
+<p><code>path_mapping</code> is one of the most important settings when Radarr/Sonarr run in Docker while VibraVid runs on the host (or vice versa). After a download completes, VibraVid must tell Radarr/Sonarr exactly where the file is so they can import it. If the two services see the same physical folder under different paths, Radarr/Sonarr will receive a path they cannot resolve and the import will fail.</p>
+<table>
+<thead>
+<tr>
+<th>Setup</th>
+<th><code>path_mapping</code> needed?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Both on bare metal</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Both in Docker with identical volume mounts</td>
+<td>No</td>
+</tr>
+<tr>
+<td>VibraVid on host, ARR stack in Docker</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>Both in Docker with different volume mounts</td>
+<td><strong>Yes</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Example:</strong> VibraVid on the host sees <code>/media/Media/Film</code>. Radarr's Docker Compose mounts the same folder at a different path:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/media/Media/Film:/media/Film</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/media/Media/Anime:/media/Anime</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/media/Media/Series:/media/Series</span>
+</code></pre></div>
+<p>Without <code>path_mapping</code>, VibraVid reports <code>/media/Media/Film/my-movie</code> to Radarr. Radarr looks for that path inside its container — it does not exist there — and the import fails. With the mapping configured, VibraVid automatically translates the path before every API call:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"path_mapping"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"/media/Media/Film"</span><span class="p">:</span><span class="w">   </span><span class="s2">"/media/Film"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"/media/Media/Anime"</span><span class="p">:</span><span class="w">  </span><span class="s2">"/media/Anime"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"/media/Media/Series"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/media/Series"</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Each key is a prefix as seen by VibraVid; the value is the equivalent prefix inside the Radarr/Sonarr container. Entries are checked in order and the first matching prefix is replaced. Leave <code>path_mapping</code> as <code>{}</code> when both services share the same filesystem view.</p>
+<h2 id="sonarr-workflow">Sonarr workflow</h2>
+<p>For series, VibraVid ARR can:</p>
+<ul>
+<li>read missing episodes from Sonarr;</li>
+<li>resolve series, season and episode metadata;</li>
+<li>download the requested episode into the expected series path;</li>
+<li>trigger a Sonarr rescan/import;</li>
+<li>verify whether the episode was imported;</li>
+<li>optionally mark the episode as unmonitored after successful import.</li>
+</ul>
+<h2 id="radarr-workflow">Radarr workflow</h2>
+<p>For movies, VibraVid ARR can:</p>
+<ul>
+<li>read missing movies from Radarr;</li>
+<li>resolve title, year and TMDB metadata;</li>
+<li>download the requested movie into the expected movie path;</li>
+<li>trigger a Radarr rescan/import;</li>
+<li>verify whether the movie was imported;</li>
+<li>optionally mark the movie as unmonitored after successful import.</li>
+</ul>
+<h2 id="naming-and-folder-structure-always-delegated-to-sonarrradarr">Naming and folder structure — always delegated to Sonarr/Radarr</h2>
+<p>VibraVid never invents its own filename/folder scheme for imported media. After a
+download completes it calls Sonarr/Radarr's own <code>Rescan</code>/<code>ManualImport</code>/<code>Rename</code> commands,
+so the final file on disk always follows <strong>your</strong> naming configuration in Sonarr/Radarr
+(Settings -&gt; Media Management), not a VibraVid-specific format.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Sonarr's <strong>"Rename Episodes"</strong> and Radarr's <strong>"Rename Movies"</strong> options (Settings -&gt;
+Media Management) are <strong>disabled by default</strong> on a clean Sonarr/Radarr install. If left
+disabled, imported files still land correctly in your library, but keep VibraVid's raw
+scraped filename instead of your configured naming format (no <code>S01E01</code>, no year, etc).
+Enable "Rename Episodes" / "Rename Movies" in Sonarr/Radarr if you want clean, consistent
+filenames. VibraVid logs a one-time warning per ARR sync when it detects this setting is
+off.</p>
+</div>
+<h2 id="recommended-setup">Recommended setup</h2>
+<p>Use shared volumes so VibraVid and Sonarr/Radarr see the same filesystem paths. If containers use different internal paths for the same media folder, imports may fail because Sonarr/Radarr will not find the downloaded files.</p>
+<p>Example Docker path layout:</p>
+<div class="highlight"><pre><span></span><code>/media
+├── movies
+├── series
+└── downloads
+</code></pre></div>
+<p>Mount the same media root into VibraVid, Sonarr and Radarr whenever possible.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.indexes", "navigation.expand", "navigation.top", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

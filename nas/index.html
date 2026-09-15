@@ -1,0 +1,1614 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DRM HLS/DASH downloader documentation">
+      
+      
+      
+      
+        <link rel="prev" href="../docker/">
+      
+      
+        <link rel="next" href="../login/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>NAS Deployment - VibraVid</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vibravid-nas-deployment-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VibraVid" class="md-header__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VibraVid
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              NAS Deployment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VibraVid" class="md-nav__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VibraVid
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-sites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Sites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web GUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARR Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generic-linux-host-ubuntu-debian-raspberry-pi-os-and-any-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generic Linux host (Ubuntu, Debian, Raspberry Pi OS, and any distribution)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generic Linux host (Ubuntu, Debian, Raspberry Pi OS, and any distribution)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-your-env-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create your .env file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-set-puid-pgid-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Set PUID / PGID (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-start-the-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Start the container
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-access-vibravid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Access VibraVid
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synology-container-manager-dsm-72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synology Container Manager (DSM 7.2+)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Synology Container Manager (DSM 7.2+)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-open-container-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1 — Open Container Manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-create-a-new-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2 — Create a new Project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-configure-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3 — Configure environment variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-port-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — Port mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-5-build-and-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5 — Build and run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-6-access-vibravid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6 — Access VibraVid
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bind-mounts-on-synology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bind mounts on Synology
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bind mounts on Synology">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#folder-structure-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Folder structure example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permissions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qnap-nas-arm64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QNAP NAS (ARM64)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="QNAP NAS (ARM64)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setup-via-qnap-container-station" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup via QNAP Container Station
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Updates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Updates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#manual-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual update
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-app-update-if-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-app update (if enabled)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#disallowedhost-or-403-forbidden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "DisallowedHost" or "403 Forbidden"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#downloads-owned-by-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads owned by root
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#port-already-in-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Port already in use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-exits-immediately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container exits immediately
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../login/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Login
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generic-linux-host-ubuntu-debian-raspberry-pi-os-and-any-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generic Linux host (Ubuntu, Debian, Raspberry Pi OS, and any distribution)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generic Linux host (Ubuntu, Debian, Raspberry Pi OS, and any distribution)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-your-env-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create your .env file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-set-puid-pgid-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Set PUID / PGID (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-start-the-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Start the container
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-access-vibravid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Access VibraVid
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synology-container-manager-dsm-72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synology Container Manager (DSM 7.2+)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Synology Container Manager (DSM 7.2+)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-open-container-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1 — Open Container Manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-create-a-new-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2 — Create a new Project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-configure-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3 — Configure environment variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-port-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — Port mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-5-build-and-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5 — Build and run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-6-access-vibravid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6 — Access VibraVid
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bind-mounts-on-synology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bind mounts on Synology
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bind mounts on Synology">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#folder-structure-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Folder structure example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permissions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qnap-nas-arm64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QNAP NAS (ARM64)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="QNAP NAS (ARM64)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setup-via-qnap-container-station" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup via QNAP Container Station
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Updates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Updates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#manual-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual update
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-app-update-if-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-app update (if enabled)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#disallowedhost-or-403-forbidden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "DisallowedHost" or "403 Forbidden"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#downloads-owned-by-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads owned by root
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#port-already-in-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Port already in use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-exits-immediately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container exits immediately
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="vibravid-nas-deployment-guide">VibraVid — NAS Deployment Guide</h1>
+<p>This guide explains how to run VibraVid on a NAS or home server using Docker Compose. Dedicated sections cover <strong>Synology Container Manager</strong> (DSM 7.2+), <strong>QNAP Container Station</strong> (ARM64), and generic <strong>Linux hosts</strong> (Ubuntu, Debian, Raspberry Pi OS, etc.).</p>
+<hr />
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Docker and Docker Compose installed on the NAS</li>
+<li>The VibraVid repository cloned or downloaded</li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/AstraeLabs/VibraVid.git
+<span class="nb">cd</span><span class="w"> </span>VibraVid
+</code></pre></div>
+<hr />
+<h2 id="generic-linux-host-ubuntu-debian-raspberry-pi-os-and-any-distribution">Generic Linux host (Ubuntu, Debian, Raspberry Pi OS, and any distribution)</h2>
+<p>This section applies to any Linux host running Docker: a mini-PC, a Raspberry Pi, a home server, or a machine with an external USB/SATA drive. The steps are the same regardless of distribution.</p>
+<h3 id="1-create-your-env-file">1. Create your <code>.env</code> file</h3>
+<div class="highlight"><pre><span></span><code>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
+</code></pre></div>
+<p>Edit <code>.env</code> with the paths and settings that match your setup. At minimum, set the download directory and your host IP. For an external drive mounted at <code>/mnt/external</code>:</p>
+<div class="highlight"><pre><span></span><code># Path on the host where downloads will be stored (e.g. an external drive)
+VIBRAVID_VIDEO_DIR=/mnt/external/vibravid
+
+# Optional: database and config on the host (recommended for easy backups)
+VIBRAVID_DB_DIR=/mnt/data/appdata/vibravid/db
+VIBRAVID_CONFIG_DIR=/mnt/data/appdata/vibravid/conf
+VIBRAVID_LOGS_DIR=/mnt/data/appdata/vibravid/logs
+
+# Expose on port 8000 (or change to avoid conflicts)
+VIBRAVID_PORT=8000
+
+# Allow access from other machines on the LAN
+ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.100
+CSRF_TRUSTED_ORIGINS=http://192.168.1.100:8000
+</code></pre></div>
+<h3 id="2-set-puid-pgid-recommended">2. Set PUID / PGID (recommended)</h3>
+<p>To avoid permission issues on the host-mounted folders, set the user and group IDs that own those folders. Run the following on the NAS host to find your user's IDs:</p>
+<div class="highlight"><pre><span></span><code>id<span class="w"> </span>&lt;your-username&gt;
+<span class="c1"># Example output: uid=1000(john) gid=1000(john) groups=...</span>
+</code></pre></div>
+<p>Add to <code>.env</code>:</p>
+<div class="highlight"><pre><span></span><code>PUID=1000
+PGID=1000
+</code></pre></div>
+<p>The container entrypoint will remap <code>appuser</code> to these IDs at startup so all downloaded files are owned by your normal user.</p>
+<h3 id="3-start-the-container">3. Start the container</h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<p>If you plan to use <code>monochrome</code> (Amazon Music), start the optional Bypasser sidecar alongside
+the main app instead — it's off by default:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>bypasser<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<p>See the <a href="../docker/#optional-sidecar-bypasser">Docker guide</a> for details.</p>
+<p>On first start, the container automatically:
+- Seeds <code>/app/Conf</code> from the image defaults if the volume is empty
+- Runs Django database migrations</p>
+<p>Check logs to confirm everything started correctly:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>-f
+</code></pre></div>
+<h3 id="4-access-vibravid">4. Access VibraVid</h3>
+<p>Open a browser and navigate to:</p>
+<div class="highlight"><pre><span></span><code>http://&lt;nas-ip&gt;:8000
+</code></pre></div>
+<hr />
+<h2 id="synology-container-manager-dsm-72">Synology Container Manager (DSM 7.2+)</h2>
+<h3 id="step-1-open-container-manager">Step 1 — Open Container Manager</h3>
+<p>In DSM, go to <strong>Main Menu → Container Manager</strong>.</p>
+<h3 id="step-2-create-a-new-project">Step 2 — Create a new Project</h3>
+<ol>
+<li>Click <strong>Project → Create</strong>.</li>
+<li>Give the project a name (e.g., <code>vibravid</code>).</li>
+<li>Choose <strong>Set a path</strong> for the project source and select the folder where you cloned the repository (e.g., <code>/volume1/docker/vibravid</code>).</li>
+<li>Container Manager will detect <code>docker-compose.yml</code> automatically.</li>
+</ol>
+<h3 id="step-3-configure-environment-variables">Step 3 — Configure environment variables</h3>
+<p>Before building, click <strong>Next</strong> to reach the environment variable screen. Add the variables from your <code>.env</code> file here, or set them directly in the UI:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Example value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VIBRAVID_VIDEO_DIR</code></td>
+<td><code>/volume2/Media/Movies</code></td>
+</tr>
+<tr>
+<td><code>VIBRAVID_DB_DIR</code></td>
+<td><code>/volume1/docker/vibravid/db</code></td>
+</tr>
+<tr>
+<td><code>VIBRAVID_CONFIG_DIR</code></td>
+<td><code>/volume1/docker/vibravid/conf</code></td>
+</tr>
+<tr>
+<td><code>VIBRAVID_LOGS_DIR</code></td>
+<td><code>/volume1/docker/vibravid/logs</code></td>
+</tr>
+<tr>
+<td><code>PUID</code></td>
+<td><code>1026</code> (your DSM user ID)</td>
+</tr>
+<tr>
+<td><code>PGID</code></td>
+<td><code>100</code> (your DSM group ID)</td>
+</tr>
+<tr>
+<td><code>ALLOWED_HOSTS</code></td>
+<td><code>localhost,127.0.0.1,192.168.1.x</code></td>
+</tr>
+<tr>
+<td><code>CSRF_TRUSTED_ORIGINS</code></td>
+<td><code>http://192.168.1.x:8000</code></td>
+</tr>
+</tbody>
+</table>
+<p>To find your Synology user's UID/GID, SSH into the NAS and run:</p>
+<div class="highlight"><pre><span></span><code>id<span class="w"> </span>&lt;your-dsm-username&gt;
+</code></pre></div>
+<h3 id="step-4-port-mapping">Step 4 — Port mapping</h3>
+<p>Container Manager shows the port mapping from <code>docker-compose.yml</code>. The default is <code>8000 → 8000</code>. Change the left side (host port) if that port is already in use.</p>
+<h3 id="step-5-build-and-run">Step 5 — Build and run</h3>
+<p>Click <strong>Done</strong> to build the image and start the container. The first build downloads all dependencies and may take a few minutes.</p>
+<h3 id="step-6-access-vibravid">Step 6 — Access VibraVid</h3>
+<p>Open <code>http://&lt;nas-ip&gt;:8000</code> in a browser on your local network.</p>
+<hr />
+<h2 id="bind-mounts-on-synology">Bind mounts on Synology</h2>
+<p>Bind mounts let you store data in regular Synology shared folders (visible in File Station) instead of Docker-managed volumes.</p>
+<h3 id="folder-structure-example">Folder structure example</h3>
+<div class="highlight"><pre><span></span><code>/volume1/docker/vibravid/
+    conf/          ← VIBRAVID_CONFIG_DIR
+    db/            ← VIBRAVID_DB_DIR
+    logs/          ← VIBRAVID_LOGS_DIR
+
+/volume2/Media/
+    Movies/        ← VIBRAVID_VIDEO_DIR (bulk storage)
+</code></pre></div>
+<p>Create the directories via SSH or File Station before starting the container:</p>
+<div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>-p<span class="w"> </span>/volume1/docker/vibravid/<span class="o">{</span>conf,db,logs<span class="o">}</span>
+mkdir<span class="w"> </span>-p<span class="w"> </span>/volume2/Media/Movies
+</code></pre></div>
+<p>Then set the corresponding variables in <code>.env</code> or in the Container Manager UI.</p>
+<h3 id="permissions">Permissions</h3>
+<p>If downloads land with root ownership, ensure <code>PUID</code> and <code>PGID</code> are set correctly (see Step 3 above). You can verify after the container starts:</p>
+<div class="highlight"><pre><span></span><code>ls<span class="w"> </span>-ln<span class="w"> </span>/volume2/Media/Movies
+<span class="c1"># Files should show your UID:GID, not 0:0</span>
+</code></pre></div>
+<hr />
+<h2 id="qnap-nas-arm64">QNAP NAS (ARM64)</h2>
+<p>QNAP devices frequently use ARM64 processors. The VibraVid Docker image is published as a <strong>multi-arch manifest</strong> (<code>linux/amd64</code> + <code>linux/arm64</code>), so you can run it on QNAP without building from source.</p>
+<blockquote>
+<p><strong>Do not run <code>docker compose up --build</code> on ARM64.</strong> The source repository includes x86_64-only prebuilt binaries that cause the build to fail on ARM64. Always use <code>docker compose pull</code> to fetch the pre-built image.</p>
+</blockquote>
+<h3 id="setup-via-qnap-container-station">Setup via QNAP Container Station</h3>
+<ol>
+<li>Install <strong>Container Station</strong> from the QNAP App Center if not already present.</li>
+<li>Open a terminal via SSH or the QNAP shell and clone the repository:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/AstraeLabs/VibraVid.git
+<span class="nb">cd</span><span class="w"> </span>VibraVid
+</code></pre></div>
+<ol>
+<li>Create your <code>.env</code> file:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
+</code></pre></div>
+<p>Edit <code>.env</code> for your QNAP paths. QNAP shared folders are typically under <code>/share/</code>:</p>
+<div class="highlight"><pre><span></span><code>VIBRAVID_VIDEO_DIR=/share/Multimedia/vibravid
+VIBRAVID_DB_DIR=/share/Container/vibravid/db
+VIBRAVID_CONFIG_DIR=/share/Container/vibravid/conf
+VIBRAVID_LOGS_DIR=/share/Container/vibravid/logs
+VIBRAVID_PORT=8000
+ALLOWED_HOSTS=localhost,127.0.0.1,&lt;qnap-ip&gt;
+CSRF_TRUSTED_ORIGINS=http://&lt;qnap-ip&gt;:8000
+</code></pre></div>
+<ol>
+<li>Find your user's UID/GID:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>id<span class="w"> </span>&lt;your-username&gt;
+</code></pre></div>
+<p>Add to <code>.env</code>:</p>
+<div class="highlight"><pre><span></span><code>PUID=&lt;your-uid&gt;
+PGID=&lt;your-gid&gt;
+</code></pre></div>
+<ol>
+<li>Pull the pre-built ARM64 image and start:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>pull
+docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<p>Docker automatically selects the ARM64 image variant from the multi-arch manifest.</p>
+<ol>
+<li>Access VibraVid at <code>http://&lt;qnap-ip&gt;:8000</code>.</li>
+</ol>
+<hr />
+<h2 id="updates">Updates</h2>
+<h3 id="manual-update">Manual update</h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>pull
+docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<p>This pulls the latest published image and recreates the container without touching volumes.</p>
+<h3 id="in-app-update-if-enabled">In-app update (if enabled)</h3>
+<p>When a new version is available, VibraVid will show an update banner in the web UI. Follow the on-screen instructions to apply the update.</p>
+<hr />
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="disallowedhost-or-403-forbidden">"DisallowedHost" or "403 Forbidden"</h3>
+<p>Your NAS IP is not in <code>ALLOWED_HOSTS</code>. Add it:</p>
+<div class="highlight"><pre><span></span><code>ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.100
+CSRF_TRUSTED_ORIGINS=http://192.168.1.100:8000
+</code></pre></div>
+<p>Then recreate the container:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate
+</code></pre></div>
+<h3 id="downloads-owned-by-root">Downloads owned by root</h3>
+<p><code>PUID</code> / <code>PGID</code> are not set or do not match the folder owner. Check with <code>id &lt;user&gt;</code> on the NAS host and set the variables accordingly.</p>
+<h3 id="port-already-in-use">Port already in use</h3>
+<p>Change <code>VIBRAVID_PORT</code> to a free port (e.g., <code>8080</code>), update <code>CSRF_TRUSTED_ORIGINS</code> to match, and recreate the container.</p>
+<h3 id="container-exits-immediately">Container exits immediately</h3>
+<p>Check logs for Python errors:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>--tail<span class="o">=</span><span class="m">50</span>
+</code></pre></div>
+<p>Common causes: invalid <code>config.json</code> (delete the conf volume and let the entrypoint re-seed it), missing bind-mount directory (create it on the host first), or a stale database migration (run <code>docker compose down -v</code> and start fresh).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.indexes", "navigation.expand", "navigation.top", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
