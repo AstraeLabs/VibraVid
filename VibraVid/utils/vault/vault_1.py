@@ -7,6 +7,7 @@ from rich.console import Console
 
 from VibraVid.utils.config import config_manager
 from VibraVid.utils.http_client import create_client
+from VibraVid.utils.upload.version import __version__
 from VibraVid.utils.vault._url_utils import clean_license_url
 
 console = Console()
@@ -79,6 +80,7 @@ class ExternalSupaDBVault:
             "service": (service or "").strip().lower(),
             "type": media_type.strip().lower(),
             "title": title.strip(),
+            "app_version": __version__,
         }
         logger.debug(f"Tracking download with payload: {payload}")
 
@@ -130,6 +132,7 @@ class ExternalSupaDBVault:
             "license_url": base_license_url,
             "pssh": pssh,
             "keys": keys_payload,
+            "app_version": __version__,
         }
 
         result = self._post("save-keys", payload)
