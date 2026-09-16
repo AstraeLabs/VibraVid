@@ -80,11 +80,22 @@ class FuzzyList(Widget):
             self.item = item
             self.control = control
 
+    class ToggleRequested(Message):
+        """Posted when the user presses SPACE on a list entry."""
+
+        control: "FuzzyList | None" = None
+
+        def __init__(self, item: FuzzyItem, control) -> None:
+            super().__init__()
+            self.item = item
+            self.control = control
+
     BINDINGS = [Binding("down", "focus_list", show=False)]
 
     def __init__(self, placeholder: str = "Filter...", **kwargs) -> None:
         super().__init__(**kwargs)
         self._items: list[FuzzyItem] = []
+        self._current_filtered: list[FuzzyItem] = []
         self._placeholder = placeholder
         self._last_click_time: float = 0.0
         self._last_click_key: str | None = None
@@ -95,13 +106,48 @@ class FuzzyList(Widget):
 
     # ── Public API ────────────────────────────────────────────────────────
 
-    def set_items(self, items: list[FuzzyItem]) -> None:
+    def set_items(self, items: list[FuzzyItem], reset_filter: bool = True) -> None:
         self._items = list(items)
-        self.query_one("#fuzzy-input", Input).value = ""
-        self.call_after_refresh(self._refresh_list, self._items)
+        if reset_filter:
+            self.query_one("#fuzzy-input", Input).value = ""
+            self._current_filtered = list(items)
+            self.call_after_refresh(self._refresh_list, self._items)
+        else:
+            query = self.query_one("#fuzzy-input", Input).value.strip().lower()
+            if not query:
+                self._current_filtered = list(items)
+                self.call_after_refresh(self._refresh_list, self._items)
+            else:
+                self.call_after_refresh(self._apply_filter, query)
 
     def action_focus_list(self) -> None:
         self.query_one("#fuzzy-list", ListView).focus()
+
+    def get_highlighted_item(self) -> FuzzyItem | None:
+        """Return the currently highlighted FuzzyItem, if any."""
+        try:
+            lv = self.query_one("#fuzzy-list", ListView)
+            if lv.highlighted_child is not None and hasattr(lv.highlighted_child, "fuzzy_payload"):
+                return lv.highlighted_child.fuzzy_payload
+            if len(lv) > 0 and lv.index is not None and 0 <= lv.index < len(lv):
+                return getattr(lv.children[lv.index], "fuzzy_payload", None)
+        except Exception:
+            pass
+        return None
+
+    def on_key(self, event: events.Key) -> None:
+        """Intercept SPACE on list view for multi-selection."""
+        if event.key == "space":
+            try:
+                lv = self.query_one("#fuzzy-list", ListView)
+                if self.focused == lv or (self.focused and self.focused in lv.walk_children()):
+                    item = self.get_highlighted_item()
+                    if item:
+                        self.post_message(self.ToggleRequested(item, self))
+                        event.prevent_default()
+                        event.stop()
+            except Exception:
+                pass
 
     # ── Internals ─────────────────────────────────────────────────────────
 
@@ -121,7 +167,11 @@ class FuzzyList(Widget):
     @on(Input.Changed, "#fuzzy-input")
     async def _filter(self, event: Input.Changed) -> None:
         query = event.value.strip().lower()
+        await self._apply_filter(query)
+
+    async def _apply_filter(self, query: str) -> None:
         if not query:
+            self._current_filtered = list(self._items)
             await self._refresh_list(self._items)
             return
 
@@ -135,7 +185,9 @@ class FuzzyList(Widget):
             if score > 0.35:
                 scored.append((score, it))
         scored.sort(key=lambda x: x[0], reverse=True)
-        await self._refresh_list([it for _, it in scored])
+        filtered_items = [it for _, it in scored]
+        self._current_filtered = filtered_items
+        await self._refresh_list(filtered_items)
 
     @on(ListView.Selected, "#fuzzy-list")
     def _chosen(self, event: ListView.Selected) -> None:
@@ -169,4 +221,3 @@ class FuzzyList(Widget):
             else:
                 self._last_click_time = now
                 self._last_click_key = fuzzy_item.key
-
