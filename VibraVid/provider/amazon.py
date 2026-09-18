@@ -7,7 +7,6 @@ import json
 import logging
 import secrets
 import uuid
-from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -134,7 +133,7 @@ def _prompt_authorization_code(oauth_url: str, pretty_name: str) -> str:
     return codes[0]
 
 
-def _normalize_pem(dpk: Optional[str]) -> Optional[str]:
+def _normalize_pem(dpk: str | None) -> str | None:
     if not dpk:
         return None
     if "BEGIN" in str(dpk):
@@ -203,7 +202,7 @@ def _login_sign(path: str, body: str, adp_token: str, privkey: RSAPrivateKey) ->
     }
 
 
-def _authorize_device(region: dict, serial: str, adp_token: str, pem: str) -> Optional[str]:
+def _authorize_device(region: dict, serial: str, adp_token: str, pem: str) -> str | None:
     """Calls the stratus authorizeDevice endpoint to retrieve the customerId."""
     try:
         key = serialization.load_pem_private_key(pem.encode(), password=None)

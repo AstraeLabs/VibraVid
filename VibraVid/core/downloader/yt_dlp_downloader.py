@@ -78,7 +78,7 @@ class YTDLPDownloader:
                 if file_path.stem == self.filename
             ]
             if existing_files:
-                console.print(f"[yellow]File already exist")
+                console.print("[yellow]File already exist")
                 return existing_files[0], False, None
 
         cmd = [yt_dlp]

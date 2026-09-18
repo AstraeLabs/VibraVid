@@ -17,8 +17,8 @@ from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_med
 from VibraVid.core.muxing import embed_poster, inject_chapters
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
-from VibraVid.core.utils.codec import format_bitrate, format_disposition_flags
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.utils.codec import format_bitrate, format_disposition_flags
 from VibraVid.utils import config_manager, internet_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.http_client import create_client, get_userAgent
