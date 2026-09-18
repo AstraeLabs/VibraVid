@@ -34,7 +34,8 @@ def register_cli_args(parser) -> list:
     group = parser.add_argument_group("Mediaset Infinity IT/ES options")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Mediaset Infinity title URL.")
     group.add_argument("--country", dest="country", default="it", choices=["it", "es"])
-    return ["url", "country"]
+    group.add_argument("--disable", dest="disable_filters", action="store_true", help="Disable the 10-minute duration filter and the BAD_WORDS category filter.",)
+    return ["url", "country", "disable_filters"]
 
 
 def _resolve_es_url(url: str):

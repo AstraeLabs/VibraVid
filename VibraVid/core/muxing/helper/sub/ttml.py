@@ -17,6 +17,7 @@ from .sanitize import sanitize_srt_file, sanitize_vtt_file
 
 # suppress ttconv logging (Merging ISD paragraphs/regions)
 logging.getLogger("ttconv").setLevel(logging.WARNING)
+logging.getLogger("ttconv.imsc.elements").setLevel(logging.CRITICAL)
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -162,6 +163,12 @@ def _last_cue_end_seconds(content: str) -> float | None:
     return max(ends) if ends else None
 
 
+def _first_cue_start_seconds(content: str) -> float | None:
+    """Return the smallest cue start-timestamp (in seconds) found in *content*, or None."""
+    m = _TS_RE.search(content)
+    return _parse_timestamp(m.group(1)) if m else None
+
+
 def convert_ttml_to_format(
     ttml_path: str,
     output_path: str | None = None,
@@ -251,12 +258,22 @@ def convert_ttml_to_format(
         # the first collapses back into the same [0, ~chunk-length] window instead
         # of covering its real position in the full duration.
         #
+        # Other sources (e.g. Canal+ DASH stpp fragments) do the opposite: every
+        # block already carries absolute program time (block 0 begins at 0:08,
+        # block 1 at 1:00, block 2 at 2:03, ...). Blindly re-basing those too would
+        # double-count time on every block and compound into a multi-hour drift by
+        # the end of the file.
+        #
         # When the caller has the real per-chunk timeline (chunk_offsets), use it
-        # directly -- exact, including across caption-free gap chunks. Otherwise
-        # fall back to estimating a running offset from each block's own last cue
-        # end-time, which is correct as long as every chunk has at least one cue.
+        # directly -- exact, including across caption-free gap chunks. Otherwise,
+        # per block, compare its own (unshifted) first cue to the running
+        # cumulative_offset: if it already picks up close to where the timeline
+        # left off, it's already absolute and needs no shift; if it's well behind
+        # (near zero while cumulative_offset has grown), it's a genuine ISM-style
+        # restart and needs re-basing.
         has_exact_offsets = bool(chunk_offsets) and len(chunk_offsets) >= len(ttml_blocks)
         cumulative_offset = 0.0
+        _RESTART_TOLERANCE_SECONDS = 5.0
 
         for index, block in enumerate(ttml_blocks, start=1):
             try:
@@ -278,7 +295,13 @@ def convert_ttml_to_format(
 
                     content = content.strip()
                     if content:
-                        offset = chunk_offsets[index - 1] if has_exact_offsets else cumulative_offset
+                        if has_exact_offsets:
+                            offset = chunk_offsets[index - 1]
+                        else:
+                            block_start = _first_cue_start_seconds(content)
+                            is_restart = block_start is not None and block_start < cumulative_offset - _RESTART_TOLERANCE_SECONDS
+                            offset = cumulative_offset if is_restart else 0.0
+
                         if offset > 0:
                             content = _shift_subtitle_timestamps(content, offset, target_format)
 

@@ -4,12 +4,62 @@ import logging
 import queue
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 _FEED_QUEUE_MAXSIZE = 64
 _SENTINEL = object()
+
+
+class ChunkRelay:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._buffer: list[bytes] = []
+        self._feeder: Callable[[bytes], None] | None = None
+        self._closed = False
+        self._on_close: Callable[[], None] | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            if self._feeder is None:
+                self._buffer.append(chunk)
+                return
+            fn = self._feeder
+        fn(chunk)
+
+    def attach(self, feeder: Callable[[bytes], None]) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            buffered, self._buffer = self._buffer, []
+            self._feeder = feeder
+        for chunk in buffered:
+            feeder(chunk)
+        return True
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._buffer = []
+            hook = self._on_close
+        if hook is not None:
+            hook()
+
+    def on_close(self, hook: Callable[[], None]) -> None:
+        with self._lock:
+            if self._closed:
+                fire = True
+            else:
+                self._on_close = hook
+                fire = False
+        if fire:
+            hook()
 
 
 @dataclass

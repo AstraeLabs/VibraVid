@@ -1,524 +1,563 @@
 # 17.07.26
 
+import base64
+import datetime
+import hashlib
 import json
 import logging
-import random
-import re
-import string
-import threading
-import time
+import secrets
+import uuid
+from typing import Optional
+from urllib.parse import parse_qs, urlencode, urlparse
 
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from rich.console import Console
+from rich.prompt import Prompt
 
-from VibraVid.utils import disk_cache
+from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
 console = Console()
 logger = logging.getLogger(__name__)
 
+_LOGIN_KEY = "amazon_music"
+_HARLEY_VER = "3.12.0.78"
+_APP_VER = "9.5.2.2478a"
+_HOST = "https://music.amazon.com"
 
-BASE_URL = "https://music.amazon.com"
-SKILL_URL = "https://eu.mesk.skill.music.a2z.com/api"
-_CONFIG_TTL_SECONDS = 8 * 60
-_CACHE_SERVICE = "amazon_provider"
-_CACHE_NAME = "config"
+_MUSIC_DEVICE_TYPE = "A1DL2DVDQVK3Q"
+_ASSOC_HANDLE = "amzn_tiburon_na"
+_APP_VERSION = "22.15.12"
 
-ENDPOINTS = {
-    "config": f"{BASE_URL}/config.json",
-    "global_search": f"{SKILL_URL}/showSearch",
-    "search_songs": f"{SKILL_URL}/searchCatalogTracks",
-    "search_albums": f"{SKILL_URL}/searchCatalogAlbums",
-    "search_artists": f"{SKILL_URL}/searchCatalogArtists",
-    "track_info": f"{SKILL_URL}/cosmicTrack/displayCatalogTrack",
-    "album_info": f"{SKILL_URL}/showCatalogAlbum",
-    "artist_info": f"{SKILL_URL}/explore/v1/showCatalogArtist",
+_REGIONS = {
+    "US": ("NA", "ATVPDKIKX0DER", "United States", "en_US", "com"),
+    "CA": ("NA", "A2EUQ1WTGCTBG2", "Canada", "en_CA", "ca"),
+    "MX": ("NA", "A1AM78C64UM0Y8", "Mexico", "es_MX", "com.mx"),
+    "BR": ("NA", "A2Q3Y263D00KWC", "Brazil", "es_BR", "com.br"),
+    "AR": ("NA", "ATVPDKIKX0DER", "Argentina", "es_AR", "com"),
+    "CL": ("NA", "ATVPDKIKX0DER", "Chile", "es_CL", "com"),
+    "CO": ("NA", "ATVPDKIKX0DER", "Colombia", "es_CO", "com"),
+    "NL": ("EU", "A1805IZSGTT6HS", "Netherlands", "nl_NL", "com"),
+    "IN": ("EU", "A21TJRUUN4KGV", "India", "hi_IN", "in"),
+    "GB": ("EU", "A1F83G8C2ARO7P", "United Kingdom", "en_GB", "co.uk"),
+    "ES": ("EU", "A1RKKUPIHCS9HS", "Spain", "es_ES", "es"),
+    "FR": ("EU", "A13V1IB3VIYZZH", "France", "fr_FR", "fr"),
+    "IT": ("EU", "APJ6JRA9NG5V4", "Italy", "it_IT", "it"),
+    "DE": ("EU", "A1PA6795UKMFR9", "Germany", "de_DE", "de"),
+    "AT": ("EU", "A1PA6795UKMFR9", "Austria", "de_AT", "de"),
+    "BE": ("EU", "ATVPDKIKX0DER", "Belgium", "fr_BE", "com"),
+    "IE": ("EU", "ATVPDKIKX0DER", "Ireland", "ga_IE", "com"),
+    "PL": ("EU", "A1C3SOZRARQ6R3", "Poland", "pl_PL", "com"),
+    "PT": ("EU", "ATVPDKIKX0DER", "Portugal", "pt_PT", "com"),
+    "SE": ("EU", "A2NODRKZP88ZB9", "Sweden", "sv_SE", "com"),
+    "JP": ("FE", "A1VC38T7YXB528", "Japan", "ja_JP", "co.jp"),
+    "AU": ("FE", "A39IBJ37TRP1C6", "Australia", "en_AU", "com.au"),
+    "NZ": ("FE", "A39IBJ37TRP1C6", "New Zealand", "en_NZ", "com.au"),
 }
-_TRANSPORT_HEADERS = {
-    "accept": "*/*",
-    "accept-language": "en-US,en;q=0.9",
-    "content-type": "text/plain;charset=UTF-8",
-    "origin": BASE_URL,
-    "referer": f"{BASE_URL}/",
-}
 
 
-def _clean_image_url(url):
-    """Strip Amazon's crop/size query params so images come back at full quality."""
-    if not url:
+def _region(country_code: str) -> dict:
+    code = (country_code or "US").strip().upper()
+    data = _REGIONS.get(code)
+    if not data:
+        raise ValueError(f"Unsupported country: {code!r}. Available: {', '.join(sorted(_REGIONS))}")
+    continent, marketplace_id, pretty_name, locale, domain_tld = data
+    return {
+        "country": code, "continent": continent, "marketplace_id": marketplace_id,
+        "pretty_name": pretty_name, "locale": locale, "domain_tld": domain_tld,
+    }
+
+
+def _code_verifier() -> bytes:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
+
+
+def _code_challenge(verifier: bytes) -> str:
+    digest = hashlib.sha256(verifier).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def _device_serial() -> str:
+    return "PIXEL5" + secrets.token_hex(16).upper()
+
+
+def _login_client_id(serial: str) -> str:
+    return (serial.encode() + f"#{_MUSIC_DEVICE_TYPE}".encode()).hex()
+
+
+def _build_oauth_url(region: dict, code_verifier: bytes, serial: str) -> str:
+    params = {
+        "openid.pape.max_auth_age": "0",
+        "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+        "accountStatusPolicy": "P1",
+        "language": region["locale"],
+        "openid.return_to": "https://www.amazon.com/ap/maplanding",
+        "openid.assoc_handle": _ASSOC_HANDLE,
+        "openid.oa2.response_type": "code",
+        "openid.mode": "checkid_setup",
+        "openid.ns.pape": "http://specs.openid.net/extensions/pape/1.0",
+        "openid.oa2.code_challenge_method": "S256",
+        "openid.ns.oa2": "http://www.amazon.com/ap/ext/oauth/2",
+        "openid.oa2.code_challenge": _code_challenge(code_verifier),
+        "openid.oa2.scope": "device_auth_access",
+        "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+        "openid.oa2.client_id": f"device:{_login_client_id(serial)}",
+        "disableLoginPrepopulate": "0",
+        "openid.ns": "http://specs.openid.net/auth/2.0",
+        "forceMobileLayout": "true",
+    }
+    return f"https://www.amazon.com/ap/signin?{urlencode(params)}"
+
+
+def _prompt_authorization_code(oauth_url: str, pretty_name: str) -> str:
+    console.print(
+        "\n[cyan]=== Amazon Music login (browser) ===[/cyan]\n\n"
+        "1. Open this URL in your browser (Ctrl+click if your terminal supports it):\n"
+        f"\n[underline]{oauth_url}[/underline]\n\n"
+        f"2. Sign in with your Amazon account ({pretty_name}). Complete any CAPTCHA/2FA normally in the browser.\n\n"
+        "3. After signing in you'll land on an error / 'not found' page (maplanding) — that is expected.\n\n"
+        "4. Copy the FULL url from the address bar and paste it below.\n"
+    )
+    pasted = Prompt.ask("\nPaste the URL after logging in").strip()
+    if not pasted:
+        raise ValueError("Login cancelled: no URL pasted.")
+
+    query = parse_qs(urlparse(pasted).query)
+    codes = query.get("openid.oa2.authorization_code")
+    if not codes:
+        raise ValueError(
+            "Pasted URL is not valid: missing 'openid.oa2.authorization_code'. "
+            "Make sure you copied the URL of the page shown right after login."
+        )
+    return codes[0]
+
+
+def _normalize_pem(dpk: Optional[str]) -> Optional[str]:
+    if not dpk:
         return None
-    return re.sub(r"(/I/[A-Za-z0-9\-]+).*?(\.[^.]+)$", r"\1\2", url)
+    if "BEGIN" in str(dpk):
+        return str(dpk)
+    try:
+        from Cryptodome.PublicKey import RSA
+
+        return RSA.import_key(base64.b64decode(dpk)).export_key("PEM").decode()
+    except Exception as e:
+        logger.debug(f"pem normalize failed: {e}")
+        return None
 
 
-def _duration_to_seconds(duration_string):
-    """Convert 'MM:SS' / 'HH:MM:SS' / plain-seconds text into an int."""
-    if not duration_string:
-        return 0
+def _register(region: dict, serial: str, authorization_code: str, code_verifier: bytes) -> dict:
+    body = {
+        "requested_token_type": ["bearer", "mac_dms", "website_cookies", "store_authentication_cookie"],
+        "cookies": {"website_cookies": [], "domain": f".amazon.{region['domain_tld']}"},
+        "registration_data": {
+            "domain": "Device",
+            "app_version": _APP_VERSION,
+            "device_serial": serial,
+            "device_type": _MUSIC_DEVICE_TYPE,
+            "device_name": f"VibraVid {uuid.uuid4().hex[:8]} Android Device (MP3)",
+            "os_version": "11",
+            "software_version": "523160014",
+            "device_model": "Pixel 5",
+            "app_name": "Amazon Music",
+        },
+        "auth_data": {
+            "client_id": _login_client_id(serial),
+            "authorization_code": authorization_code,
+            "code_verifier": code_verifier.decode(),
+            "code_algorithm": "SHA-256",
+            "client_domain": "DeviceLegacy",
+        },
+        "requested_extensions": ["device_info", "customer_info"],
+    }
 
-    text = duration_string.strip()
+    session = create_client(headers={"Content-Type": "application/json; charset=UTF-8"})
+    r = session.post(
+        f"https://api.amazon.{region['domain_tld']}/auth/register",
+        data=json.dumps(body).encode(),
+        timeout=30,
+    )
+    data = r.json()
+    if r.status_code != 200 or "success" not in data.get("response", {}):
+        raise ValueError(f"Device registration failed ({r.status_code}): {data}")
+
+    success = data["response"]["success"]
+    tokens = success["tokens"]
+    return {
+        "adp_token": tokens["mac_dms"]["adp_token"],
+        "device_private_key": _normalize_pem(tokens["mac_dms"]["device_private_key"]),
+        "extensions": success.get("extensions", {}) or {},
+    }
+
+
+def _login_sign(path: str, body: str, adp_token: str, privkey: RSAPrivateKey) -> dict:
+    date = datetime.datetime.now(datetime.timezone.utc).isoformat("T").replace("+00:00", "") + "Z"
+    data = f"POST\n{path}\n{date}\n{body}\n{adp_token}"
+    sig = privkey.sign(data.encode(), padding.PKCS1v15(), hashes.SHA256())
+    return {
+        "x-adp-token": adp_token,
+        "x-adp-alg": "SHA256withRSA:1.0",
+        "x-adp-signature": f"{base64.b64encode(sig).decode()}:{date}",
+    }
+
+
+def _authorize_device(region: dict, serial: str, adp_token: str, pem: str) -> Optional[str]:
+    """Calls the stratus authorizeDevice endpoint to retrieve the customerId."""
+    try:
+        key = serialization.load_pem_private_key(pem.encode(), password=None)
+    except Exception as e:
+        logger.debug(f"authorize_device: invalid private key: {e}")
+        return None
+    if not isinstance(key, RSAPrivateKey):
+        return None
+
+    path = f"/{region['continent']}/api/stratus/"
+    body_dict = {
+        "capabilities": ["RETRIEVE_OWNED_CONTENT", "RETRIEVE_ROBIN_CONTENT"],
+        "customerInfo": {"customerId": "", "deviceId": serial, "deviceType": _MUSIC_DEVICE_TYPE},
+        "deviceId": serial, "deviceType": _MUSIC_DEVICE_TYPE,
+        "targetDeviceId": serial, "targetDeviceType": _MUSIC_DEVICE_TYPE,
+    }
+    body = json.dumps(body_dict, separators=(",", ":"))
+    headers = {
+        "Accept": "application/json, text/javascript, */*",
+        "Content-Type": "application/json; charset=UTF-8",
+        "Content-Encoding": "amz-1.0",
+        "X-Amz-Target": "com.amazon.stratus.StratusServiceExternal.authorizeDevice",
+        "X-Amz-Requestid": str(uuid.uuid4()),
+        **_login_sign(path, body, adp_token, key),
+    }
 
     try:
-        if re.fullmatch(r"\d+:\d+:\d+", text):
-            hours, minutes, seconds = (int(p) for p in text.split(":"))
-            return hours * 3600 + minutes * 60 + seconds
-
-        if re.fullmatch(r"\d+:\d+", text):
-            first, second = (int(p) for p in text.split(":"))
-            if first >= 60:
-                return (first // 60) * 3600 + (first % 60) * 60 + second
-            return first * 60 + second
-
-        if re.fullmatch(r"\d+", text):
-            return int(text)
-    except ValueError:
-        pass
-
-    return 0
-
-
-def _extract_release_date(text):
-    """Pull a date like 'APR 03 2013' out of the album header tertiary text."""
-    if not text:
-        return None
-    match = re.search(r"([A-Z]{3}\s+\d{1,2}\s+\d{4})", text, re.IGNORECASE)
-    return match.group(1) if match else None
-
-
-def _extract_songs_count(text):
-    if not text:
-        return None
-    match = re.search(r"(\d+)\s*SONGS?", text, re.IGNORECASE)
-    return int(match.group(1)) if match else None
-
-
-def _extract_duration_from_text(text):
-    """Pull a total duration (in seconds) out of text like '54 MINUTES'."""
-    if not text:
+        session = create_client(headers={"Accept": "application/json, text/javascript, */*"})
+        r = session.post(f"https://music.amazon.com{path}", headers=headers, data=body.encode(), timeout=30)
+        data = r.json()
+    except Exception as e:
+        logger.debug(f"authorize_device call failed: {e}")
         return None
 
-    match = re.search(r"(\d+)\s*HOURS?\s*AND\s*(\d+)\s*MINUTES?", text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)) * 3600 + int(match.group(2)) * 60
+    return ((data.get("device") or {}).get("customerId")) or None
 
-    match = re.search(r"(\d+)\s*MINUTES?\s*AND\s*(\d+)\s*SECONDS?", text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)) * 60 + int(match.group(2))
 
-    match = re.search(r"(\d+)\s*MINUTES?", text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)) * 60
+def _has_full_credentials(login) -> bool:
+    return bool(
+        login.get(_LOGIN_KEY, "adp_token", default=None)
+        and login.get(_LOGIN_KEY, "device_private_key", default=None)
+        and login.get(_LOGIN_KEY, "customer_id", default=None)
+    )
 
-    return None
+
+def login() -> bool:
+    """Interactive login for Amazon Music. Saves device credentials to login.json."""
+    login_cfg = config_manager.login
+
+    if _has_full_credentials(login_cfg):
+        console.print("[green]Amazon Music credentials already present in login.json — nothing to do.[/green]")
+        return True
+
+    country = Prompt.ask("Country code of your Amazon account (e.g. US, IT, GB, DE)", default="US").strip().upper()
+    region = _region(country)
+
+    code_verifier = _code_verifier()
+    serial = _device_serial()
+    oauth_url = _build_oauth_url(region, code_verifier, serial)
+
+    authorization_code = _prompt_authorization_code(oauth_url, region["pretty_name"])
+
+    console.print("[cyan]Registering device with Amazon...[/cyan]")
+    reg = _register(region, serial, authorization_code, code_verifier)
+
+    adp_token = reg["adp_token"]
+    device_private_key = reg["device_private_key"]
+    if not adp_token or not device_private_key:
+        console.print("[red]Registration failed: adp_token / device_private_key missing from the response.[/red]")
+        return False
+
+    device_info = reg["extensions"].get("device_info") or {}
+    device_id = device_info.get("device_serial_number") or serial
+    device_type = device_info.get("device_type") or _MUSIC_DEVICE_TYPE
+
+    customer_info = reg["extensions"].get("customer_info") or {}
+    customer_id = customer_info.get("customerId") or customer_info.get("custId")
+
+    if not customer_id:
+        console.print("[cyan]Authorizing device to retrieve the customer id...[/cyan]")
+        customer_id = _authorize_device(region, device_id, adp_token, device_private_key)
+
+    if not customer_id:
+        console.print(
+            "[red]Login partially succeeded: could not retrieve the customer id "
+            "(undocumented Amazon endpoint).[/red]\n"
+            f"[yellow]adp_token and device_private_key were saved; you can set 'customer_id' manually "
+            f"under the '{_LOGIN_KEY}' section of Conf/login.json if you know it.[/yellow]"
+        )
+
+    fields = {
+        "device_id": device_id,
+        "device_type": device_type,
+        "marketplace_id": region["marketplace_id"],
+        "territory": region["country"],
+        "region_path": region["continent"],
+        "locale": region["locale"],
+        "adp_token": adp_token,
+        "device_private_key": device_private_key,
+    }
+    if customer_id:
+        fields["customer_id"] = customer_id
+
+    for key, value in fields.items():
+        login_cfg.set_key(_LOGIN_KEY, key, value)
+    config_manager.save_login()
+
+    console.print(f"[green]✓ Credentials saved to {config_manager.login_file_path}[/green]")
+    return bool(customer_id)
+
+
+def logout() -> bool:
+    login_cfg = config_manager.login
+    if login_cfg.get(_LOGIN_KEY, "adp_token", default=None) is None:
+        console.print("[yellow]No Amazon Music credentials to remove.[/yellow]")
+        return True
+    login_cfg.set_key(_LOGIN_KEY, "adp_token", "")
+    login_cfg.set_key(_LOGIN_KEY, "device_private_key", "")
+    login_cfg.set_key(_LOGIN_KEY, "customer_id", "")
+    config_manager.save_login()
+    console.print(f"[green]✓[/green] Amazon Music credentials removed from {config_manager.login_file_path}")
+    return True
 
 
 class AmazonMusicClient:
-    _config_lock = threading.Lock()
-    _config_cache: dict | None = None
-    _config_fetched_at: float = 0.0
+    def __init__(self) -> None:
+        login = config_manager.login
+        self.device_id = login.get(_LOGIN_KEY, "device_id", default=None)
+        self.device_type = login.get(_LOGIN_KEY, "device_type", default=None)
+        self.customer_id = login.get(_LOGIN_KEY, "customer_id", default=None)
+        self.marketplace = login.get(_LOGIN_KEY, "marketplace_id", default=None)
+        self.territory = login.get(_LOGIN_KEY, "territory", default=None)
+        self.region_path = login.get(_LOGIN_KEY, "region_path", default=None) or "EU"
+        self.locale = login.get(_LOGIN_KEY, "locale", default=None) or "en_US"
+        self.adp_token = login.get(_LOGIN_KEY, "adp_token", default=None)
 
-    def __init__(self):
-        self.base_url = BASE_URL
+        self._privkey: RSAPrivateKey | None = None
+        pem = login.get(_LOGIN_KEY, "device_private_key", default=None) or ""
+        if pem and self.adp_token:
+            try:
+                key = serialization.load_pem_private_key(pem.encode(), password=None)
+                if isinstance(key, RSAPrivateKey):
+                    self._privkey = key
+                else:
+                    logger.warning("Amazon Music: device_private_key is not an RSA key")
+            except Exception:
+                logger.exception("Amazon Music: failed to load device_private_key from login.json")
 
-    def _fetch_config(self):
-        """Fetch music.amazon.com's public config.json (device/session/csrf bootstrap)."""
-        with type(self)._config_lock:
-            now = time.time()
-            if type(self)._config_cache is not None and now - type(self)._config_fetched_at < _CONFIG_TTL_SECONDS:
-                return type(self)._config_cache
+        self._session = create_client(headers={"Accept": "application/json, text/javascript, */*"})
 
-            cached = disk_cache.load(_CACHE_SERVICE, _CACHE_NAME)
-            if disk_cache.is_fresh(cached):
-                type(self)._config_cache = cached["config"]
-                type(self)._config_fetched_at = cached["fetched_at"]
-                return type(self)._config_cache
+    @property
+    def is_available(self) -> bool:
+        return self._privkey is not None
 
-            with create_client(headers=_TRANSPORT_HEADERS) as client:
-                response = client.get(ENDPOINTS["config"], timeout=8)
-            response.raise_for_status()
-            config = response.json()
+    def _sign(self, method: str, path: str, body: str) -> dict:
+        date = datetime.datetime.now(datetime.timezone.utc).isoformat("T").replace("+00:00", "") + "Z"
+        data = f"{method}\n{path}\n{date}\n{body}\n{self.adp_token}"
+        sig = self._privkey.sign(data.encode(), padding.PKCS1v15(), hashes.SHA256())
+        return {
+            "x-adp-token": self.adp_token,
+            "x-adp-alg": "SHA256withRSA:1.0",
+            "x-adp-signature": f"{base64.b64encode(sig).decode()}:{date}",
+        }
 
-            type(self)._config_cache = config
-            type(self)._config_fetched_at = now
-            disk_cache.save(
-                _CACHE_SERVICE,
-                _CACHE_NAME,
-                {
-                    "config": config,
-                    "fetched_at": now,
-                    "expiry": now + _CONFIG_TTL_SECONDS,
+    def _post(self, path: str, target: str, body_dict: dict, timeout: int = 20) -> dict:
+        body = json.dumps(body_dict, separators=(",", ":"))
+        headers = {
+            "Accept": "application/json, text/javascript, */*",
+            "Content-Type": "application/json; charset=UTF-8",
+            "Content-Encoding": "amz-1.0",
+            "User-Agent": f"Harley/{_HARLEY_VER} {self.device_type}/{_APP_VER}",
+            "X-Amz-Requestid": str(uuid.uuid4()),
+            "X-Amz-Target": target,
+            **self._sign("POST", path, body),
+        }
+        r = self._session.post(f"{_HOST}{path}", headers=headers, data=body.encode(), timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def _search_docs(self, query: str, limit: int, label: str) -> list[dict]:
+        data = self._post(
+            f"/{self.region_path}/api/textsearch/search/v1_1/",
+            "com.amazon.tenzing.textsearch.v1_1.TenzingTextSearchServiceExternalV1_1.search",
+            {
+                "customerIdentity": {
+                    "customerId": self.customer_id, "deviceId": self.device_id,
+                    "deviceType": self.device_type, "sessionId": "",
                 },
-            )
-            return config
-
-    def _build_amazon_headers(self, config, page_url=""):
-        csrf = config.get("csrf") or {}
-        request_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=13))
-
-        return {
-            "x-amzn-authentication": json.dumps(
-                {
-                    "interface": "ClientAuthenticationInterface.v1_0.ClientTokenElement",
-                    "accessToken": config.get("accessToken", ""),
-                }
-            ),
-            "x-amzn-device-model": "WEBPLAYER",
-            "x-amzn-device-width": "1920",
-            "x-amzn-device-family": "WebPlayer",
-            "x-amzn-device-id": config.get("deviceId", ""),
-            "x-amzn-user-agent": "Mozilla/5.0",
-            "x-amzn-session-id": config.get("sessionId", ""),
-            "x-amzn-device-height": "1080",
-            "x-amzn-request-id": request_id,
-            "x-amzn-device-language": "en_US",
-            "x-amzn-currency-of-preference": "USD",
-            "x-amzn-os-version": "1.0",
-            "x-amzn-application-version": config.get("version", ""),
-            "x-amzn-device-time-zone": "Europe/Rome",
-            "x-amzn-timestamp": str(int(time.time() * 1000)),
-            "x-amzn-csrf": json.dumps(
-                {
-                    "interface": "CSRFInterface.v1_0.CSRFHeaderElement",
-                    "token": csrf.get("token", ""),
-                    "timestamp": str(csrf.get("ts", "")),
-                    "rndNonce": str(csrf.get("rnd", "")),
-                }
-            ),
-            "x-amzn-music-domain": "music.amazon.com",
-            "x-amzn-referer": "music.amazon.com",
-            "x-amzn-affiliate-tags": "",
-            "x-amzn-ref-marker": "",
-            "x-amzn-page-url": page_url,
-            "x-amzn-weblab-id-overrides": "",
-            "x-amzn-video-player-token": "",
-            "x-amzn-feature-flags": "hd-supported,uhd-supported",
-            "x-amzn-has-profile-id": "",
-            "x-amzn-age-band": "",
-        }
-
-    def _post(self, url, body, page_url="", timeout=15):
-        config = self._fetch_config()
-        amzn_headers = self._build_amazon_headers(config, page_url)
-
-        payload = dict(body)
-        payload["headers"] = json.dumps(amzn_headers)
-
-        with create_client(headers=_TRANSPORT_HEADERS) as client:
-            response = client.post(url, data=json.dumps(payload), timeout=timeout)
-        response.raise_for_status()
-        return response.json()
-
-    def _user_hash(self):
-        return json.dumps({"level": "LIBRARY_MEMBER"})
-
-    def search_songs(self, query: str, limit: int = 10) -> list:
-        """Search tracks by free-text query. Returns basic metadata (no duration/ISRC)."""
-        try:
-            data = self._post(
-                ENDPOINTS["search_songs"],
-                {"keyword": query, "userHash": self._user_hash()},
-                page_url=f"{BASE_URL}/search/{query}/songs",
-            )
-        except Exception as e:
-            console.log(f"[red]Amazon Music: songs search failed for '{query}': {e}[/red]")
-            return []
-
-        items = (((data.get("methods") or [{}])[0].get("template") or {}).get("widgets") or [{}])[0].get("items") or []
-        if limit and limit > 0:
-            items = items[:limit]
-
-        songs = []
-        for item in items:
-            storage_key = ((item.get("iconButton") or {}).get("observer") or {}).get("storageKey")
-            if not storage_key or ":" not in storage_key:
-                continue
-            album_id, song_id = storage_key.split(":", 1)
-            if not song_id:
-                continue
-
-            secondary_link = (item.get("secondaryLink") or {}).get("deeplink")
-            artist_id = (
-                secondary_link.split("/artists/")[1].split("/")[0]
-                if secondary_link and "/artists/" in secondary_link
-                else ""
-            )
-
-            context_options = (item.get("contextMenu") or {}).get("options") or [{}]
-            album_template = ((context_options[0].get("onItemSelected") or [{}, {}])[1] or {}).get("template") or {}
-            album_url = (((album_template.get("templateData") or {}).get("seoHead") or {}).get("link") or [{}])[0].get(
-                "href"
-            ) or f"{BASE_URL}/albums/{album_id}"
-
-            songs.append(
-                {
-                    "id": song_id,
-                    "title": (item.get("primaryText") or {}).get("text") or "Unknown Title",
-                    "url": f"{BASE_URL}/tracks/{song_id}",
-                    "image": _clean_image_url(item.get("image")),
-                    "isrc": None,
-                    "artist": {
-                        "id": artist_id,
-                        "name": item.get("secondaryText") or "Unknown Artist",
-                        "url": f"{BASE_URL}{secondary_link}" if secondary_link else None,
+                "features": {"spellCorrection": {"allowCorrection": True}},
+                "musicTerritory": self.territory, "locale": self.locale,
+                "query": query,
+                "resultSpecs": [{
+                    "contentRestrictions": {
+                        "eligibility": {"tier": "UNLIMITED"},
+                        "allowedParentalControls": {"hasExplicitLanguage": True},
+                        "assetQuality": {"quality": ["NOT_ASSIGNED", "HD", "UHD"]},
                     },
-                    "album": {
-                        "id": album_id,
-                        "name": album_template.get("headerText", {}).get("text") or "Unknown Album",
-                        "url": album_url,
-                    },
-                }
-            )
-
-        return songs
-
-    def search_albums(self, query: str) -> list:
-        """Search albums by free-text query."""
-        try:
-            data = self._post(
-                ENDPOINTS["search_albums"],
-                {"keyword": query, "userHash": self._user_hash()},
-                page_url=f"{BASE_URL}/search/{query}/albums",
-            )
-        except Exception as e:
-            console.log(f"[red]Amazon Music: albums search failed for '{query}': {e}[/red]")
-            return []
-
-        items = (((data.get("methods") or [{}])[0].get("template") or {}).get("widgets") or [{}])[0].get("items") or []
-
-        albums = []
-        for item in items:
-            album_id = ((item.get("iconButton") or {}).get("observer") or {}).get("storageKey")
-            if not album_id:
-                link = (item.get("primaryLink") or {}).get("deeplink") or ""
-                if "/albums/" in link:
-                    album_id = link.split("/albums/")[1].split("/")[0]
-            if not album_id:
-                continue
-
-            secondary_link = (item.get("secondaryLink") or {}).get("deeplink")
-            artist_id = (
-                secondary_link.split("/artists/")[1].split("/")[0]
-                if secondary_link and "/artists/" in secondary_link
-                else None
-            )
-
-            albums.append(
-                {
-                    "id": album_id,
-                    "name": (item.get("primaryText") or {}).get("text") or "Unknown Album",
-                    "url": f"{BASE_URL}/albums/{album_id}",
-                    "image": _clean_image_url(item.get("image")),
-                    "artist": {
-                        "id": artist_id,
-                        "name": item.get("secondaryText") or "Unknown Artist",
-                        "url": f"{BASE_URL}{secondary_link}" if secondary_link else None,
-                    },
-                }
-            )
-
-        return albums
-
-    def search_artists(self, query: str) -> list:
-        """Search artists by free-text query."""
-        try:
-            data = self._post(
-                ENDPOINTS["search_artists"],
-                {"keyword": query, "userHash": self._user_hash()},
-                page_url=f"{BASE_URL}/search/{query}/artists",
-            )
-        except Exception as e:
-            console.log(f"[red]Amazon Music: artists search failed for '{query}': {e}[/red]")
-            return []
-
-        items = (((data.get("methods") or [{}])[0].get("template") or {}).get("widgets") or [{}])[0].get("items") or []
-
-        artists = []
-        for item in items:
-            artist_id = ((item.get("iconButton") or {}).get("observer") or {}).get("storageKey")
-            if not artist_id:
-                continue
-
-            artists.append(
-                {
-                    "id": artist_id,
-                    "name": (item.get("primaryText") or {}).get("text") or "Unknown Artist",
-                    "url": f"{BASE_URL}/artists/{artist_id}",
-                    "image": _clean_image_url(item.get("image")),
-                }
-            )
-
-        return artists
-
-    def search(self, query: str) -> dict:
-        """Global search: returns songs, albums and artists in one call."""
-        return {
-            "songs": self.search_songs(query),
-            "albums": self.search_albums(query),
-            "artists": self.search_artists(query),
-        }
-
-    def get_track(self, track_id: str) -> dict | None:
-        """Get full metadata (incl. ISRC + duration) for a single track by ID."""
-        try:
-            data = self._post(
-                ENDPOINTS["track_info"],
-                {"id": track_id, "userHash": self._user_hash()},
-                page_url=f"{BASE_URL}/tracks/{track_id}",
-            )
-        except Exception as e:
-            console.log(f"[red]Amazon Music: track lookup failed for '{track_id}': {e}[/red]")
-            return None
-
-        methods = data.get("methods") or []
-        if not methods or "template" not in methods[0]:
-            logger.info(f"Amazon Music: track '{track_id}' not found or no longer available")
-            return None
-
-        template = methods[0]["template"]
-        widgets = template.get("widgets") or []
-        tracklist_widget = next((w for w in widgets if "album tracklist" in (w.get("header") or "").lower()), None)
-        if not tracklist_widget:
-            return None
-
-        track_item = None
-        for item in tracklist_widget.get("items") or []:
-            deeplink = (item.get("primaryTextLink") or {}).get("deeplink")
-            if deeplink and deeplink.split("/tracks/")[-1] == track_id:
-                track_item = item
-                break
-
-        if not track_item:
-            return None
-
-        context_options = (template.get("contextMenu") or {}).get("options") or []
-        album_template = {}
-        if len(context_options) > 1:
-            selected = context_options[1].get("onItemSelected") or []
-            if len(selected) > 1:
-                album_template = selected[1].get("template") or {}
-
-        album_id = None
-        template_data = album_template.get("templateData") or {}
-        if template_data.get("deeplink"):
-            album_id = template_data["deeplink"].split("/albums/")[-1]
-
-        header_link = (template.get("headerPrimaryTextLink") or {}).get("deeplink")
-        artist_id = (
-            header_link.split("/artists/")[1].split("/")[0] if header_link and "/artists/" in header_link else None
+                    "label": label,
+                    "documentSpecs": [{"type": label, "fields": ["__default", "contentEncoding", "artLarge", "artOriginal"]}],
+                    "maxResults": limit,
+                }],
+            },
         )
 
-        isrc = None
-        seo_scripts = ((template.get("templateData") or {}).get("seoHead") or {}).get("script") or []
-        for script in seo_scripts:
-            try:
-                json_ld = json.loads(script.get("innerHTML") or "{}")
-                if json_ld.get("isrcCode"):
-                    isrc = json_ld["isrcCode"]
-                    break
-            except (json.JSONDecodeError, TypeError):
-                continue
+        docs = []
+        for category in data.get("results", []):
+            for hit in category.get("hits", []):
+                doc = hit.get("document") or {}
+                if doc.get("asin"):
+                    docs.append(doc)
+        return docs
 
+    @staticmethod
+    def _doc_cover(doc: dict) -> str:
+        for field in ("artLarge", "artOriginal"):
+            art = doc.get(field)
+            if isinstance(art, dict):
+                url = art.get("URL") or art.get("artUrl")
+                if url:
+                    return url
+        return doc.get("image", "")
+
+    def search_songs(self, query: str, limit: int = 25) -> list[dict]:
+        """Search tracks by free-text query."""
+        if not self.is_available:
+            logger.info("Amazon Music: search skipped, no device credentials in login.json['amazon_music']")
+            return []
+        try:
+            docs = self._search_docs(query, limit, "catalog_track")
+        except Exception as e:
+            logger.warning(f"Amazon Music: songs search failed for {query!r}: {e}")
+            return []
+
+        return [
+            {
+                "id": d["asin"],
+                "title": d.get("title") or "Unknown Title",
+                "url": f"{_HOST}/tracks/{d['asin']}",
+                "image": self._doc_cover(d),
+                "duration": d.get("duration", 0),
+                "artist": {"name": d.get("artistName") or "Unknown Artist"},
+                "album": {"name": d.get("albumName") or ""},
+            }
+            for d in docs
+        ]
+
+    def search_albums(self, query: str, limit: int = 25) -> list[dict]:
+        """Search albums by free-text query."""
+        if not self.is_available:
+            logger.info("Amazon Music: search skipped, no device credentials in login.json['amazon_music']")
+            return []
+        try:
+            docs = self._search_docs(query, limit, "catalog_album")
+        except Exception as e:
+            logger.warning(f"Amazon Music: albums search failed for {query!r}: {e}")
+            return []
+
+        return [
+            {
+                "id": d["asin"],
+                "name": d.get("title") or "Unknown Album",
+                "url": f"{_HOST}/albums/{d['asin']}",
+                "image": self._doc_cover(d),
+                "artist": {"name": d.get("artistName") or "Unknown Artist"},
+            }
+            for d in docs
+        ]
+
+    def _lookup(self, asin: str, list_key: str) -> dict | None:
+        data = self._post(
+            f"/{self.region_path}/api/muse/",
+            "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
+            {
+                "asins": [asin], "features": ["expandTracklist", "ownership"],
+                "deviceId": self.device_id, "deviceType": self.device_type,
+                "musicTerritory": self.territory, "lang": self.locale,
+                "requestedContent": "FULL_CATALOG",
+            },
+        )
+        items = data.get(list_key) or []
+        return items[0] if items else None
+
+    def get_track(self, track_id: str) -> dict | None:
+        """Get full metadata (title/duration/artist/album) for a single track by ASIN."""
+        if not self.is_available:
+            logger.info("Amazon Music: track lookup skipped, no device credentials in login.json['amazon_music']")
+            return None
+        try:
+            t = self._lookup(track_id, "trackList")
+        except Exception as e:
+            logger.warning(f"Amazon Music: track lookup failed for '{track_id}': {e}")
+            return None
+        if not t:
+            return None
+
+        album = t.get("album") or {}
         return {
-            "id": track_id,
-            "title": (template.get("headerText") or {}).get("text") or "Unknown Title",
-            "url": f"{BASE_URL}/tracks/{track_id}",
-            "image": template.get("headerImage"),
-            "duration": _duration_to_seconds(track_item.get("secondaryText3")),
-            "isrc": isrc,
-            "album": {
-                "id": album_id,
-                "name": album_template.get("headerText", {}).get("text"),
-                "url": (((template_data.get("seoHead") or {}).get("link") or [{}])[0]).get("href"),
-            },
-            "artist": {
-                "id": artist_id,
-                "name": template.get("headerPrimaryText"),
-                "url": f"{BASE_URL}{header_link}" if header_link else None,
-            },
+            "id": t.get("asin", track_id),
+            "title": t.get("title") or "Unknown Title",
+            "url": f"{_HOST}/tracks/{track_id}",
+            "image": album.get("image", ""),
+            "duration": t.get("duration", 0),
+            "isrc": t.get("isrc"),
+            "album": {"id": album.get("asin"), "name": album.get("title") or ""},
+            "artist": {"id": (t.get("artist") or {}).get("asin"), "name": (t.get("artist") or {}).get("name") or ""},
         }
 
     def get_album(self, album_id: str) -> dict | None:
-        """Get full album metadata + tracklist by ID."""
+        """Get full album metadata + tracklist by ASIN."""
+        if not self.is_available:
+            logger.info("Amazon Music: album lookup skipped, no device credentials in login.json['amazon_music']")
+            return None
         try:
-            data = self._post(
-                ENDPOINTS["album_info"],
-                {"id": album_id, "userHash": self._user_hash()},
-                page_url=f"{BASE_URL}/albums/{album_id}",
-            )
+            a = self._lookup(album_id, "albumList")
         except Exception as e:
-            console.log(f"[red]Amazon Music: album lookup failed for '{album_id}': {e}[/red]")
+            logger.warning(f"Amazon Music: album lookup failed for '{album_id}': {e}")
+            return None
+        if not a:
             return None
 
-        methods = data.get("methods") or []
-        if not methods or "template" not in methods[0]:
-            logger.info(f"Amazon Music: album '{album_id}' not found or service error")
-            return None
-
-        album = methods[0]["template"]
-        if album.get("interface", "").find("DialogTemplate") != -1 and album.get("header") == "Service error":
-            logger.info(f"Amazon Music: album '{album_id}' returned a service error")
-            return None
-
-        header_link = (album.get("headerPrimaryTextLink") or {}).get("deeplink")
-        artist_id = (
-            header_link.split("/artists/")[1].split("/")[0] if header_link and "/artists/" in header_link else None
+        artist = a.get("artist") or {}
+        release_ms = a.get("originalReleaseDate")
+        release_date = (
+            datetime.datetime.fromtimestamp(release_ms / 1000, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+            if release_ms else ""
         )
 
         songs = []
-        widgets = album.get("widgets") or []
-        if widgets and widgets[0].get("items"):
-            for item in widgets[0]["items"]:
-                track_link = (item.get("primaryTextLink") or {}).get("deeplink")
-                track_id = track_link.split("/tracks/")[-1] if track_link else None
-
-                item_artist_link = (item.get("secondaryText2Link") or {}).get("deeplink")
-                item_artist_id = (
-                    item_artist_link.split("/artists/")[1].split("/")[0]
-                    if item_artist_link and "/artists/" in item_artist_link
-                    else artist_id
-                )
-                artist_url = (
-                    f"{BASE_URL}{item_artist_link}"
-                    if item_artist_link
-                    else (f"{BASE_URL}{header_link}" if header_link else None)
-                )
-
-                songs.append(
-                    {
-                        "id": track_id,
-                        "name": item.get("primaryText"),
-                        "url": f"{BASE_URL}/tracks/{track_id}" if track_id else None,
-                        "image": album.get("headerImage"),
-                        "duration": _duration_to_seconds(item.get("secondaryText3")),
-                        "isrc": None,
-                        "album": {
-                            "id": album_id,
-                            "name": (album.get("headerText") or {}).get("text"),
-                            "url": f"{BASE_URL}/albums/{album_id}",
-                        },
-                        "artist": {
-                            "id": item_artist_id,
-                            "name": item.get("secondaryText2") or album.get("headerPrimaryText"),
-                            "url": artist_url,
-                        },
-                    }
-                )
-
-        header_tertiary = album.get("headerTertiaryText") or ""
+        for t in a.get("tracks") or []:
+            t_artist = t.get("artist") or artist
+            songs.append(
+                {
+                    "id": t.get("asin"),
+                    "name": t.get("title") or "Unknown Track",
+                    "url": f"{_HOST}/tracks/{t.get('asin')}" if t.get("asin") else None,
+                    "image": a.get("image") or "",
+                    "duration": t.get("duration", 0),
+                    "isrc": t.get("isrc"),
+                    "artist": {"id": t_artist.get("asin"), "name": t_artist.get("name") or ""},
+                }
+            )
 
         return {
-            "id": album_id,
-            "name": (album.get("headerText") or {}).get("text"),
-            "url": f"{BASE_URL}/albums/{album_id}",
-            "image": album.get("headerImage"),
-            "total_songs": _extract_songs_count(header_tertiary),
-            "total_duration": _extract_duration_from_text(header_tertiary),
-            "release_date": _extract_release_date(header_tertiary),
-            "artist": {
-                "id": artist_id,
-                "name": album.get("headerPrimaryText"),
-                "url": f"{BASE_URL}{header_link}" if header_link else None,
-            },
+            "id": a.get("asin", album_id),
+            "name": a.get("title") or "Unknown Album",
+            "url": f"{_HOST}/albums/{album_id}",
+            "image": a.get("image") or "",
+            "total_songs": a.get("trackCount"),
+            "total_duration": a.get("duration"),
+            "release_date": release_date,
+            "artist": {"id": artist.get("asin"), "name": artist.get("name") or ""},
             "songs": songs,
         }
+
 
 # Instance
 amazon_music = AmazonMusicClient()

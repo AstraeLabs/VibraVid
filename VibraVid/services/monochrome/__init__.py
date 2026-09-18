@@ -27,7 +27,7 @@ table_show_manager = TVShowManager()
 
 
 def title_search(query: str) -> int:
-    """Search Amazon Music's public catalog for tracks and albums (no auth needed)."""
+    """Search Amazon Music's authenticated catalog for tracks and albums."""
     entries_manager.clear()
     table_show_manager.clear()
 
@@ -58,6 +58,7 @@ def title_search(query: str) -> int:
         entry.title = title
         entry.artist = artist
         entry.album = (r.get("album") or {}).get("name", "")
+        entry.duration_seconds = r.get("duration") or None
         entries_manager.add(entry)
 
     for r in albums:

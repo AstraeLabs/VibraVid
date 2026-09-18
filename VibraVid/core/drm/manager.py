@@ -439,7 +439,8 @@ class DRMManager:
             keys_list = KeysManager(norm).get_keys_list()
             if keys_list:
                 self._store_keys(keys_list, drm_type, "generic", pssh, source=None)
-                return keys_list[0], "manual"
+                matching = next((k for k in keys_list if k.split(":", 1)[0] == kid_norm), keys_list[0])
+                return matching, "manual"
 
         if not self._vaults:
             return None

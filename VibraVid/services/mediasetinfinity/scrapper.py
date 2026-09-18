@@ -10,6 +10,7 @@ from urllib.parse import quote, urlparse
 
 from bs4 import BeautifulSoup
 
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base.object import Episode, Season, SeasonManager
 from VibraVid.services.mediasetinfinity.client import get_client
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
@@ -62,6 +63,10 @@ class GetSerieInfo:
         self.public_id = None
         self.series_name = ""
         self.stagioni_disponibili = []
+        try:
+            self.disable_filters = bool((context_tracker.site_options or {}).get("disable_filters"))
+        except Exception:
+            self.disable_filters = False
 
     def close(self):
         """Close the HTTP client session."""
@@ -195,8 +200,9 @@ class GetSerieInfo:
                     if category_title
                     else carousel_link.get_text(" ", strip=True) or "Unnamed"
                 )
-                if any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
+                if not self.disable_filters and any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
                     continue
+
                 href = carousel_link["href"]
                 sb_id = href.split(",")[-1] if "," in href else href.split("_")[-1]
                 season["categories"].append({"name": category_name, "sb": sb_id})
@@ -221,7 +227,7 @@ class GetSerieInfo:
     def _get_season_episodes(self, season, sb_id, category_name, client=None):
         """Get episodes for a specific season"""
         logger.debug(f"Getting episodes for season {season['tvSeasonNumber']} category {category_name} sb_id {sb_id}")
-        if any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
+        if not self.disable_filters and any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
             return []
 
         if "tutti" in category_name.lower() or category_name.lower().startswith("all"):
@@ -326,7 +332,7 @@ class GetSerieInfo:
                     except Exception:
                         duration = 0
 
-                    if duration < MIN_DURATION:
+                    if not self.disable_filters and duration < MIN_DURATION:
                         continue
 
                     episodes.append(
@@ -438,7 +444,7 @@ class GetSerieInfo:
                 duration = (
                     int(entry.get("mediasetprogram$duration", 0) / 60) if entry.get("mediasetprogram$duration") else 0
                 )
-                if duration < MIN_DURATION:
+                if not self.disable_filters and duration < MIN_DURATION:
                     continue
 
                 ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
@@ -519,8 +525,9 @@ class GetSerieInfo:
                     ep[key] = int(m.group(1)) if key == "duration" else m.group(1)
             if ep:
                 duration = int(ep.get("duration", 0) / 60) if ep.get("duration") else 0
-                if duration < MIN_DURATION:
+                if not self.disable_filters and duration < MIN_DURATION:
                     continue
+                
                 episodes.append(
                     Episode(
                         id=ep.get("guid", ""),
@@ -677,7 +684,7 @@ class GetSerieInfo:
                 (season, category)
                 for season in self.stagioni_disponibili
                 for category in season.get("categories", [])
-                if not any(w.lower() in category["name"].lower() for w in self.BAD_WORDS)
+                if self.disable_filters or not any(w.lower() in category["name"].lower() for w in self.BAD_WORDS)
             ]
 
             def _fetch_task(task):

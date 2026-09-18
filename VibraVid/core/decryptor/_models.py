@@ -7,6 +7,8 @@ import subprocess
 from collections import OrderedDict
 from dataclasses import dataclass
 
+from VibraVid.core.utils.codec import get_short_codec
+from VibraVid.core.utils.resolution import classify_resolution
 from VibraVid.setup import get_flux_path
 
 from ..drm.system import _DRMSystems
@@ -14,6 +16,26 @@ from ..drm.system import _DRMSystems
 logger = logging.getLogger(__name__)
 
 _KNOWN_SCHEMES = {"cenc", "cens", "cbcs", "cbc1"}
+_EMPTY_MEDIA_INFO: dict = {
+    "quality": "",
+    "height": 0,
+    "language": "",
+    "video_codec": "",
+    "video_bitrate": 0,
+    "audio_codec": "",
+    "audio_tracks": [],
+    "audio_flags": "",
+    "sub_language": "",
+    "sub_flags": "",
+    "sub_codec": "",
+    "subtitle_tracks": [],
+}
+
+# Session cache: avoid re-running `flux -d -j` on the same file within a download.
+_DETECT_CACHE_MAX = 512
+_detect_cache: "OrderedDict[tuple[str, int, int], EncryptionInfo]" = OrderedDict()
+_media_cache: "OrderedDict[tuple[str, int, int], tuple[EncryptionInfo, dict]]" = OrderedDict()
+
 
 
 @dataclass
@@ -103,9 +125,49 @@ def _select_preferred_pssh(is_widevine: bool, kid: str | None) -> str | None:
         return None
 
 
-# Session cache: avoid re-running `flux -d -j` on the same file within a download.
-_DETECT_CACHE_MAX = 512
-_detect_cache: "OrderedDict[tuple[str, int, int], EncryptionInfo]" = OrderedDict()
+def _flux_media_metadata(report: dict) -> dict:
+    """Extract the same shape of metadata as ``get_media_metadata()`` (quality/codec/language) directly from a `flux -d -j`"""
+    info = dict(_EMPTY_MEDIA_INFO)
+    languages_found: list[str] = []
+    acodecs_found: list[str] = []
+    audio_tracks: list[dict] = []
+    sub_languages_found: list[str] = []
+    subtitle_tracks: list[dict] = []
+
+    for stream in report.get("streams") or []:
+        stype = (stream.get("stream_type") or "").lower()
+        codec_string = stream.get("codec_string") or ""
+        lang = (stream.get("language") or "").strip()
+        lang_up = lang.upper() if lang and lang.lower() != "und" else ""
+
+        if stype == "video" and not info["video_codec"]:
+            info["height"] = stream.get("height") or 0
+            info["quality"] = classify_resolution(stream.get("width"), stream.get("height"))
+            info["video_codec"] = get_short_codec("video", codec_string)
+            info["video_bitrate"] = stream.get("avg_bitrate") or 0
+
+        elif stype == "audio":
+            short = get_short_codec("audio", codec_string)
+            if lang_up and lang_up not in languages_found:
+                languages_found.append(lang_up)
+            if short and short not in acodecs_found:
+                acodecs_found.append(short)
+            audio_tracks.append({"language": lang_up or "UND", "codec": short})
+
+        elif stype in ("subtitle", "text"):
+            if not info["sub_codec"]:
+                info["sub_codec"] = get_short_codec("subtitle", codec_string)
+            if lang_up and lang_up not in sub_languages_found:
+                sub_languages_found.append(lang_up)
+            subtitle_tracks.append({"language": lang_up or "UND"})
+
+    info["language"] = "-".join(languages_found)
+    info["audio_codec"] = "-".join(acodecs_found)
+    info["audio_tracks"] = audio_tracks
+    info["sub_language"] = "-".join(sub_languages_found)
+    info["subtitle_tracks"] = subtitle_tracks
+    return info
+
 
 def _detect_cache_key(file_path: str) -> tuple[str, int, int] | None:
     try:
@@ -134,3 +196,25 @@ def detect_encryption_info(file_path: str) -> EncryptionInfo:
         if len(_detect_cache) > _DETECT_CACHE_MAX:
             _detect_cache.popitem(last=False)
     return info
+
+
+def detect_media_info(file_path: str) -> tuple[EncryptionInfo, dict]:
+    """Single `flux -d -j` pass returning BOTH encryption info and label-ready media metadata."""
+    cache_key = _detect_cache_key(file_path)
+    if cache_key is not None and cache_key in _media_cache:
+        _media_cache.move_to_end(cache_key)
+        return _media_cache[cache_key]
+
+    report = _run_flux_dump(file_path)
+    if report is None or not report.get("streams"):
+        result = (EncryptionInfo(), dict(_EMPTY_MEDIA_INFO))
+    else:
+        result = (_parse_flux_json(report), _flux_media_metadata(report))
+
+    if cache_key is not None:
+        _media_cache[cache_key] = result
+        _media_cache.move_to_end(cache_key)
+        if len(_media_cache) > _DETECT_CACHE_MAX:
+            _media_cache.popitem(last=False)
+    
+    return result

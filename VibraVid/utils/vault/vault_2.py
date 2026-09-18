@@ -94,6 +94,10 @@ class LabDBVault:
                 return resolved
         return kid.replace("-", "").strip().lower()
 
+    def track_download_async(self, title: str, media_type: str, service: str = None) -> None:
+        """No download tracking in the lab vault."""
+        pass
+
     def set_key(self, kid: str, key: str, license_url: str, pssh: str = None, label: str = None) -> bool:
         """
         Store a single DRM key in the lab vault.

@@ -2,7 +2,7 @@
 
 import logging
 
-from VibraVid.core.decryptor._models import detect_encryption_info
+from VibraVid.core.decryptor._models import detect_encryption_info, detect_media_info
 from VibraVid.utils.os import os_manager
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,10 @@ class DRMProbe:
             logger.debug(f"DRMProbe failed (non-fatal): {exc}")
             return False, None, False, None, None
 
+    def fetch(self, url: str, headers: dict, client, size: int = PROBE_BYTES) -> bytes | None:
+        """Public wrapper for ``_fetch_bytes`` — for callers that need the raw bytes themselves rather than just the DRM verdict."""
+        return self._fetch_bytes(url, headers, client, size=size)
+
     def inspect(self, raw: bytes) -> tuple:
         """Inspect already-downloaded bytes (in-flight probe, no second request).
         Returns ``(encrypted, scheme, is_widevine, kid, pssh_b64)``."""
@@ -48,6 +52,26 @@ class DRMProbe:
         except Exception as exc:
             logger.debug(f"DRMProbe.inspect failed (non-fatal): {exc}")
             return False, None, False, None, None
+
+    def inspect_full(self, raw: bytes) -> tuple:
+        """Like ``inspect()``, but also returns label-ready media metadata."""
+        try:
+            if not raw:
+                return False, None, False, None, None, {}
+
+            with os_manager.temp_binary_file(raw, suffix=".mp4probe") as tmp_path:
+                info, media = detect_media_info(tmp_path)
+
+            if not info.encrypted:
+                logger.debug(f"DRMProbe: no encryption markers found in first {len(raw)} bytes.")
+            else:
+                self._report(info.scheme, info.kid, info.is_widevine)
+
+            return info.encrypted, info.scheme, info.is_widevine, info.kid, info.pssh_b64, media
+
+        except Exception as exc:
+            logger.debug(f"DRMProbe.inspect_full failed (non-fatal): {exc}")
+            return False, None, False, None, None, {}
 
     def _fetch_bytes(self, url: str, headers: dict, client, size: int = PROBE_BYTES) -> bytes | None:
         """Fetch the first *size* bytes of the URL using a Range request, returning the raw bytes (or None on failure)."""

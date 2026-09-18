@@ -48,11 +48,21 @@ def _build_indexes(entries: list) -> tuple[dict[int, dict], dict[int, dict]]:
         if not isinstance(entry, dict):
             continue
         tmdb_ids = entry.get("themoviedb_id")
-        if not isinstance(tmdb_ids, dict) or not tmdb_ids:
+        if not isinstance(tmdb_ids, dict):
+            tmdb_ids = {}
+
+        imdb_id = entry.get("imdb_id")
+        if isinstance(imdb_id, list):
+            imdb_id = imdb_id[0] if imdb_id else None
+        if not isinstance(imdb_id, str) or not imdb_id:
+            imdb_id = None
+
+        if not tmdb_ids and not imdb_id:
             continue
 
         record = {
             "themoviedb_id": tmdb_ids,
+            "imdb_id": imdb_id,
             "season": entry.get("season"),
             "episode_offset": entry.get("episode_offset"),
         }
@@ -130,15 +140,41 @@ def lookup(mal_id=None, anilist_id=None) -> dict | None:
 
 
 def resolve_tmdb_id(media_type: str, mal_id=None, anilist_id=None) -> str | None:
-    """Return a TMDB id (as a string) for `media_type` ('tv'/'movie') via the MAL/AniList crosswalk."""
+    """Return a TMDB id (as a string) for `media_type` ('tv'/'movie') via the MAL/AniList crosswalk.
+
+    Falls back to resolving the crosswalk's IMDb id through TMDB's external-id
+    lookup when the crosswalk itself has no TMDB id for the requested media
+    type (e.g. an anime movie whose Fribb record only carries a TMDB tv id).
+    If there's no imdb_id either but the crosswalk has a TMDB id for the
+    *other* media type, that known id is used to derive the imdb_id first
+    (a movie/tv pair share the same IMDb entry), then the same lookup applies.
+    """
     record = lookup(mal_id=mal_id, anilist_id=anilist_id)
     if not record:
         return None
     tmdb_ids = record.get("themoviedb_id") or {}
-    value = tmdb_ids.get("movie" if media_type == "movie" else "tv")
-    if value in (None, ""):
+    other_media_type = "tv" if media_type == "movie" else "movie"
+    value = tmdb_ids.get(media_type)
+    if value not in (None, ""):
+        return str(value)
+
+    imdb_id = record.get("imdb_id")
+
+    from VibraVid.provider.tmdb import tmdb_client
+
+    if not tmdb_client.api_key:
         return None
-    return str(value)
+
+    if not imdb_id:
+        other_value = tmdb_ids.get(other_media_type)
+        if other_value in (None, ""):
+            return None
+        imdb_id = tmdb_client.get_imdb_id(int(other_value), other_media_type)
+        if not imdb_id:
+            return None
+
+    resolved = tmdb_client.get_tmdb_id_by_external_id(imdb_id, "imdb_id", media_type)
+    return str(resolved) if resolved else None
 
 
 def resolve_split_cour_episode(
@@ -165,17 +201,33 @@ def resolve_split_cour_episode(
         if not record:
             continue
 
-        record_season = (record.get("season") or {}).get("tmdb")
+        season_field = record.get("season")
+        season_field = season_field if isinstance(season_field, dict) else {}
+        record_season = season_field.get("tmdb")
         if record_season is not None and record_season != season_num:
+            logger.debug(
+                f"[anime_id_map] split-cour candidate {index} skipped: crosswalk season "
+                f"{record_season} != requested season {season_num}"
+            )
             continue
 
-        offset = (record.get("episode_offset") or {}).get("tmdb") or 0
+        offset_field = record.get("episode_offset")
+        offset_field = offset_field if isinstance(offset_field, dict) else {}
+        offset = offset_field.get("tmdb") or 0
         local_episode = absolute_episode - offset
         if local_episode < 1:
+            logger.debug(
+                f"[anime_id_map] split-cour candidate {index} skipped: absolute episode "
+                f"{absolute_episode} - offset {offset} < 1"
+            )
             continue
 
         episodes_count = candidate.get("episodes_count")
         if episodes_count is not None and local_episode > episodes_count:
+            logger.debug(
+                f"[anime_id_map] split-cour candidate {index} skipped: local episode "
+                f"{local_episode} > episodes_count {episodes_count}"
+            )
             continue
 
         return {"candidate_index": index, "local_episode": local_episode}

@@ -41,6 +41,7 @@ class DownloadBarManager:
     def __init__(self, download_id: str | None = None):
         self.download_id = download_id
         self.tasks: dict[str, Any] = {}
+        self._task_labels: dict[str, str] = {}
         self.subtitle_sizes: dict[str, str] = {}
         self.status_line = StatusLine()
         time_columns = []
@@ -136,7 +137,8 @@ class DownloadBarManager:
             or parsed.get("_task_key")
             or f"{parsed.get('track', 'trk')}_{parsed.get('label', '')}"
         )
-        label = parsed.get("label", key)
+        explicit_label = parsed.get("label")
+        label = explicit_label or key
 
         # ── Create task if first time we see this key ──────────────────────
         if key not in self.tasks:
@@ -154,6 +156,18 @@ class DownloadBarManager:
                 if self.progress
                 else "gui"
             )
+            self._task_labels[key] = label
+        elif (
+            explicit_label
+            and explicit_label != self._task_labels.get(key)
+            and self.progress
+            and self.tasks[key] != "gui"
+        ):
+            try:
+                self.progress.update(self.tasks[key], description=self._wrap_label(explicit_label))
+                self._task_labels[key] = explicit_label
+            except Exception:
+                pass
 
         # ── Update tracker (for GUI mode) ──────────────────────────────────
         if self.download_id:

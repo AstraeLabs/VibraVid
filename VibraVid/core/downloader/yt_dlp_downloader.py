@@ -78,7 +78,7 @@ class YTDLPDownloader:
                 if file_path.stem == self.filename
             ]
             if existing_files:
-                console.print(f"[yellow]File already exists: {existing_files[0]}[/yellow]")
+                console.print(f"[yellow]File already exist")
                 return existing_files[0], False, None
 
         cmd = [yt_dlp]
@@ -187,8 +187,6 @@ class YTDLPDownloader:
                 if downloaded in files_before:
                     console.print(f"[yellow]File already exists: {downloaded}[/yellow]")
                     return downloaded, False, None
-                logger.info(f"Download completed: {downloaded}")
-                console.print(f"[green]Download complete: {downloaded}[/green]")
                 return downloaded, False, None
 
             return None, False, "Download completed but output file not found"

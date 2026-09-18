@@ -234,6 +234,8 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("-UP", "--update", action="store_true", help="Auto-update to latest version (binary only)")
     util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
+    util_group.add_argument("--amazon-music-login", dest="amazon_music_login", action="store_true", help="Log in to Amazon Music via direct API device registration (no proxy/CA needed).")
+    util_group.add_argument("--amazon-music-logout", dest="amazon_music_logout", action="store_true", help="Remove stored Amazon Music credentials from login.json.")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
     # ── Queue
@@ -307,6 +309,17 @@ def apply_config_updates(args):
 
     if persistent_updates:
         config_manager.save_config()
+
+
+def _apply_interactive_site_options(selected_module_name, site_module_name):
+    """Apply site-specific options from the selected module to the context tracker."""
+    if selected_module_name == site_module_name:
+        return
+    
+    context_tracker.site_options = {
+        **(context_tracker.site_options or {}),
+        **resolve_persisted_site_options(selected_module_name),
+    }
 
 
 def build_site_options(args, parser, site_option_dests, site_module_name):
@@ -543,6 +556,18 @@ def main():
             show_dependencies(search_functions)
             return
 
+        if getattr(args, "amazon_music_login", False):
+            from VibraVid.provider.amazon import login as amazon_music_login
+
+            amazon_music_login()
+            return
+
+        if getattr(args, "amazon_music_logout", False):
+            from VibraVid.provider.amazon import logout as amazon_music_logout
+
+            amazon_music_logout()
+            return
+
         if handle_queue_dispatch(args, argv):
             return
 
@@ -660,6 +685,7 @@ def main():
                 if category in input_to_function:
                     logger.info(f"User selected site '{category}' from interactive menu.")
                     context_tracker.cli_site = category
+                    _apply_interactive_site_options(input_to_function[category].module_name, site_module_name)
                     run_function(input_to_function[category], search_terms=args.search, selections=selections)
                     equivalent_command_builder.log_equivalent_command(args, parser, context_tracker, site_option_dests)
 
@@ -677,6 +703,7 @@ def main():
 
             if category in input_to_function:
                 context_tracker.cli_site = category
+                _apply_interactive_site_options(input_to_function[category].module_name, site_module_name)
                 run_function(input_to_function[category], search_terms=args.search, selections=selections)
                 equivalent_command_builder.log_equivalent_command(args, parser, context_tracker, site_option_dests)
 

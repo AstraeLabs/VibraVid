@@ -19,7 +19,13 @@ from VibraVid.core.manifest.stream import Stream
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
-from VibraVid.core.utils.codec import AUDIO_EXTENSIONS, SUBTITLE_CODEC_MAP, SUBTITLE_EXTENSIONS, VIDEO_EXTENSIONS
+from VibraVid.core.utils.codec import (
+    AUDIO_EXTENSIONS,
+    SUBTITLE_CODEC_MAP,
+    SUBTITLE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    format_disposition_flags,
+)
 from VibraVid.core.utils.language import LANGUAGE_MAP, language_variants, resolve_locale, subtitle_flags
 from VibraVid.core.utils.resolution import classify_resolution
 from VibraVid.core.utils.selector import FilterSpec, StreamSelector, StreamSelectorFormatter
@@ -498,18 +504,10 @@ class BaseMediaDownloader:
 
             lang = s.resolved_language or lang_raw or "und"
             parts = [f"[bold white]{lang}[/bold white]"]
-            flags = []
 
-            if forced:
-                flags.append("[FORCED]")
-            if sdh:
-                flags.append("[SDH]")
-            if cc:
-                flags.append("[CC]")
-            if default:
-                flags.append("[DEFAULT]")
+            flags = format_disposition_flags(forced=forced, sdh=sdh, cc=cc, default=default)
             if flags:
-                parts.append(f"[bold red]{' '.join(flags)}[/bold red]")
+                parts.append(f"[bold red]{flags}[/bold red]")
 
             if getattr(s, "is_wvtt_mp4", False):
                 ext_tag = "WVTT"

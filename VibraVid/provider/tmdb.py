@@ -157,7 +157,8 @@ class TMDBClient:
 
     def _match_movie_result(self, movie_results, slug: str, year):
         """Return the TMDB id of the most popular movie result whose title/original_title slug-matches, honouring year if given."""
-        candidates = []
+        exact_candidates = []
+        slug_matches = []
         for movie in movie_results:
             title = movie.get("title")
             original_title = movie.get("original_title")
@@ -171,21 +172,33 @@ class TMDBClient:
 
             movie_slug = self._slugify(title)
             original_slug = self._slugify(original_title) if original_title else None
+            slug_matched = self._slugs_match(movie_slug, slug) or (original_slug and self._slugs_match(original_slug, slug))
+            if not slug_matched:
+                continue
 
-            if (self._slugs_match(movie_slug, slug) or (original_slug and self._slugs_match(original_slug, slug))) and (
-                not year or movie_year == year
-            ):
-                candidates.append((movie.get("popularity") or 0, movie["id"]))
+            slug_matches.append((movie.get("popularity") or 0, movie["id"], movie_year))
+            if not year or movie_year == year:
+                exact_candidates.append((movie.get("popularity") or 0, movie["id"]))
 
-        if not candidates:
-            return None
+        if exact_candidates:
+            exact_candidates.sort(key=lambda c: c[0], reverse=True)
+            return exact_candidates[0][1]
 
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        return candidates[0][1]
+        # No exact-year match: if the slug uniquely identifies one title (release-year
+        # ambiguity between the provider and TMDB, e.g. timezone/regional release dates),
+        # accept it when its year is within 1 of the requested one.
+        if year and len({c[1] for c in slug_matches}) == 1:
+            _, movie_id, movie_year = slug_matches[0]
+            if abs(movie_year - year) <= 1:
+                logger.info(f"Matched movie by unique slug '{slug}' with year off by {abs(movie_year - year)} ({movie_year} vs {year})")
+                return movie_id
+
+        return None
 
     def _match_tv_result(self, tv_results, slug: str, year):
         """Return the TMDB id of the most popular TV result whose name/original_name slug-matches, honouring year if given."""
-        candidates = []
+        exact_candidates = []
+        slug_matches = []
         for show in tv_results:
             name = show.get("name")
             original_name = show.get("original_name")
@@ -199,24 +212,42 @@ class TMDBClient:
 
             show_slug = self._slugify(name)
             original_slug = self._slugify(original_name) if original_name else None
+            slug_matched = self._slugs_match(show_slug, slug) or (original_slug and self._slugs_match(original_slug, slug))
+            if not slug_matched:
+                continue
 
-            if (self._slugs_match(show_slug, slug) or (original_slug and self._slugs_match(original_slug, slug))) and (
-                not year or show_year == year
-            ):
-                candidates.append((show.get("popularity") or 0, show["id"]))
+            slug_matches.append((show.get("popularity") or 0, show["id"], show_year))
+            if not year or show_year == year:
+                exact_candidates.append((show.get("popularity") or 0, show["id"]))
 
-        if not candidates:
-            return None
+        if exact_candidates:
+            exact_candidates.sort(key=lambda c: c[0], reverse=True)
+            return exact_candidates[0][1]
 
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        return candidates[0][1]
+        # No exact-year match: if the slug uniquely identifies one title (release-year
+        # ambiguity between the provider and TMDB, e.g. timezone/regional release dates),
+        # accept it when its year is within 1 of the requested one.
+        if year and len({c[1] for c in slug_matches}) == 1:
+            _, show_id, show_year = slug_matches[0]
+            if abs(show_year - year) <= 1:
+                logger.info(f"Matched TV by unique slug '{slug}' with year off by {abs(show_year - year)} ({show_year} vs {year})")
+                return show_id
+
+        return None
 
     def get_type_and_id_by_slug_year(
-        self, slug: str, year: str = None, media_type: str = None, 
+        self, slug: str, year: str = None, media_type: str = None,
         language_preference: str = "it",
         prefer_animation: bool = False,
     ):
-        """Get the type (movie or tv) and ID from TMDB based on slug and year."""
+        """Get the type (movie or tv) and ID from TMDB based on slug and year.
+
+        Known limitation: this only searches the given `media_type`. A provider
+        entry tagged e.g. "tv" for an OVA/special that TMDB catalogs as "movie"
+        (or vice versa) still yields no match here — cross-media_type retry is
+        not implemented (deliberately, to avoid false positives from title-only
+        matching across catalogs).
+        """
         if year:
             year = int(year)
 
@@ -231,6 +262,7 @@ class TMDBClient:
             movie_id = self._match_movie_result(movie_results, slug, year)
 
             if not movie_id and language_preference != "en-US":
+                
                 # Preferred-language results may exist but not match (e.g. an Italian-only title) — retry in en-US.
                 en_results = self._make_request(
                     "search/movie", {"query": query, "language": "en-US", "include_adult": True}
@@ -253,6 +285,7 @@ class TMDBClient:
             tv_id = self._match_tv_result(tv_results, slug, year)
 
             if not tv_id and language_preference != "en-US":
+
                 # Preferred-language results may exist but not match (e.g. an Italian-only title) — retry in en-US.
                 en_results = self._make_request(
                     "search/tv", {"query": query, "language": "en-US", "include_adult": True}

@@ -1,6 +1,7 @@
 # 17.08.26
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -14,10 +15,13 @@ _BATCH_TARGET_BYTES = 4 * 1024 * 1024
 
 
 class LiveFragMp4Decryptor:
-    def __init__(self, out_fh: BinaryIO, key: Any, tmp_dir: Path) -> None:
+    def __init__(
+        self, out_fh: BinaryIO, key: Any, tmp_dir: Path, on_chunk: Callable[[bytes], None] | None = None
+    ) -> None:
         self._out_fh = out_fh
         self._key = key
         self._tmp_dir = tmp_dir
+        self._on_chunk = on_chunk
         self._splitter = FragBoxSplitter()
         self._pending: list[bytes] = []
         self._raw_accum = bytearray()
@@ -30,6 +34,14 @@ class LiveFragMp4Decryptor:
         self._batch_buf = bytearray()
         self.failed_reason: str | None = None
         self._key_sanity_pending = True
+
+    def _write(self, data: bytes) -> None:
+        self._out_fh.write(data)
+        if self._on_chunk is not None and data:
+            try:
+                self._on_chunk(data)
+            except Exception:
+                logger.debug("on_chunk callback failed (non-fatal)", exc_info=True)
 
     @property
     def abandoned(self) -> bool:
@@ -98,7 +110,7 @@ class LiveFragMp4Decryptor:
             return
 
         try:
-            self._out_fh.write(strip_cenc_signaling(init_bytes))
+            self._write(strip_cenc_signaling(init_bytes))
         except Exception as exc:
             self.failed_reason = f"init write failed: {exc}"
             self._decided = "abandon"
@@ -142,7 +154,7 @@ class LiveFragMp4Decryptor:
         if not ok or not self._frag_dec_path.exists():
             raise RuntimeError(f"live fragment decrypt failed: {message}")
 
-        self._out_fh.write(self._frag_dec_path.read_bytes())
+        self._write(self._frag_dec_path.read_bytes())
 
     def finish(self) -> bytes:
         """Call once after the last `feed()`. Returns raw bytes the caller still has to write itself: the un-decided/abandoned leftover, or (on a successful live-decrypt run) empty """
@@ -153,7 +165,7 @@ class LiveFragMp4Decryptor:
 
         trailing = self._splitter.finish()
         if trailing:
-            self._out_fh.write(trailing)
+            self._write(trailing)
         return b""
 
     def cleanup(self, remove_init: bool = True) -> None:

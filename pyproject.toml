@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "VibraVid"
-version = "1.4.0"
+version = "1.4.1"
 description = "Media downloader and streaming utility with ARR integration, GUI support, and DRM handling"
 authors = [{ name = "AstraeLabs" }]
 requires-python = ">=3.10,<3.15"

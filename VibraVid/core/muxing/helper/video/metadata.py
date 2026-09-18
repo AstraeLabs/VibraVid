@@ -19,11 +19,13 @@ _EMPTY_METADATA = {
     "height": 0,
     "language": "",
     "video_codec": "",
+    "video_bitrate": 0,
     "audio_codec": "",
     "audio_tracks": [],
     "audio_flags": "",
     "sub_language": "",
     "sub_flags": "",
+    "sub_codec": "",
     "subtitle_tracks": [],
 }
 
@@ -49,9 +51,11 @@ def get_media_metadata(file_path: str) -> dict:
 
         info = json.loads(result.stdout)
         streams = info.get("streams", [])
+        container_bitrate = int((info.get("format") or {}).get("bit_rate") or 0)
         quality_val = ""
         height_val = 0
         vcodec_val = ""
+        vbitrate_val = 0
 
         for s in streams:
             if s.get("codec_type") == "video":
@@ -60,6 +64,7 @@ def get_media_metadata(file_path: str) -> dict:
 
                 raw_vcodec = s.get("codec_name", "")
                 vcodec_val = get_short_codec("video", raw_vcodec)
+                vbitrate_val = int(s.get("bit_rate") or 0) or container_bitrate
                 break
 
         languages_found = []
@@ -93,8 +98,12 @@ def get_media_metadata(file_path: str) -> dict:
         sub_languages_found = []
         sub_flags_found = []
         subtitle_tracks = []
+        scodec_val = ""
         for s in streams:
             if s.get("codec_type") == "subtitle":
+                if not scodec_val:
+                    scodec_val = get_short_codec("subtitle", s.get("codec_name", ""))
+
                 lang = s.get("tags", {}).get("language") or ""
                 if not lang:
                     continue
@@ -126,11 +135,13 @@ def get_media_metadata(file_path: str) -> dict:
             "height": height_val,
             "language": "-".join(languages_found) if languages_found else "",
             "video_codec": vcodec_val,
+            "video_bitrate": vbitrate_val,
             "audio_codec": "-".join(acodecs_found) if acodecs_found else "",
             "audio_tracks": audio_tracks,
             "audio_flags": "-".join(audio_flags_found),
             "sub_language": "-".join(sub_languages_found) if sub_languages_found else "",
             "sub_flags": "-".join(sub_flags_found),
+            "sub_codec": scodec_val,
             "subtitle_tracks": subtitle_tracks,
         }
 

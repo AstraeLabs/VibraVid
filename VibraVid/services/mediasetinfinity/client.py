@@ -175,11 +175,8 @@ class MediasetAPI:
             return False
 
     def getHash2c(self):
-        from .regions import REGIONS
-
-        it_home = REGIONS["it"]["home_url"]
         with create_client(headers=self.headers) as client:
-            html = client.get(it_home).text
+            html = client.get(self.conf["home_url"]).text
 
         scripts = self.find_relevant_script(html)[0:1]
         if not scripts:

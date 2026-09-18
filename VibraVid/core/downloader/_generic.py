@@ -10,12 +10,23 @@ from typing import Any
 from rich.console import Console
 
 from VibraVid.core.decryptor.keys_manager import KeysManager
+from VibraVid.core.downloader.util._drm_probe import PROBE_BYTES_FAST, DRMProbe
+from VibraVid.core.drm.manager import DRMManager
+from VibraVid.core.drm.system import DRMType, normalize_kid
 from VibraVid.core.muxing import probe_media_file
+from VibraVid.core.muxing.helper.sub.convert import convert_subtitle
+from VibraVid.core.muxing.helper.sub.disposition import (
+    SubtitleDispositionInfo,
+    build_subtitle_disposition_args,
+    get_configured_disposition_language,
+)
+from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
+from VibraVid.core.muxing.streaming_mux import ChunkRelay, StreamingMuxFeeder
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES
-from VibraVid.core.utils.language import language_variants
+from VibraVid.core.utils.language import language_variants, resolve_iso639_2, resolve_language_display_name
 from VibraVid.core.utils.selector import (
     FilterSpec,
     StreamSelector,
@@ -32,6 +43,7 @@ from VibraVid.core.velora.util.formatting import (
 from VibraVid.core.velora.util.formatting import (
     parse_max_time as _parse_max_time,
 )
+from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
@@ -44,6 +56,7 @@ logger = logging.getLogger(__name__)
 EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
 _MEDIA_TYPES = ("video", "audio", "subtitle")
 _DIRECT_MEDIA_EXTS = (".mp4", ".m4v", ".m4a", ".mp3", ".aac", ".wav")
+_LIVEMUX_WAIT_SECONDS = 1800.0
 
 
 def _track_signature(s) -> tuple:
@@ -133,6 +146,7 @@ class Generic_Downloader(BaseDownloader):
             - poster_url: Poster/still image URL to embed in the muxed output. Default: context_tracker.poster_url.
         """
         self.sources = [dict(s or {}) for s in (sources or [])]
+        self._pooled_keys: list[Any] = [s.get("key") for s in self.sources if s.get("key")]
         self.cookies = cookies or {}
         self.max_segments = _parse_max_segments(
             max_segments if max_segments is not None else context_tracker.max_segments
@@ -149,6 +163,9 @@ class Generic_Downloader(BaseDownloader):
         self._no_match = False
         self.other_tracks: list = []
         self._direct_sources: list[dict[str, Any]] = []
+        self._track_done_events: dict[str, threading.Event] = {}
+        self._track_results: dict[str, str | None] = {}
+        self._direct_streaming_mux_result: str | None = None
         logger.info(f"Initialized GENERIC_Downloader with {len(self.sources)} source(s), max_segments={self.max_segments}")
         super().__init__(output_path, "_generic_temp")
 
@@ -212,19 +229,106 @@ class Generic_Downloader(BaseDownloader):
             parsed.append((md, source))
         return parsed
 
-    def _download_direct_sources(self) -> bool:
-        """Download every self._direct_sources entry (plain .mp4/.m4a/... files) via Mp4_Downloader. Returns False if cancelled (Ctrl+C)."""
+    def _preresolve_direct_source_keys(self) -> None:
+        """Probe every direct source's KID up front and resolve+print all of them as ONE
+        consolidated key block, instead of each concurrent thread probing and printing its own"""
+        probe = DRMProbe()
+        mgr = DRMManager()
+        resolved_keys: list[str] = []
+        vault_tagged_keys: list[str] = []
+        vault_source_name: str | None = None
+        drm_label = None
+        pssh_val = None
+        required_kids: set[str] = set()
+
         for entry in self._direct_sources:
             source = entry["source"]
-            label = entry["label"]
-            url = entry["url"]
 
-            role = str(source.get("role") or source.get("type") or "video").strip().lower()
-            kind = role.split(":")[0]
-            ext = os.path.splitext(url.split("?")[0])[1] or ".mp4"
-            out_path = os.path.join(entry["out_dir"], f"{self.filename_base}{ext}")
+            try:
+                client = create_client(headers=source.get("headers") or {})
+                try:
+                    raw = probe.fetch(entry["url"], source.get("headers") or {}, client, size=PROBE_BYTES_FAST)
+                finally:
+                    client.close()
+                encrypted, scheme, is_widevine, kid, pssh_b64 = probe.inspect(raw) if raw else (False, None, False, None, None)
+            except Exception as exc:
+                logger.debug(f"Pre-resolve probe failed for '{entry['label']}' (non-fatal): {exc}")
+                continue
 
-            console.print(f"[cyan]Downloading direct source '[yellow]{label}[/yellow]' ({kind})...")
+            if not encrypted:
+                source["key"] = None
+                continue
+
+            try:
+                result = mgr.resolve_flat_key(kid, pssh_b64, self._pooled_keys, drm_type=scheme or "mp4")
+            except Exception as exc:
+                logger.debug(f"Pre-resolve key resolution failed for '{entry['label']}' (non-fatal): {exc}")
+                continue
+
+            if not result:
+                continue
+
+            resolved_key, source_label = result
+            source["key"] = resolved_key
+            required_kids.add(normalize_kid(kid))
+            if resolved_key not in resolved_keys:
+                resolved_keys.append(resolved_key)
+            if source_label and source_label != "manual":
+                if resolved_key not in vault_tagged_keys:
+                    vault_tagged_keys.append(resolved_key)
+                vault_source_name = vault_source_name or source_label
+            if drm_label is None:
+                drm_label = "Widevine" if is_widevine else (scheme or "unknown DRM")
+                pssh_val = pssh_b64
+
+        if resolved_keys:
+            mgr._display_keys(
+                resolved_keys,
+                vault_tagged_keys,
+                drm_label,
+                pssh_val,
+                vault_source_name,
+                header=True,
+                default_label="manual",
+                required_kids=required_kids,
+            )
+
+    def _track_done_event(self, key: str) -> threading.Event:
+        event = self._track_done_events.get(key)
+        if event is None:
+            event = threading.Event()
+            self._track_done_events[key] = event
+        return event
+
+    def _mark_track_done(self, key: str, result_path: str | None) -> None:
+        self._track_results[key] = result_path
+        self._track_done_event(key).set()
+
+    def _get_track_result(self, key: str) -> str | None:
+        return self._track_results.get(key)
+
+    @staticmethod
+    def _is_dv_role(role: str) -> bool:
+        return role.partition(":")[2].strip().lower() == "dv"
+
+    def _download_one_direct_source(
+        self, entry: dict[str, Any], bar_mgr: DownloadBarManager, relay: "ChunkRelay | None" = None
+    ) -> tuple[bool, bool]:
+        """Run one direct-media entry's MP4_Downloader on the shared bar. Returns (ok, need_stop).
+
+        *relay* is only ever passed for the source identified as the streaming-mux fast
+        path's video track (see _maybe_launch_streaming_mux_direct) -- it receives every
+        confirmed-clear byte as it's written to disk, live."""
+        source = entry["source"]
+        label = entry["label"]
+        url = entry["url"]
+
+        role = str(source.get("role") or source.get("type") or "video").strip().lower()
+        kind = role.split(":")[0]
+        ext = os.path.splitext(url.split("?")[0])[1] or ".mp4"
+        out_path = os.path.join(entry["out_dir"], f"{self.filename_base}{ext}")
+
+        try:
             path, need_stop, error = MP4_Downloader(
                 url=url,
                 path=out_path,
@@ -232,24 +336,260 @@ class Generic_Downloader(BaseDownloader):
                 download_id=self.download_id,
                 site_name=self.site_name,
                 label=label,
-                key=source.get("key"),
+                # source["key"] is normally already pinned to a single resolved pair by
+                # _preresolve_direct_source_keys by the time this runs; fall back to the
+                # full cross-source pool (not just this source's own declared key) so a
+                # misattributed key still resolves if that pre-pass didn't run/match.
+                key=source.get("key") or self._pooled_keys,
                 check_content_type=True,
+                bar_mgr=bar_mgr,
+                suppress_key_log=True,
+                expected_language=source.get("language") or source.get("lang"),
+                expected_forced=(source.get("tag") or role.partition(":")[2]).strip().lower() == "forced",
+                on_clear_chunk=relay.feed if relay else None,
+                on_clear_abandon=relay.close if relay else None,
             )
+        except Exception as exc:
+            logger.error(f"Direct source '{label}' crashed: {exc}", exc_info=True)
+            console.print(f"[red]Direct source '{label}' failed: {exc}")
+            return False, False
 
-            if need_stop:
-                return False
+        if need_stop:
+            return False, True
 
-            if not path or not os.path.exists(path):
-                logger.error(f"Direct source '{label}' failed to download: {error}")
-                console.print(f"[red]Direct source '{label}' failed: {error}")
-                continue
+        if not path or not os.path.exists(path):
+            logger.error(f"Direct source '{label}' failed to download: {error}")
+            console.print(f"[red]Direct source '{label}' failed: {error}")
+            return False, False
 
-            entry["result"] = {
-                "path": path,
-                "kind": kind,
-                "language": source.get("language") or source.get("lang") or "und",
-                "size": os.path.getsize(path),
-            }
+        entry["result"] = {
+            "path": path,
+            "kind": kind,
+            "role": role,
+            "language": source.get("language") or source.get("lang") or "und",
+            "size": os.path.getsize(path),
+        }
+        return True, False
+
+    def _streaming_mux_direct_eligible(self) -> dict[str, Any] | None:
+        """Return the eligible video entry for the direct-mp4 streaming-mux fast path, or None."""
+        if not context_tracker.force_livemux or context_tracker.no_livemux:
+            return None
+        if config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower() != "ffmpeg":
+            return None
+        if not str(self.output_path).lower().endswith(".mkv"):
+            return None
+        if self._dv_stream is not None or self._active:
+            return None  # manifest-based DV companion or any manifest track present -- stay on the safe post-download path
+        try:
+            if not get_ffmpeg_path():
+                return None
+        except Exception:
+            return None
+
+        video_entries = [
+            e
+            for e in self._direct_sources
+            if str(e["source"].get("role") or e["source"].get("type") or "video").strip().lower().split(":")[0]
+            in ("video", "vid")
+        ]
+        if len(video_entries) != 1:
+            return None
+        video_entry = video_entries[0]
+        role = str(video_entry["source"].get("role") or video_entry["source"].get("type") or "video").strip().lower()
+        if self._is_dv_role(role):
+            return None
+        return video_entry
+
+    def _launch_streaming_mux_direct(self, video_entry: dict[str, Any]) -> tuple[ChunkRelay, threading.Thread]:
+        """Spawn the background thread that waits for every sibling direct source to
+        finish, builds the ffmpeg command and starts StreamingMuxFeeder, then attaches the
+        relay so the video source (already downloading) can feed it."""
+        relay = ChunkRelay()
+        sibling_entries = [e for e in self._direct_sources if e is not video_entry]
+
+        def _worker() -> None:
+            for entry in sibling_entries:
+                if not self._track_done_event(entry["label"]).wait(timeout=_LIVEMUX_WAIT_SECONDS):
+                    logger.info(f"streaming_mux: timed out waiting for '{entry['label']}' -- falling back to the normal mux")
+                    relay.close()
+                    return
+                if self._get_track_result(entry["label"]) is None:
+                    logger.info(f"streaming_mux: sibling source '{entry['label']}' failed -- falling back to the normal mux")
+                    relay.close()
+                    return
+
+            try:
+                cmd, output_path = self._build_streaming_mux_cmd_direct(video_entry, sibling_entries)
+            except Exception as exc:
+                logger.warning(f"streaming_mux: failed to build ffmpeg command ({exc!r}) -- falling back to the normal mux", exc_info=True)
+                relay.close()
+                return
+
+            feeder = StreamingMuxFeeder(cmd)
+            try:
+                feeder.start()
+            except Exception as exc:
+                logger.warning(f"streaming_mux: failed to start ffmpeg: {exc}")
+                relay.close()
+                return
+
+            if not relay.attach(feeder.feed):
+                feeder.abort()
+                return
+            relay.on_close(feeder.abort)
+
+            logger.info(f"streaming_mux: started early cross-track mux -> {output_path}")
+
+            if not self._track_done_event(video_entry["label"]).wait(timeout=_LIVEMUX_WAIT_SECONDS):
+                logger.info("streaming_mux: timed out waiting for the video source -- falling back to the normal mux")
+                feeder.abort()
+                return
+            if self._get_track_result(video_entry["label"]) is None:
+                logger.info("streaming_mux: video source failed -- falling back to the normal mux")
+                feeder.abort()
+                return
+
+            result = feeder.finish()
+            if result.ok:
+                self._direct_streaming_mux_result = output_path
+                logger.info(f"streaming_mux: fast-path mux finished -> {output_path}")
+            else:
+                logger.warning(f"streaming_mux: ffmpeg failed ({result.error}) -- falling back to the normal mux. stderr tail: {result.stderr_tail[-500:]}")
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        return relay, t
+
+    def _build_streaming_mux_cmd_direct(
+        self, video_entry: dict[str, Any], sibling_entries: list[dict[str, Any]]
+    ) -> tuple[list[str], str]:
+        """Build the ffmpeg command for the direct-mp4 streaming-mux fast path: video piped
+        via stdin, every finished sibling audio/subtitle source as a plain -i input."""
+        ffmpeg_path = get_ffmpeg_path()
+        output_path = os_manager.get_sanitize_path(self.output_path)
+
+        audio_paths: list[str] = []
+        audio_langs: list[str] = []
+        subtitle_paths: list[str] = []
+        subtitle_infos: list[SubtitleDispositionInfo] = []
+        subtitle_langs: list[str] = []
+
+        force_subtitle = config_manager.config.get("PROCESS", "force_subtitle")
+        for entry in sibling_entries:
+            result = entry.get("result")
+            source = entry["source"]
+            role = str(source.get("role") or source.get("type") or "").strip().lower()
+            kind = role.split(":")[0]
+            path = result["path"]
+            lang = result.get("language") or "und"
+
+            if kind in ("audio", "aud"):
+                audio_paths.append(path)
+                audio_langs.append(lang)
+            elif kind in ("subtitle", "sub"):
+                converted = convert_subtitle(path, force_subtitle)
+                if not converted:
+                    logger.warning(f"streaming_mux: subtitle conversion failed for '{entry['label']}' -- dropping this track from the fast-path mux")
+                    continue
+                subtitle_paths.append(converted)
+                tag = (source.get("tag") or role.partition(":")[2]).strip().lower()
+                subtitle_infos.append(SubtitleDispositionInfo(language=lang, forced=tag == "forced"))
+                subtitle_langs.append(lang)
+
+        cmd = [ffmpeg_path, "-y", "-f", "mp4", "-i", "-"]
+        for p in audio_paths:
+            if is_mpegts_file(p):
+                cmd += ["-f", "mpegts"]
+            cmd += ["-i", p]
+        for p in subtitle_paths:
+            cmd += ["-i", p]
+
+        cmd += ["-map", "0:v:0"]
+        video_codecs = str(video_entry["source"].get("codecs") or "").lower()
+        if any(p in video_codecs for p in ("hev", "hvc", "dvh", "dvhe")):
+            cmd += ["-tag:v", "hvc1"]
+
+        for i in range(len(audio_paths)):
+            cmd += ["-map", f"{i + 1}:a"]
+        sub_input_base = 1 + len(audio_paths)
+        for i in range(len(subtitle_paths)):
+            cmd += ["-map", f"{sub_input_base + i}:s"]
+
+        for i, lang in enumerate(audio_langs):
+            iso_lang = resolve_iso639_2(lang)
+            title = resolve_language_display_name(lang)
+            cmd += [f"-metadata:s:a:{i}", f"title={title}"]
+            cmd += [f"-metadata:s:a:{i}", f"language={iso_lang}"]
+            cmd += [f"-metadata:s:a:{i}", f"handler_name={title}"]
+            cmd += [f"-disposition:a:{i}", "default" if i == 0 else "0"]
+
+        for i, lang in enumerate(subtitle_langs):
+            iso_lang = resolve_iso639_2(lang)
+            title = resolve_language_display_name(lang)
+            cmd += [f"-metadata:s:s:{i}", f"title={title}"]
+            cmd += [f"-metadata:s:s:{i}", f"language={iso_lang}"]
+            cmd += [f"-metadata:s:s:{i}", f"handler_name={title}"]
+
+        cmd += build_subtitle_disposition_args(subtitle_infos, get_configured_disposition_language())
+
+        cmd += ["-c", "copy"]
+        if subtitle_paths:
+            cmd += ["-c:s", "srt"]
+        cmd += [output_path]
+
+        return cmd, output_path
+
+    def _download_direct_sources(self) -> bool:
+        """Download every self._direct_sources entry (plain .mp4/.m4a/... files) concurrently
+        on one shared progress bar, the same way _run_downloads does for manifest-based
+        sources. Returns False if cancelled (Ctrl+C)."""
+        if not self._direct_sources:
+            return True
+
+        self._preresolve_direct_source_keys()
+
+        video_entry = self._streaming_mux_direct_eligible()
+        relay, mux_thread = (
+            self._launch_streaming_mux_direct(video_entry) if video_entry is not None else (None, None)
+        )
+
+        stop_event = threading.Event()
+        results: dict[int, tuple[bool, bool]] = {}
+
+        def _run(i: int, entry: dict[str, Any], bm: DownloadBarManager) -> None:
+            this_relay = relay if entry is video_entry else None
+            ok, need_stop = self._download_one_direct_source(entry, bm, this_relay)
+            results[i] = (ok, need_stop)
+            self._mark_track_done(entry["label"], entry.get("result", {}).get("path") if ok else None)
+
+        bar = DownloadBarManager(self.download_id)
+        threads: list[threading.Thread] = []
+        try:
+            with bar as bm:
+                for i, entry in enumerate(self._direct_sources):
+                    t = threading.Thread(target=_run, args=(i, entry, bm), daemon=True)
+                    threads.append(t)
+                    t.start()
+
+                join_interruptible(threads, stop_event)
+                bm.finish_all_tasks()
+        except KeyboardInterrupt:
+            logger.warning("KeyboardInterrupt — stopping all direct-media sources")
+            stop_event.set()
+            if relay is not None:
+                relay.close()
+            join_interruptible(threads, threading.Event(), hard_timeout=15.0)
+            return False
+
+        if mux_thread is not None:
+            # All direct sources are done, so the mux worker's own waits resolve almost
+            # immediately from here -- this just waits for it to finish writing the
+            # muxed file (or aborting) before _collect_status()/_merge_files() run.
+            mux_thread.join(timeout=_LIVEMUX_WAIT_SECONDS)
+
+        if any(need_stop for _ok, need_stop in results.values()):
+            return False
 
         return True
     
@@ -496,6 +836,70 @@ class Generic_Downloader(BaseDownloader):
         self._active.append((dv_md, source))
         logger.info(f"&dv: companion isolated in dedicated downloader -> {target}")
 
+    def _preresolve_manifest_keys(self) -> None:
+        """Probe every manifest source's KID up front and resolve+print all of them as ONE
+        consolidated key block, instead of each concurrent thread probing and printing its own"""
+        pssh_by_kid: dict[str, str | None] = {}
+        widevine_pssh = None
+        drm_type = None
+        for md, _source in self._active:
+            for s in md.streams:
+                if not s.selected or s.is_external:
+                    continue
+                drm = getattr(s, "drm", None)
+                if drm is None or not drm.is_encrypted():
+                    continue
+                for kid in drm.get_all_kids():
+                    pssh_by_kid.setdefault(normalize_kid(kid), drm.pssh)
+                if widevine_pssh is None:
+                    widevine_pssh = drm.get_pssh_for(DRMType.WIDEVINE)
+                if drm_type is None:
+                    drm_type = drm.drm_type
+
+        if not pssh_by_kid:
+            return
+
+        mgr = DRMManager()
+        norm_keys = KeysManager.normalize(self._pooled_keys) if self._pooled_keys else []
+        covered_kids = {kid for kid, _ in norm_keys}
+        resolved_keys = [f"{kid}:{key}" for kid, key in norm_keys if kid in pssh_by_kid]
+
+        vault_tagged_keys: list[str] = []
+        vault_source_name: str | None = None
+        for kid, kid_pssh in pssh_by_kid.items():
+            if kid in covered_kids:
+                continue
+            try:
+                result = mgr.resolve_flat_key(kid, kid_pssh, None, drm_type=drm_type or "mp4")
+            except Exception as exc:
+                logger.debug(f"Manifest vault key resolution failed for KID {kid} (non-fatal): {exc}")
+                continue
+            if not result:
+                continue
+
+            resolved_key, source_label = result
+            resolved_keys.append(resolved_key)
+            self._pooled_keys.append(resolved_key)
+            if source_label and source_label != "manual":
+                vault_tagged_keys.append(resolved_key)
+                vault_source_name = vault_source_name or source_label
+
+        if not resolved_keys:
+            return
+
+        pssh_val = widevine_pssh or next((v for v in pssh_by_kid.values() if v), None)
+        drm_label = "Widevine" if widevine_pssh else (drm_type or "unknown DRM")
+        mgr._display_keys(
+            resolved_keys,
+            vault_tagged_keys,
+            drm_label,
+            pssh_val,
+            vault_source_name,
+            header=True,
+            default_label="manual",
+            required_kids=set(pssh_by_kid.keys()),
+        )
+
     def _stop_all(self) -> None:
         if self.download_id:
             download_tracker.request_stop(self.download_id)
@@ -505,8 +909,9 @@ class Generic_Downloader(BaseDownloader):
 
     def _run_downloads(self) -> bool:
         """Download every selected stream of every source concurrently on ONE shared progress bar. Returns False if cancelled (Ctrl+C)."""
+        self._preresolve_manifest_keys()
         for md, source in self._active:
-            md.set_key(source.get("key"))
+            md.set_key(self._pooled_keys)
             sel = [s for s in md.streams if s.selected and not s.is_external and s.type in _MEDIA_TYPES]
 
             # Warn early if a source has encrypted tracks but no way to decrypt them.
@@ -521,7 +926,7 @@ class Generic_Downloader(BaseDownloader):
             encrypted_sel = [s for s in sel if _is_encrypted(s)]
             label = source.get("label") or (str(source.get("url") or "?")[:60])
 
-            if encrypted_sel and not source.get("key") and not source.get("license_url"):
+            if encrypted_sel and not self._pooled_keys and not source.get("license_url"):
                 kinds = ", ".join(sorted({s.type for s in encrypted_sel}))
                 console.print(
                     f"[bold red][!] WARNING[/bold red] Source '[yellow]{label}[/yellow]': "
@@ -530,9 +935,10 @@ class Generic_Downloader(BaseDownloader):
                 )
                 logger.error(f"Generic source '{label}': encrypted {kinds} stream(s) without key/license — will remain encrypted")
 
-            # Warn early per-track when keys ARE provided but none of them match this specific track's KID
-            elif encrypted_sel and source.get("key") and not source.get("license_url"):
-                provided_kids = {kid.lower() for kid, _ in KeysManager.normalize(source.get("key"))}
+            # Warn early per-track when keys ARE provided (anywhere in the pool) but none of
+            # them match this specific track's KID
+            elif encrypted_sel and self._pooled_keys and not source.get("license_url"):
+                provided_kids = {kid.lower() for kid, _ in KeysManager.normalize(self._pooled_keys)}
                 for s in encrypted_sel:
                     track_kids = {k.lower() for k in (s.drm.get_all_kids() if s.drm else [])}
                     if track_kids and provided_kids.isdisjoint(track_kids):
@@ -647,8 +1053,11 @@ class Generic_Downloader(BaseDownloader):
 
             kind = result["kind"]
             lang = result["language"]
+            is_dv = result.get("role", "").partition(":")[2].strip().lower() == "dv"
 
-            if kind in ("video", "vid"):
+            if kind in ("video", "vid") and is_dv:
+                status["other_tracks_downloaded"].append(self._dv_entry(result))
+            elif kind in ("video", "vid"):
                 if status["video"] is None:
                     status["video"] = {"path": result["path"], "size": result["size"]}
             elif kind in ("audio", "aud"):
@@ -747,9 +1156,10 @@ class Generic_Downloader(BaseDownloader):
         if self.download_id:
             download_tracker.update_status(self.download_id, "Muxing ...")
 
-        # `_merge_files` (inherited from `BaseDownloader`) refuses to mux a track that never actually decrypted by checking `self.media_downloader.decrypt_failures`
         self.media_downloader = SimpleNamespace(
-            decrypt_failures=[f for md, _src in self._active for f in getattr(md, "decrypt_failures", None) or []]
+            decrypt_failures=[f for md, _src in self._active for f in getattr(md, "decrypt_failures", None) or []],
+            streaming_mux_result=self._direct_streaming_mux_result,
+            streaming_mux_chapters_injected=False,
         )
 
         final_file = self._merge_files(status)

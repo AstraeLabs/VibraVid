@@ -97,6 +97,25 @@ class ExternalSupaDBVault:
             logger.error(f"Claudio track_download error: {e}")
             return False
 
+    def track_download_async(self, title: str, media_type: str, service: str = None) -> None:
+        """Fire-and-forget: notify Claudio about a completed download in a background thread."""
+        def _run():
+            try:
+                if not self.is_connected:
+                    logger.warning("track_download_async: claudio_vault not configured")
+                    return
+
+                title_str = (title or "").strip()
+                media_type_str = (media_type or "Film").strip()
+                service_str = (service or "").strip().lower()
+                logger.debug(f"[TRACK] Tracking download: title={title_str}, type={media_type_str}, service={service_str}")
+                result = self.track_download(title=title_str, media_type=media_type_str, service=service_str)
+                logger.debug(f"[TRACK] Track result: {result}")
+            except Exception as e:
+                logger.error(f"[TRACK] Error tracking download: {e}", exc_info=True)
+
+        threading.Thread(target=_run, daemon=False).start()
+
     def set_keys(self, keys_list: list[str], license_url: str, pssh: str, kid_to_label: dict | None = None) -> int:
         """
         Add multiple keys to the vault in a single bulk request.

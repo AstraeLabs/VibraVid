@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import shutil
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -231,30 +230,6 @@ class BaseDownloader:
 
         parts.append(f"-o '{safe_name}'")
         return " ".join(parts)
-
-    def track_download_start(self, title: str, media_type: str, site: str) -> None:
-        """Fire-and-forget: notify Supabase that a download has started."""
-
-        def _run():
-            try:
-                from VibraVid.utils.vault.vault_1 import claudio_vault
-
-                if claudio_vault.is_connected:
-                    title_str = (title or "").strip()
-                    media_type_str = (media_type or "Film").strip()
-                    site_str = (site or "").strip().lower()
-                    logger.debug(f"[TRACK] Tracking download: title={title_str}, type={media_type_str}, service={site_str}")
-                    result = claudio_vault.track_download(
-                        title=title_str,
-                        media_type=media_type_str,
-                        service=site_str,
-                    )
-                    logger.debug(f"[TRACK] Track result: {result}")
-            except Exception as e:
-                logger.error(f"[TRACK] Error tracking download: {e}", exc_info=True)
-
-        t = threading.Thread(target=_run, daemon=False)
-        t.start()
 
     def _build_tracks_desc(self, streams: list) -> str:
         """Human-readable summary of tracks"""
@@ -852,7 +827,8 @@ class BaseDownloader:
 
         if self.output_path and os.path.exists(self.output_path):
             title, media_type, site, _ = self._resolve_track_info()
-            self.track_download_start(title=title, media_type=media_type, site=site)
+            from VibraVid.utils.vault.vault_1 import claudio_vault
+            claudio_vault.track_download_async(title=title, media_type=media_type, service=site)
 
         # Never publish a file that failed decryption, is missing segments, or is below 1080p.
         if verified_ok:

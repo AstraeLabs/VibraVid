@@ -368,6 +368,31 @@ def detect_stream_type(codec_str: str) -> str:
     return ""
 
 
+def format_bitrate(bps: int | float | None) -> str:
+    """Human-readable bitrate, same formatting as Stream.bitrate_display ('1.1 Mbps', '128 Kbps')."""
+    bw = bps or 0
+    if bw >= 1_000_000:
+        return f"{bw / 1e6:.1f} Mbps"
+    if bw >= 1_000:
+        return f"{bw / 1e3:.0f} Kbps"
+    return f"{bw:.0f} bps" if bw else ""
+
+
+def format_disposition_flags(*, forced: bool = False, sdh: bool = False, cc: bool = False, default: bool = False) -> str:
+    """Rich-markup subtitle disposition tags (e.g. "[FORCED] [SDH]")."""
+    default = default and not forced
+    flags = []
+    if forced:
+        flags.append("[FORCED]")
+    if sdh:
+        flags.append("[SDH]")
+    if cc:
+        flags.append("[CC]")
+    if default:
+        flags.append("[DEFAULT]")
+    return " ".join(flags)
+
+
 def get_channel_label(channels: str) -> str:
     """Return human-readable channel layout label (e.g. '2' → 'Stereo', 'F801' → '5.1')."""
     if not channels:
