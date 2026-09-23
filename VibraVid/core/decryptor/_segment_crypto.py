@@ -1,5 +1,6 @@
 # 01.04.26
 
+import gzip
 import os
 
 try:
@@ -37,6 +38,13 @@ def decrypt_aes128_file(input_path: str | os.PathLike, output_path: str | os.Pat
     """Decrypt one AES-128-CBC HLS segment file on disk, writing the plaintext to *output_path*."""
     with open(input_path, "rb") as fh:
         data = fh.read()
+
+    # Some CDNs (e.g. vixcloud) serve segments with Content-Encoding gzip that the downloader stores as-is: the ciphertext is inside the gzip stream.
+    if data[:2] == b"\x1f\x8b":
+        try:
+            data = gzip.decompress(data)
+        except Exception:
+            pass
 
     decrypted = decrypt_aes128(data, key_data, iv_hex, seg_num)
 

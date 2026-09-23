@@ -189,6 +189,32 @@ def create_client(
     return session
 
 
+def get_with_retry(session: requests.Session, url: str, retries: int | None = None, **kwargs) -> requests.Response:
+    """GET *url* retrying with backoff on network errors and 5xx responses; 4xx are raised immediately.
+    Meant for small manifest/playlist requests: some hosts (e.g. vixcloud) answer most of them with a transient 500."""
+    import time
+
+    if retries is None:
+        retries = max(config_manager.config.get_int("REQUESTS", "max_retry"), 15)
+
+    for attempt in range(retries + 1):
+        try:
+            resp = session.get(url, **kwargs)
+            if resp.status_code < 500:
+                resp.raise_for_status()
+                return resp
+            exc: Exception = requests.exceptions.HTTPError(f"HTTP Error {resp.status_code}", response=resp)
+        except requests.exceptions.HTTPError:
+            raise
+        except Exception as e:
+            exc = e
+
+        if attempt >= retries:
+            raise exc
+        logger.debug(f"GET {url} failed ({exc}), retry {attempt + 1}/{retries}")
+        time.sleep(min(0.5 * (attempt + 1), 2.0))
+
+
 @contextmanager
 def open_client(
     *,

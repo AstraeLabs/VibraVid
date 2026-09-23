@@ -9,7 +9,7 @@ from VibraVid.core.decryptor import Decryptor, KeysManager
 from VibraVid.core.manifest.stream import format_duration
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client
+from VibraVid.utils.http_client import create_client, get_with_retry
 from VibraVid.utils.os import os_manager
 
 from .util._dash import build_dash_ranged_segments
@@ -281,8 +281,7 @@ class VodStreamMixin:
         all_headers = self._build_headers()
         try:
             with create_client(headers=all_headers, timeout=REQUEST_TIMEOUT, follow_redirects=True) as c:
-                resp = c.get(playlist_url)
-                resp.raise_for_status()
+                resp = get_with_retry(c, playlist_url)
                 playlist_content = resp.text
         except Exception as exc:
             logger.error(f"Failed to fetch HLS variant playlist: {exc}")

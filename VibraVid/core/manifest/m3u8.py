@@ -18,7 +18,7 @@ from VibraVid.core.manifest.stream import DRMInfo, DRMType, Stream
 from VibraVid.core.utils.codec import VIDEO_CODEC_PREFIXES, infer_video_range
 from VibraVid.core.utils.language import resolve_locale
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -231,8 +231,7 @@ class HLSParser:
             hdrs = dict(self.headers)
             hdrs.setdefault("User-Agent", get_headers().get("User-Agent", ""))
             with create_client(headers=hdrs, timeout=_request_timeout(), follow_redirects=True) as c:
-                r = c.get(variant_url)
-                r.raise_for_status()
+                r = get_with_retry(c, variant_url)
                 variant_content = r.text
                 return self._parse_drm_tags(variant_content), variant_content
         except Exception as exc:

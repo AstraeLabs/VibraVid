@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,7 @@ def resolve_subtitle_segments_sync(url: str, headers: dict) -> tuple[list[tuple[
         hdrs = dict(headers)
         hdrs.setdefault("User-Agent", get_headers().get("User-Agent", ""))
         with create_client(headers=hdrs, timeout=15, follow_redirects=True) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
+            resp = get_with_retry(client, url)
             text = resp.text.strip()
     except Exception as exc:
         logger.info(f"resolve_subtitle_segments_sync: request failed for {url!r}: {exc}")
