@@ -168,14 +168,16 @@ class DownloadsScreen(Screen):
         history_items = download_tracker.get_history()
         self._completed_items = [dl for dl in history_items if dl.get("status") == "completed"]
 
-        for dl in self._completed_items:
+        for row_index, dl in enumerate(self._completed_items):
             dl_id = str(dl.get("id", "?"))[:8]
             title = str(dl.get("title", "?"))[:38]
             site = str(dl.get("site", "?"))
             size = str(dl.get("size", "-"))
             path = str(dl.get("path") or "-")
             finished = _format_time(dl.get("end_time") or dl.get("last_update"))
-            row_key = dl.get("path") or str(dl.get("id"))
+            # A file may legitimately appear more than once in history after it
+            # has been downloaded again. DataTable keys must still be unique.
+            row_key = f"{dl.get('id') or 'completed'}:{row_index}"
             completed_table.add_row(dl_id, title, site, size, path, finished, key=row_key)
 
         if completed_cursor is not None and completed_cursor < len(self._completed_items):
