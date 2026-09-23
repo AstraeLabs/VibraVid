@@ -9,9 +9,9 @@ from VibraVid.utils import TVShowManager
 from VibraVid.utils.http_client import create_client
 
 from .client import get_api, hub_search
-from .downloader import download_series
+from .downloader import download_film, download_series
 
-indice = 17
+indice = 19
 _useFor = "Serie"
 _region = ["IT"]
 msg = Prompt()
@@ -97,5 +97,6 @@ search, process_search_result = make_search_entrypoints(
     title_search=title_search,
     entries_manager=entries_manager,
     table_show_manager=table_show_manager,
+    download_film=download_film,
     download_series=download_series,
 )
