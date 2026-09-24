@@ -837,8 +837,7 @@ class Generic_Downloader(BaseDownloader):
         logger.info(f"&dv: companion isolated in dedicated downloader -> {target}")
 
     def _preresolve_manifest_keys(self) -> None:
-        """Probe every manifest source's KID up front and resolve+print all of them as ONE
-        consolidated key block, instead of each concurrent thread probing and printing its own"""
+        """Probe every manifest source's selected streams for KIDs, then resolve+print all of them as ONE consolidated key block, instead of each concurrent thread probing and printing its own."""
         pssh_by_kid: dict[str, str | None] = {}
         widevine_pssh = None
         drm_type = None

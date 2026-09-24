@@ -189,6 +189,8 @@
 .cn-cta:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px; }
 .cn-cta.is-ghost { background: rgba(255,255,255,.13); color: var(--cn-white); }
 .cn-cta.is-ghost:hover { background: rgba(255,255,255,.24); }
+.cn-cta:disabled, .cn-cta:disabled:hover { opacity: .4; cursor: not-allowed; }
+.cn-cta.is-ghost:disabled:hover { background: rgba(255,255,255,.13); }
 .cn-cta.cn-round {
   width: 46px; height: 46px; padding: 0; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;

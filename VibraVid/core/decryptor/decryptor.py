@@ -221,6 +221,49 @@ class _FluxDaemon:
             return True, None
         return False, resp.get("error") or "unknown daemon error"
 
+    def scan(self, chunk_path: str) -> tuple[list[dict], int | None] | None:
+        """Scan a chunk file for per-track fragment counts via the daemon. Returns (tracks, scan_cut) or None if unavailable."""
+        if self._dead or self._proc.poll() is not None:
+            self._dead = True
+            return None
+
+        job = json.dumps({"scan": chunk_path})
+
+        with self._lock:
+            try:
+                self._proc.stdin.write(job + "\n")
+                self._proc.stdin.flush()
+                line = self._proc.stdout.readline()
+            except (BrokenPipeError, OSError):
+                self._dead = True
+                return None
+
+        if not line:
+            self._dead = True
+            return None
+
+        try:
+            resp = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+
+        if not resp.get("ok"):
+            return None
+        
+        tracks = resp.get("tracks")
+        if tracks is None:
+            if not getattr(self, "_scan_warned", False):
+                self._scan_warned = True
+                logger.error("flux daemon has no scan support (flux >= 0.4.10 required in C:\\binary)")
+            return None
+        
+        try:
+            cut = resp.get("scan_cut")
+            cut = int(cut) if cut is not None else None
+        except (TypeError, ValueError):
+            cut = None
+        return list(tracks), cut
+
     def close(self) -> None:
         if _log_engine_output_enabled() and self._job_count > 1 and not self._last_job_had_fragments_info:
             self._log_job_output(self._last_job_lines, f"last job, #{self._job_count}")
@@ -371,6 +414,13 @@ class Decryptor:
         if self._flux_daemon is not None:
             self._flux_daemon.close()
             self._flux_daemon = None
+
+    def scan_fragments(self, chunk_path: str) -> tuple[list[dict], int | None] | None:
+        """Scan a chunk file for per-track fragment counts via the daemon. Returns (tracks, scan_cut) or None if unavailable."""
+        daemon = self._get_flux_daemon()
+        if daemon is None:
+            return None
+        return daemon.scan(chunk_path)
 
     def _decrypt_flux_live(
         self,

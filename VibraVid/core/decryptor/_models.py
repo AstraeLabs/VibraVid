@@ -45,6 +45,22 @@ class EncryptionInfo:
     kid: str | None = None
     pssh_b64: str | None = None
     is_widevine: bool = False
+    encrypted_fragments: int = 0
+    clear_fragments: int = 0
+    has_fragment_signal: bool = False
+
+    @property
+    def fully_encrypted(self) -> bool:
+        return (
+            self.encrypted
+            and self.has_fragment_signal
+            and self.encrypted_fragments > 0
+            and self.clear_fragments == 0
+        )
+
+    @property
+    def has_clear_lead(self) -> bool:
+        return self.encrypted and self.has_fragment_signal and self.clear_fragments > 0
 
 
 def _run_flux_dump(file_path: str) -> dict | None:
@@ -89,6 +105,19 @@ def _parse_flux_json(report: dict) -> EncryptionInfo:
                 kid = (stream.get("crypto") or {}).get("default_kid")
                 if kid:
                     info.kid = kid
+
+        enc_frags = stream.get("encrypted_fragments")
+        clear_frags = stream.get("clear_fragments")
+        if enc_frags is not None or clear_frags is not None:
+            info.has_fragment_signal = True
+            try:
+                info.encrypted_fragments += int(enc_frags or 0)
+            except (TypeError, ValueError):
+                pass
+            try:
+                info.clear_fragments += int(clear_frags or 0)
+            except (TypeError, ValueError):
+                pass
 
     first_scheme: str | None = None
     for stream in streams:

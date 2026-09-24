@@ -53,6 +53,7 @@ urlpatterns = [
     path("api/arr/webhook/radarr/", views.radarr_webhook, name="radarr_webhook"),
     path("api/arr/status/", views.arr_status, name="arr_status"),
     path("api/arr/trigger-sync/", views.arr_trigger_sync, name="arr_trigger_sync"),
+    path("api/arr/queue/<int:queue_id>/delete/", views.arr_delete_request, name="arr_delete_request"),
     path("arr-stack/", views.arr_stack, name="arr_stack"),
 
     # In-app update

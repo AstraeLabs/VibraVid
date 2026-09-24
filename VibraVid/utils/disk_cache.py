@@ -63,6 +63,30 @@ def invalidate(service: str, name: str) -> None:
             logger.warning(f"[disk_cache] could not remove {service}/{name}: {e}")
 
 
+def clear_service(service: str) -> int:
+    """Delete every cached file for a service (e.g. stale MSL/ESN data after a cookie/account change).
+
+    Returns the number of files removed.
+    """
+    service_dir = os.path.join(config_manager.base_path, ".cache", "services", service)
+    removed = 0
+    try:
+        entries = os.listdir(service_dir)
+    except FileNotFoundError:
+        return 0
+    for entry in entries:
+        if not entry.endswith(".json"):
+            continue
+        path = os.path.join(service_dir, entry)
+        with _lock_for(path):
+            try:
+                os.remove(path)
+                removed += 1
+            except Exception as e:
+                logger.warning(f"[disk_cache] could not remove {service}/{entry}: {e}")
+    return removed
+
+
 def is_fresh(data: dict | None, expiry_key: str = "expiry", buffer_seconds: float = 0) -> bool:
     """True if `data` has a numeric `expiry_key` timestamp still valid (with a safety buffer)."""
     if not data:

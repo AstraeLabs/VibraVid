@@ -41,6 +41,35 @@ def estimate_total_size(completed_bytes: int, done_segs: int, total_segs: int) -
     return int((completed_bytes / done_segs) * total_segs)
 
 
+def resolve_display_total(
+    completed_bytes: int,
+    done_segs: int,
+    total_segs: int,
+    known_total: int = 0,
+    prev_estimated: int = 0,
+) -> int:
+    """Resolve the stable total to show as ``downloaded/total``."""
+    try:
+        known = int(known_total or 0)
+    except (TypeError, ValueError):
+        known = 0
+    try:
+        prev = int(prev_estimated or 0)
+    except (TypeError, ValueError):
+        prev = 0
+    try:
+        done_bytes = int(completed_bytes or 0)
+    except (TypeError, ValueError):
+        done_bytes = 0
+
+    base = known if known > 0 else estimate_total_size(done_bytes, done_segs, total_segs)
+    if base < done_bytes:
+        base = done_bytes
+    if prev > base:
+        base = prev
+    return base
+
+
 def fmt_dur(seconds: float) -> str:
     """Format seconds as HH:MM:SS or MM:SS."""
     s = int(seconds)

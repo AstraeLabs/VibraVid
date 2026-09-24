@@ -52,9 +52,6 @@ from .util._stream_helpers import (
 )
 from .util._subtitle_segments import merge_vtt_files
 from .util.formatting import (
-    estimate_total_size as _estimate_total_size,
-)
-from .util.formatting import (
     fmt_dur as _fmt_dur,
 )
 from .util.formatting import (
@@ -66,6 +63,9 @@ from .util.formatting import (
 from .util.formatting import (
     normalize_path_key,
 )
+from .util.formatting import (
+    resolve_display_total as _resolve_display_total,
+)
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT = config_manager.config.get_int("REQUESTS", "timeout")
@@ -75,6 +75,7 @@ TOKEN_REFRESH_BACKOFF_SECONDS = config_manager.config.get_float(
     "DOWNLOAD", "token_refresh_backoff_seconds", default=2.0
 )
 TOKEN_REFRESH_STALL_ROUNDS = max(1, config_manager.config.get_int("DOWNLOAD", "token_refresh_stall_rounds", default=3))
+_DECRYPT_ERROR_RATIO_LIMIT = 0.5
 STREAMING_MUX_MIN_WAIT_SECONDS = 60.0
 STREAMING_MUX_MAX_WAIT_SECONDS = 900.0 
 STREAMING_MUX_SECONDS_PER_SEGMENT = 0.2
@@ -140,11 +141,12 @@ class _LiveMerger:
         self._lock = threading.Lock()
         self._fh = open(out_path, "wb")
         self._failed = False
+        self._adopted = False
         self._on_chunk = on_chunk
 
     def submit(self, key: Any, path: Path) -> None:
         with self._lock:
-            if self._failed:
+            if self._failed or self._adopted:
                 return
             self._pending[key] = path
             while self._cursor < len(self._expected) and self._expected[self._cursor] in self._pending:
@@ -167,10 +169,36 @@ class _LiveMerger:
                     return
                 self._cursor += 1
 
+    @property
+    def out_path(self) -> Path:
+        return Path(self._fh.name)
+
+    def can_adopt(self) -> bool:
+        with self._lock:
+            return self._on_chunk is None and not self._failed and not self._adopted
+
+    def adopt(self, complete_path: Path) -> bool:
+        """Adopt an already-complete file as the final output, replacing the current out_path. Returns True if successful, False if adoption was not possible (e.g. because a chunk callback is active or the merger has failed)."""
+        with self._lock:
+            if self._on_chunk is not None or self._failed or self._adopted:
+                return False
+            out_path = self.out_path
+            self._fh.close()
+            try:
+                complete_path.replace(out_path)
+            except OSError as exc:
+                self._failed = True
+                logger.warning(f"[live_merge] adopt failed for {complete_path.name}: {exc}")
+                return False
+            self._adopted = True
+            self._cursor = len(self._expected)
+            self._pending.clear()
+            return True
+
     def attach_feeder(self, feed_fn: Callable[[bytes], None]) -> None:
         """Retroactively wire a streaming-mux feeder into an already-running live merge"""
         with self._lock:
-            if self._on_chunk is not None or self._failed:
+            if self._on_chunk is not None or self._failed or self._adopted:
                 return
             self._fh.flush()
             with open(self._fh.name, "rb") as src:
@@ -192,6 +220,9 @@ class _LiveMerger:
             return self._failed
 
     def close(self) -> None:
+        if self._adopted:
+            return
+        
         try:
             self._fh.close()
         except Exception:
@@ -533,6 +564,13 @@ class DecryptPipelineMixin:
         seg_url_refresh_fn=None,
     ) -> None:
         task_key = self._stream_task_key(stream)
+        poisoned = self._kids_poisoned(self._stream_kids(stream))
+        if poisoned:
+            self._skip_stream_wrong_key(stream, poisoned, bar_manager, task_key)
+            return
+
+        def stream_stop():
+            return self._stop_check() or self._kids_poisoned(self._stream_kids(stream)) is not None
         if stream.type == "video":
             _plain = self._video_labels_by_task_key.get(task_key) or self._video_label
             _progress_label = f"[bold cyan]Vid[/bold cyan] {_plain}" if _plain else ""
@@ -546,16 +584,34 @@ class DecryptPipelineMixin:
             _progress_label = f"[bold cyan]Sub[/bold cyan] {_plain}" if _plain else ""
         else:
             _progress_label = ""
+        
         total = len(dl_segs)
         stream_dir = self._make_stream_dir(stream, protocol)
         all_headers = self._build_headers()
         protocol_lower = protocol.lower()
+        _key_sanity_checked = [False]
 
-        # Checked once per track (the first media segment, not the dedicated init segment) to fail fast on a wrong key
-        _first_media_seg_number = min(
-            (s["number"] for s in dl_segs if s.get("seg_type") != "init"),
-            default=None,
-        )
+        def _want_key_sanity(fp: Path, decryptor: "Decryptor | None") -> bool:
+            """True only for the first chunk with >= 1 senc fragment."""
+            if _key_sanity_checked[0]:
+                return False
+            if decryptor is None:
+                return False
+            try:
+                scanned = decryptor.scan_fragments(str(fp))
+            except Exception as exc:
+                logger.debug(f"{protocol.upper()} daemon scan failed for {fp.name}: {exc}")
+                scanned = None
+            if scanned is None:
+                logger.error(f"{protocol.upper()} key-sanity deferred for {fp.name}: flux scan unavailable (daemon down or flux < 0.4.10) -- waiting for the next chunk")
+                return False
+            
+            tracks, _cut = scanned
+            if any(int(t.get("encrypted_fragments") or 0) > 0 for t in tracks):
+                return True
+            
+            logger.debug(f"{protocol.upper()} key-sanity deferred for {fp.name}: no senc fragment in this chunk (pure clear lead) -- waiting for the first chunk carrying sample-encryption")
+            return False
 
         key_cache: dict[str, bytes] = {}
         segment_meta_by_path = {}
@@ -635,6 +691,7 @@ class DecryptPipelineMixin:
                 raise last_exc
 
         _first_bytes_logged = False
+        _prev_estimated = [0]
 
         def _progress(
             done: int, total_: int, total_bytes: int, speed_bps: float, speed_label: str | None = None
@@ -645,9 +702,17 @@ class DecryptPipelineMixin:
                 logger.info(
                     f"{protocol.upper()} first bytes received | id={stream.id!r} | type={stream.type} | {task_key}"
                 )
+
+            known_total = int(getattr(stream, "estimated_size", 0) or 0)
+            estimated_total = _resolve_display_total(
+                total_bytes, done, total_, known_total=known_total, prev_estimated=_prev_estimated[0]
+            )
+            _prev_estimated[0] = estimated_total
+            if known_total > 0:
+                pct = min(100, int((total_bytes / known_total) * 100)) if known_total else 0
+            else:
+                pct = int((done / total_) * 100) if total_ else 0
             
-            pct = int((done / total_) * 100) if total_ else 0
-            estimated_total = _estimate_total_size(total_bytes, done, total_) if done > 0 else total_bytes
             size_display = (
                 f"{_fmt_size(total_bytes)}/{_fmt_size(estimated_total)}"
                 if done < total_
@@ -819,18 +884,34 @@ class DecryptPipelineMixin:
 
             dec_tmp = fp.with_suffix(fp.suffix + ".dec")
             init_path_str = str(init_path) if init_path and init_path.exists() else None
+            merger = _live_merger_box[0]
+            adopt_whole_file = (
+                merger is not None
+                and len(_media_segs_only) == 1
+                and not (seg.get("headers") or {}).get("Range")
+                and getattr(self, "_streaming_mux_output_path", None) is None
+                and merger.can_adopt()
+                and _reads_as_self_initializing_mp4(fp)
+            )
+            if adopt_whole_file:
+                init_path_str = None
+            
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"CENC LIVE decrypt path={fp} init={init_path_str or 'None'} with key={describe_key_for_log(self.key)}")
 
+            want_key_sanity = _want_key_sanity(fp, dash_decryptor)
             ok, message, _data = dash_decryptor.decrypt_segment_live(
                 encrypted_path=str(fp),
                 decrypted_path=str(dec_tmp),
                 raw_keys=self.key,
                 init_path=init_path_str,
-                key_sanity=(seg.get("number") == _first_media_seg_number),
+                key_sanity=want_key_sanity,
             )
+            if want_key_sanity:
+                _key_sanity_checked[0] = True
 
-            if not ok:
+            wrong_key = not ok and message and "key is wrong" in message
+            if not ok and not wrong_key:
                 # The bytes on disk decrypt-fail even though the download itself
                 # reported success (e.g. a CDN response cut short mid-transfer
                 # without the HTTP layer noticing) -- re-fetch this one segment
@@ -848,6 +929,21 @@ class DecryptPipelineMixin:
                 except Exception as exc:
                     message = f"{message} (retry fetch failed: {exc})"
 
+            elif wrong_key:
+                logger.error(
+                    f"{protocol.upper()} live decrypt for {fp.name}: key sanity check confirmed the stored "
+                    f"key is wrong for this KID -- skipping the re-download retry (it would fail identically) "
+                    f"and dropping this segment. The vault entry for this KID is likely stale/corrupt and "
+                    f"should be re-extracted from a fresh license request: {message}"
+                )
+
+                # Deterministic for the whole KID, not just this segment
+                self._register_wrong_key(self._stream_kids(stream))
+                if decrypt_aborted["reason"] is None:
+                    poisoned_now = self._kids_poisoned(self._stream_kids(stream))
+                    decrypt_aborted["reason"] = (f"wrong key for KID {poisoned_now or 'unknown'} (confirmed by key-sanity on {fp.name}) -- terminating track")
+                    self._skip_stream_wrong_key(stream, poisoned_now or "unknown")
+
             if not ok or not dec_tmp.exists():
                 # Still bad after the retry -- drop this one segment (a small
                 # A/V gap) instead of aborting the whole track: the CDN glitch
@@ -858,6 +954,36 @@ class DecryptPipelineMixin:
                 fp.unlink(missing_ok=True)
                 dec_tmp.unlink(missing_ok=True)
                 return
+
+            if adopt_whole_file and merger is not None:
+                _t_adopt = time.monotonic()
+                if merger.adopt(dec_tmp):
+                    # Keep seg_NNNNN in place (the missing-segment census looks
+                    # for it) as a hard link to the output: no second copy.
+                    try:
+                        fp.unlink(missing_ok=True)
+                        os.link(merger.out_path, fp)
+                    except OSError as exc:
+                        logger.debug(f"{protocol.upper()} whole-file adopt: could not relink {fp.name}: {exc}")
+                    logger.info(f"{protocol.upper()} whole-file decrypt adopted as track output (no merge copy, {(time.monotonic() - _t_adopt) * 1000:.0f}ms)")
+                    return
+                
+                # Progressive output can't be appended after the init: redo
+                # it through the regular --fragments-info path instead.
+                logger.warning(f"{protocol.upper()} whole-file adopt refused for {fp.name} -- re-decrypting via the regular live path")
+                dec_tmp.unlink(missing_ok=True)
+                ok, message, _data = dash_decryptor.decrypt_segment_live(
+                    encrypted_path=str(fp),
+                    decrypted_path=str(dec_tmp),
+                    raw_keys=self.key,
+                    init_path=str(init_path) if init_path and init_path.exists() else None,
+                    key_sanity=False,
+                )
+                if not ok or not dec_tmp.exists():
+                    logger.warning(f"{protocol.upper()} live decrypt failed for {fp.name} after adopt refusal -- dropping this segment: {message}")
+                    fp.unlink(missing_ok=True)
+                    dec_tmp.unlink(missing_ok=True)
+                    return
 
             _replace_segment_file(dec_tmp, fp, f"{protocol.upper()} live")
             logger.debug(f"{protocol.upper()} live decrypted -> {fp.name}")
@@ -897,15 +1023,27 @@ class DecryptPipelineMixin:
             fp.write_bytes(self._normalize_ism_fragment_sdi(fp.read_bytes()))
 
             dec_tmp = fp.with_suffix(fp.suffix + ".dec")
+            want_key_sanity = _want_key_sanity(fp, ism_decryptor)
             ok, message, _data = ism_decryptor.decrypt_segment_live(
                 encrypted_path=str(fp),
                 decrypted_path=str(dec_tmp),
                 raw_keys=self.key,
                 init_path=str(init_path),
-                key_sanity=(seg.get("number") == _first_media_seg_number),
+                key_sanity=want_key_sanity,
             )
+            if want_key_sanity:
+                _key_sanity_checked[0] = True
 
             if not ok:
+                if message and "key is wrong" in message:
+                    self._register_wrong_key(self._stream_kids(stream))
+                    poisoned_now = self._kids_poisoned(self._stream_kids(stream))
+                    if decrypt_aborted["reason"] is None:
+                        decrypt_aborted["reason"] = (
+                            f"wrong key for KID {poisoned_now or 'unknown'} "
+                            f"(confirmed by key-sanity on {fp.name}) -- terminating track"
+                        )
+                    self._skip_stream_wrong_key(stream, poisoned_now or "unknown", bar_manager, task_key)
                 raise RuntimeError(f"ISM live decrypt failed for {fp.name}: {message}")
 
             if not dec_tmp.exists():
@@ -923,6 +1061,18 @@ class DecryptPipelineMixin:
                     break
                 try:
                     if decrypt_aborted["reason"] is not None:
+                        continue
+                    poisoned = self._kids_poisoned(self._stream_kids(stream))
+                    if poisoned is not None:
+                        # Sibling (or this) track proved the key wrong -- stop
+                        # burning decrypt cycles here; the abort reason below
+                        # ends this track after the queue drains.
+                        if decrypt_aborted["reason"] is None:
+                            decrypt_aborted["reason"] = (
+                                f"wrong key for KID {poisoned} "
+                                "(confirmed on another track) -- terminating track"
+                            )
+                            self._skip_stream_wrong_key(stream, poisoned, bar_manager, task_key)
                         continue
                     path_value = item.get("path")
                     if not path_value:
@@ -1305,10 +1455,11 @@ class DecryptPipelineMixin:
                 stream=stream,
                 event_cb=_handle_download_event,
                 default_ext=default_ext,
+                stop_check=stream_stop,
             )
 
         # curl_cffi fallback: once the primary backend (native Velora binary, or curl_cffi itself if that's already the primary) has exhausted its own max_retry attempts for a segment
-        if net_segs and not self._stop_check():
+        if net_segs and not stream_stop():
             still_failed = collect_failed_segments(dl_segs, paths, stream_dir, default_ext)
             if still_failed:
                 seg_by_number_fb = {s["number"]: s for s in dl_segs}
@@ -1354,13 +1505,13 @@ class DecryptPipelineMixin:
                     logger.info(f"curl_cffi fallback recovered {recovered}/{len(fallback_tasks)} segment(s)")
 
         # Token-refresh retry: when segments fail (e.g. the CDN manifest token expired mid-download -> HTTP 403, or a transient CDN-side 503 that clears up after a short wait).
-        if seg_url_refresh_fn and not self._stop_check():
+        if seg_url_refresh_fn and not stream_stop():
             seg_by_number = {s["number"]: s for s in dl_segs}
             failed = collect_failed_segments(dl_segs, paths, stream_dir, default_ext)
             rounds = 0
             stall_rounds = 0
 
-            while failed and rounds < MAX_TOKEN_REFRESH_ROUNDS and not self._stop_check():
+            while failed and rounds < MAX_TOKEN_REFRESH_ROUNDS and not stream_stop():
                 rounds += 1
 
                 if TOKEN_REFRESH_BACKOFF_SECONDS > 0:
@@ -1385,6 +1536,7 @@ class DecryptPipelineMixin:
                     stream=stream,
                     event_cb=_handle_download_event,
                     default_ext=default_ext,
+                    stop_check=stream_stop,
                 )
                 paths.extend(retry_paths)
                 new_failed = collect_failed_segments(dl_segs, paths, stream_dir, default_ext)
@@ -1443,7 +1595,12 @@ class DecryptPipelineMixin:
 
             _plain_label = Text.from_markup(_stream_label_rich).plain.strip() or task_key
             failed = collect_failed_segments(dl_segs, paths, stream_dir, default_ext)
-            if failed:
+            # A wrong-key abort stops downloads on purpose: the "missing"
+            # segments below are intentional, not CDN failures -- reporting
+            # them as Dio Cancaro/missing would be pure noise on top of the
+            # Terminating/decrypt-failure lines.
+            wrong_key_abort = bool(decrypt_aborted["reason"] and "wrong key" in decrypt_aborted["reason"])
+            if failed and not wrong_key_abort:
                 failed_numbers = {n for n, _ in failed}
                 aes_failed = sum(
                     1
@@ -1482,17 +1639,26 @@ class DecryptPipelineMixin:
         elif decrypt_errors:
             # Per-segment decrypt failures (already retried once with a fresh
             # download inside _decrypt_dash_segment/_decrypt_hls_segment/etc.,
-            # and the affected segments dropped) -- a warning and a small A/V
-            # gap, not a reason to fail this entire track.
-            logger.warning(
-                f"{len(decrypt_errors)} segment decrypt error(s) on this track (first: {decrypt_errors[0]}) -- "
-                "continuing with the segments that did decrypt"
-            )
+            # and the affected segments dropped) -- fine as a warning and a
+            # small A/V gap, but past _DECRYPT_ERROR_RATIO_LIMIT the track is
+            # mostly garbage (e.g. a CDN edge serving broken bytes for nearly
+            # every segment) and merging it just produces an unplayable file
+            # silently reported as a success.
+            error_ratio = (len(decrypt_errors) / total) if total else 1.0
+            if error_ratio > _DECRYPT_ERROR_RATIO_LIMIT:
+                raise RuntimeError(f"too many segment decrypt failures ({len(decrypt_errors)}/{total}, {error_ratio:.0%}) -- first: {decrypt_errors[0]}")
+            
+            logger.warning(f"{len(decrypt_errors)} segment decrypt error(s) on this track (first: {decrypt_errors[0]}) -- continuing with the segments that did decrypt")
 
         if needs_ism_live and ism_init_paths[0] is not None:
             _protected_init_path, _clean_init_path = ism_init_paths[0]
             if _clean_init_path.exists():
                 paths.append(_clean_init_path)
+
+        poisoned = self._kids_poisoned(self._stream_kids(stream))
+        if poisoned:
+            self._skip_stream_wrong_key(stream, poisoned, bar_manager, task_key)
+            return
 
         if self._stop_check() or not paths:
             return
@@ -1578,8 +1744,8 @@ class DecryptPipelineMixin:
             _detect_reason = f"ext={_ext_says_vtt}, content={_content_says_vtt}"
 
         logger.info(f"[merge_detect] {out_path.name}: is_webvtt_sub={_is_webvtt_sub} ({_detect_reason}), {len(paths)} segment(s)")
-
-        stream_is_encrypted = stream.drm.method is not None
+        _drm = getattr(stream, "drm", None)
+        stream_is_encrypted = (_drm is not None) and (_drm.method is not None or (protocol_lower != "hls" and _drm.is_encrypted()))
         already_decrypted_per_segment = False
 
         # Some HLS BYTERANGE packagings make every media segment a
