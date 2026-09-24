@@ -23,7 +23,7 @@ class DRMProbe:
                 logger.debug(f"DRMProbe: no encryption markers found in first {len(raw)} bytes.")
                 return False, None, False, None, None
 
-            self._report(info.scheme, info.kid, info.is_widevine)
+            self._report(info.scheme, info.kid, info.is_widevine, info)
             return True, info.scheme, info.is_widevine, info.kid, info.pssh_b64
 
         except Exception as exc:
@@ -46,7 +46,7 @@ class DRMProbe:
                 logger.debug(f"DRMProbe: no encryption markers found in first {len(raw)} bytes.")
                 return False, None, False, None, None
 
-            self._report(info.scheme, info.kid, info.is_widevine)
+            self._report(info.scheme, info.kid, info.is_widevine, info)
             return True, info.scheme, info.is_widevine, info.kid, info.pssh_b64
 
         except Exception as exc:
@@ -65,7 +65,7 @@ class DRMProbe:
             if not info.encrypted:
                 logger.debug(f"DRMProbe: no encryption markers found in first {len(raw)} bytes.")
             else:
-                self._report(info.scheme, info.kid, info.is_widevine)
+                self._report(info.scheme, info.kid, info.is_widevine, info)
 
             return info.encrypted, info.scheme, info.is_widevine, info.kid, info.pssh_b64, media
 
@@ -92,7 +92,12 @@ class DRMProbe:
             return detect_encryption_info(tmp_path)
 
     @staticmethod
-    def _report(scheme: str | None, kid: str | None, is_widevine: bool) -> None:
+    def _report(scheme: str | None, kid: str | None, is_widevine: bool, info=None) -> None:
         """Log a summary of the detected encryption info."""
         label = "Widevine" if is_widevine else (scheme or "unknown DRM")
         logger.info(f"DRMProbe: encryption detected — scheme={scheme or 'unknown'}, kid={kid or 'n/a'}, DRM=[{label}]")
+        if info is not None and getattr(info, "has_fragment_signal", False):
+            if info.fully_encrypted:
+                logger.info(f"DRMProbe: fully-encrypted chunk — {info.encrypted_fragments} encrypted fragment(s), 0 clear (senc-driven, scheme-agnostic).")
+            elif info.clear_fragments:
+                logger.info(f"DRMProbe: clear-lead suspected — {info.clear_fragments} clear fragment(s) vs {info.encrypted_fragments} encrypted; key-sanity must run on a senc-carrying fragment.")

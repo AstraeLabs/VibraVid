@@ -105,7 +105,7 @@ def build_table(
 
             is_sel = s.selected if not interactive else (orig_idx in (selected or set()))
             res = s.resolution if s.type == "video" else ""
-            hdr = s.get_hdr_display() if s.type == "video" else ""
+            hdr = (s.get_hdr_display() if s.type == "video" else "") or s.name
             bitrate = s.bitrate_display if s.bitrate else ""
             codec = s.get_short_codec()
             channels = get_channel_label(s.channels) if s.channels else ""

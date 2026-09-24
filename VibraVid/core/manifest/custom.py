@@ -165,6 +165,7 @@ class CustomParser:
         s.name = str(track.get("name") or "")
         s.label = str(track.get("label") or "")
         s.format = str(track.get("format") or "")
+        s.no_range_split = bool(track.get("no_range_split"))
 
         if stype == "video":
             s.width = int(track.get("width") or 0)
@@ -219,7 +220,13 @@ class CustomParser:
             s.add_segment(seg)
 
         s.compute_estimated_size()
-        logger.info(f"CustomParser: track {s.id} [{stype}] {s.resolution or s.language} — {len(media)} segment(s), init={'yes' if init_seg else 'no'}")
+        profile_suffix = f" [{s.name}]" if s.name else ""
+        try:
+            track_kids = s.drm.get_all_kids() if getattr(s, "drm", None) else []
+        except Exception:
+            track_kids = []
+        kid_suffix = f" kid={track_kids[0]}" if track_kids else ""
+        logger.info(f"CustomParser: track {s.id} [{stype}] {s.resolution or s.language}{profile_suffix}{kid_suffix} — {len(media)} segment(s), init={'yes' if init_seg else 'no'}")
         return s
 
     def _abs(self, ref: str) -> str:

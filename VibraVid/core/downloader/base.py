@@ -440,12 +440,29 @@ class BaseDownloader:
     def _decrypt_failure_message(self) -> str | None:
         """"Decryption failed - track(s) still encrypted: ..." from  media_downloader.decrypt_failures, or None if every track decrypted OK."""
         md = getattr(self, "media_downloader", None)
-        failures = [f for f in (getattr(md, "decrypt_failures", []) or []) if not f.get("skipped")]
+        failures = [
+            f for f in (getattr(md, "decrypt_failures", []) or [])
+            if not f.get("skipped") or f.get("stream_type") == "video"
+        ]
+
         if not failures:
             return None
 
         labels = ", ".join(dict.fromkeys(f.get("label") or f.get("track") or "?" for f in failures))
-        return f"Decryption failed - track(s) still encrypted: {labels}"
+        kids = []
+
+        for f in failures:
+            kid = f.get("kid")
+            if kid and kid not in kids:
+                kids.append(kid)
+            else:
+                # Back-compat: older entries carry the KID inside the message.
+                m = re.search(r"KID:?\s*([0-9a-fA-F]{32})", f.get("message") or "")
+                if m and m.group(1) not in kids:
+                    kids.append(m.group(1))
+        
+        suffix = f" ({', '.join(kids)})" if kids else ""
+        return f"Decryption failed - track(s) still encrypted: {labels}{suffix}"
 
     def _merge_files(self, status: dict) -> str | None:
         """
@@ -455,7 +472,6 @@ class BaseDownloader:
         err = self._decrypt_failure_message()
         if err:
             logger.warning(f"{err} — skipping mux, the merged file would be rejected anyway")
-            console.print(f"[yellow]{err} — skipping mux.")
             self.error = err
             return None
 
@@ -541,6 +557,28 @@ class BaseDownloader:
                 subtitle_tracks.append(track)
 
         if video_track is None:
+            media_downloader = getattr(self, "media_downloader", None)
+            video_was_selected = any(
+                getattr(s, "type", None) == "video" and getattr(s, "selected", False)
+                for s in getattr(media_downloader, "streams", None) or []
+            )
+            
+            if video_was_selected:
+                self.error = self.error or "Video track failed to download"
+                logger.error(f"{self.error} -- not falling back to audio-only")
+                return None
+
+            if audio_tracks:
+                valid_audio_tracks = [
+                    t
+                    for t in audio_tracks
+                    if self._merge_output_ok(t.get("path")) and get_media_metadata(t["path"]).get("audio_tracks")
+                ]
+                dropped = len(audio_tracks) - len(valid_audio_tracks)
+                if dropped:
+                    logger.error(f"Audio-only fallback: dropped {dropped} corrupted audio track(s) that failed ffprobe validation")
+                audio_tracks = valid_audio_tracks
+
             if audio_tracks or subtitle_tracks:
                 self.audio_only = True
                 if audio_tracks:
@@ -747,7 +785,10 @@ class BaseDownloader:
                 return True
 
             md = getattr(self, "media_downloader", None)
-            failures = [f for f in (getattr(md, "decrypt_failures", []) or []) if not f.get("skipped")]
+            failures = [
+                f for f in (getattr(md, "decrypt_failures", []) or [])
+                if not f.get("skipped") or f.get("stream_type") == "video"
+            ]
             detail = failures[0].get("message", "") if failures else ""
             logger.error(f"Decryption verification FAILED for {os.path.basename(self.output_path or '')}: {err} ({detail})")
 

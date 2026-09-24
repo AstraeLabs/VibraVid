@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.codec import AUDIO_EXTENSIONS, SUBTITLE_EXTENSIONS
 from VibraVid.core.utils.language import extract_lang_and_flags, language_variants, resolve_locale, subtitle_flags
 from VibraVid.core.velora.bridge import run_download_plan
@@ -264,6 +265,7 @@ async def _process_external_track(
                 "timeout_seconds": config_manager.config.get_int("REQUESTS", "timeout"),
                 "proxy_url": get_proxy_url(),
                 "verify_tls": config_manager.config.get_bool("REQUESTS", "verify"),
+                "http_version": getattr(context_tracker, "http_version", None) or "1.1",
                 "headers": headers,
                 "tasks": [
                     {

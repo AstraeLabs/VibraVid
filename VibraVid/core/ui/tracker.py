@@ -558,6 +558,14 @@ class ContextTracker:
         self.local.bypass_vault_cache = value
 
     @property
+    def http_version(self):
+        return getattr(self.local, "http_version", None)
+
+    @http_version.setter
+    def http_version(self, value):
+        self.local.http_version = value
+
+    @property
     def skip_decrypt(self) -> bool:
         return bool(getattr(self.local, "skip_decrypt", False))
 

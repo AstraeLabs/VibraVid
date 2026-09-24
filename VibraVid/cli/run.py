@@ -183,6 +183,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument( "--proxy-scope", dest="proxy_scope", type=str, choices=["scrap", "down", "scrap+down"], metavar="scrap|down|scrap+down", help="Where to apply the proxy: scraping only, downloads only, or both")
     dl_opts.add_argument("--close-console", dest="close_console", type=str, choices=["true", "false"],metavar="true|false", help="Exit after last download (overrides config)")
     dl_opts.add_argument("--no-vault-cache", dest="bypass_vault_cache", action="store_const", const=True, default=None, help="Bypass DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)")
+    dl_opts.add_argument("--http-version", dest="http_version", choices=["1.1", "2", "3"], default=None, help="HTTP version Velora uses for segment downloads (default: 1.1 — safest for ~99%% of CDNs). Use 2 for CDNs with aggressive anti-bot fingerprinting that block HTTP/1.1-only ALPN (e.g. phncdn/Pornhub)")
     dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
     dl_opts.add_argument("--no-livemux", dest="no_livemux", action="store_true", help="Disable the streaming-mux fast path for this run and always fall back to the normal post-download join_media() pass. Fast path is on by default")
     dl_opts.add_argument("--livemux", dest="force_livemux", action="store_true", help="Force-enable the streaming-mux fast path for this run even if the current service does not opt in via _live_mux = True. Off by default")
@@ -325,7 +326,7 @@ def _apply_interactive_site_options(selected_module_name, site_module_name):
 def build_site_options(args, parser, site_option_dests, site_module_name):
     """Merge this run's site-specific CLI values with the site's persisted `extra_args` (login.json)"""
     persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
-    site_options = {"drm": getattr(args, "drm", None)}
+    site_options = {"drm": getattr(args, "drm", None), "key": getattr(args, "key", None)}
     for dest in site_option_dests:
         cli_val = getattr(args, dest, None)
         if cli_val != parser.get_default(dest):
@@ -626,6 +627,7 @@ def main():
         # Propagate CLI download limits to the service flow
         apply_limits(args)
         context_tracker.bypass_vault_cache = getattr(args, "bypass_vault_cache", None)
+        context_tracker.http_version = getattr(args, "http_version", None)
         context_tracker.skip_decrypt = bool(getattr(args, "skip_decrypt", False))
         context_tracker.no_livemux = bool(getattr(args, "no_livemux", False))
         context_tracker.force_livemux = bool(getattr(args, "force_livemux", False))

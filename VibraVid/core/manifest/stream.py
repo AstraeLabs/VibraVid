@@ -404,6 +404,7 @@ class Stream:
     supports_live_decryption: bool = True  # Default True, parsers will set False when needed
     is_live: bool = False
     is_wvtt_mp4: bool = False
+    no_range_split: bool = False
 
     # ── Size estimation ───────────────────────────────────────────────────────
     # Populated by compute_estimated_size(); do not set manually.

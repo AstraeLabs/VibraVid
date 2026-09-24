@@ -551,7 +551,7 @@ class DRMManager:
                 results[name] = added
             except Exception as e:
                 logger.error(f"[add_keys] Failed to store to {name}: {e}")
-                console.print(f"[red]✗ {name}: {e}")
+                console.print(f"[red]x {name}: {e}")
                 results[name] = 0
 
         return results

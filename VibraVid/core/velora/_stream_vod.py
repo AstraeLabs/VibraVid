@@ -1,20 +1,24 @@
 # 01.04.25
 
 import logging
+import os
 import struct
+import threading
+import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from VibraVid.core.decryptor import Decryptor, KeysManager
 from VibraVid.core.manifest.stream import format_duration
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
+from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_with_retry
 from VibraVid.utils.os import os_manager
 
-from .util._dash import build_dash_ranged_segments
+from .util._dash import build_dash_ranged_segments, build_dash_sidx_segments
 from .util._hls import hls_base_url, parse_hls_variant_playlist
-from .util._stream_helpers import is_valid_frag_init, repair_init_segment, safe_name
+from .util._stream_helpers import detect_seg_ext, is_valid_frag_init, repair_init_segment, safe_name
 from .util.formatting import format_size
 
 logger = logging.getLogger("manual")
@@ -213,7 +217,7 @@ class VodStreamMixin:
             return True
         return any(k == kid.lower() for k, _ in norm_keys)
 
-    def _skip_stream_no_key(self, stream, required: str) -> None:
+    def _skip_stream_no_key(self, stream, required: str, bar_manager=None, task_key: str | None = None) -> None:
         """Log and report a track skipped pre-download for lack of a matching key. Never downloaded, so it's simply absent from the merge -- not a decrypt failure, doesn't block muxing the rest."""
         label = self._decrypt_track_label(stream)
         logger.error(f"Skipping {label}: no provided key matches required KID(s) {required}")
@@ -222,10 +226,248 @@ class VodStreamMixin:
             self.decrypt_failures.append(
                 {"label": label, "track": label, "message": f"no key for required KID(s): {required}", "skipped": True}
             )
-        
-        # Unblock anything waiting on this track (e.g. the streaming-mux fast path), which
-        # would otherwise sit idle for the full size-estimated timeout before giving up.
+        self._finish_bar_task(bar_manager, task_key or self._stream_task_key(stream), "Skipped")
         self._record_track_done(self._stream_task_key(stream), None)
+
+    def _skip_stream_wrong_key(self, stream, kid: str, bar_manager=None, task_key: str | None = None) -> None:
+        """Log and report a track skipped mid-download because a key-sanity check proved the stored key was wrong for the KID. The download is terminated, the track is skipped, and the KID is poisoned so any other segment of any track sharing that KID will also be skipped."""
+        label = self._decrypt_track_label(stream)
+        logger.error(f"Terminating {label}: stored key proven wrong for KID {kid} -- skipping undecryptable track")
+        with self._decrypt_failures_lock:
+            self.decrypt_failures.append(
+                {
+                    "label": label,
+                    "track": label,
+                    "message": f"wrong key for KID: {kid}",
+                    "kid": kid,
+                    "skipped": True,
+                    "stream_type": getattr(stream, "type", ""),
+                }
+            )
+
+        self._finish_bar_task(bar_manager, task_key or self._stream_task_key(stream), "Failed")
+        self._record_track_done(self._stream_task_key(stream), None)
+
+    # Live trial: wait until the growing single-file segment passes
+    _SIDX_CHUNK_BYTES = 16 * 1024 * 1024
+    _TRIAL_FIRST_FLOOR = 64 * 1024 * 1024
+    _TRIAL_STEP = 8 * 1024 * 1024
+    _TRIAL_HEAD_CAP = 128 * 1024 * 1024
+    _TRIAL_POLL_SECONDS = 1.0
+    _TRIAL_STALL_POLLS = 30
+
+    def _spawn_live_key_trial(self, url: str, stream, seg_number: int, seg_url: str) -> None:
+        """Spawn a background thread to fetch the growing single-file segment, check for sample-encryption, and run key-sanity on the first senc-carrying fragment. If the stored key is wrong, poison the KID so all tracks sharing it terminate mid-download."""
+        label = self._decrypt_track_label(stream)
+        try:
+            kids = self._stream_kids(stream)
+        except Exception:
+            return
+        if self._kids_poisoned(kids) is not None:
+            return
+
+        try:
+            estimated = int(getattr(stream, "estimated_size", 0) or 0)
+        except Exception:
+            estimated = 0
+        threshold = max(self._TRIAL_FIRST_FLOOR, int(estimated * 0.10)) if estimated > 0 else self._TRIAL_FIRST_FLOOR
+
+        seg_ext = detect_seg_ext(seg_url, default="mp4")
+        if seg_ext == "m4s":
+            seg_ext = "mp4"
+        logger.info(f"live key-trial armed for {label} (head check once main file passes {threshold // (1024 * 1024)}MB)")
+
+        def _run() -> None:
+            try:
+                norm_keys = KeysManager.normalize(self.key)
+            except Exception:
+                return
+            if not norm_keys:
+                return
+            
+            keys_arg = [f"{str(k).lower()}:{str(v).lower()}" for k, v in norm_keys]
+            try:
+                ffmpeg_path = get_ffmpeg_path()
+                if not (ffmpeg_path and os.path.exists(ffmpeg_path)):
+                    ffmpeg_path = None
+            except Exception:
+                ffmpeg_path = None
+
+            try:
+                stream_dir = self._make_stream_dir(stream, "dash")
+            except Exception:
+                return
+            seg_path = stream_dir / f"seg_{seg_number:05d}.{seg_ext}"
+            head_path = stream_dir / "_key_trial_head.mp4"
+            in_path = stream_dir / "_key_trial_in.mp4"
+            out_path = stream_dir / "_key_trial_out.mp4"
+
+            def _cleanup() -> None:
+                for p in (head_path, in_path, out_path):
+                    try:
+                        if p.exists():
+                            p.unlink()
+                    except OSError:
+                        pass
+
+            decryptor = Decryptor()
+            try:
+                # Phase 1: wait for the threshold (stat only: safe even if the
+                # backend locks the file or preallocates it sparse).
+                stalled = 0
+                last_size = 0
+                while True:
+                    if self._stop_check():
+                        return
+                    if self._kids_poisoned(kids) is not None:
+                        return  # someone else already proved it
+                    
+                    # velora writes to "<final>.part" and renames at the end.
+                    size = 0
+                    for p in (seg_path.with_name(seg_path.name + ".part"), seg_path):
+                        try:
+                            size = max(size, p.stat().st_size)
+                        except OSError:
+                            pass
+                        
+                    if size == last_size:
+                        stalled += 1
+                        if stalled >= self._TRIAL_STALL_POLLS:
+                            logger.info(f"live key-trial stood down for {label}: main file stopped growing")
+                            return
+                    else:
+                        stalled = 0
+                        last_size = size
+                    if size >= threshold:
+                        break
+                    time.sleep(self._TRIAL_POLL_SECONDS)
+
+                logger.info(f"live key-trial fetching head for {label} (main at {size // (1024 * 1024)}MB)")
+                t_start = time.monotonic()
+                timings: list[str] = []
+
+                def _mark(name: str, t0: float) -> float:
+                    now = time.monotonic()
+                    timings.append(f"{name}={(now - t0) * 1000:.0f}ms")
+                    return now
+
+                # Phase 2a: local snapshot of the bytes velora already wrote
+                # ("<final>.part" while downloading, final name once done).
+                cut: int | None = None
+                head_len = 0
+                t = t_start
+                src_path = seg_path.with_name(seg_path.name + ".part")
+                if not src_path.exists():
+                    src_path = seg_path
+                try:
+                    want = min(src_path.stat().st_size, self._TRIAL_HEAD_CAP)
+                    with open(src_path, "rb") as src, open(head_path, "wb") as dst:
+                        while head_len < want:
+                            buf = src.read(min(self._TRIAL_STEP, want - head_len))
+                            if not buf:
+                                break
+                            dst.write(buf)
+                            head_len += len(buf)
+                except OSError as exc:
+                    logger.debug(f"live key-trial local snapshot failed for {label}: {exc}")
+                    _cleanup()
+                    head_len = 0
+                t = _mark(f"local_copy[{head_len // (1024 * 1024)}MB]", t)
+                if head_len:
+                    scanned = decryptor.scan_fragments(str(head_path))
+                    t = _mark("local_scan", t)
+                    if scanned is None:
+                        logger.info(f"live key-trial inconclusive for {label}: flux scan unavailable")
+                        return
+                    tracks, cut = scanned
+                    if not (any(int(t_.get("encrypted_fragments") or 0) > 0 for t_ in tracks) and cut):
+                        cut = None
+
+                # Phase 2b (fallback): independent head fetch + daemon scan per step.
+                range_steps = 0
+                with create_client(headers={"User-Agent": "VibraVid-trial"}, timeout=REQUEST_TIMEOUT, follow_redirects=True) as c:
+                    while cut is None and head_len < self._TRIAL_HEAD_CAP:
+                        range_steps += 1
+                        if self._stop_check():
+                            return
+                        if self._kids_poisoned(kids) is not None:
+                            return
+                        try:
+                            r = c.get(url, headers={"Range": f"bytes={head_len}-{head_len + self._TRIAL_STEP - 1}"})
+                        except Exception as exc:
+                            logger.debug(f"live key-trial prefetch failed for {label}: {exc}")
+                            return
+                        if r.status_code != 206 or not r.content:
+                            logger.info(f"live key-trial inconclusive for {label}: no Range support (status={r.status_code})")
+                            return
+                        try:
+                            with open(head_path, "ab") as fh:
+                                fh.write(r.content)
+                            head_len += len(r.content)
+                        except OSError:
+                            return
+                        scanned = decryptor.scan_fragments(str(head_path))
+                        if scanned is None:
+                            logger.info(f"live key-trial inconclusive for {label}: flux scan unavailable")
+                            return
+                        tracks, cut = scanned
+                        if any(int(t.get("encrypted_fragments") or 0) > 0 for t in tracks) and cut:
+                            break
+                        cut = None
+                if range_steps:
+                    t = _mark(f"range_fetch+scan[{range_steps} steps]", t)
+
+                if not cut:
+                    logger.info(f"live key-trial inconclusive for {label}: no senc in first {head_len // (1024 * 1024)}MB")
+                    return
+
+                try:
+                    with open(head_path, "rb") as src:
+                        in_path.write_bytes(src.read(cut))
+                except OSError:
+                    return
+                t = _mark(f"prefix_cut[{cut // 1024}KB]", t)
+
+                daemon = decryptor._get_flux_daemon()
+                if daemon is None:
+                    logger.info(f"live key-trial inconclusive for {label}: no daemon")
+                    return
+                ok, err = daemon.decrypt(
+                    str(in_path), str(out_path), keys_arg, None,
+                    key_sanity=True, ffmpeg_path=ffmpeg_path,
+                )
+                t = _mark("decrypt+sanity", t)
+                logger.info(f"live key-trial timing for {label}: {' '.join(timings)} total={(t - t_start) * 1000:.0f}ms")
+                if ok and out_path.exists() and out_path.stat().st_size > 0:
+                    logger.info(f"live key-trial passed for {label} (prefix {cut // 1024}KB) -- download continues")
+                    return
+
+                if err and "key is wrong" in err:
+                    logger.error(f"live key-trial: stored key is wrong for {label} -- terminating mid-download")
+                    console.print(f"[red]Terminating {label} (live key-trial):[/red] wrong key, stopping download")
+                    self._register_wrong_key(kids)
+                    return
+
+                logger.info(f"live key-trial inconclusive for {label} ({err or 'no verdict'}) -- download continues")
+            finally:
+                try:
+                    decryptor.close_flux_daemon()
+                except Exception:
+                    pass
+                _cleanup()
+
+        t = threading.Thread(target=_run, daemon=True, name=f"key-trial-{getattr(stream, 'id', '?')}")
+        t.start()
+
+    @staticmethod
+    def _finish_bar_task(bar_manager, task_key: str, status: str) -> None:
+        """Mark a track's progress-bar row terminal so it never freezes at 0B."""
+        if bar_manager is None or not task_key:
+            return
+        try:
+            bar_manager.handle_progress_line({"task_key": task_key, "pct": 100, "speed": status})
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Dispatch per stream type
@@ -233,7 +475,12 @@ class VodStreamMixin:
     def _download_stream(self, stream, bar_manager: DownloadBarManager) -> None:
         if not self._has_matching_key(stream):
             required = ", ".join(stream.drm.get_all_kids()) if stream.drm else "unknown"
-            self._skip_stream_no_key(stream, required)
+            self._skip_stream_no_key(stream, required, bar_manager)
+            return
+
+        poisoned = self._kids_poisoned(self._stream_kids(stream))
+        if poisoned:
+            self._skip_stream_wrong_key(stream, poisoned, bar_manager)
             return
 
         effective_live = self._session_live_decrypt
@@ -247,8 +494,7 @@ class VodStreamMixin:
 
                 try:
                     with create_client(headers=all_headers, timeout=REQUEST_TIMEOUT, follow_redirects=True) as c:
-                        resp = c.get(playlist_url)
-                        resp.raise_for_status()
+                        resp = get_with_retry(c, playlist_url)
                         first_content = resp.text
 
                     base_url = hls_base_url(playlist_url)
@@ -332,7 +578,7 @@ class VodStreamMixin:
         if self._needs_kid_probe(stream):
             _, probed_kid = _frag_init_probe(dl_segs, all_headers)
             if probed_kid and not self._key_matches_kid(probed_kid):
-                self._skip_stream_no_key(stream, probed_kid)
+                self._skip_stream_no_key(stream, probed_kid, bar_manager)
                 return
 
         seg_start, seg_end = self.max_segments if isinstance(self.max_segments, tuple) else (0, self.max_segments)
@@ -445,6 +691,7 @@ class VodStreamMixin:
         media_segments = [s for s in stream.segments if s.seg_type == "media"]
         unique_media_urls = {s.url for s in media_segments}
         is_single_file = len(unique_media_urls) == 1 and not any(s.byte_range for s in media_segments)
+        sidx_split = is_single_file and getattr(stream, "no_range_split", False)
 
         dl_segs: list[dict] = []
         next_num = 0
@@ -468,7 +715,10 @@ class VodStreamMixin:
                     continue
 
                 single_file_emitted = True
-                ranged = build_dash_ranged_segments(seg.url, all_headers, chunk_size, REQUEST_TIMEOUT)
+                if sidx_split:
+                    ranged, _total_size = build_dash_sidx_segments(seg.url, all_headers, self._SIDX_CHUNK_BYTES, REQUEST_TIMEOUT)
+                else:
+                    ranged, _total_size = build_dash_ranged_segments(seg.url, all_headers, chunk_size, REQUEST_TIMEOUT)
 
                 if ranged:
                     for part in ranged:
@@ -537,8 +787,16 @@ class VodStreamMixin:
             _, probed_kid = _frag_init_probe(dl_segs, all_headers)
 
         if probed_kid and not self._key_matches_kid(probed_kid):
-            self._skip_stream_no_key(stream, probed_kid)
+            self._skip_stream_no_key(stream, probed_kid, bar_manager)
             return
+
+        # If the stream is a single-file DASH and live decryption is enabled, spawn a background thread to fetch the growing segment and check for sample-encryption. If the stored key is wrong, poison the KID so all tracks sharing it terminate mid-download.
+        media_dl = [s for s in dl_segs if s.get("seg_type") != "init"]
+        whole_file = len(media_dl) == 1 and not (media_dl[0].get("headers") or {}).get("Range")
+        if whole_file and effective_live and self.key:
+            drm = getattr(stream, "drm", None)
+            if drm is not None and drm.is_encrypted():
+                self._spawn_live_key_trial(media_dl[0]["url"], stream, media_dl[0]["number"], media_dl[0]["url"])
 
         self._download_stream_generic(
             dl_segs,
@@ -590,7 +848,7 @@ class VodStreamMixin:
                     continue
 
                 single_file_emitted = True
-                ranged = build_dash_ranged_segments(seg.url, all_headers, chunk_size, REQUEST_TIMEOUT)
+                ranged, _total_size = build_dash_ranged_segments(seg.url, all_headers, chunk_size, REQUEST_TIMEOUT)
 
                 if ranged:
                     for part in ranged:
@@ -654,7 +912,7 @@ class VodStreamMixin:
             _, probed_kid = _frag_init_probe(dl_segs, all_headers)
 
         if probed_kid and not self._key_matches_kid(probed_kid):
-            self._skip_stream_no_key(stream, probed_kid)
+            self._skip_stream_no_key(stream, probed_kid, bar_manager)
             return
 
         self._download_stream_generic(

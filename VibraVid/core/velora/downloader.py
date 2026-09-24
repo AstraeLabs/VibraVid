@@ -93,6 +93,10 @@ class MediaDownloader(
         self.decrypt_failures: list = []
         self._decrypt_failures_lock = threading.Lock()
 
+        # KIDs whose stored key was PROVEN wrong by a key-sanity check
+        self._wrong_key_kids: set[str] = set()
+        self._wrong_key_kids_lock = threading.Lock()
+
         # Per-stream "this track is fully written to its final output_dir path" signal, set by _download_stream_generic() just before it returns.
         self._track_done_events: dict[str, threading.Event] = {}
         self._track_results: dict[str, Path | None] = {}
@@ -132,6 +136,43 @@ class MediaDownloader(
         with self._track_done_lock:
             return self._track_results.get(task_key)
 
+    @staticmethod
+    def _stream_kids(stream) -> set[str]:
+        """Lowercased KIDs advertised by *stream*'s manifest DRM (empty when unknown)."""
+        drm = getattr(stream, "drm", None)
+        if drm is None:
+            return set()
+        try:
+            kids = drm.get_all_kids() or []
+        except Exception:
+            return set()
+        return {str(k).lower() for k in kids if k}
+
+    def _register_wrong_key(self, kids) -> None:
+        """Poison *kids*: every track sharing one terminates instead of downloading undecryptable bytes."""
+        kids = {str(k).lower() for k in (kids or []) if k}
+        if not kids:
+            return
+        with self._wrong_key_kids_lock:
+            new = kids - self._wrong_key_kids
+            self._wrong_key_kids |= kids
+        if new:
+            logger.error(
+                f"Wrong key confirmed for KID(s) {sorted(new)} -- terminating download/decrypt "
+                "for all tracks sharing them"
+            )
+
+    def _kids_poisoned(self, kids) -> str | None:
+        """Return the first of *kids* already proven wrong-key, or None."""
+        if not kids:
+            return None
+        with self._wrong_key_kids_lock:
+            for k in kids:
+                kl = str(k).lower()
+                if kl in self._wrong_key_kids:
+                    return kl
+        return None
+
     def start_download(self, show_progress: bool = True) -> dict[str, Any]:
         if self.download_id:
             download_tracker.update_status(self.download_id, "Downloading ...")
@@ -168,9 +209,11 @@ class MediaDownloader(
 
                 ext_loop = asyncio.new_event_loop()
                 self._register_loop(ext_loop)
+                _parent_http_version = context_tracker.http_version
 
                 def _run_externals() -> None:
                     asyncio.set_event_loop(ext_loop)
+                    context_tracker.http_version = _parent_http_version
                     try:
                         subs, auds = ext_loop.run_until_complete(
                             download_external_tracks_with_progress(
@@ -209,6 +252,7 @@ class MediaDownloader(
                     context_tracker.force_livemux = _parent_force_livemux
                     context_tracker.no_concurrent = _parent_no_concurrent
                     context_tracker.log_engine_output = _parent_log_engine_output
+                    context_tracker.http_version = _parent_http_version
                     try:
                         self._download_stream(s, bar_manager)
                     except Exception as exc:
@@ -301,10 +345,13 @@ class MediaDownloader(
         # A stop (Ctrl+C or a tracker-level request, e.g. a live source going
         # offline) can still have produced a fully merged file by the time we
         # get here — only treat it as a cancellation if nothing was produced.
+        # Guard on decrypt_failures too so a real decrypt failure never gets
+        # swallowed as a plain "cancelled" and skips the "Decryption failed"
+        # reporting in _decrypt_failure_message().
         was_stopped = self._stop_event.is_set() or bool(
             self.download_id and download_tracker.is_stopped(self.download_id)
         )
-        if was_stopped and not self.status.get("video") and not self.status.get("audios"):
+        if was_stopped and not self.decrypt_failures and not self.status.get("video") and not self.status.get("audios"):
             return {"error": "cancelled"}
 
         return self.status
@@ -340,6 +387,7 @@ class MediaDownloader(
         stream=None,
         event_cb=None,
         default_ext: str = "ts",
+        stop_check=None,
     ) -> list[Path]:
         try:
             plan_task_key = self._stream_task_key(stream) if stream else "download"
@@ -379,6 +427,7 @@ class MediaDownloader(
                     }
                 )
 
+            http_version = getattr(context_tracker, "http_version", None) or "1.1"
             plan = {
                 "project": "Velora",
                 "version": 1,
@@ -395,12 +444,14 @@ class MediaDownloader(
                 "segment_delay_jitter_seconds": SEGMENT_DELAY_JITTER_SECONDS,
                 "proxy_url": get_proxy_url(),
                 "verify_tls": VERIFY_TLS,
+                "http_version": http_version,
                 "headers": headers,
                 "tasks": tasks,
             }
+            known_total = int(getattr(stream, "estimated_size", 0) or 0) if stream else 0
             use_curl_cffi = config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
             backend = run_download_plan_curl_cffi if use_curl_cffi else run_download_plan
-            results = backend(plan, progress_cb=progress_cb, event_cb=event_cb, stop_check=self._stop_check)
+            results = backend(plan, progress_cb=progress_cb, event_cb=event_cb, stop_check=stop_check or self._stop_check, known_total=known_total)
             return [Path(item["path"]) for item in results if item.get("path")]
 
         except Exception as exc:
