@@ -405,16 +405,25 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
 
 def get_user_site_selection(args, choice_labels):
     """Get site selection from user (interactive or category-based)."""
-    legend_text = " | ".join([f"[{color}]{cat.capitalize()}[/{color}]" for cat, color in COLOR_MAP.items()])
-    console.print(f"\n[cyan]Category: {legend_text}")
+    counts: dict[str, int] = {}
+    for _key, (_name, cat) in choice_labels.items():
+        counts[cat] = counts.get(cat, 0) + 1
+        
+    legend_text = "  ".join(
+        [f"[{color}]{cat.capitalize()}({counts.get(cat, 0)})[/{color}]" for cat, color in COLOR_MAP.items()]
+    )
+    console.print(f"\n  [cyan]Category: {legend_text}")
+    console.print()
 
     choice_keys = list(choice_labels.keys()) + ["global"]
+    name_width = max([len(label[0]) for label in choice_labels.values()] + [len("(global) Global")])
+    cell_width = name_width + 4  # "12:" + space + name
     site_entries = [
-        f"{key}: [{COLOR_MAP.get(label[1], 'white')}]{label[0]}[/{COLOR_MAP.get(label[1], 'white')}]"
+        f"[dim]{key:>2}:[/dim] [{COLOR_MAP.get(label[1], 'white')}]{label[0]:<{name_width}}[/{COLOR_MAP.get(label[1], 'white')}]"
         for key, label in choice_labels.items()
-    ] + ["[magenta](global) Global[/magenta]"]
+    ] + [f"[magenta]{'(global) Global':<{cell_width}}[/magenta]"]
 
-    site_rows = [" | ".join(site_entries[i : i + 6]) for i in range(0, len(site_entries), 6)]
+    site_rows = [" ".join(site_entries[i : i + 6]) for i in range(0, len(site_entries), 6)]
     for row in site_rows:
         console.print(row)
 

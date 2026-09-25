@@ -40,3 +40,4 @@ nav:
   - NAS Deployment: nas.md
   - Login: login.md
   - Adding a Service: add-service.md
+  - Adding a Vault: vault.md

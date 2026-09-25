@@ -17,7 +17,7 @@ from VibraVid.utils import TVShowManager
 from .album import AmazonAlbumScraper
 from .downloader import download_song, download_track_from_album
 
-indice = 18
+indice = 17
 _useFor = "Song"
 console = Console()
 msg = Prompt()

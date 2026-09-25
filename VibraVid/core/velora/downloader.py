@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.velora.bridge import run_download_plan
@@ -15,6 +16,7 @@ from VibraVid.core.velora.subtitle import download_external_tracks_with_progress
 from VibraVid.setup import get_flux_path
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_proxy_url
+from VibraVid.utils.vault import all_vaults
 
 from ._decrypt_pipeline import DecryptPipelineMixin
 from ._ism_postproc import IsmPostprocMixin
@@ -148,19 +150,40 @@ class MediaDownloader(
             return set()
         return {str(k).lower() for k in kids if k}
 
-    def _register_wrong_key(self, kids) -> None:
-        """Poison *kids*: every track sharing one terminates instead of downloading undecryptable bytes."""
+    def _register_wrong_key(self, kids, license_url: str | None = None, pssh: str | None = None) -> None:
+        """Mark the given KID(s) as having been proven wrong-key, and notify all connected vaults."""
         kids = {str(k).lower() for k in (kids or []) if k}
         if not kids:
             return
+        
         with self._wrong_key_kids_lock:
             new = kids - self._wrong_key_kids
             self._wrong_key_kids |= kids
+        
         if new:
-            logger.error(
-                f"Wrong key confirmed for KID(s) {sorted(new)} -- terminating download/decrypt "
-                "for all tracks sharing them"
-            )
+            logger.error(f"Wrong key confirmed for KID(s) {sorted(new)} -- terminating download/decrypt for all tracks sharing them")
+            self._report_wrong_key_to_vaults(new, license_url, pssh)
+
+    def _report_wrong_key_to_vaults(self, kids: set[str], license_url: str | None, pssh: str | None) -> None:
+        """Fire-and-forget: tell each connected vault about the confirmed-wrong (kid, key) pairs."""
+        if not license_url:
+            logger.debug("_report_wrong_key_to_vaults: no license_url in scope -- skipping vault report")
+            return
+
+        pairs = [(kid, key) for kid, key in KeysManager.normalize(self.key) if kid.lower() in kids]
+        if not pairs:
+            return
+
+        def _run():
+            for kid, key in pairs:
+                for vault in all_vaults():
+                    try:
+                        if vault.is_connected:
+                            vault.report_wrong_key(kid, key, license_url, pssh)
+                    except Exception as e:
+                        logger.debug(f"report_wrong_key failed for {kid} on {getattr(vault, 'name', vault)} (non-fatal): {e}")
+
+        threading.Thread(target=_run, daemon=True, name="report-wrong-key").start()
 
     def _kids_poisoned(self, kids) -> str | None:
         """Return the first of *kids* already proven wrong-key, or None."""

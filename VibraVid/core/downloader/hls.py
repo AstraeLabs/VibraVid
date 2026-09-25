@@ -179,55 +179,59 @@ class HLS_Downloader(BaseDownloader):
             stream_kids: set = set()
             stream_dts: list = []
 
+            # Every KID this stream's manifest declared, not just the "primary" one
+            kids = [k for k in (drm.get_all_kids() or []) if k and k != "N/A"]
+            if not kids:
+                kid_val = getattr(drm, "kid", None) or getattr(drm, "default_kid", None)
+                kids = [kid_val] if kid_val and kid_val != "N/A" else ["N/A"]
+
             for dt in drm.get_all_drm_types():  # DRMType.WIDEVINE, DRMType.PLAYREADY, DRMType.FAIRPLAY, DRMType.UNKNOWN
                 if dt not in result:
                     continue
 
                 pssh = drm.get_pssh_for(dt)
 
-                if not pssh and dt == DRMType.WIDEVINE:
-                    kid_val = getattr(drm, "kid", None) or getattr(drm, "default_kid", None)
-                    if kid_val and kid_val != "N/A":
+                for kid in kids:
+                    entry_pssh = pssh
+                    if not entry_pssh and dt == DRMType.WIDEVINE and kid != "N/A":
                         try:
-                            pssh = _DRMSystems.build_widevine_pssh_from_kid(kid_val)
-                            logger.info(f"HLS: synthesized Widevine PSSH from KID {kid_val}")
+                            entry_pssh = _DRMSystems.build_widevine_pssh_from_kid(kid)
+                            logger.info(f"HLS: synthesized Widevine PSSH from KID {kid}")
                         except Exception as exc:
                             logger.debug(f"HLS: Widevine PSSH synthesis failed: {exc}")
 
-                kid = getattr(drm, "kid", None) or getattr(drm, "default_kid", None) or "N/A"
+                    # Dedup on (pssh, kid): audio and video often share one PSSH box
+                    # but carry different per-track KIDs — collapsing on PSSH alone
+                    # drops one track's KID and the license fetch never asks for it.
+                    dedup_key = (entry_pssh, (kid or "").replace("-", "").strip().lower())
+                    if not entry_pssh or dedup_key in seen[dt]:
+                        continue
+                    seen[dt].add(dedup_key)
 
-                # Dedup on (pssh, kid): audio and video often share one PSSH box
-                # but carry different per-track KIDs — collapsing on PSSH alone
-                # drops one track's KID and the license fetch never asks for it.
-                dedup_key = (pssh, (kid or "").replace("-", "").strip().lower())
-                if not pssh or dedup_key in seen[dt]:
-                    continue
-                seen[dt].add(dedup_key)
+                    if kid and kid != "N/A" and label:
+                        kid_norm = kid.replace("-", "").strip().lower()
+                        labels = kid_labels.setdefault(kid_norm, [])
+                        if label not in labels:
+                            labels.append(label)
 
-                if kid and kid != "N/A" and label:
-                    kid_norm = kid.replace("-", "").strip().lower()
-                    labels = kid_labels.setdefault(kid_norm, [])
-                    if label not in labels:
-                        labels.append(label)
+                    entry = {
+                        "pssh" if dt != DRMType.FAIRPLAY else "uri": entry_pssh,
+                        "kid": kid,
+                        "type": "Widevine"
+                        if dt == DRMType.WIDEVINE
+                        else ("PlayReady" if dt == DRMType.PLAYREADY else "FairPlay"),
+                        "label": label,
+                    }
 
-                entry = {
-                    "pssh" if dt != DRMType.FAIRPLAY else "uri": pssh,
-                    "kid": kid,
-                    "type": "Widevine"
-                    if dt == DRMType.WIDEVINE
-                    else ("PlayReady" if dt == DRMType.PLAYREADY else "FairPlay"),
-                    "label": label,
-                }
+                    # Services whose license server demands the manifest's own key URI read this in their license_request_fn
+                    key_uri = drm.get_key_uri(dt, entry_pssh)
+                    if key_uri:
+                        entry["key_uri"] = key_uri
 
-                # Services whose license server demands the manifest's own key URI read this in their license_request_fn
-                key_uri = drm.get_key_uri(dt, pssh)
-                if key_uri:
-                    entry["key_uri"] = key_uri
-
-                result[dt].append(entry)
-                stream_kids.add(kid)
-                if dt not in stream_dts:
-                    stream_dts.append(dt)
+                    result[dt].append(entry)
+                    stream_kids.add(kid)
+                    if dt not in stream_dts:
+                        stream_dts.append(dt)
 
         # Merge every selected track's label onto each surviving entry so a key
         # shared across tracks is stored with the full quality it unlocks

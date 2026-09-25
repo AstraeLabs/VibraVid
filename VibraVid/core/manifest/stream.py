@@ -208,41 +208,43 @@ class DRMInfo:
         return self._key_uri_by_type.get((drm_type or self.drm_type or "").upper())
 
     def to_dict(self) -> dict:
-        """Canonical DRM dict consumed by the HLS/ISM downloader fallbacks::
-
-        {'widevine': [{'pssh','type','kid','key_uri'}], 'playready': [...], 'fairplay': [{'uri',...}]}
-        """
+        """Return a dict of all DRM info, including every KID and PSSH variant."""
         result: dict = {"widevine": [], "playready": [], "fairplay": []}
+        kids = self.get_all_kids() or [self.kid]
+
         pssh_wv = self.get_pssh_for(DRMType.WIDEVINE)
         if pssh_wv:
-            result["widevine"].append(
-                {
-                    "pssh": pssh_wv,
-                    "type": "Widevine",
-                    "kid": self.kid,
-                    "key_uri": self.get_key_uri(DRMType.WIDEVINE, pssh_wv),
-                }
-            )
+            for kid in kids:
+                result["widevine"].append(
+                    {
+                        "pssh": pssh_wv,
+                        "type": "Widevine",
+                        "kid": kid,
+                        "key_uri": self.get_key_uri(DRMType.WIDEVINE, pssh_wv),
+                    }
+                )
         pssh_pr = self.get_pssh_for(DRMType.PLAYREADY)
         if pssh_pr:
-            result["playready"].append(
-                {
-                    "pssh": pssh_pr,
-                    "type": "PlayReady",
-                    "kid": self.kid,
-                    "key_uri": self.get_key_uri(DRMType.PLAYREADY, pssh_pr),
-                }
-            )
+            for kid in kids:
+                result["playready"].append(
+                    {
+                        "pssh": pssh_pr,
+                        "type": "PlayReady",
+                        "kid": kid,
+                        "key_uri": self.get_key_uri(DRMType.PLAYREADY, pssh_pr),
+                    }
+                )
         pssh_fp = self.get_pssh_for(DRMType.FAIRPLAY)
         if pssh_fp:
-            result["fairplay"].append(
-                {
-                    "uri": pssh_fp,
-                    "type": "FairPlay",
-                    "kid": self.kid,
-                    "key_uri": self.get_key_uri(DRMType.FAIRPLAY, pssh_fp),
-                }
-            )
+            for kid in kids:
+                result["fairplay"].append(
+                    {
+                        "uri": pssh_fp,
+                        "type": "FairPlay",
+                        "kid": kid,
+                        "key_uri": self.get_key_uri(DRMType.FAIRPLAY, pssh_fp),
+                    }
+                )
         return result
 
     def add_advertised_type(self, drm_type: str) -> None:
@@ -313,8 +315,12 @@ class DRMInfo:
         return "-"
 
     def get_kid_display(self) -> str:
-        """Full KID for one-liner logging, e.g. 'a1b2c3d4...deadbeef'. Empty if no KID is known."""
-        kid = self.kid or self.default_kid or (self.default_kids[0] if self.default_kids else "")
+        """Return a comma-separated list of all KIDs, or the single KID/default_kid if none."""
+        kids = self.get_all_kids()
+        if kids:
+            return ",".join(kids)
+        
+        kid = self.kid or self.default_kid
         return f"{kid}" if kid else ""
 
     def __repr__(self) -> str:

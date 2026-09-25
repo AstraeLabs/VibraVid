@@ -322,6 +322,6 @@ def update():
         tag_url = last_version if last_version.startswith("v") else f"v{last_version}"
         mode = get_execution_mode()
         if mode == "installer":
-            console.print(f"\n[red]New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run with [#FFD60A]-UP [#00BCD4]to auto-update")
+            console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run with [#FFD60A]-UP [#00BCD4]to auto-update\n")
         elif mode == "source_code":
-            console.print(f"\n[red]New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run [#FFD60A]git pull [#00BCD4]to update")
+            console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run [#FFD60A]git pull [#00BCD4]to update\n")

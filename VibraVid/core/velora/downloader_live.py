@@ -569,6 +569,10 @@ class LiveDownloadMixin:
 
                 if not ok:
                     logger.debug(f"Live DASH: decrypt failed for {fp.name}: {message}")
+                    if message and "key is wrong" in message:
+                        logger.error(f"Live DASH: key sanity check confirmed the stored key is wrong for {fp.name} -- the vault entry for this KID is likely stale/corrupt: {message}")
+                        self._register_wrong_key(self._stream_kids(stream), self.license_url, getattr(stream.drm, "pssh", None))
+                    
                     dec_tmp.unlink(missing_ok=True)
                     return False
 

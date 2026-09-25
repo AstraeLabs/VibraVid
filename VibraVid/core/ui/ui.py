@@ -69,8 +69,8 @@ def build_table(
         ("Bitrate", "right"),
         ("Codec", "left"),
         ("Channels", "center"),
-        ("Extra", "center"),
         ("Language", "left"),
+        ("Extra", "center"),
     ]
     for name, justify in cols:
         table.add_column(name, justify=justify, no_wrap=True)
@@ -146,8 +146,8 @@ def build_table(
             _c(bitrate, _COL_BITRATE if bitrate else None),
             _c(codec, _COL_CODEC if codec else None),
             _c(channels, "white" if channels else None),
-            _c(hdr, hdr_col),
             _c(language, _COL_LANG if language else None),
+            _c(hdr, hdr_col),
             style=row_style,
         )
 

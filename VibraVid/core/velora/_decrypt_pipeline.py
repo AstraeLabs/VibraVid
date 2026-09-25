@@ -938,7 +938,7 @@ class DecryptPipelineMixin:
                 )
 
                 # Deterministic for the whole KID, not just this segment
-                self._register_wrong_key(self._stream_kids(stream))
+                self._register_wrong_key(self._stream_kids(stream), self.license_url, getattr(stream.drm, "pssh", None))
                 if decrypt_aborted["reason"] is None:
                     poisoned_now = self._kids_poisoned(self._stream_kids(stream))
                     decrypt_aborted["reason"] = (f"wrong key for KID {poisoned_now or 'unknown'} (confirmed by key-sanity on {fp.name}) -- terminating track")
@@ -1036,7 +1036,7 @@ class DecryptPipelineMixin:
 
             if not ok:
                 if message and "key is wrong" in message:
-                    self._register_wrong_key(self._stream_kids(stream))
+                    self._register_wrong_key(self._stream_kids(stream), self.license_url, getattr(stream.drm, "pssh", None))
                     poisoned_now = self._kids_poisoned(self._stream_kids(stream))
                     if decrypt_aborted["reason"] is None:
                         decrypt_aborted["reason"] = (

@@ -312,6 +312,12 @@ def get_short_codec(stream_type: str, codec_str: str) -> str:
         for part in codec_parts:
             detected_type = detect_stream_type(part)
 
+            # An HLS #EXT-X-STREAM-INF's CODECS attribute lists every codec used by
+            # the whole variant (video + its paired audio), not just the caller's
+            # track type.
+            if detected_type and detected_type != stream_type.lower():
+                continue
+
             # Choose the appropriate codec map
             if detected_type == "video":
                 codec_map = VIDEO_CODEC_MAP

@@ -15,7 +15,7 @@ from rich.console import Console
 from VibraVid.core.drm.system import _DRMSystems
 from VibraVid.core.manifest._utils import calc_base_url, save_raw_manifest
 from VibraVid.core.manifest.stream import DRMInfo, DRMType, Stream
-from VibraVid.core.utils.codec import VIDEO_CODEC_PREFIXES, infer_video_range
+from VibraVid.core.utils.codec import VIDEO_CODEC_PREFIXES, detect_stream_type, infer_video_range
 from VibraVid.core.utils.language import resolve_locale
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
@@ -222,7 +222,40 @@ class HLSParser:
                     stream.is_live = True
                     logger.info(f"HLS stream marked as live (propagated): {stream}")
 
+        self._backfill_audio_codecs(streams)
+
         return streams
+
+    def _backfill_audio_codecs(self, streams: list[Stream]) -> None:
+        """Populate the .codecs field of audio streams that don't have it, using the CODECS attribute of their parent #EXT-X-STREAM-INF line."""
+        if not self.raw_content:
+            return
+
+        group_codec: dict[str, str] = {}
+        for line in self.raw_content.splitlines():
+            line = line.strip()
+            if not line.startswith("#EXT-X-STREAM-INF:"):
+                continue
+            
+            group_id = self._attr(line, "AUDIO", "")
+            codecs = self._attr(line, "CODECS", "")
+            if not (group_id and codecs) or group_id in group_codec:
+                continue
+            
+            for tok in (c.strip() for c in codecs.split(",")):
+                if detect_stream_type(tok) == "audio":
+                    group_codec[group_id] = tok
+                    break
+
+        if not group_codec:
+            return
+
+        for stream in streams:
+            if stream.type != "audio" or stream.codecs:
+                continue
+            group_id = getattr(stream, "_hls_group_id", "")
+            if group_id in group_codec:
+                stream.codecs = group_codec[group_id]
 
     def parse_variant(self, variant_url: str) -> tuple[DRMInfo, str | None]:
         """Fetch and parse a variant playlist to find additional DRM info."""
@@ -397,6 +430,7 @@ class HLSParser:
             s.name = name
 
         s.id = stable_id if stable_id else _make_rendition_id(group_id, lang, name)
+        s._hls_group_id = group_id  # consumed by _backfill_audio_codecs, not part of the public Stream API
 
         ch = self._attr(line, "CHANNELS", "")
         if ch:
@@ -539,7 +573,7 @@ class HLSParser:
                         for k in key_list:
                             sys = (k.get("system") or k.get("keyformat") or "").lower()
                             pssh = k.get("pssh")
-                            kid = k.get("id")
+                            kid = k.get("id") or k.get("key-id")
 
                             if "widevine" in sys:
                                 if pssh:
@@ -553,8 +587,8 @@ class HLSParser:
                                 if uri:
                                     info.set_pssh(uri, DRMType.FAIRPLAY, key_uri=full_uri)
 
-                            if kid and not info.kid:
-                                info.kid = kid
+                            if kid:
+                                info.set_kid(kid)
 
                     except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError, ValueError):
                         is_wv = ("edef8ba9" in attrs.lower() or "edef8ba9" in full_uri.lower() or "widevine" in attrs.lower())
@@ -571,10 +605,11 @@ class HLSParser:
                             info.set_pssh(b64, DRMType.WIDEVINE, key_uri=full_uri)
 
                         elif is_pr:
-                            kid = _DRMSystems.extract_kid_from_playready_pro(b64)
-                            if kid:
+                            kids = _DRMSystems.extract_kids_from_playready_pro(b64)
+                            for kid in kids:
                                 info.set_kid(kid)
-                                logger.debug(f"PlayReady WRM Header KID extracted: {kid}")
+                            if kids:
+                                logger.debug(f"PlayReady WRM Header KID(s) extracted: {kids}")
                             info.set_pssh(b64, DRMType.PLAYREADY, key_uri=full_uri)
                         else:
                             info.set_pssh(b64, key_uri=full_uri)

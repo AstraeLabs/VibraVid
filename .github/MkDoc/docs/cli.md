@@ -11,22 +11,22 @@
 python manual.py -h
 
 # Search and download
-python manual.py --site streamingcommunity --search "interstellar"
+python manual.py -i streamingcommunity --search "interstellar"
 
-# Auto-download the first result
-python manual.py --site streamingcommunity --search "interstellar" --auto-first
+# Auto-download the first result (--item 0 picks the first result, 0-based)
+python manual.py -i streamingcommunity --search "interstellar" --item 0
 
 # Select a specific result by index (0-based) instead of the first
-python manual.py --site streamingcommunity --search "interstellar" --item 2
+python manual.py -i streamingcommunity --search "interstellar" --item 2
 
 # Use a site by its index number
-python manual.py --site 0 --search "interstellar"
+python manual.py -i 0 --search "interstellar"
 
 # Skip TS/CAM releases (StreamingCommunity only)
-python manual.py --site streamingcommunity --search "interstellar" --skip-ts
+python manual.py -i streamingcommunity --search "interstellar" --skip-ts
 
 # Disable the log file for this run
-python manual.py --site streamingcommunity --search "interstellar" --no-log
+python manual.py -i streamingcommunity --search "interstellar" --no-log
 ```
 
 ## Series Selection
@@ -35,48 +35,48 @@ Use `--season` and `--episode` to skip interactive prompts:
 
 ```bash
 # Specific episode
-python manual.py --site streamingcommunity --search "breaking bad" --auto-first --season 1 --episode 3
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode 3
 
 # Range of episodes
-python manual.py --site streamingcommunity --search "breaking bad" --auto-first --season 1 --episode "1-5"
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode "1-5"
 
 # All episodes of a season
-python manual.py --site streamingcommunity --search "breaking bad" --auto-first --season 1 --episode "*"
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode "*"
 
 # All episodes of all seasons
-python manual.py --site streamingcommunity --search "breaking bad" --auto-first --season "*"
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season "*"
 
 # Multiple seasons
-python manual.py --site streamingcommunity --search "breaking bad" --auto-first --season "1-3"
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season "1-3"
 ```
 
 ## Year Filter
 
 ```bash
 # Exact year
-python manual.py --site streamingcommunity --search "dune" --year 2021
+python manual.py -i streamingcommunity --search "dune" --year 2021
 
 # Year range
-python manual.py --site streamingcommunity --search "batman" --year "1990-2015"
+python manual.py -i streamingcommunity --search "batman" --year "1990-2015"
 ```
 
 ## Stream Track Overrides
 
 ```bash
 # Video resolution
-python manual.py --site streamingcommunity --search "interstellar" -sv 1080
+python manual.py -i streamingcommunity --search "interstellar" -sv 1080
 
 # Audio language
-python manual.py --site streamingcommunity --search "interstellar" -sa "eng"
+python manual.py -i streamingcommunity --search "interstellar" -sa "eng"
 
 # Subtitles
-python manual.py --site streamingcommunity --search "interstellar" -ss "eng"
+python manual.py -i streamingcommunity --search "interstellar" -ss "eng"
 
 # Skip the whole download if the requested filter matches no track
-python manual.py --site streamingcommunity --search "interstellar" -sa "deu" --skip-no-match
+python manual.py -i streamingcommunity --search "interstellar" -sa "deu" --skip-no-match
 
 # Output container (overrides PROCESS.extension from config.json for this run)
-python manual.py --site streamingcommunity --search "interstellar" --extension mp4
+python manual.py -i streamingcommunity --search "interstellar" --extension mp4
 ```
 
 See [Stream Selection Filters](configuration.md#stream-selection-filters) for the full
@@ -89,20 +89,20 @@ See [Stream Selection Filters](configuration.md#stream-selection-filters) for th
 python manual.py --close-console false
 
 # Close console after download
-python manual.py --site streamingcommunity --search "interstellar" --close-console true
+python manual.py -i streamingcommunity --search "interstellar" --close-console true
 ```
 
 ## Proxy
 
 ```bash
 # Use the configured proxy for everything (default scope)
-python manual.py --site streamingcommunity --search "interstellar" --use_proxy
+python manual.py -i streamingcommunity --search "interstellar" --use_proxy
 
 # Proxy only the downloads (Velora), scrape directly
-python manual.py --site streamingcommunity --search "interstellar" --use_proxy --proxy-scope down
+python manual.py -i streamingcommunity --search "interstellar" --use_proxy --proxy-scope down
 
 # Proxy only the scraping, download directly
-python manual.py --site streamingcommunity --search "interstellar" --use_proxy --proxy-scope scrap
+python manual.py -i streamingcommunity --search "interstellar" --use_proxy --proxy-scope scrap
 ```
 
 ## Show Dependency Paths
@@ -262,6 +262,10 @@ python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist
 | Flag | Effect |
 |---|---|
 | `--use-curl-cffi` | Download segments via curl_cffi (browser TLS impersonation) instead of Velora — for sites where individual segments are Cloudflare-protected |
+| `--http-version {1.1,2,3}` | Force the HTTP protocol version used for requests instead of letting the client negotiate it |
+| `-o`, `--output <PATH>` | Output file path for `--down`/`--yt-dlp` direct downloads |
+| `--amazon-music-login` | Log in to Amazon Music (stores credentials for future runs) |
+| `--amazon-music-logout` | Clear stored Amazon Music login credentials |
 | `--no-vault-cache` | Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens) |
 | `--no-decrypt` | Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass) |
 | `--no-livemux` | Disable the streaming-mux fast path for this run, always falling back to the normal post-download `join_media()` pass. On by default |
@@ -284,7 +288,7 @@ python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist
 
 ```bash
 # Resolve now, download later: cache the manifest/keys without downloading
-python manual.py --site streamingcommunity --search "interstellar" --item 0 --resolve-only
+python manual.py -i streamingcommunity --search "interstellar" --item 0 --resolve-only
 
 # Launch the TUI instead of the classic prompt-driven flow
 python manual.py --tui
@@ -303,7 +307,7 @@ python manual.py --down "https://example.com/master.m3u8" --type hls \
 
 ```bash
 # Queue instead of downloading now
-python manual.py --site streamingcommunity --search "interstellar" --item 0 --queue-add
+python manual.py -i streamingcommunity --search "interstellar" --item 0 --queue-add
 python manual.py --down "https://example.com/movie.mkv" -o "./Video/movie.mkv" --queue-add
 
 # Inspect / manage the queue
@@ -317,7 +321,7 @@ python manual.py --queue-run
 
 !!! note
     Only invocations that would already complete without any prompt can be queued; anything
-    ambiguous (e.g. `--global`, or a site search with no `--item`/`--auto-first`) is rejected at
+    ambiguous (e.g. `--global`, or a site search with no `--item`) is rejected at
     enqueue time.
 
 Items enqueued together share one auto-generated queue name (e.g. `20260723-152525`, shown

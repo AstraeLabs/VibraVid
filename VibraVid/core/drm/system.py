@@ -138,6 +138,74 @@ class _DRMSystems(dict):
         return None
 
     @staticmethod
+    def extract_kids_from_playready_pro(pro_b64: str) -> list[str]:
+        """Extract all KIDs from base64 PlayReady Object (PRO) or WRM Header."""
+        try:
+            data = base64.b64decode(pro_b64)
+        except Exception:
+            return []
+
+        kids: list[str] = []
+        try:
+            if len(data) < 6:
+                return []
+
+            offset = 6
+            while offset + 4 <= len(data):
+                rec_type = int.from_bytes(data[offset : offset + 2], "little")
+                rec_len = int.from_bytes(data[offset + 2 : offset + 4], "little")
+                offset += 4
+                if rec_len <= 0 or offset + rec_len > len(data):
+                    break
+
+                if rec_type == 0x0001:
+                    wrm_xml = data[offset : offset + rec_len].decode("utf-16-le", errors="ignore")
+                    for kid_b64 in re.findall(r'<KID[^>]*\bVALUE="([A-Za-z0-9+/=]+)"', wrm_xml):
+                        try:
+                            kid_bytes = base64.b64decode(kid_b64 + "==")
+                        except Exception:
+                            continue
+                        if len(kid_bytes) < 16:
+                            continue
+                        hex_kid = (
+                            kid_bytes[3::-1].hex()
+                            + kid_bytes[5:3:-1].hex()
+                            + kid_bytes[7:5:-1].hex()
+                            + kid_bytes[8:10].hex()
+                            + kid_bytes[10:16].hex()
+                        )
+                        if hex_kid not in kids:
+                            kids.append(hex_kid)
+
+                    # Fallback: the redundant <KID>base64</KID> element body -- only
+                    # useful when no VALUE-attribute form was present at all.
+                    if not kids:
+                        m = re.search(r"<KID[^>]*>([A-Za-z0-9+/=]+)</KID>", wrm_xml)
+                        if m:
+                            try:
+                                kid_bytes = base64.b64decode(m.group(1).strip())
+                                if len(kid_bytes) == 16:
+                                    b = kid_bytes
+                                    kids.append(
+                                        f"{b[3]:02x}{b[2]:02x}{b[1]:02x}{b[0]:02x}"
+                                        f"{b[5]:02x}{b[4]:02x}{b[7]:02x}{b[6]:02x}" + b[8:16].hex()
+                                    )
+                            except Exception:
+                                pass
+
+                    if not kids:
+                        m = re.search(r'KeyID="([^"]+)"', wrm_xml)
+                        if m:
+                            kids.append(m.group(1).strip())
+
+                offset += rec_len
+
+        except Exception:
+            pass
+
+        return kids
+
+    @staticmethod
     def build_widevine_pssh_from_kid(kid_hex: str) -> str:
         """Synthesize minimal Widevine v0 PSSH box from KID hex."""
         from uuid import UUID

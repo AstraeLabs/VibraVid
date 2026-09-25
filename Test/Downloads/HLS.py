@@ -21,7 +21,7 @@ conf_extension = config_manager.config.get("PROCESS", "extension")
 context_tracker.force_livemux = True
 
 
-m3u8_url = ""
+m3u8_url = "https://vod-dsc-eu-south-1-mrs1-dss.media.dssott.com/dvt3=exp=1790435996~url=%2Fps01%2Fdisney%2Fdedc42a9-96f6-41a6-b87c-8e5932579d4f%2F~aid=89a4cd19-8d0f-4ead-bcab-ca6623b63bfc~did=8b22352c-2823-4131-bbe1-f5fd0e69af97~country=IT~kid=k02~hmac=6d70b093aa0640bc4b137b1781879919307cf1d7606df77e53fd335b4796c396/ps01/disney/dedc42a9-96f6-41a6-b87c-8e5932579d4f/una-ctr-all-30164a8a-a80d-4726-9a1e-96c6df05390c-ec68fc20-7ad1-4873-b8c1-c5d28dda01e5.m3u8?a=3&r=1080&rmin=720&v=1&hash=7bd9329c87221eb1dab6571b2bc31422267e1148"
 m3u8_headers = {}
 license_key = None
 

@@ -507,6 +507,10 @@ each vault also carries its own internal name used in log/console output (`Bypas
 entry (`myvault` above) logs under the same name you gave it in `DRM.vault`, so there's no
 separate label to know about for those.
 
+For a backend that doesn't speak this REST contract (a different transport, auth scheme, or
+response shape — like `vault_2`'s JSON-RPC), see [Adding a Vault](vault.md) for how to subclass
+`BaseVault` instead.
+
 ### Remote CDM Services
 
 When remote CDM services are available, add one or both of the following blocks to `config.json`:
