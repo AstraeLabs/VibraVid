@@ -1,0 +1,2355 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DRM HLS/DASH downloader documentation">
+      
+      
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Configuration - VibraVid</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VibraVid" class="md-header__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VibraVid
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VibraVid" class="md-nav__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VibraVid
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tmdb-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TMDB API Key
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TMDB API Key">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setting-the-key-current-supported-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting the key (current, supported method)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deprecated-method-confloginjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deprecated method: Conf/login.json
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DEFAULT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OUTPUT
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OUTPUT">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#movie-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Movie Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#episode-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Episode Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#song-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Song Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommended-configuration-with-a-tmdb-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended configuration (with a TMDB API key)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#download" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DOWNLOAD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DOWNLOAD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#segment-throttling-live-streams-token-refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Segment Throttling, Live Streams &amp; Token Refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stream-selection-filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream Selection Filters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#process-post-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PROCESS (Post-Processing)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REQUESTS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DRM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DRM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-self-hosted-drm-vaults" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple / self-hosted DRM vaults
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remote-cdm-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote CDM Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-cdm-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local CDM Devices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-sites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Sites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web GUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARR Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../login/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Login
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tmdb-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TMDB API Key
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TMDB API Key">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setting-the-key-current-supported-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting the key (current, supported method)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deprecated-method-confloginjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deprecated method: Conf/login.json
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DEFAULT
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OUTPUT
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OUTPUT">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#movie-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Movie Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#episode-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Episode Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#song-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Song Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recommended-configuration-with-a-tmdb-api-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended configuration (with a TMDB API key)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#download" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DOWNLOAD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DOWNLOAD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#segment-throttling-live-streams-token-refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Segment Throttling, Live Streams &amp; Token Refresh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stream-selection-filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream Selection Filters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#process-post-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PROCESS (Post-Processing)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REQUESTS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DRM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DRM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-self-hosted-drm-vaults" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple / self-hosted DRM vaults
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remote-cdm-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote CDM Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-cdm-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local CDM Devices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="configuration">Configuration</h1>
+<p>All settings live in <code>config.json</code>. The sections below cover each configuration block.
+ARR automation settings are documented separately in the <a href="../arr/">ARR Integration</a> guide.</p>
+<h2 id="tmdb-api-key">TMDB API Key</h2>
+<p>An optional <a href="https://www.themoviedb.org/">TMDB</a> API key unlocks:</p>
+<ul>
+<li>The <code>%(tmdb_*)</code>, <code>%(original_title)</code>, <code>%(original_language)</code> and <code>%(imdb_id)</code> filename tokens
+  (see <a href="#movie-format">Movie Format</a> / <a href="#episode-format">Episode Format</a> below).</li>
+<li>Poster/backdrop artwork (<code>embed_poster</code> in <a href="#download">DOWNLOAD</a>).</li>
+<li>Strict TMDB/TVDB identity matching for the <a href="../arr/">ARR Integration</a>.</li>
+</ul>
+<p>It is <strong>not required</strong> — without it these features degrade gracefully (tokens are dropped from
+filenames, artwork/matching falls back to the site's own data).</p>
+<p>The key is shared by every interface (CLI, TUI, GUI, ARR) — there is a single configuration
+point, not a per-interface setting.</p>
+<h3 id="setting-the-key-current-supported-method">Setting the key (current, supported method)</h3>
+<ol>
+<li>Create a key at <a href="https://www.themoviedb.org/settings/api">themoviedb.org/settings/api</a> (free).</li>
+<li>Export it as the <strong><code>TMDB_API_KEY</code></strong> environment variable before running VibraVid:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">TMDB_API_KEY</span><span class="o">=</span>your_key_here
+python<span class="w"> </span>manual.py<span class="w">      </span><span class="c1"># CLI</span>
+python<span class="w"> </span>tui.py<span class="w">         </span><span class="c1"># TUI</span>
+python<span class="w"> </span>GUI/manage.py<span class="w"> </span>runserver<span class="w"> </span><span class="m">0</span>.0.0.0:8000<span class="w">   </span><span class="c1"># GUI</span>
+</code></pre></div>
+<p>On Windows (PowerShell): <code>$env:TMDB_API_KEY = "your_key_here"</code>.</p>
+<ul>
+<li><strong>Docker / NAS</strong>: set <code>TMDB_API_KEY</code> in your <code>.env</code> file (see <code>.env.example</code>) — it's already
+  wired through <code>docker-compose.yml</code> under the ARR Integration section and applies to the
+  bundled GUI/ARR container.</li>
+<li><strong>GUI</strong>: there is no in-app field for the key; it's read from the environment at process
+  start, so after setting/changing it you need to restart the server (or recreate the
+  container). If it's missing, search results show a "TMDB covers aren't active" hint.</li>
+<li>This is the <strong>only</strong> way to configure the key going forward — see the deprecated method below.</li>
+</ul>
+<h3 id="deprecated-method-confloginjson">Deprecated method: <code>Conf/login.json</code></h3>
+<p>Older versions read the key from <code>Conf/login.json</code>, under a <code>Provider</code> section:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"Provider"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"tmdb"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your_key_here"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>This still works as a fallback if <code>TMDB_API_KEY</code> is not set, but it is <strong>deprecated and will be
+removed in a future release</strong> — a warning is logged the first time it's used. Fresh installs'
+<code>login.json</code> template does not include a <code>Provider</code> section at all, so this path only matters
+for existing configs carried over from an older version; migrate to the <code>TMDB_API_KEY</code>
+environment variable above.</p>
+<h2 id="default">DEFAULT</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"DEFAULT"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"debug_track_json"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"log_level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"close_console"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"show_message"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"fetch_domain_online"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"auto_update_check"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"disable_scraper_cache"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"imp_service"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"default"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"installation"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"get_me"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>close_console</code></td>
+<td><code>true</code></td>
+<td>Automatically close the console after download completes</td>
+</tr>
+<tr>
+<td><code>debug_track_json</code></td>
+<td><code>false</code></td>
+<td>Log a <code>TRACKS_JSON</code> payload with selected tracks, keys, and manifest metadata — useful for debugging stream selection</td>
+</tr>
+<tr>
+<td><code>log_level</code></td>
+<td><code>"INFO"</code></td>
+<td>Logging verbosity. Accepts standard Python values: <code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, <code>CRITICAL</code></td>
+</tr>
+<tr>
+<td><code>show_message</code></td>
+<td><code>true</code></td>
+<td>Show the startup banner and clear the console before printing it</td>
+</tr>
+<tr>
+<td><code>fetch_domain_online</code></td>
+<td><code>true</code></td>
+<td>Automatically fetch the latest domains from GitHub</td>
+</tr>
+<tr>
+<td><code>auto_update_check</code></td>
+<td><code>true</code></td>
+<td>Notify you at startup when a new VibraVid version is available</td>
+</tr>
+<tr>
+<td><code>disable_scraper_cache</code></td>
+<td><code>false</code></td>
+<td>GUI only: the Django backend caches an already-instantiated site scraper per title for 15 minutes so repeat requests (e.g. opening the same series-detail page) don't re-scrape.</td>
+</tr>
+<tr>
+<td><code>imp_service</code></td>
+<td><code>["default"]</code></td>
+<td>Service source paths to load site modules from. <code>"default"</code> loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have <code>__init__.py</code> defining <code>indice</code> and <code>_useFor</code>. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under <code>.cache/imported_service/&lt;host&gt;__&lt;owner&gt;__&lt;repo&gt;__&lt;ref&gt;/</code>. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name.</td>
+</tr>
+<tr>
+<td><code>installation</code></td>
+<td><code>""</code></td>
+<td>Controls which bundled binaries are auto-downloaded at setup. <code>""</code> (base): FFmpeg, Velora, flux. <code>"yt"</code>: base + yt-dlp, deno. <code>"full"</code>: base + dovi_tool, mkvtoolnix, yt-dlp, deno</td>
+</tr>
+<tr>
+<td><code>get_me</code></td>
+<td><code>false</code></td>
+<td>Resolve and print the account name in the login banner (e.g. <code>Login - Type: Account / User: name</code>) for services that support it.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Custom <code>imp_service</code> example (local folder):</strong>
+<div class="highlight"><pre><span></span><code><span class="nt">"imp_service"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"default"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/home/user/my_custom_sites"</span><span class="p">]</span>
+</code></pre></div></p>
+<p><strong>Custom <code>imp_service</code> example (remote GitHub/Gitea repository):</strong>
+<div class="highlight"><pre><span></span><code><span class="nt">"imp_service"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"default"</span><span class="p">,</span><span class="w"> </span><span class="s2">"https://github.com/owner/my-vibravid-sites"</span><span class="p">]</span>
+</code></pre></div></p>
+<p><strong>Custom <code>imp_service</code> example (private repository, with username/password or token):</strong>
+<div class="highlight"><pre><span></span><code><span class="nt">"imp_service"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"default"</span><span class="p">,</span><span class="w"> </span><span class="s2">"http://user:password@192.168.1.149:3000/owner/my-vibravid-sites"</span><span class="p">]</span>
+</code></pre></div>
+Embed the credentials directly in the URL userinfo, as <code>&lt;scheme&gt;://&lt;username&gt;:&lt;password&gt;@&lt;host&gt;/&lt;owner&gt;/&lt;repo&gt;</code> (GitHub: use a personal access token as the password; Gitea: username/password or a token both work). Pin a specific branch/tag with a <code>#ref</code> fragment, e.g. <code>https://host/owner/repo#dev</code>; otherwise the repository's default branch is used. Since credentials end up in plain text in <code>config.json</code>, prefer a scoped token over your account password, and keep <code>config.json</code> out of any git history you push (it's tracked in the VibraVid repo itself, so a fork/clone used for personal config should not be pushed upstream with real credentials in it).</p>
+<h2 id="output">OUTPUT</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"OUTPUT"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"root_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Video"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"movie_folder_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Movie"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"serie_folder_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Serie"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"anime_folder_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Anime"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"music_folder_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Music"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"live_folder_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Live"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"movie_format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%(title_name) (%(title_year))/%(title_name) (%(title_year))"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"episode_format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d)"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"song_format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%(album)/%(track_number:02d). %(title)"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong><code>root_path</code></strong> — Base directory where videos are saved.
+- Windows: <code>C:\\MyLibrary\\Folder</code> or <code>\\\\MyServer\\Share</code>
+- Linux/macOS: <code>Desktop/MyLibrary/Folder</code>
+- Docker / NAS: set the <code>VIBRAVID_OUTPUT_ROOT</code> environment variable instead of editing <code>config.json</code> — the value is applied at startup and overrides this field without touching the persisted config file. Example: <code>VIBRAVID_OUTPUT_ROOT=/app/Video</code> (container path matching the bind-mount target).</p>
+<p><strong><code>movie_folder_name</code></strong>, <strong><code>serie_folder_name</code></strong>, <strong><code>anime_folder_name</code></strong>, <strong><code>music_folder_name</code></strong>, <strong><code>live_folder_name</code></strong> — Subfolder names for each content type (defaults: <code>"Movie"</code>, <code>"Serie"</code>, <code>"Anime"</code>, <code>"Music"</code>, <code>"Live"</code>). All support the <code>%{site_name}</code> placeholder:</p>
+<div class="highlight"><pre><span></span><code>"Movie/%{site_name}"  -&gt;  "Movie/Crunchyroll"
+"Serie/%{site_name}"  -&gt;  "Serie/Crunchyroll"
+</code></pre></div>
+<h3 id="movie-format">Movie Format</h3>
+<p><strong>Default:</strong> <code>"%(title_name) (%(title_year))/%(title_name) (%(title_year))"</code></p>
+<div class="highlight"><pre><span></span><code>%(title_name) (%(title_year))/   -&gt;  folder    Inception (2010)/
+%(title_name) (%(title_year))    -&gt;  filename  Inception (2010).mkv
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%(title_name)</code></td>
+<td>Movie title</td>
+</tr>
+<tr>
+<td><code>%(title_name_slug)</code></td>
+<td>Movie title as slug</td>
+</tr>
+<tr>
+<td><code>%(title_year)</code></td>
+<td>Release year (omitted if unavailable)</td>
+</tr>
+<tr>
+<td><code>%(quality)</code></td>
+<td>Video resolution</td>
+</tr>
+<tr>
+<td><code>%(language)</code></td>
+<td>Audio languages</td>
+</tr>
+<tr>
+<td><code>%(video_codec)</code></td>
+<td>Video codec</td>
+</tr>
+<tr>
+<td><code>%(audio_codec)</code></td>
+<td>Audio codec</td>
+</tr>
+<tr>
+<td><code>%(audio_flags)</code></td>
+<td>Audio track flags, e.g. <code>DEFAULT</code></td>
+</tr>
+<tr>
+<td><code>%(sub_flags)</code></td>
+<td>Subtitle track flags, e.g. <code>CC-SDH-FORCED</code></td>
+</tr>
+<tr>
+<td><code>%(original_title)</code></td>
+<td>Original-language title (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(original_language)</code></td>
+<td>Original language code, e.g. <code>ja</code> (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_id)</code></td>
+<td>TMDB ID (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_title)</code></td>
+<td>TMDB title in the configured lookup language (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(imdb_id)</code></td>
+<td>IMDb ID, e.g. <code>tt0409591</code> (requires TMDB API key)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="episode-format">Episode Format</h3>
+<p><strong>Default:</strong> <code>"%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d)"</code></p>
+<div class="highlight"><pre><span></span><code>%(series_name)/     -&gt;  series folder   Breaking Bad/
+S%(season:02d)/     -&gt;  season folder   S01/
+%(episode_name)...  -&gt;  filename        Pilot S01E05.mkv
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%(series_name)</code></td>
+<td>Series name</td>
+</tr>
+<tr>
+<td><code>%(series_name_slug)</code></td>
+<td>Series name as slug</td>
+</tr>
+<tr>
+<td><code>%(series_year)</code></td>
+<td>Series release year</td>
+</tr>
+<tr>
+<td><code>%(season:FORMAT)</code></td>
+<td>Season number with inline padding (see below)</td>
+</tr>
+<tr>
+<td><code>%(episode:FORMAT)</code></td>
+<td>Episode number with inline padding (see below)</td>
+</tr>
+<tr>
+<td><code>%(episode_name)</code></td>
+<td>Episode title (sanitized)</td>
+</tr>
+<tr>
+<td><code>%(episode_name_slug)</code></td>
+<td>Episode title as slug</td>
+</tr>
+<tr>
+<td><code>%(absolute:FORMAT)</code></td>
+<td>Absolute episode number with inline padding — anime only (AnimeUnity/AnimeWorld)</td>
+</tr>
+<tr>
+<td><code>%(quality)</code></td>
+<td>Video resolution</td>
+</tr>
+<tr>
+<td><code>%(language)</code></td>
+<td>Audio languages</td>
+</tr>
+<tr>
+<td><code>%(video_codec)</code></td>
+<td>Video codec</td>
+</tr>
+<tr>
+<td><code>%(audio_codec)</code></td>
+<td>Audio codec</td>
+</tr>
+<tr>
+<td><code>%(audio_flags)</code></td>
+<td>Audio track flags, e.g. <code>DEFAULT</code></td>
+</tr>
+<tr>
+<td><code>%(sub_flags)</code></td>
+<td>Subtitle track flags, e.g. <code>CC-SDH-FORCED</code></td>
+</tr>
+<tr>
+<td><code>%(original_title)</code></td>
+<td>Original-language title (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(original_language)</code></td>
+<td>Original language code, e.g. <code>ja</code> (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_id)</code></td>
+<td>TMDB ID (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_title)</code></td>
+<td>TMDB title in the configured lookup language (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_episode_title)</code></td>
+<td>TMDB episode title, resolved from <code>%(tmdb_id)</code> + season/episode number (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_season_number:FORMAT)</code></td>
+<td>Real TMDB season number, mapped from an absolute/flat episode number when needed (anime) — supports inline padding like <code>season</code>/<code>episode</code> (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(tmdb_season_name)</code></td>
+<td>TMDB season name, e.g. <code>Season 2</code>, mapped the same way (requires TMDB API key)</td>
+</tr>
+<tr>
+<td><code>%(imdb_id)</code></td>
+<td>IMDb ID, e.g. <code>tt0409591</code> (requires TMDB API key)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Inline padding syntax (for <code>season</code>, <code>episode</code>, <code>absolute</code>, and <code>track_number</code> in Song Format below):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Result (n=1)</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%(season:02d)</code></td>
+<td><code>01</code></td>
+<td>Zero-pad to 2 digits</td>
+</tr>
+<tr>
+<td><code>%(season:03d)</code></td>
+<td><code>001</code></td>
+<td>Zero-pad to 3 digits</td>
+</tr>
+<tr>
+<td><code>%(season:d)</code></td>
+<td><code>1</code></td>
+<td>No padding</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Tokens that cannot be resolved (e.g. TMDB tokens without an API key, or <code>%(absolute)</code> on non-anime services) are removed from the filename together with any surrounding <code>[]</code>/<code>()</code> wrapper, so they never leak as literal text.</p>
+</blockquote>
+<h3 id="song-format">Song Format</h3>
+<p><strong>Default:</strong> <code>"%(album)/%(track_number:02d). %(title)"</code></p>
+<div class="highlight"><pre><span></span><code>%(album)/                        -&gt;  folder    Discovery/
+%(track_number:02d). %(title)    -&gt;  filename  01. One More Time.mp3
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%(artist)</code></td>
+<td>Artist name</td>
+</tr>
+<tr>
+<td><code>%(artist_slug)</code></td>
+<td>Artist name as slug</td>
+</tr>
+<tr>
+<td><code>%(album)</code></td>
+<td>Album name</td>
+</tr>
+<tr>
+<td><code>%(album_slug)</code></td>
+<td>Album name as slug</td>
+</tr>
+<tr>
+<td><code>%(title)</code></td>
+<td>Track title</td>
+</tr>
+<tr>
+<td><code>%(title_slug)</code></td>
+<td>Track title as slug</td>
+</tr>
+<tr>
+<td><code>%(year)</code></td>
+<td>Release year (omitted if unavailable)</td>
+</tr>
+<tr>
+<td><code>%(track_number:FORMAT)</code></td>
+<td>Track number with inline padding (see above)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="recommended-configuration-with-a-tmdb-api-key">Recommended configuration (with a TMDB API key)</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">"movie_format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%(title_name) (%(title_year)) [%(tmdb_id)]/%(title_name) (%(title_year)) [%(tmdb_title)] [%(quality)]"</span><span class="p">,</span>
+<span class="nt">"episode_format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%(series_name) [%(tmdb_id)]/S%(tmdb_season_number:02d) - %(tmdb_season_name)/%(episode_name) - %(tmdb_episode_title) S%(season:02d)E%(episode:02d) [%(tmdb_title)] [%(quality)]"</span><span class="p">,</span>
+</code></pre></div>
+<h2 id="download">DOWNLOAD</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"DOWNLOAD"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"skip_download"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"auto_select"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"use_curl_cffi_segments"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"delay_after_download"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"thread_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"segment_delay_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"segment_delay_jitter_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"subtitle_resolve_workers"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"select_video"</span><span class="p">:</span><span class="w"> </span><span class="s2">"best"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"select_audio"</span><span class="p">:</span><span class="w"> </span><span class="s2">"it|en"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"select_subtitle"</span><span class="p">:</span><span class="w"> </span><span class="s2">"it|en"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"extract_embedded_cc"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"live_max_empty_polls"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"max_token_refresh_rounds"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"token_refresh_backoff_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mf">4.0</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"token_refresh_stall_rounds"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"embed_poster"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"cleanup_tmp_folder"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="performance-settings">Performance Settings</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auto_select</code></td>
+<td><code>true</code></td>
+<td>Automatically select streams based on filters. When <code>false</code>, enables interactive track selection before download</td>
+</tr>
+<tr>
+<td><code>delay_after_download</code></td>
+<td><code>0</code></td>
+<td>Delay (seconds) applied after each movie or episode download</td>
+</tr>
+<tr>
+<td><code>skip_download</code></td>
+<td><code>false</code></td>
+<td>Skip the download step and process existing files</td>
+</tr>
+<tr>
+<td><code>thread_count</code></td>
+<td><code>10</code></td>
+<td>Number of concurrent segment requests for a single stream</td>
+</tr>
+<tr>
+<td><code>subtitle_resolve_workers</code></td>
+<td><code>4</code></td>
+<td>Number of HLS subtitle renditions resolved/downloaded concurrently. <code>1</code> restores the original strictly-sequential behaviour</td>
+</tr>
+<tr>
+<td><code>extract_embedded_cc</code></td>
+<td><code>false</code></td>
+<td>HLS only: extract embedded CEA-608/708 closed captions (<code>EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS</code>, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download</td>
+</tr>
+<tr>
+<td><code>cleanup_tmp_folder</code></td>
+<td><code>true</code></td>
+<td>Remove temporary files after download</td>
+</tr>
+<tr>
+<td><code>embed_poster</code></td>
+<td><code>false</code></td>
+<td>Embed a poster/still into the downloaded file: the matching TMDB artwork if found, otherwise the site's own poster/still as a fallback</td>
+</tr>
+</tbody>
+</table>
+<h3 id="segment-throttling-live-streams-token-refresh">Segment Throttling, Live Streams &amp; Token Refresh</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>use_curl_cffi_segments</code></td>
+<td><code>false</code></td>
+<td>Download segments through <code>curl_cffi</code> (TLS/JA3 fingerprint impersonation) instead of the default Velora HTTP backend.</td>
+</tr>
+<tr>
+<td><code>segment_delay_seconds</code></td>
+<td><code>0</code></td>
+<td>Fixed delay inserted before each segment request — throttles download speed to stay under a CDN's rate limit</td>
+</tr>
+<tr>
+<td><code>segment_delay_jitter_seconds</code></td>
+<td><code>0</code></td>
+<td>Random jitter (0 to this value, seconds) added on top of <code>segment_delay_seconds</code> so requests aren't perfectly periodic</td>
+</tr>
+<tr>
+<td><code>live_max_empty_polls</code></td>
+<td><code>8</code></td>
+<td>Live HLS/DASH downloads only: number of consecutive polls with no new segments (or poll failures) before VibraVid concludes the live stream has ended and stops</td>
+</tr>
+<tr>
+<td><code>max_token_refresh_rounds</code></td>
+<td><code>10</code></td>
+<td>Maximum retry rounds when segments fail mid-download (e.g. the CDN manifest token expired -&gt; HTTP 403, or a transient 503) — VibraVid re-requests a fresh manifest/token and retries just the failed segments</td>
+</tr>
+<tr>
+<td><code>token_refresh_backoff_seconds</code></td>
+<td><code>4.0</code></td>
+<td>Base backoff between token-refresh rounds; actual wait is <code>backoff × round number</code>, capped at 20s</td>
+</tr>
+<tr>
+<td><code>token_refresh_stall_rounds</code></td>
+<td><code>3</code></td>
+<td>Give up early if this many consecutive refresh rounds make no progress (same or more segments still failing), instead of exhausting all <code>max_token_refresh_rounds</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="stream-selection-filters">Stream Selection Filters</h3>
+<p>Use <code>select_video</code>, <code>select_audio</code>, and <code>select_subtitle</code> to control which tracks are downloaded.</p>
+<p><strong>Video (<code>select_video</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"best"</code></td>
+<td>Best available resolution</td>
+</tr>
+<tr>
+<td><code>"worst"</code></td>
+<td>Worst available resolution</td>
+</tr>
+<tr>
+<td><code>"1080"</code></td>
+<td>Exact height (falls back to worst if not found)</td>
+</tr>
+<tr>
+<td><code>"1080,H265"</code></td>
+<td>Height + codec constraint</td>
+</tr>
+<tr>
+<td><code>"1080\|best"</code></td>
+<td>Height with fallback to best</td>
+</tr>
+<tr>
+<td><code>"1080\|best,H265"</code></td>
+<td>Height + codec with fallback to best</td>
+</tr>
+<tr>
+<td><code>"b=8000:f=best"</code></td>
+<td>Bitrate cap (kbps) — best within range. Useful when the highest-bitrate rendition isn't decryptable with your DRM device/security level</td>
+</tr>
+<tr>
+<td><code>"b=1000-8000:f=best"</code></td>
+<td>Bitrate range (kbps) — best within range</td>
+</tr>
+<tr>
+<td><code>"b=1000-:f=best"</code></td>
+<td>Bitrate floor only (no upper bound) — best within range</td>
+</tr>
+<tr>
+<td><code>"false"</code></td>
+<td>Skip video</td>
+</tr>
+</tbody>
+</table>
+<p>Native <code>key=value</code> filters combine multiple constraints (resolution, codec, bitrate, id, fallback) in one string, joined by <code>:</code> — keys are <code>r=</code> (resolution), <code>c=</code> (codec), <code>b=</code> (bitrate), <code>i=</code> (manifest id, regex), <code>f=</code> (fallback: <code>best</code>/<code>worst</code>/<code>all</code>), e.g. <code>"r=1080:c=hvc1:f=best"</code>.</p>
+<p><strong>Audio (<code>select_audio</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+<th>If not found</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"best"</code></td>
+<td>Best bitrate per language</td>
+<td>Selects best across all</td>
+</tr>
+<tr>
+<td><code>"worst"</code></td>
+<td>Worst bitrate per language</td>
+<td>Selects worst across all</td>
+</tr>
+<tr>
+<td><code>"all"</code></td>
+<td>All audio tracks</td>
+<td>Downloads all</td>
+</tr>
+<tr>
+<td><code>"default"</code></td>
+<td>Streams marked as default</td>
+<td>DROP</td>
+</tr>
+<tr>
+<td><code>"non-default"</code></td>
+<td>Streams NOT marked as default</td>
+<td>DROP</td>
+</tr>
+<tr>
+<td><code>"ita"</code></td>
+<td>Italian audio</td>
+<td>DROP</td>
+</tr>
+<tr>
+<td><code>"ita\|it"</code></td>
+<td>Pipe-separated language codes</td>
+<td>DROP if none found</td>
+</tr>
+<tr>
+<td><code>"ita,MP4A"</code></td>
+<td>Language + codec</td>
+<td>DROP if combination not found</td>
+</tr>
+<tr>
+<td><code>"ita\|best"</code></td>
+<td>Language with fallback to best</td>
+<td>Fallback to best</td>
+</tr>
+<tr>
+<td><code>"ita\|best,AAC"</code></td>
+<td>Language + codec with fallback</td>
+<td>Fallback to best</td>
+</tr>
+<tr>
+<td><code>"b=64-192:f=best"</code></td>
+<td>Bitrate range (kbps) — best within range</td>
+<td>Ignores range if no match</td>
+</tr>
+<tr>
+<td><code>"1ita\|2eng"</code></td>
+<td>Numbered slots — exclusive priority</td>
+<td>Skips the whole download</td>
+</tr>
+<tr>
+<td><code>"false"</code></td>
+<td>Skip audio</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>Same native keys as video, plus <code>l=</code> for language, e.g. <code>"l=ita:c=aac:f=best"</code> (language + codec + fallback).</p>
+<p><strong>Subtitle (<code>select_subtitle</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"all"</code></td>
+<td>All subtitles</td>
+</tr>
+<tr>
+<td><code>"default"</code></td>
+<td>Streams marked as default</td>
+</tr>
+<tr>
+<td><code>"non-default"</code></td>
+<td>Streams NOT marked as default</td>
+</tr>
+<tr>
+<td><code>"ita\|eng"</code></td>
+<td>Pipe-separated language codes</td>
+</tr>
+<tr>
+<td><code>"ita_forced"</code></td>
+<td>Language with flag (<code>forced</code>, <code>cc</code>, <code>sdh</code>)</td>
+</tr>
+<tr>
+<td><code>"ita_forced\|eng_cc"</code></td>
+<td>Multiple languages with flags</td>
+</tr>
+<tr>
+<td><code>"false"</code></td>
+<td>Skip subtitles</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Companion Dolby Vision (<code>select_video</code> only):</strong></p>
+<p>Add <code>&amp;dv=&lt;quality&gt;</code> to the video filter to also download a Dolby Vision companion alongside the main (non-DV) video. <code>&lt;quality&gt;</code> is <code>best</code>/<code>worst</code> (default <code>worst</code>) or an explicit height override (e.g. <code>&amp;dv=720</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"best&amp;dv"</code></td>
+<td>Best non-DV video + DV companion at worst quality</td>
+</tr>
+<tr>
+<td><code>"1080&amp;dv=best"</code></td>
+<td>1080p main video + DV companion at best quality, matched to 1080p when available</td>
+</tr>
+</tbody>
+</table>
+<p>When <code>&lt;quality&gt;</code> is <code>best</code>/<code>worst</code>, the companion is picked from DV streams at the <strong>same resolution</strong> as the main video (falling back to the nearest available resolution if none matches exactly). An explicit height override (<code>&amp;dv=720</code>) bypasses this matching and always targets that height directly.</p>
+<p>The DV track is muxed as an additional video track via mkvmerge.</p>
+<h2 id="process-post-processing">PROCESS (Post-Processing)</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"PROCESS"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"engine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ffmpeg"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"use_gpu"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"param_video"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"-c:v"</span><span class="p">,</span><span class="w"> </span><span class="s2">"libx265"</span><span class="p">,</span><span class="w"> </span><span class="s2">"-crf"</span><span class="p">,</span><span class="w"> </span><span class="s2">"28"</span><span class="p">,</span><span class="w"> </span><span class="s2">"-preset"</span><span class="p">,</span><span class="w"> </span><span class="s2">"medium"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"param_audio"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"-c:a"</span><span class="p">,</span><span class="w"> </span><span class="s2">"libopus"</span><span class="p">,</span><span class="w"> </span><span class="s2">"-b:a"</span><span class="p">,</span><span class="w"> </span><span class="s2">"128k"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"param_song"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">    </span><span class="nt">"param_final"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"-c"</span><span class="p">,</span><span class="w"> </span><span class="s2">"copy"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"audio_order"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">    </span><span class="nt">"subtitle_order"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">    </span><span class="nt">"subtitle_disposition_language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"it-it_forced"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"merge_audio"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"merge_subtitle"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"force_subtitle"</span><span class="p">:</span><span class="w"> </span><span class="s2">"auto"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"extension"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mkv"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>engine</code></td>
+<td><code>"ffmpeg"</code></td>
+<td>Muxing engine used to combine video, audio and subtitle tracks. <code>ffmpeg</code> or <code>mkvmerge</code> (<code>mkvmerge</code> requires a <strong>full installation</strong>)</td>
+</tr>
+<tr>
+<td><code>use_gpu</code></td>
+<td><code>false</code></td>
+<td>Enable hardware acceleration. GPU type is auto-detected at runtime: <code>cuda</code> (NVIDIA), <code>qsv</code> (Intel), <code>vaapi</code> (AMD)</td>
+</tr>
+<tr>
+<td><code>param_video</code></td>
+<td>H.265/HEVC</td>
+<td>FFmpeg video encoding parameters, e.g. <code>["-c:v", "libx265", "-crf", "28", "-preset", "medium"]</code></td>
+</tr>
+<tr>
+<td><code>param_audio</code></td>
+<td>Opus 128k</td>
+<td>FFmpeg audio encoding parameters, e.g. <code>["-c:a", "libopus", "-b:a", "128k"]</code></td>
+</tr>
+<tr>
+<td><code>param_song</code></td>
+<td><code>[]</code></td>
+<td>FFmpeg re-encode parameters applied to downloaded music tracks (e.g. <code>monochrome</code>).</td>
+</tr>
+<tr>
+<td><code>param_final</code></td>
+<td><code>["-c", "copy"]</code></td>
+<td>Final FFmpeg parameters. When set, takes full precedence over <code>param_video</code> and <code>param_audio</code></td>
+</tr>
+<tr>
+<td><code>audio_order</code></td>
+<td><code>[]</code></td>
+<td>Order of audio tracks in the output, e.g. <code>["ita", "eng"]</code></td>
+</tr>
+<tr>
+<td><code>subtitle_order</code></td>
+<td><code>[]</code></td>
+<td>Order of subtitle tracks in the output, e.g. <code>["ita", "eng"]</code></td>
+</tr>
+<tr>
+<td><code>merge_audio</code></td>
+<td><code>true</code></td>
+<td>Merge all audio tracks into a single output file</td>
+</tr>
+<tr>
+<td><code>merge_subtitle</code></td>
+<td><code>true</code></td>
+<td>Merge all subtitle tracks into a single output file</td>
+</tr>
+<tr>
+<td><code>subtitle_disposition_language</code></td>
+<td><code>"it-it_forced"</code></td>
+<td>Mark a specific subtitle track as default/forced</td>
+</tr>
+<tr>
+<td><code>extension</code></td>
+<td><code>"mkv"</code></td>
+<td>Output container format: <code>"mkv"</code> or <code>"mp4"</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>force_subtitle</code></strong> — Controls how subtitles are handled before remuxing:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"auto"</code> (default)</td>
+<td>Subtitles are renamed/converted based on their detected format. VTT files are sanitized (unmatched <code>&lt;</code> replaced) to prevent data loss when muxed as SRT</td>
+</tr>
+<tr>
+<td><code>"copy"</code></td>
+<td>No conversion or renaming — the original file is muxed as-is. Also skips VTT sanitization</td>
+</tr>
+<tr>
+<td><code>"srt"</code> / <code>"vtt"</code> / <code>"ass"</code></td>
+<td>Force-convert all subtitles to the specified format using FFmpeg, with sanitization applied for <code>vtt</code></td>
+</tr>
+</tbody>
+</table>
+<p>See <code>VibraVid/core/processors/helper/ex_sub.py</code> in the repository for conversion logic.</p>
+<h2 id="requests">REQUESTS</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"REQUESTS"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"timeout"</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"max_retry"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"verify"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"use_proxy"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"proxy_scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"scrap+down"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"proxy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"http"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:8888"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"https"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:8888"</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"bypasser_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:8192"</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timeout</code></td>
+<td><code>15</code></td>
+<td>Request timeout in seconds</td>
+</tr>
+<tr>
+<td><code>max_retry</code></td>
+<td><code>8</code></td>
+<td>Maximum retry attempts for failed requests</td>
+</tr>
+<tr>
+<td><code>verify</code></td>
+<td><code>true</code></td>
+<td>Verify TLS/SSL certificates on outgoing requests and segment downloads.</td>
+</tr>
+<tr>
+<td><code>use_proxy</code></td>
+<td><code>false</code></td>
+<td>Enable proxy support for HTTP requests</td>
+</tr>
+<tr>
+<td><code>proxy_scope</code></td>
+<td><code>scrap+down</code></td>
+<td>Where the proxy is applied: <code>scrap</code>, <code>down</code>, or <code>scrap+down</code> (see below)</td>
+</tr>
+<tr>
+<td><code>proxy.http</code></td>
+<td>—</td>
+<td>Proxy URL for HTTP targets</td>
+</tr>
+<tr>
+<td><code>proxy.https</code></td>
+<td>—</td>
+<td>Proxy URL for HTTPS targets</td>
+</tr>
+<tr>
+<td><code>bypasser_url</code></td>
+<td><code>http://localhost:8192</code></td>
+<td>Endpoint of the <strong>bypasser</strong> sidecar that solves monochrome.tf's Cloudflare Turnstile widget for the <strong>monochrome</strong> Amazon Music download. <strong>Required</strong> — there is no in-process fallback. Keep the localhost default for local runs; in Docker the <code>BYPASSER_URL</code> env in <code>docker-compose.yml</code> overrides it to the <code>bypasser</code> service.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Proxy scope</strong> — when <code>use_proxy</code> is <code>true</code>, <code>proxy_scope</code> decides <em>which</em> traffic goes through the proxy:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scrap</code></td>
+<td>Only VibraVid's own HTTP client (search, metadata, manifests, DRM licenses)</td>
+</tr>
+<tr>
+<td><code>down</code></td>
+<td>Only the Velora download engine (media/subtitle segment downloads)</td>
+</tr>
+<tr>
+<td><code>scrap+down</code></td>
+<td>Both (default)</td>
+</tr>
+</tbody>
+</table>
+<p>Any invalid value falls back to <code>scrap+down</code>. Override per run from the CLI with <code>--proxy-scope scrap|down|scrap+down</code>.</p>
+<p><strong>SOCKS5 support</strong> — the <code>http</code>/<code>https</code> keys refer to the <strong>target</strong> URL scheme, not the proxy protocol. The value can be an HTTP <strong>or</strong> a SOCKS5 proxy URL. Use <code>socks5h://</code> (with the <code>h</code>) to resolve DNS through the proxy — recommended for geo-restricted sites and to avoid DNS leaks. Authentication is supported via <code>user:pass@</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"proxy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"http"</span><span class="p">:</span><span class="w">  </span><span class="s2">"socks5h://localhost:1080"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"https"</span><span class="p">:</span><span class="w"> </span><span class="s2">"socks5h://user:pass@localhost:1080"</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="drm">DRM</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"DRM"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"use_cdm"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"prefer_remote_cdm"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"bypass_vault_cache"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"log_engine_output"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"vault"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"vault_1"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://drm-db.server66.workers.dev"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"token"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>use_cdm</code></td>
+<td><code>true</code></td>
+<td>Enable CDM-based key extraction. When <code>false</code>, only database/vault lookups are attempted</td>
+</tr>
+<tr>
+<td><code>prefer_remote_cdm</code></td>
+<td><code>false</code></td>
+<td>Prefer remote CDM services (see <a href="#remote-cdm-services">Remote CDM Services</a> below) over local device files</td>
+</tr>
+<tr>
+<td><code>bypass_vault_cache</code></td>
+<td><code>false</code></td>
+<td>Skip the DRM key vault lookup and force a fresh CDM license request every run, instead of reusing a previously-seen key.</td>
+</tr>
+<tr>
+<td><code>log_engine_output</code></td>
+<td><code>false</code></td>
+<td>Log the decrypt engine's own stdout/stderr output — equivalent to the CLI's <code>--log-decryptor-output</code>. Off by default since it's verbose; useful when a decrypt is failing and you need the raw engine output</td>
+</tr>
+<tr>
+<td><code>vault</code></td>
+<td>—</td>
+<td>Optional external DRM key store(s), queried before CDM extraction</td>
+</tr>
+</tbody>
+</table>
+<h3 id="multiple-self-hosted-drm-vaults">Multiple / self-hosted DRM vaults</h3>
+<p><code>vault</code> isn't limited to the single <code>vault_1</code> entry shown above — add as many named entries as
+you want. Each configured vault is queried in the order it's declared, stopping as soon as every
+requested KID has been resolved; when a key is found in one vault it's written back to every
+<em>other</em> configured vault (never back to the one it came from, to avoid a pointless round-trip):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"vault"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"vault_1"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://drm-db.server66.workers.dev"</span><span class="p">,</span><span class="w"> </span><span class="nt">"token"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"myvault"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://drm.example.com"</span><span class="p">,</span><span class="w"> </span><span class="nt">"token"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my-secret-token"</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Any name other than <code>vault_1</code> and the reserved <code>vault_2</code> is treated as a self-hosted vault
+speaking the same simple REST contract as <code>vault_1</code> — implement these two Bearer-token-authenticated
+JSON endpoints and VibraVid can read/write keys from it, no code changes required on the VibraVid
+side:</p>
+<ul>
+<li><code>POST {url}/get-keys</code> — body <code>{"kids": ["&lt;kid_hex&gt;", ...], "license_url": "&lt;optional&gt;"}</code> (or
+  <code>{"license_url": ..., "pssh": ...}</code> for a PSSH-scoped lookup) → <code>{"keys": [{"kid_key": "&lt;kid&gt;:&lt;key&gt;"}, ...]}</code></li>
+<li><code>POST {url}/save-keys</code> — body <code>{"license_url": ..., "pssh": ..., "keys": [{"kid": ..., "key": ..., "label": "&lt;optional&gt;"}, ...]}</code> → <code>{"added": &lt;int&gt;}</code></li>
+</ul>
+<p><strong>Config key vs. console label</strong>: <code>vault_1</code> and <code>vault_2</code> are the <em>config keys</em> (<code>vault_2</code> is
+reserved for a JSON-RPC-protocol vault, distinct from the <code>vault_1</code>/custom REST protocol above);
+each vault also carries its own internal name used in log/console output (<code>Bypassing cached key
+... from &lt;name&gt;</code>) — the <code>vault_1</code> entry logs as <code>claudio</code>, <code>vault_2</code> logs as <code>lab</code>. A custom
+entry (<code>myvault</code> above) logs under the same name you gave it in <code>DRM.vault</code>, so there's no
+separate label to know about for those.</p>
+<p>For a backend that doesn't speak this REST contract (a different transport, auth scheme, or
+response shape — like <code>vault_2</code>'s JSON-RPC), see <a href="../vault/">Adding a Vault</a> for how to subclass
+<code>BaseVault</code> instead.</p>
+<h3 id="remote-cdm-services">Remote CDM Services</h3>
+<p>When remote CDM services are available, add one or both of the following blocks to <code>config.json</code>:</p>
+<p><strong>Widevine:</strong>
+<div class="highlight"><pre><span></span><code><span class="nt">"widevine"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"device_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ANDROID"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"system_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">22590</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"security_level"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://cdrm-project.com/remotecdm/widevine"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CDRM"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"device_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"public"</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>device_type</code></td>
+<td>Device model: <code>"ANDROID"</code> or <code>"CHROME"</code></td>
+</tr>
+<tr>
+<td><code>system_id</code></td>
+<td>Widevine system ID (default <code>22590</code> for Android)</td>
+</tr>
+<tr>
+<td><code>security_level</code></td>
+<td>Security level 1–3 (3 = L3)</td>
+</tr>
+<tr>
+<td><code>host</code></td>
+<td>Remote CDM server URL</td>
+</tr>
+<tr>
+<td><code>secret</code></td>
+<td>Authentication secret</td>
+</tr>
+<tr>
+<td><code>device_name</code></td>
+<td>Device identifier registered on the remote service</td>
+</tr>
+</tbody>
+</table>
+<p><strong>PlayReady:</strong>
+<div class="highlight"><pre><span></span><code><span class="nt">"playready"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"device_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"public"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"security_level"</span><span class="p">:</span><span class="w"> </span><span class="mi">3000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://cdrm-project.com/remotecdm/playready"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CDRM"</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>device_name</code></td>
+<td>Device identifier registered on the remote service</td>
+</tr>
+<tr>
+<td><code>security_level</code></td>
+<td>Security level (e.g. <code>3000</code> for SL3000)</td>
+</tr>
+<tr>
+<td><code>host</code></td>
+<td>Remote CDM server URL</td>
+</tr>
+<tr>
+<td><code>secret</code></td>
+<td>Authentication secret</td>
+</tr>
+</tbody>
+</table>
+<h3 id="local-cdm-devices">Local CDM Devices</h3>
+<p>To use local CDM device files instead of remote services, place them in the binary directory resolved at runtime:</p>
+<ul>
+<li>Default on Linux: <code>~/.local/bin/binary</code></li>
+<li>
+<p>Override with <code>VIBRAVID_BINARY_DIR</code> if you need a different path, for example <code>/home/user_name/.local/bin/binary</code></p>
+</li>
+<li>
+<p><strong>Widevine:</strong> <code>.wvd</code> file (from pywidevine)</p>
+</li>
+<li><strong>PlayReady:</strong> <code>.prd</code> file (from pyplayready)</li>
+</ul>
+<p>Set <code>prefer_remote_cdm</code> to <code>false</code> and local devices will be picked up automatically.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.indexes", "navigation.expand", "navigation.top", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
