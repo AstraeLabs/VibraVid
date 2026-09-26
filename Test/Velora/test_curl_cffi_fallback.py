@@ -81,6 +81,7 @@ def test_stop_check_interrupts_in_flight_fallback():
                 tasks,
                 plan,
                 done_before=0,
+                bytes_before=0,
                 total=16,
                 progress_cb=None,
                 event_cb=None,
@@ -105,6 +106,7 @@ def test_progress_offset_never_goes_backwards():
             out_dir = Path(tmp)
             fallback_count = 16
             done_before = 5
+            bytes_before = 4096
             total = done_before + fallback_count
             tasks = _make_tasks(base_url, out_dir, count=fallback_count)
             plan = {"headers": {}, "retry_count": 0, "timeout_seconds": 5.0, "concurrency": 4}
@@ -118,6 +120,7 @@ def test_progress_offset_never_goes_backwards():
                 tasks,
                 plan,
                 done_before=done_before,
+                bytes_before=bytes_before,
                 total=total,
                 progress_cb=_progress_cb,
                 event_cb=None,
@@ -136,6 +139,15 @@ def test_progress_offset_never_goes_backwards():
 
             assert all(call[1] == total for call in progress_calls), (
                 "progress_cb must always report the whole-stream total, not the fallback-local total"
+            )
+
+            seen_bytes = [call[2] for call in progress_calls]
+            assert all(b >= bytes_before for b in seen_bytes), (
+                f"progress reported bytes below bytes_before={bytes_before}: {seen_bytes}"
+            )
+            assert seen_bytes == sorted(seen_bytes), f"byte count went backwards: {seen_bytes}"
+            assert seen_bytes[-1] == bytes_before + len(SEGMENT_BODY) * fallback_count, (
+                "final byte count must equal bytes_before plus all fallback segment bytes"
             )
     finally:
         server.shutdown()
@@ -159,6 +171,7 @@ def test_errors_are_forwarded_to_event_cb():
                 tasks,
                 plan,
                 done_before=0,
+                bytes_before=0,
                 total=6,
                 progress_cb=None,
                 event_cb=events.append,

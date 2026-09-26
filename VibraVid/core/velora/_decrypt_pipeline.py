@@ -86,6 +86,7 @@ def _run_curl_cffi_fallback(
     fallback_tasks: list[dict],
     fallback_plan: dict,
     done_before: int,
+    bytes_before: int,
     total: int,
     progress_cb: Callable[..., None] | None,
     event_cb: Callable[[dict[str, Any]], None] | None,
@@ -97,7 +98,7 @@ def _run_curl_cffi_fallback(
 
     def _offset_progress(done: int, _fallback_total: int, total_bytes: int, speed: float) -> None:
         if progress_cb:
-            progress_cb(done_before + done, total, total_bytes, speed)
+            progress_cb(done_before + done, total, bytes_before + total_bytes, speed)
 
     plan = dict(fallback_plan)
     plan["tasks"] = fallback_tasks
@@ -721,11 +722,13 @@ class DecryptPipelineMixin:
 
         _first_bytes_logged = False
         _prev_estimated = [0]
+        _last_total_bytes = [0]
 
         def _progress(
             done: int, total_: int, total_bytes: int, speed_bps: float, speed_label: str | None = None
         ) -> None:
             nonlocal _first_bytes_logged
+            _last_total_bytes[0] = total_bytes
             if not _first_bytes_logged and total_bytes > 0:
                 _first_bytes_logged = True
                 logger.info(
@@ -1521,10 +1524,12 @@ class DecryptPipelineMixin:
 
                 logger.warning(f"{len(fallback_tasks)} segment(s) exhausted the primary backend's retries -- falling back to curl_cffi for up to {RETRY_COUNT} more attempt(s) each")
                 done_before_fallback = len(paths)
+                bytes_before_fallback = _last_total_bytes[0]
                 recovered_paths = _run_curl_cffi_fallback(
                     fallback_tasks,
                     fallback_plan,
                     done_before_fallback,
+                    bytes_before_fallback,
                     total,
                     _progress,
                     _handle_download_event,
