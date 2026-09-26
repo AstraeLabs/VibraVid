@@ -10,6 +10,9 @@ from VibraVid.core.utils.codec import get_codec_extension
 from VibraVid.setup import get_ffmpeg_path, get_ffprobe_path
 
 logger = logging.getLogger(__name__)
+_UNSUPPORTED_FFMPEG_AUDIO_TAGS = {
+    "dtsx"
+}
 
 
 def audio_ext_for_codec(codec: str) -> str | None:
@@ -63,6 +66,29 @@ def _detect_audio_codec(path: str) -> str:
     except Exception:
         logger.exception(f"[audio] codec probe failed for {os.path.basename(path)}")
         return ""
+
+
+def has_unsupported_ffmpeg_audio_codec(audio_tracks: list[dict[str, str]]) -> bool:
+    """Check if any of the audio tracks have an unsupported codec tag according to ffmpeg."""
+    ffprobe_path = get_ffprobe_path()
+    if not ffprobe_path:
+        return False
+
+    for track in audio_tracks:
+        path = track.get("path")
+        if not path or not os.path.exists(path):
+            continue
+
+        cmd = [ffprobe_path, "-v", "error", "-show_entries", "stream=codec_tag_string", "-of", "csv=p=0", path]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace")
+        tags = {line.strip().lower() for line in result.stdout.splitlines() if line.strip()}
+        hit = tags & _UNSUPPORTED_FFMPEG_AUDIO_TAGS
+
+        if hit:
+            logger.info(f"Detected unsupported audio codec tag {hit} in {os.path.basename(path)}")
+            return True
+        
+    return False
 
 
 def fix_container_mismatch(path: str) -> str:

@@ -23,7 +23,13 @@ from VibraVid.utils import config_manager, internet_manager
 from VibraVid.utils.image_cache import get_cached_tmdb_image
 
 from .capture import capture_ffmpeg_real_time
-from .helper.audio import check_duration_v_a, detect_audio_offset, get_video_duration, has_audio
+from .helper.audio import (
+    check_duration_v_a,
+    detect_audio_offset,
+    get_video_duration,
+    has_audio,
+    has_unsupported_ffmpeg_audio_codec,
+)
 from .helper.chapters import (
     dedupe_chapters as _dedupe_chapters,
 )
@@ -817,6 +823,12 @@ def join_media(
         if chapters[0]["seconds"] > 0:
             chapters = [{"name": "Intro", "seconds": 0}] + chapters
         _persist_chapters_file(chapters, os.path.dirname(video_path))
+
+    if MUX_ENGINE != "mkvmerge" and get_mkvmerge_path() and has_unsupported_ffmpeg_audio_codec(audio_tracks):
+        logger.warning("Audio track uses a codec ffmpeg's demuxer can't parse (e.g. DTS:X) -- using mkvmerge directly")
+        base, _ = os.path.splitext(out_path)
+        out_path = base + ".mkv"
+        return _join_media_mkvmerge(video_path, audio_tracks, subtitle_tracks, out_path, chapters)
 
     if MUX_ENGINE == "mkvmerge":
         base, _ = os.path.splitext(out_path)
