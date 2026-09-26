@@ -39,6 +39,7 @@ _PREFERRED_ORDER = [
     "homegardentv",
     "foodnetwork",
     "tubitv",
+    "plutotv",
     "cinezo",
     "altadefinizione",
     "eurostreaming",
