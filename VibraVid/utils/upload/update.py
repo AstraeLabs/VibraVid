@@ -175,20 +175,11 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
         return {"success": False, "message": f"Could not fetch the latest {tool} version."}
 
     local = binary_paths.get_local_tool_version(tool)
-    if local is None:
-        binary_paths.set_local_tool_version(tool, remote)
-        return {
-            "success": True,
-            "updated": False,
-            "local": None,
-            "latest": remote,
-            "message": f"{tool} version baseline recorded ({remote}).",
-        }
 
     managed_dir = os.path.abspath(binary_paths.get_binary_directory())
     ext = ".exe" if binary_paths.system == "windows" else ""
 
-    if local == remote:
+    if local is not None and local == remote:
         missing = [f"{name}{ext}" for name in exec_names if not binary_paths.get_binary_path(tool, f"{name}{ext}")]
         if not missing:
             logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
@@ -218,7 +209,10 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
             ),
         }
 
-    console.print(f"[#FFD60A]{tool} outdated (local: {local} -> latest: {remote}), updating...")
+    if local is None:
+        console.print(f"[#FFD60A]{tool} local version unknown, verifying installation against latest ({remote})...")
+    else:
+        console.print(f"[#FFD60A]{tool} outdated (local: {local} -> latest: {remote}), updating...")
 
     updated_any = False
 
@@ -243,19 +237,30 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
         if binary_paths.download_binary(tool, binary_name):
             updated_any = True
 
+    # Only record the remote version once it has actually been installed/verified;
+    # never baseline an unknown local version against a binary we haven't confirmed.
     if updated_any:
         binary_paths.set_local_tool_version(tool, remote)
+
+    if local is None:
+        message = (
+            f"{tool} installation verified ({remote})."
+            if updated_any
+            else f"{tool}: nothing installed locally and installation failed."
+        )
+    else:
+        message = (
+            f"{tool} updated: {local} -> {remote}."
+            if updated_any
+            else f"{tool}: nothing installed locally to update."
+        )
 
     return {
         "success": True,
         "updated": updated_any,
         "local": local,
         "latest": remote,
-        "message": (
-            f"{tool} updated: {local} -> {remote}."
-            if updated_any
-            else f"{tool}: nothing installed locally to update."
-        ),
+        "message": message,
     }
 
 

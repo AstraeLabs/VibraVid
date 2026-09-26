@@ -10,7 +10,6 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +35,7 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
 from ..decryptor._segment_crypto import decrypt_aes128_file
-from .curl_bridge import _fetch_one
+from .curl_bridge import run_download_plan_curl_cffi
 from .util._cenc_init import strip_cenc_signaling
 from .util._stream_helpers import (
     build_retry_segments,
@@ -81,6 +80,36 @@ STREAMING_MUX_MAX_WAIT_SECONDS = 900.0
 STREAMING_MUX_SECONDS_PER_SEGMENT = 0.2
 STREAMING_MUX_MIN_THROUGHPUT_BPS = 1_048_576
 _LIVE_MERGE_BUFSIZE = 2 * 1024 * 1024
+
+
+def _run_curl_cffi_fallback(
+    fallback_tasks: list[dict],
+    fallback_plan: dict,
+    done_before: int,
+    total: int,
+    progress_cb: Callable[..., None] | None,
+    event_cb: Callable[[dict[str, Any]], None] | None,
+    stop_check: Callable[[], bool] | None,
+) -> list[Path]:
+    """Run curl_cffi recovery downloads for segments that exhausted the primary backend's retries, delegating to the shared runner so cancellation and progress reporting behave like the primary path."""
+    if not fallback_tasks:
+        return []
+
+    def _offset_progress(done: int, _fallback_total: int, total_bytes: int, speed: float) -> None:
+        if progress_cb:
+            progress_cb(done_before + done, total, total_bytes, speed)
+
+    plan = dict(fallback_plan)
+    plan["tasks"] = fallback_tasks
+    plan.setdefault("concurrency", min(8, max(1, len(fallback_tasks))))
+
+    results = run_download_plan_curl_cffi(
+        plan,
+        progress_cb=_offset_progress,
+        event_cb=event_cb,
+        stop_check=stop_check,
+    )
+    return [Path(item["path"]) for item in results if item.get("path")]
 
 
 def _estimate_livemux_wait_seconds(stream: Any) -> float:
@@ -1491,18 +1520,20 @@ class DecryptPipelineMixin:
                 }
 
                 logger.warning(f"{len(fallback_tasks)} segment(s) exhausted the primary backend's retries -- falling back to curl_cffi for up to {RETRY_COUNT} more attempt(s) each")
-                recovered = 0
-                with ThreadPoolExecutor(max_workers=min(8, max(1, len(fallback_tasks)))) as executor:
-                    futures = {executor.submit(_fetch_one, task, fallback_plan): task for task in fallback_tasks}
-                    for future in as_completed(futures):
-                        result = future.result()
-                        if result.get("event") == "completed" and result.get("path"):
-                            paths.append(Path(result["path"]))
-                            recovered += 1
-                            _handle_download_event(result)
+                done_before_fallback = len(paths)
+                recovered_paths = _run_curl_cffi_fallback(
+                    fallback_tasks,
+                    fallback_plan,
+                    done_before_fallback,
+                    total,
+                    _progress,
+                    _handle_download_event,
+                    stream_stop,
+                )
+                paths.extend(recovered_paths)
 
-                if recovered:
-                    logger.info(f"curl_cffi fallback recovered {recovered}/{len(fallback_tasks)} segment(s)")
+                if recovered_paths:
+                    logger.info(f"curl_cffi fallback recovered {len(recovered_paths)}/{len(fallback_tasks)} segment(s)")
 
         # Token-refresh retry: when segments fail (e.g. the CDN manifest token expired mid-download -> HTTP 403, or a transient CDN-side 503 that clears up after a short wait).
         if seg_url_refresh_fn and not stream_stop():
