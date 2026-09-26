@@ -42,7 +42,6 @@ _PREFERRED_ORDER = [
     "cinezo",
     "altadefinizione",
     "eurostreaming",
-    "amazon_music",
 ]
 _OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus"}
 _SITE_CATEGORIES: dict[str, str] = {}
