@@ -101,6 +101,7 @@ class BaseMediaDownloader:
         self.external_other_tracks: list = []
         self.other_tracks: list = []
         self.custom_filters: dict | None = None
+        self.display_selected_only: bool = False
         self.license_url: str | None = None
         self.drm_type: str | None = None
 
@@ -195,6 +196,8 @@ class BaseMediaDownloader:
             selector = InteractiveStreamSelector(self.streams, window_size=15)
             selector.run()
 
+        self._register_dv_companion()
+
         for ext in self.external_subtitles:
             lang = ext.get("language", "")
             selected = self._ext_track_matches(ext, "subtitle")
@@ -254,7 +257,46 @@ class BaseMediaDownloader:
 
         if show_table and self.streams:
             console = Console(force_terminal=True if platform.system().lower() != "windows" else None)
-            console.print(build_table(self.streams))
+            console.print(build_table(self._streams_for_display()))
+
+        return self.streams
+
+    def _register_dv_companion(self) -> None:
+        """Registra il companion Dolby Vision (`&dv`) come other_track di tipo `video:dv`.
+
+        `StreamSelector` marca il companion con `dv_companion=True` ma lo lascia
+        `selected=False`: nessun downloader lo prende, quindi su HLS il DV non arrivava
+        mai a `build_hybrid_output()` e il mux produceva solo HEVC/HDR10. DASH e
+        Generic fanno questa registrazione (vedi `DASH_Downloader.start`), HLI no.
+
+        Registrandolo in `other_tracks` il resto della catena si collega da solo: il
+        fast-path streaming_mux si disattiva quando `other_tracks` e' popolato,
+        `download_other_tracks()` scarica la variante DV in una dir isolata e
+        `join_media()` chiama `build_hybrid_output()` per l'output ibrido DV + fallback.
+        """
+        companion = next((s for s in self.streams if getattr(s, "dv_companion", False)), None)
+        if companion is None:
+            return
+        if any((t.get("type") or "").strip().lower() == "video:dv" for t in self.other_tracks):
+            return
+
+        quality = str(getattr(companion, "dv_companion_quality", "") or "worst").strip() or "worst"
+        self.other_tracks = [*self.other_tracks, {"type": "video:dv", "url": self.url, "quality": quality}]
+        logger.info("&dv: companion DV registrato come other_track (quality=%r, id=%s)", quality, companion.id)
+
+    def _streams_for_display(self) -> list[Stream]:
+        """Stream da mostrare in tabella.
+
+        Con `display_selected_only` la tabella e' l'anteprioma della selezione: mostra solo
+        le tracce che `StreamSelector` ha gia' scelto (una per gruppo di filtri), quindi
+        quello che si vede e' esattamente quello che verra' scaricato, e resta coerente
+        anche quando l'unica traccia disponibile per una lingua e' stereo. Selezione e
+        download usano comunque `self.streams` per intero.
+        """
+        if self.display_selected_only:
+            selected = [s for s in self.streams if getattr(s, "selected", False)]
+            if selected:
+                return selected
 
         return self.streams
 
@@ -269,16 +311,22 @@ class BaseMediaDownloader:
         v_cfg = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
         a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
         s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+
+        # Le preferenze vengono da config.json (chiavi DOWNLOAD/prefer_*): un servizio puo'
+        # sovrascriverle con custom_filters, ma di default il comportamento e' uguale per tutti.
+        def _pref(key: str) -> bool:
+            return bool(f.get(key, config_manager.config.get_bool("DOWNLOAD", key, default=False)))
+
         selector = StreamSelector(
             v_cfg,
             a_cfg,
             s_cfg,
             formatter=StreamSelectorFormatter(),
-            prefer_h265=bool(f.get("prefer_h265")),
-            prefer_hdr10=bool(f.get("prefer_hdr10")),
-            prefer_drm=bool(f.get("prefer_drm")),
-            require_drm=bool(f.get("require_drm")),
-            minimum_video_height=int(f.get("minimum_video_height") or 0),
+            prefer_h265=_pref("prefer_h265"),
+            prefer_hdr10=_pref("prefer_hdr10"),
+            prefer_drm=_pref("prefer_drm"),
+            require_drm=_pref("require_drm"),
+            minimum_video_height=int(f.get("minimum_video_height") or config_manager.config.get("DOWNLOAD", "minimum_video_height", default=0) or 0),
             strict_no_match=context_tracker.skip_no_match,
         )
         self._sv, self._sa, self._ss = selector.apply(self.streams)

@@ -660,6 +660,14 @@ class DashParser:
             if index_range or media_range:
                 logger.debug(f"DASH range-split detected for stream {rep_id!r}: indexRange={index_range!r}, mediaRange={media_range!r}. Live decryption disabled.")
 
+            # An indexRange means the single file starts with a real sidx box, so its
+            # true segment boundaries are known. Splitting it on fixed byte chunks
+            # instead cuts through moof/mdat pairs: the reassembled file loses its
+            # encryption boxes and the decryptor then reports "no encryption indicators"
+            # for every track. Ask the downloader for the sidx-based split instead.
+            if index_range:
+                s.no_range_split = True
+
             # Get the media URL
             rep_base = rep.find("mpd:BaseURL", _NS)
             if rep_base is not None and rep_base.text:
@@ -671,10 +679,17 @@ class DashParser:
             else:
                 media_url = rep_base_url.rstrip("/")
 
-            # Add ONLY the media segment (no explicit byte_range)
-            # The downloader will detect single-file media and call _build_dash_ranged_segments()
-            # which will split it into chunks automatically
-            s.add_segment(Segment(media_url, 0, "media"))
+            # A SegmentBase file opens with the init segment (ftyp+moov, which carries the
+            # tenc/senc setup the decryptor looks for). Without it the reassembled file is
+            # a bare moof/mdat sequence, so decryption reports "no encryption indicators".
+            next_segment_number = 0
+            if media_range:
+                s.add_segment(Segment(media_url, next_segment_number, "init", byte_range=media_range))
+                next_segment_number += 1
+
+            # The media part is emitted as one single-file segment; the downloader splits
+            # it on the sidx boundaries.
+            s.add_segment(Segment(media_url, next_segment_number, "media"))
         else:
             # No segmentation info - single file
             rep_base = rep.find("mpd:BaseURL", _NS)

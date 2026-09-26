@@ -62,6 +62,8 @@ class HLS_Downloader(BaseDownloader):
         hls_key: bytes | None = None,
         hls_iv: bytes | None = None,
         has_drm: bool = False,
+        custom_filters: dict | None = None,
+        display_selected_only: bool = False,
     ):
         """
         Parameters:
@@ -108,6 +110,8 @@ class HLS_Downloader(BaseDownloader):
         )
         self.max_time = _parse_max_time(max_time if max_time is not None else context_tracker.max_time)
         self.other_tracks = other_tracks or []
+        self.custom_filters = custom_filters or None
+        self.display_selected_only = display_selected_only
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
@@ -179,7 +183,12 @@ class HLS_Downloader(BaseDownloader):
             stream_kids: set = set()
             stream_dts: list = []
 
-            # Every KID this stream's manifest declared, not just the "primary" one
+            # Every KID this stream's manifest declared, not just the "primary" one --
+            # multi-key content (e.g. separate audio/video content keys sharing one
+            # PSSH) needs one pssh_list entry per KID or the license fetch never asks
+            # for every real key, and flux fails decrypting the track(s) whose real KID
+            # was dropped. Falls back to the single kid/default_kid for older DRMInfo
+            # instances without get_all_kids(). Mirrors dash.py's equivalent loop.
             kids = [k for k in (drm.get_all_kids() or []) if k and k != "N/A"]
             if not kids:
                 kid_val = getattr(drm, "kid", None) or getattr(drm, "default_kid", None)
@@ -411,6 +420,8 @@ class HLS_Downloader(BaseDownloader):
             has_drm=self.has_drm,
         )
         self.media_downloader.other_tracks = self.other_tracks
+        self.media_downloader.custom_filters = self.custom_filters
+        self.media_downloader.display_selected_only = self.display_selected_only
         self.media_downloader.hls_enc_override = self.hls_enc_override
         other_videos, other_audios, other_subtitles = split_other_tracks(self.other_tracks)
 

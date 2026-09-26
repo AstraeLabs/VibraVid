@@ -245,6 +245,7 @@ class DASH_Downloader(BaseDownloader):
         self.media_downloader = None
         self.custom_filters: dict | None = None
         self.display_min_video_height: int | None = None
+        self.display_selected_only: bool = False
         self.display_only_drm_video = False
         self.display_only_drm_audio = False
         self._probe = DRMProbe()
@@ -778,6 +779,11 @@ class DASH_Downloader(BaseDownloader):
                     if getattr(stream, "type", "") != "audio"
                     or bool(getattr(stream, "drm", None) and stream.drm.is_encrypted())
                 ]
+
+            if self.display_selected_only:
+                selected = [stream for stream in display_streams if getattr(stream, "selected", False)]
+                if selected:
+                    display_streams = selected
 
             console.print(build_table(display_streams))
             if _dv_companion_stream is not None and _was_selected is not None:

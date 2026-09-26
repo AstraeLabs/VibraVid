@@ -29,19 +29,21 @@ def _drm_preference(playback_info: dict) -> str:
 
 
 def _create_dash_downloader(**kwargs) -> DASH_Downloader:
-    """Create a DASH downloader using the global media-selection configuration."""
+    """Create a DASH downloader using the global media-selection configuration.
+
+    Video, audio, subtitle e le preferenze (HEVC/HDR10) arrivano da `Conf/config.json`,
+    come per gli altri servizi. Qui resta solo il vincolo proprio di HBO Max: le tracce
+    devono essere cifrate, altrimenti il selettore sceglie l'annuncio pubblicitario al
+    posto del film. `display_only_drm_*` applica lo stesso filtro alla tabella, che
+    altrimenti mostrerebbe anche le varianti non cifrate; `display_selected_only` la
+    riduce a quello che verrà davvero scaricato.
+    """
     downloader = DASH_Downloader(**kwargs)
     downloader.custom_filters = {
-        "video": "best",
-        "audio": config_manager.config.get("DOWNLOAD", "select_audio"),
-        "subtitle": config_manager.config.get("DOWNLOAD", "select_subtitle"),
         "prefer_drm": True,
         "require_drm": True,
-        "prefer_h265": True,
-        "minimum_video_height": 720,
     }
-    downloader.display_min_video_height = 720
-    downloader.display_audio_codecs = {"eac3", "ec-3"}
+    downloader.display_selected_only = True
     downloader.display_only_drm_video = True
     downloader.display_only_drm_audio = True
     return downloader

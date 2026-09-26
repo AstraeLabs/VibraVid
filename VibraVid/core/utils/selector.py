@@ -72,12 +72,42 @@ def _codecs(s) -> str:
     return (getattr(s, "codecs", "") or "").strip().lower()
 
 
+# Codec audio che ffmpeg non sa decodificare. Disney li dichiara come `DTS-X`
+# (CODECS="dtsx", le tracce "atmos" lossless) e il mux termina con
+# "Could not find codec parameters for stream 0 (Audio: none (dtsx / 0x78737464)):
+# unknown codec", lasciando il file senza audio. Vanno scartati prima della selezione:
+# essendo i piu' alti in bitrate, il "best" ci finirebbe sempre dentro.
+# Il riconoscimento passa dai CODECS dichiarati e, per i manifest che non li espongono
+# sulle sole tracce audio (Disney), dall'id della rendition (`DTS-X:it`, `atmos:it`).
+NON_MUXABLE_AUDIO_CODECS = frozenset({"dtsx"})
+NON_MUXABLE_AUDIO_ID_PREFIXES = ("dts-x", "atmos")
+
+
+def _is_unmuxable_audio(s) -> bool:
+    if getattr(s, "type", "") != "audio":
+        return False
+    if any(bad in _codecs(s) for bad in NON_MUXABLE_AUDIO_CODECS):
+        return True
+    stream_id = (getattr(s, "id", "") or "").strip().lower()
+    return stream_id.startswith(NON_MUXABLE_AUDIO_ID_PREFIXES)
+
+
 def _is_h265(s) -> bool:
     return _codecs(s).startswith(("hvc1", "hev1", "hevc", "h265"))
 
 
 def _is_hdr10(s) -> bool:
     return (getattr(s, "video_range", "") or "").strip().lower() in {"hdr10", "hdr10+"}
+
+
+def _is_dv(s) -> bool:
+    codecs = (getattr(s, "codecs", "") or "").lower()
+    if any(codecs.startswith(p) for p in DV_CODEC_PREFIXES):
+        return True
+    return (getattr(s, "video_range", "") or "").upper() == "DV"
+
+
+_UNSUPPORTED_VIDEO_CODEC_PREFIXES = ("vp09", "vp90", "vp08", "av01", "av1")
 
 
 def _is_encrypted(s) -> bool:
@@ -756,28 +786,37 @@ class StreamSelector:
 
     def apply(self, streams: list) -> tuple[str, str, str]:
         """Mark stream.selected and return (sv, sa, ss) formatter strings."""
+        muxable, dropped = [], 0
+        for s in streams:
+            if _is_unmuxable_audio(s):
+                dropped += 1
+                continue
+            muxable.append(s)
+        if dropped:
+            logger.info(f"StreamSelector: scartate {dropped} tracce audio non muxabili (DTS:X, sconosciuto a ffmpeg)")
+
         pv = FilterSpec.parse(self._vf, "video")
 
-        rv = self._select_video(streams, pv)
+        rv = self._select_video(muxable, pv)
 
         audio_slots = split_audio_slots(self._af)
         if audio_slots is not None:
-            ra = self._select_audio_slotted(streams, audio_slots)
+            ra = self._select_audio_slotted(muxable, audio_slots)
         else:
             pa = FilterSpec.parse(self._af, "audio")
-            ra = self._select_audio(streams, pa)
+            ra = self._select_audio(muxable, pa)
 
         subtitle_slots = split_audio_slots(self._sf)
         if subtitle_slots is not None:
-            rs = self._select_subtitle_slotted(streams, subtitle_slots)
+            rs = self._select_subtitle_slotted(muxable, subtitle_slots)
         else:
             ps = FilterSpec.parse(self._sf, "subtitle")
-            rs = self._select_subtitle(streams, ps)
+            rs = self._select_subtitle(muxable, ps)
 
         self.no_match = bool(rv.no_match or ra.no_match or rs.no_match)
 
         if self._dv_quality is not None:
-            videos = [s for s in streams if getattr(s, "type", "") == "video"]
+            videos = [s for s in muxable if getattr(s, "type", "") == "video"]
             target_res = rv.matched_res or pv.res
             self._mark_dv_companion(videos, self._dv_quality, target_res)
 
@@ -802,9 +841,34 @@ class StreamSelector:
         logger.info(f"StreamSelector: default filter (select_default={spec.select_default}) resulted in 0 streams, keeping original {len(selected)}")
         return selected
 
+    @staticmethod
+    def _drop_unsupported_video(videos: list) -> list:
+        """Skip the video variants we do not want to deliver.
+
+        Dolby Vision is excluded until it can be muxed without failures, while VP9
+        and AV1 are dropped for playback compatibility: H.264 and H.265 are the
+        supported targets. If a title only ships excluded variants the originals
+        are kept, otherwise it would become undownloadable.
+        """
+        if not videos:
+            return videos
+
+        def unwanted(s) -> bool:
+            codecs = (getattr(s, "codecs", "") or "").lower()
+            if _is_dv(s):
+                return True
+            return any(codecs.startswith(p) for p in _UNSUPPORTED_VIDEO_CODEC_PREFIXES)
+
+        kept = [s for s in videos if not unwanted(s)]
+        if kept and len(kept) != len(videos):
+            dropped = [f"{_height(s)}p/{_codecs(s)}" for s in videos if unwanted(s)]
+            logger.info(f"StreamSelector: dropped unsupported video variant(s): {', '.join(dropped)}")
+        return kept or videos
+
     def _select_video(self, streams: list, spec: FilterSpec) -> SelectionResult:
         result = SelectionResult(select_best=spec.select_best, extra=dict(spec.extra))
         videos = [s for s in streams if getattr(s, "type", "") == "video"]
+        videos = self._drop_unsupported_video(videos)
         logger.debug(f"Video available: {[f'{_height(s)}p/{_codecs(s)}' for s in videos]} | filter: id={spec.id} res={spec.res} codec={spec.codec} bitrate=[{spec.bitrate_min},{spec.bitrate_max}] all={spec.select_all} drop={spec.drop} default={spec.select_default}")
 
         if spec.drop or not videos:
@@ -1359,12 +1423,6 @@ class StreamSelector:
 
     def _mark_dv_companion(self, video_streams: list, quality: str, target_res: str | None = None) -> None:
         """Find the DV companion stream and mark it with dv_companion=True (not selected)."""
-
-        def _is_dv(s) -> bool:
-            codecs = (getattr(s, "codecs", "") or "").lower()
-            if any(codecs.startswith(p) for p in DV_CODEC_PREFIXES):
-                return True
-            return (getattr(s, "video_range", "") or "").upper() == "DV"
 
         dv_streams = [s for s in video_streams if _is_dv(s) and not getattr(s, "selected", False)]
         if not dv_streams:
