@@ -171,6 +171,32 @@ def parse_detail_sources(html: str, base_url: str) -> list[CineblogSource]:
             )
         )
 
+    for iframe in soup.find_all("iframe", src=True):
+        raw_url = str(iframe.get("src") or "").strip()
+        if not raw_url or raw_url.lower() == "about:blank":
+            continue
+
+        url = urljoin(base_url, raw_url)
+        key = ("player", url)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        host = _source_host(url)
+        sources.append(
+            CineblogSource(
+                section="player",
+                label=iframe.get("title") or host or "iframe",
+                host=host,
+                url=url,
+                quality=_quality_from_text(
+                    str(iframe.get("title") or ""),
+                    iframe.get_text(" ", strip=True),
+                ),
+                verification_required=_verification_required(host),
+            )
+        )
+
     return sources
 
 
