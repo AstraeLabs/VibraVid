@@ -166,3 +166,43 @@ def test_vixsrc_falls_back_to_injected_browser_resolver():
 
     assert manifest == manifest_url
     assert headers["Referer"] == player_url
+
+
+def test_vixsrc_uses_injected_manifest_resolver_before_other_strategies():
+    player_url = "https://vixsrc.to/movie/tt32897959?lang=it"
+    manifest_url = "https://media.example.test/injected/master.m3u8"
+
+    calls = []
+
+    def manifest_resolver(url, headers):
+        calls.append((url, headers))
+        return manifest_url, {
+            "Referer": player_url,
+            "User-Agent": "InjectedResolver/1.0",
+        }
+
+    source = VixSrcSource(
+        player_url,
+        manifest_resolver=manifest_resolver,
+    )
+
+    manifest, headers = source.get_stream()
+
+    assert manifest == manifest_url
+    assert headers["Referer"] == player_url
+    assert headers["User-Agent"] == "InjectedResolver/1.0"
+    assert calls[0][0] == player_url
+
+
+def test_vixsrc_rejects_non_hls_injected_manifest():
+    player_url = "https://vixsrc.to/movie/tt32897959?lang=it"
+
+    source = VixSrcSource(
+        player_url,
+        manifest_resolver=lambda url, headers: (
+            "https://media.example.test/video.mp4",
+            {},
+        ),
+    )
+
+    assert source._resolve_injected_manifest() == (None, {})
