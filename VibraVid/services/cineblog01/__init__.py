@@ -12,7 +12,7 @@ from .downloader import download_film
 from .scrapper import parse_search_results
 
 indice = 98
-_useFor = "Film"
+_useFor = "Film_Serie"
 _hide = True
 
 msg = Prompt()
