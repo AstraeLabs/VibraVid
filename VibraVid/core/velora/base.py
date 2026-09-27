@@ -101,6 +101,7 @@ class BaseMediaDownloader:
         self.external_other_tracks: list = []
         self.other_tracks: list = []
         self.custom_filters: dict | None = None
+        self.display_selected_only: bool = False
         self.license_url: str | None = None
         self.drm_type: str | None = None
 
@@ -195,6 +196,8 @@ class BaseMediaDownloader:
             selector = InteractiveStreamSelector(self.streams, window_size=15)
             selector.run()
 
+        self._register_dv_companion()
+
         for ext in self.external_subtitles:
             lang = ext.get("language", "")
             selected = self._ext_track_matches(ext, "subtitle")
@@ -254,7 +257,36 @@ class BaseMediaDownloader:
 
         if show_table and self.streams:
             console = Console(force_terminal=True if platform.system().lower() != "windows" else None)
-            console.print(build_table(self.streams))
+            console.print(build_table(self._streams_for_display()))
+
+        return self.streams
+
+    def _dv_companion_stream(self) -> "Stream | None":
+        """The DV companion stream marked by the selector, downloaded alongside the other tracks."""
+        return next(
+            (s for s in self.streams if getattr(s, "dv_companion", False) and not s.is_external),
+            None,
+        )
+
+    def _register_dv_companion(self) -> None:
+        """If a DV companion stream is present, register it as an "other_track" for download."""
+        companion = self._dv_companion_stream()
+        if companion is None:
+            return
+        
+        if any((t.get("type") or "").strip().lower() == "video:dv" for t in self.other_tracks):
+            return
+
+        quality = str(getattr(companion, "dv_companion_quality", "") or "worst").strip() or "worst"
+        self.other_tracks = [*self.other_tracks, {"type": "video:dv", "url": self.url, "quality": quality}]
+        logger.info("&dv: companion DV registrato come other_track (quality=%r, id=%s)", quality, companion.id)
+
+    def _streams_for_display(self) -> list[Stream]:
+        """Return the list of streams to display in the table, filtered by self.display_selected_only if set."""
+        if self.display_selected_only:
+            selected = [s for s in self.streams if getattr(s, "selected", False)]
+            if selected:
+                return selected
 
         return self.streams
 
@@ -269,17 +301,23 @@ class BaseMediaDownloader:
         v_cfg = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
         a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
         s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+
+        def _pref(key: str, default: bool = False, section: str = "DOWNLOAD") -> bool:
+            return bool(f.get(key, config_manager.config.get_bool(section, key, default=default)))
+
         selector = StreamSelector(
             v_cfg,
             a_cfg,
             s_cfg,
             formatter=StreamSelectorFormatter(),
-            prefer_h265=bool(f.get("prefer_h265")),
-            prefer_hdr10=bool(f.get("prefer_hdr10")),
-            prefer_drm=bool(f.get("prefer_drm")),
-            require_drm=bool(f.get("require_drm")),
-            minimum_video_height=int(f.get("minimum_video_height") or 0),
+            prefer_h265=_pref("prefer_h265"),
+            prefer_hdr10=_pref("prefer_hdr10"),
+            prefer_drm=_pref("prefer_drm"),
+            require_drm=_pref("require_drm"),
+            minimum_video_height=int(f.get("minimum_video_height") or config_manager.config.get("DOWNLOAD", "minimum_video_height", default=0) or 0),
             strict_no_match=context_tracker.skip_no_match,
+            dv_auto=_pref("dv_auto", True, section="CODEC"),
+            mux_dtsx=_pref("mux_dtsx", False, section="CODEC"),
         )
         self._sv, self._sa, self._ss = selector.apply(self.streams)
         self.no_match_skip = selector.no_match
@@ -410,6 +448,20 @@ class BaseMediaDownloader:
             self._video_task_key = "vid_main"
         self._video_labels_by_task_key = {self._video_task_key: self._video_label}
 
+        companion = self._dv_companion_stream()
+        if companion is not None:
+            parts = []
+            codec = companion.get_short_codec() or companion.codecs or ""
+            if codec:
+                parts.append(f"[yellow]\\[{codec}][/yellow]")
+            if companion.width and companion.height:
+                parts.append(f"[white]{classify_resolution(companion.width, companion.height)}[/white]")
+            elif companion.resolution:
+                parts.append(f"[white]{companion.resolution}[/white]")
+            if companion.bitrate:
+                parts.append(f"[blue]{companion.bitrate_display}[/blue]")
+            self._video_labels_by_task_key[f"{self._video_task_key}_dv"] = " ".join(parts)
+
         self._audio_labels = {}
         self._audio_labels_by_task_key = {}
         self._audio_task_keys = []
@@ -530,6 +582,11 @@ class BaseMediaDownloader:
         if self._has_video:
             tasks.append((self._video_task_key, f"[bold cyan]Vid[/bold cyan] {self._video_label}"))
 
+        dv_task_key = f"{self._video_task_key}_dv"
+        if self._dv_companion_stream() is not None:
+            dv_label = self._video_labels_by_task_key.get(dv_task_key, "")
+            tasks.append((dv_task_key, f"[bold cyan]Vid DV[/bold cyan] {dv_label}"))
+
         seen: set[str] = set()
         for lang_code, label in self._audio_task_keys:
             key = f"aud_{lang_code}"
@@ -627,6 +684,7 @@ class BaseMediaDownloader:
             "external_subtitles": [],
             "external_audios": ext_auds or [],
             "other_tracks": list(getattr(self, "other_tracks", []) or []),
+            "other_tracks_downloaded": [],
         }
 
         for f in sorted(self.output_dir.iterdir()):
@@ -643,6 +701,22 @@ class BaseMediaDownloader:
 
             ext = f.suffix.lower()
             fname_l = self.filename.lower()
+
+            # ── Dolby Vision companion (_out_filename: "{filename}.dv.{ext}") ─
+            # Only its RPU is used, by build_hybrid_output() — never a real track.
+            if ext in VIDEO_EXTENSIONS and f.stem.lower() == f"{fname_l}.dv":
+                status["other_tracks_downloaded"].append(
+                    {
+                        "path": str(f),
+                        "type": "video:dv",
+                        "kind": "video",
+                        "tag": "dv",
+                        "language": "und",
+                        "name": "Dolby Vision",
+                        "size": f.stat().st_size,
+                    }
+                )
+                continue
 
             # ── video ────────────────────────────────────────────────────────
             if ext in VIDEO_EXTENSIONS and f.stem.lower() == fname_l:

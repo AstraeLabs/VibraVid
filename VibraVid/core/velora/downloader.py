@@ -204,7 +204,11 @@ class MediaDownloader(
         self._prepare_labels()
 
         selected_media = [
-            s for s in self.streams if s.selected and not s.is_external and s.type in ("video", "audio", "subtitle")
+            s
+            for s in self.streams
+            if (s.selected or getattr(s, "dv_companion", False))
+            and not s.is_external
+            and s.type in ("video", "audio", "subtitle")
         ]
         all_support_live = all(s.supports_live_decryption for s in selected_media) if selected_media else False
         flux_available = bool(get_flux_path())
@@ -500,6 +504,8 @@ class MediaDownloader(
 
     def _out_filename(self, stream, ext: str) -> str:
         if stream.type == "video":
+            if getattr(stream, "dv_companion", False):
+                return f"{self.filename}.dv.{ext}"
             return f"{self.filename}.{ext}"
 
         raw_lang = getattr(stream, "resolved_language", "") or stream.language or "und"

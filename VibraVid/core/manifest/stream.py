@@ -376,6 +376,7 @@ class Stream:
     video_range: str = ""
     hdcp_level: str = ""
     scan_type: str = ""
+    supplemental_codecs: str = ""
 
     # Audio-only
     default: bool = False

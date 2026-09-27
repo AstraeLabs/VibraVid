@@ -34,7 +34,7 @@ covered in the
 
 | Topic | |
 |---|---|
-| ⚙️ [Configuration](https://astraelabs.github.io/VibraVid/configuration/) | `config.json` reference — DEFAULT, OUTPUT, DOWNLOAD (stream selection filters), PROCESS, REQUESTS, DRM |
+| ⚙️ [Configuration](https://astraelabs.github.io/VibraVid/configuration/) | `config.json` reference — DEFAULT, OUTPUT, DOWNLOAD (stream selection filters), CODEC, PROCESS, REQUESTS, DRM |
 | 💻 [CLI Usage](https://astraelabs.github.io/VibraVid/cli/) | Search, series selection, year filter, track overrides, proxy, direct URL download, download queue |
 | 🌐 [Web GUI](https://astraelabs.github.io/VibraVid/gui/) | Django-based browser interface |
 | ⌨️ [TUI](https://astraelabs.github.io/VibraVid/tui/) | Terminal user interface (Textual) |

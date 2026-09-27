@@ -791,6 +791,8 @@ class Generic_Downloader(BaseDownloader):
             require_drm=bool(f.get("require_drm")),
             minimum_video_height=int(f.get("minimum_video_height") or 0),
             strict_no_match=context_tracker.skip_no_match,
+            dv_auto=bool(f.get("dv_auto", config_manager.config.get_bool("CODEC", "dv_auto"))),
+            mux_dtsx=bool(f.get("mux_dtsx", config_manager.config.get_bool("CODEC", "mux_dtsx"))),
         )
 
     def _setup_dv_companion(self) -> None:

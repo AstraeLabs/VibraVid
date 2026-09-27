@@ -354,6 +354,22 @@ When `<quality>` is `best`/`worst`, the companion is picked from DV streams at t
 
 The DV track is muxed as an additional video track via mkvmerge.
 
+## CODEC
+
+```json
+{
+  "CODEC": {
+    "dv_auto": true,
+    "mux_dtsx": false
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `dv_auto` | `true` | Automatically pair a Dolby Vision companion with the main video when the title ships a DV variant, even without an explicit `&dv` in `select_video` (see [Companion Dolby Vision](#stream-selection-filters) above). Set to `false` to only pair a companion when `&dv` is explicitly requested |
+| `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio tracks instead of dropping them at selection time. ffmpeg cannot demux DTS:X, so this requires mkvmerge to be installed |
+
 ## PROCESS (Post-Processing)
 
 ```json

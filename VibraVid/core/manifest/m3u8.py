@@ -15,7 +15,7 @@ from rich.console import Console
 from VibraVid.core.drm.system import _DRMSystems
 from VibraVid.core.manifest._utils import calc_base_url, save_raw_manifest
 from VibraVid.core.manifest.stream import DRMInfo, DRMType, Stream
-from VibraVid.core.utils.codec import VIDEO_CODEC_PREFIXES, detect_stream_type, infer_video_range
+from VibraVid.core.utils.codec import AUDIO_CODEC_PREFIXES, VIDEO_CODEC_PREFIXES, detect_stream_type, infer_video_range
 from VibraVid.core.utils.language import resolve_locale
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
@@ -51,6 +51,15 @@ def _make_rendition_id(group_id: str, language: str, name: str) -> str:
 
 def _infer_video_range_from_codecs(codecs: str) -> str:
     return infer_video_range(codecs)
+
+
+def _sniff_audio_codec_from_uri(uri: str) -> str:
+    """Best-effort per-track codec hint from the rendition URI's filename."""
+    filename = uri.rsplit("/", 1)[-1].lower()
+    for token in filename.split("_"):
+        if any(token.startswith(p) for p in AUDIO_CODEC_PREFIXES):
+            return token
+    return ""
 
 
 def _playlist_is_live(content: str) -> bool:
@@ -381,7 +390,8 @@ class HLSParser:
         if m:
             s.fps = m.group(1)
 
-        m = re.search(r'CODECS="([^"]+)"', line)
+        # (?<!-) so a SUPPLEMENTAL-CODECS listed before CODECS can't be picked up here
+        m = re.search(r'(?<!-)CODECS="([^"]+)"', line)
         if m:
             s.codecs = m.group(1)
 
@@ -396,6 +406,7 @@ class HLSParser:
             ):
                 s.type = "audio"
 
+        s.supplemental_codecs = self._attr(line, "SUPPLEMENTAL-CODECS", "")
         vr = self._attr(line, "VIDEO-RANGE", "").upper()
         s.video_range = vr if vr else _infer_video_range_from_codecs(s.codecs)
 
@@ -439,6 +450,12 @@ class HLSParser:
         uri = self._attr(line, "URI", "")
         if uri:
             s.playlist_url = urljoin(self._base_url, uri)
+
+        if stream_type == "audio" and uri:
+            hint = _sniff_audio_codec_from_uri(uri)
+            if hint:
+                logger.info(f"HLSParser: audio codec hint from URI: {hint} for rendition {s.id}")
+                s.codecs = hint
 
         s.default = self._attr(line, "DEFAULT", "NO").upper() == "YES"
         s.autoselect = self._attr(line, "AUTOSELECT", "NO").upper() == "YES"

@@ -159,6 +159,8 @@ class VodStreamMixin:
 
     def _stream_task_key(self, stream) -> str:
         if stream.type == "video":
+            if getattr(stream, "dv_companion", False):
+                return f"{self._video_task_key}_dv"
             return self._video_task_key
 
         if stream.type == "subtitle":
@@ -171,6 +173,8 @@ class VodStreamMixin:
     def _make_stream_dir(self, stream, protocol: str) -> Path:
         if stream.type == "video":
             name = f"v_{safe_name(stream.resolution or 'unknown')}"
+            if getattr(stream, "dv_companion", False):
+                name = f"{name}_dv"
         elif stream.type == "subtitle":
             lang = safe_name((stream.language or "und").lower())
             name = f"s_{lang}{self._sub_discriminator(stream)}"

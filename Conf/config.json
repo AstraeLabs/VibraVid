@@ -43,6 +43,10 @@
         "embed_poster": false,
         "cleanup_tmp_folder": true
     },
+    "CODEC": {
+        "dv_auto": true,
+        "mux_dtsx": false
+    },
     "PROCESS": {
         "engine": "ffmpeg",
         "use_gpu": false,

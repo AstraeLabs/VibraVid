@@ -288,7 +288,6 @@ class MP4FileDownloader:
             logger.debug(f"Preflight probe failed (non-fatal): {exc}")
             return
 
-        self._probe_done = True
         if not raw:
             return
 
@@ -299,14 +298,18 @@ class MP4FileDownloader:
             encrypted, scheme, is_widevine, kid, pssh_b64, metadata = False, None, False, None, None, {}
 
         if not encrypted:
-            logger.info("Preflight probe: no encryption markers found — clear stream, skipping in-flight probe.")
+            logger.info("Preflight probe: no encryption markers found — clear stream.")
         else:
             self._resolve_from_probe(encrypted, scheme, is_widevine, kid, pssh_b64)
 
+        metadata_conclusive = False
         try:
-            self._apply_early_metadata(metadata)
+            metadata_conclusive = self._apply_early_metadata(metadata)
         except Exception as exc:
             logger.debug(f"Early metadata probe failed (non-fatal): {exc}")
+
+        # Only skip the deeper 1 MB in-flight probe when the cheap 100 KB one was actually conclusive
+        self._probe_done = encrypted or metadata_conclusive
 
     def _feed_probe(self, chunk: bytes) -> None:
         """Accumulate the first ~1 MB of the *live* download and inspect them in-flight

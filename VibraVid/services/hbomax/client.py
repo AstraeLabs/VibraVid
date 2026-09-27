@@ -5,11 +5,14 @@ import logging
 import uuid
 from typing import Any
 
+from rich.console import Console
+
 from VibraVid.services._base.login_status import ACCOUNT, print_login
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 _max_client = None
 _API_ROOT = "https://default.any-any.prd.api.hbomax.com"
@@ -72,15 +75,23 @@ class Max:
 
         self._authenticate()
 
+    @staticmethod
+    def _fail_auth() -> None:
+        """Report an unusable session and stop without a traceback."""
+        message = "HBO Max token missing or expired. Copy a fresh token from the browser"
+        logger.error(message)
+        console.print(f"[red]{message}[/red]")
+        raise SystemExit(1)
+
     def _authenticate(self) -> None:
         """Authenticate with the configured ``st`` cookie and bootstrap routing."""
         if not self.access_token:
-            raise OSError(
-                "HBO Max requires an 'st' cookie in Conf/login.json (section 'hbomax')."
-            )
+            self._fail_auth()
 
         with create_client(headers=self.base_headers, cookies=self.cookies) as client:
             response = client.post(_BOOTSTRAP_URL)
+        if response.status_code in (400, 401, 403):
+            self._fail_auth()
         response.raise_for_status()
 
         bootstrap = response.json()
