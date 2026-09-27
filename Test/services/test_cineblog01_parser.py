@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -6,6 +7,7 @@ def _load_scrapper():
     path = Path(__file__).resolve().parents[2] / "VibraVid" / "services" / "cineblog01" / "scrapper.py"
     spec = importlib.util.spec_from_file_location("cineblog01_scrapper_test", path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
