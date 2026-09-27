@@ -39,13 +39,15 @@ _PREFERRED_ORDER = [
     "homegardentv",
     "foodnetwork",
     "tubitv",
+    "plutotv",
     "cinezo",
-    "altadefinzione",
+    "altadefinizione",
     "eurostreaming",
     "amazon_music",
 ]
-_OPTIONAL_EXTERNAL = {"primevideo", "appletv"}
+_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music"}
 _SITE_CATEGORIES: dict[str, str] = {}
+_SITE_ALIASES = {"altadefinzione": "altadefinizione"}
 
 
 def _disabled_sites() -> set:
@@ -188,6 +190,12 @@ def reset_site_categories_cache() -> None:
     _SITE_CATEGORIES = {}
 
 
+def _normalize_site(site: str) -> str:
+    """Return the canonical GUI provider identifier, accepting legacy aliases."""
+    site_lower = site.lower().strip()
+    return _SITE_ALIASES.get(site_lower, site_lower)
+
+
 def get_api(site: str) -> BaseStreamingAPI:
     """
     Get API instance for specified site.
@@ -201,7 +209,7 @@ def get_api(site: str) -> BaseStreamingAPI:
     Raises:
         ValueError: If site is not supported
     """
-    site_lower = site.lower().strip()
+    site_lower = _normalize_site(site)
 
     if site_lower not in _API_REGISTRY:
         available = ", ".join(_API_REGISTRY.keys())
@@ -221,7 +229,7 @@ def is_site_available(site: str) -> bool:
     Returns:
         True if site is available
     """
-    return site.lower().strip() in _API_REGISTRY
+    return _normalize_site(site) in _API_REGISTRY
 
 
 __all__ = [
