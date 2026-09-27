@@ -128,7 +128,7 @@ def download_film(select_title: Entries, *, manifest_resolver=None):
         if not playlist:
             if kind == "vixsrc":
                 errors.append(
-                    "vixsrc: player detected but no manifest discovery strategy is available"
+                    "vixsrc: manifest resolution did not produce a playable HLS source"
                 )
             else:
                 errors.append(f"{kind}: no playable stream resolved")
