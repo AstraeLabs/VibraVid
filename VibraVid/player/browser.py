@@ -81,7 +81,11 @@ class PlaywrightBrowserSession:
                 for key, value in response.headers.items()
             }
 
-            request_headers = response.request.all_headers()
+            try:
+                request_headers = response.request.all_headers()
+            except Exception:
+                request_headers = {}
+
             playback_headers = {
                 str(key): str(value)
                 for key, value in request_headers.items()
