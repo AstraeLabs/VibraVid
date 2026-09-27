@@ -13,6 +13,7 @@ from VibraVid.core.downloader import HLS_Downloader
 from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.player.maxstream import MaxStreamSource
 from VibraVid.player.vidxgo import VideoSource as VidXgoVideoSource
+from VibraVid.player.vixsrc import VixSrcSource
 from VibraVid.services._base import Entries, movie_folder
 from VibraVid.services._base.tv_display_manager import map_movie_path
 from VibraVid.utils import config_manager, start_message
@@ -61,6 +62,9 @@ def _resolve_source(source: CineblogSource, referer: str) -> tuple[str | None, d
     if kind == "maxstream":
         return MaxStreamSource(source.url, referer=referer).get_stream()
 
+    if kind == "vixsrc":
+        return VixSrcSource(source.url, referer=referer).get_stream()
+
     return None, {}
 
 
@@ -91,13 +95,7 @@ def download_film(select_title: Entries):
             errors.append(f"{source.host or source.label}: browser verification required")
             continue
 
-        if kind == "vixsrc":
-            errors.append(
-                "vixsrc: player detected but no compatible VibraVid resolver is available"
-            )
-            continue
-
-        if kind not in _SUPPORTED_RESOLVER_KINDS:
+        if kind not in _SUPPORTED_RESOLVER_KINDS | {"vixsrc"}:
             errors.append(
                 f"{source.host or source.label}: unsupported external source"
             )
@@ -111,7 +109,12 @@ def download_film(select_title: Entries):
             continue
 
         if not playlist:
-            errors.append(f"{kind}: no playable stream resolved")
+            if kind == "vixsrc":
+                errors.append(
+                    "vixsrc: player detected but no manifest discovery strategy is available"
+                )
+            else:
+                errors.append(f"{kind}: no playable stream resolved")
             continue
 
         return HLS_Downloader(
