@@ -150,3 +150,79 @@ def test_direct_video_source_is_extracted_and_classified():
     assert len(sources) == 1
     assert sources[0].section == "player"
     assert scrapper.source_kind(sources[0]) == "hls"
+
+
+def test_dle_search_layout_ignores_promos_and_duplicate_grid_cards():
+    html = """
+    <header class="pageheader">
+      <div class="promotion">
+        <div id="promo-carousel" class="owl-carousel">
+          <div class="promo-item">
+            <a href="/cb01-streaming/35003-resident-evil-cam-streaming-cb01.html">
+              <img src="/uploads/thumb/203x293-0-70/2026-09/tt35538033.jpg">
+            </a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <article class="short block-list">
+      <div class="story-cover">
+        <a href="/cb01-streaming/31541-cime-tempestose-2026-stream-hd-cb01.html">
+          <img src="/uploads/thumb/203x293-0-70/2025-10/1761846054-754533039.jpg">
+        </a>
+      </div>
+      <h3 class="story-heading font-contrail">
+        <a href="/cb01-streaming/31541-cime-tempestose-2026-stream-hd-cb01.html">
+          Cime tempestose [ITA] [SD] (2026)
+        </a>
+      </h3>
+    </article>
+
+    <div class="col-xs-6 col-md-4 block-th">
+      <div class="block-th-cover">
+        <a href="/cb01-streaming/31541-cime-tempestose-2026-stream-hd-cb01.html">
+          <img src="/uploads/thumb/203x293-0-70/2025-10/1761846054-754533039.jpg">
+        </a>
+      </div>
+      <a href="/cb01-streaming/31541-cime-tempestose-2026-stream-hd-cb01.html">
+        Cime tempestose [ITA] [SD] (2026)
+      </a>
+    </div>
+
+    <article class="short block-list">
+      <div class="story-cover">
+        <a href="/cb01-streaming/13165-cime-tempestose-streaming-cb01.html">
+          <img src="/uploads/thumb/203x293-0-70/2020-07/1594513127-cime-tempestose.jpg">
+        </a>
+      </div>
+      <h3 class="story-heading font-contrail">
+        <a href="/cb01-streaming/13165-cime-tempestose-streaming-cb01.html">
+          Cime Tempestose [ITA] [HD] (1992)
+        </a>
+      </h3>
+    </article>
+
+    <ul>
+      <li>
+        <div class="topnews-poster">
+          <a href="/cb01-streaming/34996-paolo-streaming-cb01.html">
+            <img src="/uploads/thumb/203x293-0-70/2026-09/tt40407840.jpg">
+          </a>
+        </div>
+        <a href="/cb01-streaming/34996-paolo-streaming-cb01.html">Paolo (2026)</a>
+      </li>
+    </ul>
+    """
+
+    results = scrapper.parse_search_results(html, "https://cineblog001.download/")
+
+    assert len(results) == 2
+    assert results[0].title == "Cime tempestose"
+    assert results[0].year == "2026"
+    assert results[0].image == (
+        "https://cineblog001.download/uploads/thumb/203x293-0-70/"
+        "2025-10/1761846054-754533039.jpg"
+    )
+    assert results[1].title == "Cime Tempestose"
+    assert results[1].year == "1992"
