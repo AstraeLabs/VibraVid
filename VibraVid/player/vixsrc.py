@@ -5,6 +5,13 @@ from __future__ import annotations
 import logging
 from urllib.parse import urlsplit
 
+from VibraVid.player.resolver import (
+    CurlHttpClient,
+    ManifestNotFoundError,
+    Resolver,
+    ResolverError,
+    StaticHtmlPlayerResolver,
+)
 from VibraVid.utils.http_client import get_userAgent
 
 logger = logging.getLogger(__name__)
@@ -20,9 +27,18 @@ class VixSrcSource:
     by VibraVid's HLS downloader.
     """
 
-    def __init__(self, player_url: str, referer: str = ""):
+    def __init__(
+        self,
+        player_url: str,
+        referer: str = "",
+        *,
+        http_client=None,
+        page_resolver=None,
+    ):
         self.player_url = str(player_url or "").strip()
         self.referer = str(referer or "").strip()
+        self.http_client = http_client or CurlHttpClient()
+        self.page_resolver = page_resolver
 
     @property
     def host(self) -> str:
@@ -65,15 +81,29 @@ class VixSrcSource:
         return str(manifest_url), self.get_playback_headers()
 
     def get_stream(self) -> tuple[str | None, dict[str, str]]:
-        """Return a resolved HLS stream when one is available.
-
-        Player interaction and network interception are intentionally not performed
-        here. The provider remains able to detect the player and fail cleanly until
-        a supported manifest discovery strategy is supplied.
-        """
+        """Resolve a directly exposed HLS manifest through the shared resolver stack."""
         if not self.is_supported_player():
             logger.error("Unsupported VixSrc player host: %s", self.host or "<empty>")
             return None, {}
 
-        logger.info("VixSrc player detected but no manifest discovery strategy is configured")
-        return None, {}
+        page_resolver = self.page_resolver or StaticHtmlPlayerResolver(self.http_client)
+        resolver = Resolver(
+            self.http_client,
+            page_resolver,
+            user_agent=get_userAgent(),
+        )
+
+        try:
+            result = resolver.resolve(self.player_url)
+        except ManifestNotFoundError:
+            logger.info("VixSrc player did not expose a static media manifest")
+            return None, {}
+        except ResolverError as error:
+            logger.warning("VixSrc resolution failed: %s", error)
+            return None, {}
+
+        if not result.is_hls or not result.manifest_url:
+            logger.info("VixSrc resolved source is not HLS")
+            return None, {}
+
+        return result.manifest_url, result.headers
