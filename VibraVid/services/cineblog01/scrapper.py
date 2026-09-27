@@ -45,13 +45,22 @@ def _clean_title(raw_title: str) -> tuple[str, str | None]:
 
 
 def parse_search_results(html: str, base_url: str) -> list[SearchResult]:
-    """Parse all CB01 WordPress search cards without choosing a first match."""
+    """Parse all CB01 WordPress search results without choosing a first match."""
     soup = BeautifulSoup(html, "html.parser")
     results: list[SearchResult] = []
     seen: set[str] = set()
 
-    for card in soup.select("div.card.mp-post.horizontal"):
-        link = card.select_one("h3.card-title a")
+    containers = list(soup.select("div.card.mp-post.horizontal"))
+    if not containers:
+        containers = list(soup.select("article, .post, .type-post"))
+
+    for card in containers:
+        link = (
+            card.select_one("h3.card-title a")
+            or card.select_one("h2.entry-title a")
+            or card.select_one("h3.entry-title a")
+            or card.select_one(".entry-title a")
+        )
         if not link or not link.get("href"):
             continue
 
@@ -61,12 +70,19 @@ def parse_search_results(html: str, base_url: str) -> list[SearchResult]:
         seen.add(url)
 
         raw_title = link.get_text(" ", strip=True)
+        if not raw_title:
+            continue
+
         title, year = _clean_title(raw_title)
 
         image_tag = card.find("img")
         image = None
         if image_tag:
-            image = image_tag.get("src") or image_tag.get("data-src")
+            image = (
+                image_tag.get("src")
+                or image_tag.get("data-src")
+                or image_tag.get("data-lazy-src")
+            )
             if image:
                 image = urljoin(base_url, str(image))
 
@@ -194,6 +210,29 @@ def parse_detail_sources(html: str, base_url: str) -> list[CineblogSource]:
                     iframe.get_text(" ", strip=True),
                 ),
                 verification_required=_verification_required(host),
+            )
+        )
+
+    for media in soup.select("video[src], source[src]"):
+        raw_url = str(media.get("src") or "").strip()
+        if not raw_url:
+            continue
+
+        url = urljoin(base_url, raw_url)
+        key = ("player", url)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        host = _source_host(url)
+        sources.append(
+            CineblogSource(
+                section="player",
+                label=media.get("type") or host or "media",
+                host=host,
+                url=url,
+                quality=_quality_from_text(str(media.get("type") or "")),
+                verification_required=False,
             )
         )
 
