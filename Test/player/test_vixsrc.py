@@ -206,3 +206,24 @@ def test_vixsrc_rejects_non_hls_injected_manifest():
     )
 
     assert source._resolve_injected_manifest() == (None, {})
+
+
+def test_vixsrc_accepts_native_playlist_endpoint_as_hls_manifest():
+    source = VixSrcSource(
+        "https://vixsrc.to/movie/tt32897959?lang=it"
+    )
+
+    assert source.is_hls_manifest(
+        "https://vixsrc.to/playlist/695377"
+        "?b=1&token=test&expires=123456&h=1&lang=it"
+    ) is True
+
+
+def test_vixsrc_does_not_accept_unrelated_playlist_endpoint():
+    source = VixSrcSource(
+        "https://vixsrc.to/movie/tt32897959?lang=it"
+    )
+
+    assert source.is_hls_manifest(
+        "https://example.test/playlist/695377?token=test"
+    ) is False

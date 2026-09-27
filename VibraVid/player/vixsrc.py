@@ -75,7 +75,21 @@ class VixSrcSource:
     def is_hls_manifest(url: str | None) -> bool:
         if not url:
             return False
-        return ".m3u8" in urlsplit(str(url)).path.lower()
+
+        parsed = urlsplit(str(url))
+        path = parsed.path.lower()
+        host = (parsed.hostname or "").lower()
+
+        if ".m3u8" in path:
+            return True
+
+        if (
+            (host == _SUPPORTED_HOST or host.endswith("." + _SUPPORTED_HOST))
+            and path.startswith("/playlist/")
+        ):
+            return True
+
+        return False
 
     def from_manifest(self, manifest_url: str | None) -> tuple[str | None, dict[str, str]]:
         """Validate an already resolved HLS manifest for this player."""

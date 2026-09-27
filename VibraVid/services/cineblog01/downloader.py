@@ -67,6 +67,11 @@ def _resolve_source(
         return MaxStreamSource(source.url, referer=referer).get_stream()
 
     if kind == "vixsrc":
+        if manifest_resolver is None:
+            from VibraVid.player.browser_manifest import BrowserManifestResolver
+
+            manifest_resolver = BrowserManifestResolver().resolve
+
         return VixSrcSource(
             source.url,
             referer=referer,

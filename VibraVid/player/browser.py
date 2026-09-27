@@ -7,11 +7,23 @@ import time
 from VibraVid.player.resolver import BrowserResolution, InteractionRequiredError
 
 
+_IGNORED_PLAYBACK_HEADERS = {
+    "host",
+    "content-length",
+    "connection",
+}
+
+
 class PlaywrightBrowserSession:
     """Generic Playwright-backed BrowserSession implementation.
 
     Playwright is imported lazily so normal VibraVid usage does not require it.
     A custom playwright_factory can be injected by tests.
+
+    Response headers are used only to identify interesting media responses.
+    BrowserResolution.headers contains the request headers that were actually
+    used by Chromium for the matching media request, because those are the
+    headers required by the downloader to reproduce the playback request.
     """
 
     def __init__(
@@ -28,7 +40,9 @@ class PlaywrightBrowserSession:
         self._context = None
         self._page = None
         self._frame = None
-        self._responses: list[BrowserResolution] = []
+        self._responses: list[
+            tuple[BrowserResolution, dict[str, str]]
+        ] = []
 
     def _start(self):
         if self._page is not None:
@@ -62,14 +76,26 @@ class PlaywrightBrowserSession:
         self._frame = self._page
 
         def on_response(response):
-            headers = {
-                str(key): str(value)
+            response_headers = {
+                str(key).lower(): str(value)
                 for key, value in response.headers.items()
             }
+
+            request_headers = response.request.all_headers()
+            playback_headers = {
+                str(key): str(value)
+                for key, value in request_headers.items()
+                if not str(key).startswith(":")
+                and str(key).lower() not in _IGNORED_PLAYBACK_HEADERS
+            }
+
             self._responses.append(
-                BrowserResolution(
-                    media_url=str(response.url),
-                    headers=headers,
+                (
+                    BrowserResolution(
+                        media_url=str(response.url),
+                        headers=playback_headers,
+                    ),
+                    response_headers,
                 )
             )
 
@@ -135,9 +161,10 @@ class PlaywrightBrowserSession:
 
         while time.monotonic() < deadline:
             while checked < len(self._responses):
-                result = self._responses[checked]
+                result, response_headers = self._responses[checked]
                 checked += 1
-                if predicate(result.media_url, result.headers):
+
+                if predicate(result.media_url, response_headers):
                     return result
 
             if self._page is not None:
@@ -158,8 +185,8 @@ class PlaywrightBrowserSession:
                 if self._browser is not None:
                     self._browser.close()
             finally:
-                if self._manager is not None:
-                    self._manager.stop()
+                if self._playwright is not None:
+                    self._playwright.stop()
 
         self._manager = None
         self._playwright = None

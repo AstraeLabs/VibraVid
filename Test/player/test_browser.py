@@ -4,11 +4,26 @@ from VibraVid.player.browser import PlaywrightBrowserSession
 from VibraVid.player.resolver import InteractionRequiredError
 
 
+class FakeRequest:
+    def __init__(self, headers=None):
+        self._headers = headers or {}
+
+    def all_headers(self):
+        return dict(self._headers)
+
+
 class FakeResponse:
-    def __init__(self, url, status=200, headers=None):
+    def __init__(
+        self,
+        url,
+        status=200,
+        headers=None,
+        request_headers=None,
+    ):
         self.url = url
         self.status = status
         self.headers = headers or {}
+        self.request = FakeRequest(request_headers)
 
 
 class FakeElementHandle:
@@ -107,6 +122,10 @@ class FakeChromium:
 class FakePlaywright:
     def __init__(self, chromium):
         self.chromium = chromium
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
 
 
 class FakeManager:
@@ -148,7 +167,7 @@ def test_browser_session_opens_page_and_applies_headers():
 
     assert context.closed is True
     assert browser.closed is True
-    assert manager.stopped is True
+    assert manager.playwright.stopped is True
 
 
 def test_browser_session_enters_frame_and_triggers_selector():
@@ -165,7 +184,7 @@ def test_browser_session_enters_frame_and_triggers_selector():
     session.close()
 
 
-def test_browser_session_returns_matching_media_response():
+def test_browser_session_returns_request_headers_for_matching_media_response():
     session, page, _context, _browser, _manager = make_session()
     session.open("https://example.test/player", {})
 
@@ -174,16 +193,33 @@ def test_browser_session_returns_matching_media_response():
             "https://cdn.example.test/master.m3u8",
             200,
             {"content-type": "application/vnd.apple.mpegurl"},
+            {
+                ":authority": "cdn.example.test",
+                "accept": "*/*",
+                "origin": "https://example.test",
+                "referer": "https://example.test/player",
+                "user-agent": "BrowserTest/1.0",
+                "sec-fetch-mode": "cors",
+            },
         )
     )
 
     result = session.wait_for_media_request(
-        predicate=lambda url, headers: url.endswith(".m3u8"),
+        predicate=lambda url, headers: (
+            url.endswith(".m3u8")
+            and "mpegurl" in headers.get("content-type", "")
+        ),
         timeout=0.1,
     )
 
     assert result.media_url == "https://cdn.example.test/master.m3u8"
-    assert result.headers["content-type"] == "application/vnd.apple.mpegurl"
+    assert result.headers["referer"] == "https://example.test/player"
+    assert result.headers["origin"] == "https://example.test"
+    assert result.headers["user-agent"] == "BrowserTest/1.0"
+    assert result.headers["sec-fetch-mode"] == "cors"
+    assert ":authority" not in result.headers
+    assert "content-type" not in result.headers
+
     session.close()
 
 
