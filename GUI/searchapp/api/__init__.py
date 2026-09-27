@@ -43,8 +43,9 @@ _PREFERRED_ORDER = [
     "cinezo",
     "altadefinizione",
     "eurostreaming",
+    "amazon_music",
 ]
-_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus"}
+_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music"}
 _SITE_CATEGORIES: dict[str, str] = {}
 _SITE_ALIASES = {"altadefinzione": "altadefinizione"}
 
