@@ -1,10 +1,13 @@
 # 23-01-26
 
 import json
+import logging
 import os
 import threading
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class SingletonMeta(type):
@@ -31,36 +34,63 @@ class DownloadTracker(metaclass=SingletonMeta):
         self.active_processes: dict[str, list[any]] = {}
         self.stale_timeout_seconds = 30 * 60
         self._lock = threading.Lock()
+        self._history_loaded = False
         self._load_persisted_history()
 
     def _django_enabled(self) -> bool:
         return bool(os.environ.get("DJANGO_SETTINGS_MODULE"))
 
-    def _get_history_model(self):
+    def _django_apps_ready(self) -> bool:
         if not self._django_enabled():
+            return False
+        try:
+            from django.apps import apps
+
+            return apps.ready
+        except Exception:
+            return False
+
+    def _get_history_model(self):
+        if not self._django_apps_ready():
             return None
         try:
-            from GUI.searchapp.models import DownloadHistory
+            from django.apps import apps
 
-            return DownloadHistory
-        except Exception:
+            return apps.get_model("searchapp", "DownloadHistory")
+        except Exception as exc:
+            logger.warning("Unable to load Django download history model: %s", exc)
             return None
 
     def _load_persisted_history(self) -> None:
-        model = self._get_history_model()
-        if model:
+        if self._history_loaded:
+            return
+
+        if self._django_enabled():
+            if not self._django_apps_ready():
+                return
+
+            model = self._get_history_model()
+            if model is None:
+                return
+
             try:
                 rows = list(model.objects.order_by("-created_at")[:50])
                 payloads: list[dict[str, Any]] = []
                 for row in reversed(rows):
                     try:
                         payloads.append(json.loads(row.payload))
-                    except Exception:
-                        continue
+                    except Exception as exc:
+                        logger.warning(
+                            "Unable to decode persisted download history entry %s: %s",
+                            getattr(row, "download_id", ""),
+                            exc,
+                        )
                 self.history = payloads
+                self._history_loaded = True
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Unable to load persisted download history from Django: %s", exc)
+                return
 
         try:
             from VibraVid.utils import config_manager
@@ -71,8 +101,14 @@ class DownloadTracker(metaclass=SingletonMeta):
                     data = json.load(fh)
                 if isinstance(data, list):
                     self.history = data[-50:]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Unable to load persisted download history file: %s", exc)
+        finally:
+            self._history_loaded = True
+
+    def _ensure_persisted_history_loaded(self) -> None:
+        if not self._history_loaded:
+            self._load_persisted_history()
 
     def _persist_history_entry(self, entry: dict[str, Any]) -> None:
         model = self._get_history_model()
@@ -84,24 +120,34 @@ class DownloadTracker(metaclass=SingletonMeta):
                     payload=json.dumps(entry),
                 )
                 persisted_to_model = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Unable to persist download history entry %s to Django: %s",
+                    entry.get("id"),
+                    exc,
+                )
 
         if persisted_to_model:
             return
 
         try:
             from VibraVid.utils import config_manager
+
             path = os.path.join(config_manager.base_path, ".cache", "history.json")
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(self.history[-50:], fh, indent=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Unable to persist download history entry %s to file: %s",
+                entry.get("id"),
+                exc,
+            )
 
     def start_download(
         self, download_id: str, title: str, site: str, media_type: str = "Film", path: str = None, poster: str = None
     ):
+        self._ensure_persisted_history_loaded()
         hook_context = None
         poster = poster if poster is not None else context_tracker.poster_url
         with self._lock:
@@ -367,6 +413,7 @@ class DownloadTracker(metaclass=SingletonMeta):
             return list(self.downloads.values())
 
     def get_history(self) -> list[dict[str, Any]]:
+        self._ensure_persisted_history_loaded()
         with self._lock:
             return list(reversed(self.history))
 
