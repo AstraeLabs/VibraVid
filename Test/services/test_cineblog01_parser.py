@@ -118,3 +118,33 @@ def test_iframe_vidxgo_source_is_extracted():
     assert sources[0].url == "https://v.vidxgo.co/tt1234567"
     assert sources[0].section == "player"
     assert scrapper.source_kind(sources[0]) == "vidxgo"
+
+
+def test_search_falls_back_to_standard_wordpress_entry_title():
+    html = """
+    <article class="post type-post">
+      <h2 class="entry-title">
+        <a href="/film-esempio-hd-2025/">Film esempio [HD] (2025)</a>
+      </h2>
+      <img data-lazy-src="/poster.jpg">
+    </article>
+    """
+
+    results = scrapper.parse_search_results(html, "https://cineblog001.download/")
+
+    assert len(results) == 1
+    assert results[0].title == "Film esempio"
+    assert results[0].year == "2025"
+    assert results[0].image == "https://cineblog001.download/poster.jpg"
+
+
+def test_direct_video_source_is_extracted_and_classified():
+    html = """
+    <video src="https://cdn.example.test/movie/master.m3u8?token=abc"></video>
+    """
+
+    sources = scrapper.parse_detail_sources(html, "https://cineblog001.download/movie/")
+
+    assert len(sources) == 1
+    assert sources[0].section == "player"
+    assert scrapper.source_kind(sources[0]) == "hls"
