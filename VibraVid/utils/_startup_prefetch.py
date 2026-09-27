@@ -26,7 +26,7 @@ _CB01_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="startup-prefetch")
+_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="startup-prefetch")
 _futures: dict[str, Future] = {}
 
 
