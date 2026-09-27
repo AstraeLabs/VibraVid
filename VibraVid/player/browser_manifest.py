@@ -5,10 +5,7 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlsplit
 
 from VibraVid.player.browser import PlaywrightBrowserSession
-from VibraVid.player.resolver import (
-    BrowserResolution,
-    ManifestNotFoundError,
-)
+from VibraVid.player.resolver import ManifestNotFoundError
 
 
 class BrowserManifestResolver:
