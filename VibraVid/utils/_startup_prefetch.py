@@ -22,7 +22,7 @@ RELEASES_URL = f"https://api.github.com/repos/{_AUTHOR}/{_TITLE}/releases"
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
 _CB01_HEADING_MARKER = 'id="cb01-nuovo-indirizzo-aggiornato"'
 _CB01_URL_RE = re.compile(
-    r"https://(?:www\\.)?(?:cineblog[0-9a-z-]*|cb01[0-9a-z-]*)\\.[a-z0-9.-]+(?:/[^\\s<\\\"\\\']*)?",
+    r"https://(?:www\.)?(?:cineblog[0-9a-z-]*|cb01[0-9a-z-]*)\.[a-z0-9.-]+(?:/[^\s<\"']*)?",
     re.IGNORECASE,
 )
 
