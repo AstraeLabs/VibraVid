@@ -50,7 +50,12 @@ def _resolve_vidxgo(source: CineblogSource, referer: str) -> tuple[str | None, d
     return playlist, video_source.get_playback_headers() if playlist else {}
 
 
-def _resolve_source(source: CineblogSource, referer: str) -> tuple[str | None, dict]:
+def _resolve_source(
+    source: CineblogSource,
+    referer: str,
+    *,
+    manifest_resolver=None,
+) -> tuple[str | None, dict]:
     kind = source_kind(source)
 
     if kind == "hls":
@@ -63,12 +68,16 @@ def _resolve_source(source: CineblogSource, referer: str) -> tuple[str | None, d
         return MaxStreamSource(source.url, referer=referer).get_stream()
 
     if kind == "vixsrc":
-        return VixSrcSource(source.url, referer=referer).get_stream()
+        return VixSrcSource(
+            source.url,
+            referer=referer,
+            manifest_resolver=manifest_resolver,
+        ).get_stream()
 
     return None, {}
 
 
-def download_film(select_title: Entries):
+def download_film(select_title: Entries, *, manifest_resolver=None):
     """Resolve an accessible CB01 player through existing VibraVid resolvers and download it."""
     start_message()
     console.print(
@@ -102,7 +111,11 @@ def download_film(select_title: Entries):
             continue
 
         try:
-            playlist, headers = _resolve_source(source, final_url)
+            playlist, headers = _resolve_source(
+                source,
+                final_url,
+                manifest_resolver=manifest_resolver,
+            )
         except Exception as error:
             logger.warning("CB01 resolver failed for %s: %s", source.url, error)
             errors.append(f"{kind}: {error}")
