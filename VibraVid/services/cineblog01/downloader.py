@@ -33,7 +33,7 @@ def _output_path(select_title: Entries) -> str:
     return os.path.join(movie_path, f"{filename}.{extension_output}")
 
 
-def _resolve_vidxgo(source: CineblogSource) -> tuple[str | None, dict]:
+def _resolve_vidxgo(source: CineblogSource, referer: str) -> tuple[str | None, dict]:
     match = _IMDB_PATH_RE.search(urlsplit(source.url).path)
     if not match:
         return None, {}
@@ -42,6 +42,7 @@ def _resolve_vidxgo(source: CineblogSource) -> tuple[str | None, dict]:
         match.group(1),
         embed_domain=f"{urlsplit(source.url).scheme}://{urlsplit(source.url).netloc}",
         content_type="movie",
+        referer=referer,
     )
     playlist = video_source.get_playlist()
     return playlist, video_source.get_playback_headers() if playlist else {}
@@ -54,7 +55,7 @@ def _resolve_source(source: CineblogSource, referer: str) -> tuple[str | None, d
         return source.url, {"Referer": referer}
 
     if kind == "vidxgo":
-        return _resolve_vidxgo(source)
+        return _resolve_vidxgo(source, referer)
 
     if kind == "maxstream":
         return MaxStreamSource(source.url, referer=referer).get_stream()
