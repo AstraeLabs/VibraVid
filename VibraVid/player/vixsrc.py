@@ -31,15 +31,21 @@ class VixSrcSource:
     def is_supported_player(self) -> bool:
         return self.host == _SUPPORTED_HOST or self.host.endswith("." + _SUPPORTED_HOST)
 
-    def get_playback_headers(self) -> dict[str, str]:
+    def get_player_headers(self) -> dict[str, str]:
         headers = {
+            "User-Agent": get_userAgent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        if self.referer:
+            headers["Referer"] = self.referer
+        return headers
+
+    def get_playback_headers(self) -> dict[str, str]:
+        return {
             "User-Agent": get_userAgent(),
             "Referer": self.player_url,
             "Origin": "https://vixsrc.to",
         }
-        if self.referer:
-            headers["X-Player-Referer"] = self.referer
-        return headers
 
     @staticmethod
     def is_hls_manifest(url: str | None) -> bool:
