@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 from rich.console import Console
 
 from VibraVid.core.downloader import HLS_Downloader
-from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.player.maxstream import MaxStreamSource
 from VibraVid.player.vidxgo import VideoSource as VidXgoVideoSource
 from VibraVid.player.vixsrc import VixSrcSource
@@ -87,11 +86,11 @@ def download_film(select_title: Entries, *, manifest_resolver=None):
     try:
         html, final_url = fetch_detail_page(select_title.url)
     except Exception as error:
-        return DownloadResult(None, True, f"CB01 detail request failed: {error}")
+        return (None, True, f"CB01 detail request failed: {error}")
 
     sources = parse_detail_sources(html, final_url)
     if not sources:
-        return DownloadResult(None, True, "CB01 did not expose any player or download source")
+        return (None, True, "CB01 did not expose any player or download source")
 
     player_sources = [source for source in sources if source.section == "player"]
     candidates = player_sources or sources
@@ -137,7 +136,7 @@ def download_film(select_title: Entries, *, manifest_resolver=None):
         ).start()
 
     if errors:
-        return DownloadResult(None, True, "CB01 source unavailable: " + "; ".join(errors))
+        return (None, True, "CB01 source unavailable: " + "; ".join(errors))
 
     return DownloadResult(
         None,
