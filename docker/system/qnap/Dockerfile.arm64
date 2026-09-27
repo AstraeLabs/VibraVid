@@ -18,7 +18,11 @@ WORKDIR /app
 # Install Python dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m playwright install --with-deps chromium
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" && \
+    python -m playwright install --with-deps chromium && \
+    chmod -R 755 "$PLAYWRIGHT_BROWSERS_PATH"
 
 COPY GUI/requirements.txt ./GUI/requirements.txt
 RUN pip install --no-cache-dir -r GUI/requirements.txt
