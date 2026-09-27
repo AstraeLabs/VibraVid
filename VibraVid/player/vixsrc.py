@@ -38,6 +38,7 @@ class VixSrcSource:
         page_resolver=None,
         browser_factory=None,
         interaction_plan: InteractionPlan | None = None,
+        manifest_resolver=None,
     ):
         self.player_url = str(player_url or "").strip()
         self.referer = str(referer or "").strip()
@@ -45,6 +46,7 @@ class VixSrcSource:
         self.page_resolver = page_resolver
         self.browser_factory = browser_factory
         self.interaction_plan = interaction_plan or InteractionPlan()
+        self.manifest_resolver = manifest_resolver
 
     @property
     def host(self) -> str:
@@ -86,11 +88,32 @@ class VixSrcSource:
 
         return str(manifest_url), self.get_playback_headers()
 
+    def _resolve_injected_manifest(self) -> tuple[str | None, dict[str, str]]:
+        if self.manifest_resolver is None:
+            return None, {}
+
+        result = self.manifest_resolver(
+            self.player_url,
+            self.get_player_headers(),
+        )
+        if not result:
+            return None, {}
+
+        manifest_url, headers = result
+        if not self.is_hls_manifest(manifest_url):
+            return None, {}
+
+        return str(manifest_url), dict(headers or {})
+
     def get_stream(self) -> tuple[str | None, dict[str, str]]:
-        """Resolve a directly exposed HLS manifest through the shared resolver stack."""
+        """Resolve an HLS manifest through static, injected, or browser strategies."""
         if not self.is_supported_player():
             logger.error("Unsupported VixSrc player host: %s", self.host or "<empty>")
             return None, {}
+
+        injected_manifest, injected_headers = self._resolve_injected_manifest()
+        if injected_manifest:
+            return injected_manifest, injected_headers
 
         page_resolver = self.page_resolver or StaticHtmlPlayerResolver(self.http_client)
         resolver = Resolver(
