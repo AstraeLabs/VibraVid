@@ -6,7 +6,9 @@ import logging
 from urllib.parse import urlsplit
 
 from VibraVid.player.resolver import (
+    BrowserEventPlayerResolver,
     CurlHttpClient,
+    InteractionPlan,
     ManifestNotFoundError,
     Resolver,
     ResolverError,
@@ -34,11 +36,15 @@ class VixSrcSource:
         *,
         http_client=None,
         page_resolver=None,
+        browser_factory=None,
+        interaction_plan: InteractionPlan | None = None,
     ):
         self.player_url = str(player_url or "").strip()
         self.referer = str(referer or "").strip()
         self.http_client = http_client or CurlHttpClient()
         self.page_resolver = page_resolver
+        self.browser_factory = browser_factory
+        self.interaction_plan = interaction_plan or InteractionPlan()
 
     @property
     def host(self) -> str:
@@ -97,7 +103,25 @@ class VixSrcSource:
             result = resolver.resolve(self.player_url)
         except ManifestNotFoundError:
             logger.info("VixSrc player did not expose a static media manifest")
-            return None, {}
+
+            if self.browser_factory is None:
+                return None, {}
+
+            browser_resolver = BrowserEventPlayerResolver(
+                browser_factory=self.browser_factory,
+                plan=self.interaction_plan,
+            )
+            resolver = Resolver(
+                self.http_client,
+                browser_resolver,
+                user_agent=get_userAgent(),
+            )
+
+            try:
+                result = resolver.resolve(self.player_url)
+            except ResolverError as error:
+                logger.warning("VixSrc browser resolution failed: %s", error)
+                return None, {}
         except ResolverError as error:
             logger.warning("VixSrc resolution failed: %s", error)
             return None, {}
