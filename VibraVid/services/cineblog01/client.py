@@ -17,7 +17,15 @@ def fetch_search_page(query: str) -> tuple[str, str]:
     """Fetch the public WordPress search page and return HTML plus final URL."""
     base_url = get_base_url()
     with create_client(headers=get_headers()) as client:
-        response = client.get(base_url, params={"s": query}, timeout=20)
+        response = client.get(
+            urljoin(base_url, "index.php"),
+            params={
+                "story": query,
+                "do": "search",
+                "subaction": "search",
+            },
+            timeout=20,
+        )
         response.raise_for_status()
     return response.text, str(response.url)
 
