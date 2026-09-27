@@ -107,3 +107,62 @@ def test_vixsrc_returns_empty_when_player_has_no_static_manifest():
     source = VixSrcSource(player_url, http_client=http)
 
     assert source.get_stream() == (None, {})
+
+
+def test_vixsrc_falls_back_to_injected_browser_resolver():
+    player_url = "https://vixsrc.to/movie/tt32897959?lang=it"
+    manifest_url = "https://media.example.test/browser/master.m3u8"
+
+    class FakeBrowser:
+        def open(self, url, headers):
+            assert url == player_url
+
+        def enter_frame(self, selector):
+            raise AssertionError("no frame expected")
+
+        def trigger(self, selector):
+            raise AssertionError("no trigger expected")
+
+        def wait_for_media_request(self, *, predicate, timeout):
+            from VibraVid.player.resolver import BrowserResolution
+
+            headers = {
+                "content-type": "application/vnd.apple.mpegurl",
+                "Referer": player_url,
+            }
+            assert predicate(manifest_url, headers)
+            return BrowserResolution(
+                media_url=manifest_url,
+                headers=headers,
+            )
+
+        def close(self):
+            pass
+
+    http = FakeHttpClient(
+        {
+            player_url: FakeHttpResponse(
+                player_url,
+                200,
+                "<html><body>No static manifest</body></html>",
+                {"content-type": "text/html"},
+            ),
+            manifest_url: FakeHttpResponse(
+                manifest_url,
+                200,
+                "#EXTM3U\n#EXT-X-VERSION:3\n",
+                {"content-type": "application/vnd.apple.mpegurl"},
+            ),
+        }
+    )
+
+    source = VixSrcSource(
+        player_url,
+        http_client=http,
+        browser_factory=FakeBrowser,
+    )
+
+    manifest, headers = source.get_stream()
+
+    assert manifest == manifest_url
+    assert headers["Referer"] == player_url
