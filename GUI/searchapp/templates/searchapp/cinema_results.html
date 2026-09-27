@@ -77,7 +77,7 @@
 				         data-slug="{{ result.slug|default:'' }}"
 				         data-tmdb-id="{{ result.tmdb_id|default:'' }}"
 				         {% if not result.is_movie %}
-				         data-detail="{% url 'series_detail' %}?source_alias={{ result.source_alias }}&item_payload={{ result.payload_json|urlencode }}"
+				         data-fire="cn-detail-{{ forloop.counter }}"
 				         {% else %}
 				         data-fire="cn-dl-{{ forloop.counter }}"
 				         {% endif %}
@@ -132,10 +132,14 @@
 									<button class="cn-mini" type="submit">Download</button>
 								</form>
 							{% else %}
-								<a class="cn-mini"
-								   href="{% url 'series_detail' %}?source_alias={{ result.source_alias }}&item_payload={{ result.payload_json|urlencode }}">
+								<form id="cn-detail-{{ forloop.counter }}" action="{% url 'series_detail' %}" method="post">
+									{% csrf_token %}
+									<input type="hidden" name="source_alias" value="{{ result.source_alias }}">
+									<input type="hidden" name="item_payload" value="{{ result.payload_json }}">
+								</form>
+								<button class="cn-mini" type="submit" form="cn-detail-{{ forloop.counter }}">
 									Episodes
-								</a>
+								</button>
 							{% endif %}
 
 							{% comment %}
@@ -227,7 +231,6 @@
 	});
 
 	function activate(tile) {
-		if (tile.dataset.detail) { window.location.href = tile.dataset.detail; return; }
 		var form = tile.dataset.fire && document.getElementById(tile.dataset.fire);
 		if (!form) return;
 		tile.classList.add("is-firing");

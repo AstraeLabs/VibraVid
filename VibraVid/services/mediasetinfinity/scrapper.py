@@ -10,6 +10,7 @@ from urllib.parse import quote, urlparse
 
 from bs4 import BeautifulSoup
 
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base.object import Episode, Season, SeasonManager
 from VibraVid.services.mediasetinfinity.client import get_client
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
@@ -21,6 +22,7 @@ MIN_DURATION = 10
 MAX_WORKERS = 6
 FULL_EPISODE_MIN_DURATION = 50
 FEED_FETCH_TIMEOUT = 20
+IMAGE_BASE_URL = "https://img-prod-api2.mediasetplay.mediaset.it/api/images"
 
 
 class GetSerieInfo:
@@ -61,6 +63,10 @@ class GetSerieInfo:
         self.public_id = None
         self.series_name = ""
         self.stagioni_disponibili = []
+        try:
+            self.disable_filters = bool((context_tracker.site_options or {}).get("disable_filters"))
+        except Exception:
+            self.disable_filters = False
 
     def close(self):
         """Close the HTTP client session."""
@@ -176,16 +182,27 @@ class GetSerieInfo:
         if not carousel_links:
             carousel_links = soup.find_all("a", attrs={"data-testid": "carousel-title"})
         if not carousel_links:
-            logger.error(f"No titleCarousel categories found for season {season['tvSeasonNumber']}")
+            carousel_links = [
+                link
+                for link in soup.find_all("a", href=True)
+                if "/episodi_" in link.get("href", "")
+            ]
+        if not carousel_links:
+            logger.error(f"No season categories found for season {season['tvSeasonNumber']}")
             return
 
         season["categories"] = []
         for carousel_link in carousel_links:
             if carousel_link.has_attr("href"):
                 category_title = carousel_link.find("h2")
-                category_name = category_title.text.strip() if category_title else "Unnamed"
-                if any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
+                category_name = (
+                    category_title.text.strip()
+                    if category_title
+                    else carousel_link.get_text(" ", strip=True) or "Unnamed"
+                )
+                if not self.disable_filters and any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
                     continue
+
                 href = carousel_link["href"]
                 sb_id = href.split(",")[-1] if "," in href else href.split("_")[-1]
                 season["categories"].append({"name": category_name, "sb": sb_id})
@@ -210,7 +227,7 @@ class GetSerieInfo:
     def _get_season_episodes(self, season, sb_id, category_name, client=None):
         """Get episodes for a specific season"""
         logger.debug(f"Getting episodes for season {season['tvSeasonNumber']} category {category_name} sb_id {sb_id}")
-        if any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
+        if not self.disable_filters and any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
             return []
 
         if "tutti" in category_name.lower() or category_name.lower().startswith("all"):
@@ -315,7 +332,7 @@ class GetSerieInfo:
                     except Exception:
                         duration = 0
 
-                    if duration < MIN_DURATION:
+                    if not self.disable_filters and duration < MIN_DURATION:
                         continue
 
                     episodes.append(
@@ -328,6 +345,7 @@ class GetSerieInfo:
                             category=category_name,
                             description=item.get("cardText") or item.get("description", ""),
                             season_number=season_number,
+                            image=self._episode_image(item.get("guid")),
                         )
                     )
                     seen_ids.add(item_id)
@@ -373,6 +391,45 @@ class GetSerieInfo:
             start += self.FEED_PAGE_SIZE
         return entries
 
+    def _episode_image_from_entry(self, entry):
+        """Return the best feed artwork, falling back to the guid-based CDN URL."""
+        if not isinstance(entry, dict):
+            return self._episode_image(entry)
+
+        thumbnails = entry.get("thumbnails") or {}
+
+        preferred = (
+            "image_keyframe_poster-652x367",
+            "image_keyframe_poster-1280x720",
+            "image_horizontal_cover-704x396",
+        )
+
+        for key in preferred:
+            thumbnail = thumbnails.get(key)
+            if isinstance(thumbnail, dict) and thumbnail.get("url"):
+                return thumbnail["url"]
+
+        candidates = []
+        for key, thumbnail in thumbnails.items():
+            if not isinstance(thumbnail, dict) or not thumbnail.get("url"):
+                continue
+            if not any(kind in key for kind in ("keyframe", "horizontal", "header_poster")):
+                continue
+
+            width = thumbnail.get("width") or 0
+            height = thumbnail.get("height") or 0
+            try:
+                area = int(width) * int(height)
+            except (TypeError, ValueError):
+                area = 0
+
+            candidates.append((area, thumbnail["url"]))
+
+        if candidates:
+            return max(candidates)[1]
+
+        return self._episode_image(entry.get("guid"))
+
     def _get_all_season_episodes(self, season, category_name="programs_feed", client=None):
         """Fetch the full programs feed for the season and return a list of Episode objects for all entries."""
         logger.debug(f"Getting all episodes for season {season['tvSeasonNumber']}")
@@ -387,7 +444,7 @@ class GetSerieInfo:
                 duration = (
                     int(entry.get("mediasetprogram$duration", 0) / 60) if entry.get("mediasetprogram$duration") else 0
                 )
-                if duration < MIN_DURATION:
+                if not self.disable_filters and duration < MIN_DURATION:
                     continue
 
                 ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
@@ -411,6 +468,7 @@ class GetSerieInfo:
                         description=entry.get("description", ""),
                         season_number=season.get("tvSeasonNumber"),
                         release_date=self._feed_release_date(entry),
+                        image=self._episode_image_from_entry(entry),
                     )
                 )
             return episodes
@@ -424,6 +482,18 @@ class GetSerieInfo:
         publish_info = entry.get("mediasetprogram$publishInfo") or {}
         last_published = publish_info.get("last_published")
         return last_published.split("T")[0] if last_published else last_published
+
+    def _episode_image(self, guid):
+        """Episode keyframe thumbnail URL, built directly from the episode's own guid."""
+        if not guid:
+            return None
+        return f"{IMAGE_BASE_URL}/mp/v5/{self.conf['image_region']}/{guid}/image_keyframe_poster/292/165@2"
+
+    def _season_hero_image(self, guid):
+        """Season hero/backdrop image URL, built directly from the season's own guid."""
+        if not guid:
+            return None
+        return f"{IMAGE_BASE_URL}/mst/v5/{self.conf['image_region']}/{guid}/image_header_poster/768/630@2"
 
     @staticmethod
     def _rsc_unescape(s):
@@ -455,8 +525,9 @@ class GetSerieInfo:
                     ep[key] = int(m.group(1)) if key == "duration" else m.group(1)
             if ep:
                 duration = int(ep.get("duration", 0) / 60) if ep.get("duration") else 0
-                if duration < MIN_DURATION:
+                if not self.disable_filters and duration < MIN_DURATION:
                     continue
+                
                 episodes.append(
                     Episode(
                         id=ep.get("guid", ""),
@@ -573,6 +644,7 @@ class GetSerieInfo:
                         description=entry.get("description", ""),
                         season_number=season_number,
                         release_date=self._feed_release_date(entry),
+                        image=self._episode_image_from_entry(entry),
                     )
                 )
 
@@ -612,7 +684,7 @@ class GetSerieInfo:
                 (season, category)
                 for season in self.stagioni_disponibili
                 for category in season.get("categories", [])
-                if not any(w.lower() in category["name"].lower() for w in self.BAD_WORDS)
+                if self.disable_filters or not any(w.lower() in category["name"].lower() for w in self.BAD_WORDS)
             ]
 
             def _fetch_task(task):
@@ -665,6 +737,7 @@ class GetSerieInfo:
                         number=season_data["tvSeasonNumber"],
                         name=f"Season {season_data['tvSeasonNumber']}",
                         id=season_data.get("title") or season_data.get("id"),
+                        image=self._season_hero_image(season_data.get("guid")),
                     )
                 )
 

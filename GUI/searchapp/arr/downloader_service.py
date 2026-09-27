@@ -110,6 +110,8 @@ class ArrDownloaderService:
                     media_type="tv",
                     season_number=season_num,
                     episode_number=ep_num,
+                    imdb_id=serie.get("imdbId") or serie.get("imdb_id"),
+                    tvdb_id=serie.get("tvdbId") or serie.get("tvdb_id"),
                 )
                 if not item_payload:
                     logger.error(f"✖️ Could not find '{title}' using candidates: {titles}")
@@ -259,6 +261,7 @@ class ArrDownloaderService:
             expected_year=year,
             tmdb_id=tmdb_id,
             media_type="movie",
+            imdb_id=movie.get("imdbId") or movie.get("imdb_id"),
         )
         if not item_payload:
             logger.error(f"Could not find movie '{title}' using candidates: {titles}")
@@ -569,6 +572,37 @@ class ArrDownloaderService:
                 raw_data["tmdb_id"] = resolved
         return resolved
 
+    def _resolve_provider_tmdb_id_via_request_external_id(
+        self, result: Any, media_type: str, imdb_id: str | None = None, tvdb_id: str | None = None
+    ) -> str | None:
+        """Last-resort fallback: resolve TMDB id from the ARR request's own imdb/tvdb id.
+
+        Used only when the provider itself could not attest an id.
+        """
+        tmdb = self._tmdb_client()
+        if not tmdb or not tmdb.api_key:
+            return None
+
+        for external_id, external_source in ((tvdb_id, "tvdb_id"), (imdb_id, "imdb_id")):
+            if not external_id:
+                continue
+            if external_source == "tvdb_id" and media_type != "tv":
+                continue
+            try:
+                resolved = tmdb.get_tmdb_id_by_external_id(external_id, external_source, media_type)
+            except Exception as exc:
+                logger.warning(f"[tmdb_check] Could not resolve {external_source}={external_id} as fallback: {exc}")
+                continue
+            normalized = self._normalize_tmdb_id(resolved)
+            if normalized:
+                logger.info(
+                    f"[tmdb_check] Resolved {external_source}={external_id} to {media_type} TMDB id={normalized} "
+                    f"(ARR-request fallback, provider itself could not attest an id)"
+                )
+                result.tmdb_id = normalized
+                return normalized
+        return None
+
     @staticmethod
     def _strip_accents(text: str) -> str:
         """Replace accented characters with their ASCII base: à->a, è->e, ì->i, ò->o, ù->u, etc."""
@@ -753,6 +787,8 @@ class ArrDownloaderService:
         media_type: str = "tv",
         season_number: int | None = None,
         episode_number: int | None = None,
+        imdb_id: str | None = None,
+        tvdb_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Search VibraVid's streaming API for a title and return an item_payload dict.
 
@@ -874,6 +910,10 @@ class ArrDownloaderService:
                         continue
 
                     result_tmdb = self._resolve_provider_tmdb_id(api, r, provider, media_type)
+                    if not result_tmdb:
+                        result_tmdb = self._resolve_provider_tmdb_id_via_request_external_id(
+                            r, media_type, imdb_id=imdb_id, tvdb_id=tvdb_id
+                        )
                     if not result_tmdb:
                         logger.warning(
                             f"[tmdb_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id"

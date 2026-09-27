@@ -186,7 +186,7 @@ ls -ln /volume2/Media/Movies
 
 QNAP devices frequently use ARM64 processors. The VibraVid Docker image is published as a **multi-arch manifest** (`linux/amd64` + `linux/arm64`), so you can run it on QNAP without building from source.
 
-> **Do not run `docker compose up --build` on ARM64.** The source repository includes x86_64-only prebuilt binaries (Bento4, Shaka Packager) that cause the build to fail on ARM64. Always use `docker compose pull` to fetch the pre-built image.
+> **Do not run `docker compose up --build` on ARM64.** The source repository includes x86_64-only prebuilt binaries that cause the build to fail on ARM64. Always use `docker compose pull` to fetch the pre-built image.
 
 ### Setup via QNAP Container Station
 

@@ -14,13 +14,13 @@ from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
 
 from .util.formatting import (
-    estimate_total_size as _estimate_total_size,
-)
-from .util.formatting import (
     format_size as _fmt_size,
 )
 from .util.formatting import (
     format_speed as _fmt_speed,
+)
+from .util.formatting import (
+    resolve_display_total as _resolve_display_total,
 )
 
 logger = logging.getLogger("manual")
@@ -57,6 +57,7 @@ def _run_ffmpeg_concat(list_path: Path, out_path: Path, codec_args: list[str]) -
         cmd += ["-f", "mp4"]
     cmd.append(str(out_path))
 
+    logger.info(f"Running _run_ffmpeg_concat for {os.path.basename(out_path)} with cmd: {' '.join(cmd)}")
     return subprocess.run(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -149,12 +150,20 @@ class MultiPeriodMixin:
         num_to_period = {e["number"]: e["period_idx"] for e in dl_segs}
 
         total = len(dl_segs)
+        _prev_estimated = [0]
 
         def _progress(
             done: int, total_: int, total_bytes: int, speed_bps: float, speed_label: str | None = None
         ) -> None:
-            pct = int((done / total_) * 100) if total_ else 0
-            estimated_total = _estimate_total_size(total_bytes, done, total_) if done > 0 else total_bytes
+            known_total = int(getattr(stream, "estimated_size", 0) or 0)
+            estimated_total = _resolve_display_total(
+                total_bytes, done, total_, known_total=known_total, prev_estimated=_prev_estimated[0]
+            )
+            _prev_estimated[0] = estimated_total
+            if known_total > 0:
+                pct = min(100, int((total_bytes / known_total) * 100)) if total_bytes else 0
+            else:
+                pct = int((done / total_) * 100) if total_ else 0
             size_display = (
                 f"{_fmt_size(total_bytes)}/{_fmt_size(estimated_total)}"
                 if done < total_
@@ -235,6 +244,7 @@ class MultiPeriodMixin:
                     else:
                         logger.warning(f"[multiperiod] Period {order_idx} decryption failed - keeping raw merge")
                         dec_path.unlink(missing_ok=True)
+                        
                 except Exception as exc:
                     logger.error(f"[multiperiod] Period {order_idx} decryption error: {exc}")
                     try:

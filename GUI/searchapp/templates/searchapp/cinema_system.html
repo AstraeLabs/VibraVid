@@ -108,13 +108,19 @@
 					provider (e.g. Prime Video's <code>--optimize-audio</code>).
 				</p>
 				<div class="cn-lines" id="cn-extra-args-list" style="gap:2px;max-height:220px;overflow-y:auto"></div>
-				<div class="cn-row" style="margin-top:12px;gap:8px">
-					<select id="cn-extra-args-site" class="cn-mini" style="flex:1;min-width:0">
-						{% for p in providers %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}
-					</select>
-					<input type="text" id="cn-extra-args-value" class="cn-mini" placeholder="--optimize-audio" style="flex:2;min-width:0">
-					<button class="cn-cta is-ghost" type="button" id="cn-extra-args-add">Add</button>
-				</div>
+				{% if cli_option_providers %}
+					<div class="cn-row" style="margin-top:12px;gap:8px">
+						<select id="cn-extra-args-site" class="cn-mini" style="flex:1;min-width:0">
+							{% for p in cli_option_providers %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}
+						</select>
+					</div>
+					<div id="cn-extra-args-fields" style="margin-top:8px"></div>
+					<div class="cn-row" style="margin-top:12px;gap:8px">
+						<button class="cn-cta is-ghost" type="button" id="cn-extra-args-add">Add</button>
+					</div>
+				{% else %}
+					<p class="cn-empty" style="padding:14px 0">No providers with custom CLI options available.</p>
+				{% endif %}
 				<p class="cn-sub" id="cn-extra-args-msg" style="margin-top:8px"></p>
 			</div>
 		</div>
@@ -282,7 +288,7 @@
 			<div class="cn-box">
 				<h3>Binaries</h3>
 				<p class="cn-sub" style="margin-bottom:15px">
-					FFmpeg, Bento4, Shaka Packager, dovi_tool, MKVToolNix and Velora don't go
+					FFmpeg, Flux, dovi_tool, MKVToolNix and Velora don't go
 					through the app update: they're checked against AstraeLabs/Binary and
 					re-downloaded from here if outdated.
 				</p>
@@ -293,6 +299,7 @@
 			</div>
 		</div>
 	</section>
+
 </div>
 {% endblock %}
 
@@ -317,6 +324,7 @@
 	var URL_ARR_SYNC = "{% url 'arr_trigger_sync' %}";
 	var URL_UPLOAD   = "{% url 'upload_service_zip' %}";
 	var URL_BINARIES = "{% url 'trigger_binaries_update' %}";
+	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
 	var CSRF         = "{{ csrf_token }}";
 
 	function el(id) { return document.getElementById(id); }
@@ -541,6 +549,93 @@
 	var extraArgsState = source("cn-src-extra-args") || {};
 	var extraArgsMsg = el("cn-extra-args-msg");
 	var extraArgsList = el("cn-extra-args-list");
+	var extraArgsFields = el("cn-extra-args-fields");
+	var extraArgsSchemaCache = {};
+
+	function quoteIfNeeded(v) {
+		return /\s/.test(v) ? '"' + v.replace(/"/g, '\\"') + '"' : v;
+	}
+
+	function renderExtraArgsFields(schema) {
+		if (!extraArgsFields) return;
+		extraArgsFields.innerHTML = "";
+		if (!schema.length) {
+			extraArgsFields.innerHTML = '<p class="cn-empty" style="padding:6px 0">No custom options available for this provider.</p>';
+			return;
+		}
+		schema.forEach(function (arg) {
+			var row = document.createElement("div");
+			row.className = "cn-row";
+			row.style.gap = "8px";
+			row.style.marginBottom = "6px";
+
+			var label = document.createElement("span");
+			label.className = "cn-s";
+			label.style.flex = "1";
+			label.style.minWidth = "0";
+			label.title = arg.help || "";
+			label.textContent = arg.flag;
+
+			var control;
+			if (arg.kind === "flag") {
+				control = document.createElement("input");
+				control.type = "checkbox";
+				control.checked = !!arg.default;
+			} else if (arg.kind === "choice") {
+				control = document.createElement("select");
+				control.className = "cn-mini";
+				control.style.flex = "2";
+				var empty = document.createElement("option");
+				empty.value = "";
+				empty.textContent = "(unset)";
+				control.appendChild(empty);
+				(arg.choices || []).forEach(function (c) {
+					var opt = document.createElement("option");
+					opt.value = c;
+					opt.textContent = c;
+					if (arg.default === c) opt.selected = true;
+					control.appendChild(opt);
+				});
+			} else {
+				control = document.createElement("input");
+				control.type = arg.kind === "int" ? "number" : "text";
+				control.className = "cn-mini";
+				control.style.flex = "2";
+				control.style.minWidth = "0";
+				if (arg.default !== null && arg.default !== undefined && arg.default !== false) {
+					control.placeholder = String(arg.default);
+				}
+			}
+			control.dataset.flag = arg.flag;
+			control.dataset.kind = arg.kind;
+
+			row.appendChild(label);
+			row.appendChild(control);
+			extraArgsFields.appendChild(row);
+		});
+	}
+
+	function loadExtraArgsSchema(site) {
+		if (!extraArgsFields) return;
+		if (!site) { renderExtraArgsFields([]); return; }
+		if (extraArgsSchemaCache[site]) { renderExtraArgsFields(extraArgsSchemaCache[site]); return; }
+		extraArgsFields.innerHTML = '<p class="cn-empty" style="padding:6px 0">Loading…</p>';
+		fetch(URL_CLI_OPTIONS + "?site=" + encodeURIComponent(site))
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var schema = data.args || [];
+				extraArgsSchemaCache[site] = schema;
+				renderExtraArgsFields(schema);
+			})
+			.catch(function () {
+				extraArgsFields.innerHTML = '<p class="cn-empty" style="padding:6px 0">Could not load options for this provider.</p>';
+			});
+	}
+
+	if (el("cn-extra-args-site")) {
+		el("cn-extra-args-site").addEventListener("change", function () { loadExtraArgsSchema(this.value); });
+		loadExtraArgsSchema(el("cn-extra-args-site").value);
+	}
 
 	function renderExtraArgs() {
 		var keys = Object.keys(extraArgsState).sort();
@@ -615,18 +710,27 @@
 			.catch(function (err) { say(extraArgsMsg, "Save failed: " + err.message, "bad"); });
 	}
 
-	el("cn-extra-args-add").addEventListener("click", function () {
-		var siteSel = el("cn-extra-args-site");
-		var valInput = el("cn-extra-args-value");
-		var site = siteSel.value;
-		var val = valInput.value.trim();
-		if (!site || !val) { say(extraArgsMsg, "Pick a provider and enter options.", "bad"); return; }
+	if (el("cn-extra-args-add")) {
+		el("cn-extra-args-add").addEventListener("click", function () {
+			var site = el("cn-extra-args-site").value;
+			var controls = extraArgsFields.querySelectorAll("[data-flag]");
+			var parts = [];
+			controls.forEach(function (c) {
+				if (c.dataset.kind === "flag") {
+					if (c.checked) parts.push(c.dataset.flag);
+				} else {
+					var v = c.value.trim();
+					if (v) parts.push(c.dataset.flag + " " + quoteIfNeeded(v));
+				}
+			});
+			var val = parts.join(" ");
+			if (!site || !val) { say(extraArgsMsg, "Pick a provider and set at least one option.", "bad"); return; }
 
-		extraArgsState[site] = val;
-		renderExtraArgs();
-		valInput.value = "";
-		saveExtraArgs();
-	});
+			extraArgsState[site] = val;
+			renderExtraArgs();
+			saveExtraArgs();
+		});
+	}
 
 	extraArgsList.addEventListener("click", function (e) {
 		var b = e.target.closest("[data-remove-extra-args]");

@@ -55,7 +55,7 @@ argparse `dest`:
 
 ```python
 def register_cli_args(parser) -> list:
-    group = parser.add_argument_group("MyService options (--site <n>)")
+    group = parser.add_argument_group("MyService options (-i <n>)")
     group.add_argument("--url", dest="url", default=None, help="Direct title URL.")
     return ["url"]
 ```

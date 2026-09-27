@@ -69,8 +69,8 @@ def build_table(
         ("Bitrate", "right"),
         ("Codec", "left"),
         ("Channels", "center"),
-        ("Extra", "center"),
         ("Language", "left"),
+        ("Extra", "center"),
     ]
     for name, justify in cols:
         table.add_column(name, justify=justify, no_wrap=True)
@@ -105,7 +105,7 @@ def build_table(
 
             is_sel = s.selected if not interactive else (orig_idx in (selected or set()))
             res = s.resolution if s.type == "video" else ""
-            hdr = s.get_hdr_display() if s.type == "video" else ""
+            hdr = (s.get_hdr_display() if s.type == "video" else "") or s.name
             bitrate = s.bitrate_display if s.bitrate else ""
             codec = s.get_short_codec()
             channels = get_channel_label(s.channels) if s.channels else ""
@@ -146,8 +146,8 @@ def build_table(
             _c(bitrate, _COL_BITRATE if bitrate else None),
             _c(codec, _COL_CODEC if codec else None),
             _c(channels, "white" if channels else None),
-            _c(hdr, hdr_col),
             _c(language, _COL_LANG if language else None),
+            _c(hdr, hdr_col),
             style=row_style,
         )
 

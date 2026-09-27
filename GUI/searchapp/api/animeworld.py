@@ -1,10 +1,8 @@
 # 27.01.26
 
-import importlib
 import re
 import time
 
-from VibraVid.services._base.site_loader import get_folder_name
 from VibraVid.services.animeworld.scrapper import ScrapSerie
 from VibraVid.utils import anime_id_map, config_manager
 from VibraVid.utils.http_client import create_client, get_headers
@@ -33,12 +31,6 @@ class AnimeWorldAPI(BaseStreamingAPI):
         self.base_url = config_manager.domain.get(self.site_name, "full_url")
         print(f"[{self.site_name}] Configuration loaded: base_url={self.base_url}")
 
-    def _get_search_fn(self):
-        """Lazy load the search function."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
 
     def search(self, query: str) -> list[Entries]:
         """Search for anime content on AnimeWorld."""

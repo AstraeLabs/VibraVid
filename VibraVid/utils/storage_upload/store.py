@@ -80,16 +80,14 @@ class ExternalUploadVault:
             r.raise_for_status()
             endpoint = r.json()["endpoint"]
 
-            key, nonce = client.new_file_key()
             up = client.upload_file(
-                self.upload_client, file_path, endpoint, key, nonce, filename=filename, on_progress=on_progress
+                self.upload_client, file_path, endpoint, filename=filename, on_progress=on_progress
             )
 
             register = {
                 "filename": filename,
                 "size": up.get("size", size),
                 "storageUrl": up["url"],
-                "key": client.pack_key(key, nonce),
             }
             if title:
                 register["title"] = title
@@ -122,14 +120,10 @@ class ExternalUploadVault:
             r.raise_for_status()
             info = r.json()
             url = info.get("url")
-            key_packed = info.get("key")
-            if not url or not key_packed:
+            if not url:
                 return None
 
-            key, nonce = client.unpack_key(key_packed)
-            client.download_decrypt(
-                self.storage, url, dest_path, key, nonce, total=info.get("size"), on_progress=on_progress
-            )
+            client.download_file(self.storage, url, dest_path, total=info.get("size"), on_progress=on_progress)
             logger.info(f"upload store: downloaded -> {dest_path}")
             return dest_path
         except Exception as e:

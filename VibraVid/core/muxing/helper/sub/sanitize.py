@@ -86,6 +86,8 @@ def trim_subtitle_to_duration(subtitle_path: str, max_duration: float) -> str:
     try:
         cmd = [get_ffmpeg_path(), "-v", "error", "-i", subtitle_path, "-t", f"{max_duration:.3f}", trimmed_path, "-y"]
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        logger.info(f"Running trim_subtitle_to_duration for {os.path.basename(subtitle_path)} with cmd: {' '.join(cmd)}")
+
         if result.returncode == 0 and os.path.exists(trimmed_path) and os.path.getsize(trimmed_path) > 0:
             os.replace(trimmed_path, subtitle_path)
             logger.info(f"Subtitle trimmed to {max_duration:.2f}s: {os.path.basename(subtitle_path)}")

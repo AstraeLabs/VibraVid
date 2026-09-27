@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
@@ -555,4 +556,47 @@ def arr_trigger_sync(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"status": "error", "message": str(exc)}, status=500)
 
 
-__all__ = ['arr_stack', 'seerr_webhook', 'sonarr_webhook', 'radarr_webhook', 'arr_status', 'arr_trigger_sync']
+@require_http_methods(["POST"])
+def arr_delete_request(request: HttpRequest, queue_id: int) -> JsonResponse:
+    """
+    Remove an ARR queue entry and its media request.
+    POST /api/arr/queue/<queue_id>/delete/
+    """
+    try:
+        with transaction.atomic():
+            queue_entry = (
+                ArrProcessingQueue.objects
+                .select_for_update()
+                .select_related("media_request")
+                .get(pk=queue_id)
+            )
+
+            # A running worker would otherwise race with the next sync and
+            # download the same item twice.
+            if queue_entry.started_at and not queue_entry.completed_at:
+                return JsonResponse(
+                    {"status": "error", "message": "Download in progress, wait for it to finish"},
+                    status=409,
+                )
+
+            media_request = queue_entry.media_request
+            media_request_id = media_request.id
+
+            # The queue row goes with it through on_delete=CASCADE.
+            media_request.delete()
+
+        logger.info(
+            "Deleted ARR queue entry %s (media request %s): %s",
+            queue_id, media_request_id, media_request.title,
+        )
+        return JsonResponse({"status": "ok", "message": "ARR request deleted"})
+
+    except ArrProcessingQueue.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "ARR queue entry not found"}, status=404)
+
+    except Exception as exc:
+        logger.exception("Failed to delete ARR queue entry %s: %s", queue_id, exc)
+        return JsonResponse({"status": "error", "message": "Could not delete ARR request"}, status=500)
+
+
+__all__ = ['arr_stack', 'seerr_webhook', 'sonarr_webhook', 'radarr_webhook', 'arr_status', 'arr_trigger_sync', 'arr_delete_request']

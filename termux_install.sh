@@ -91,49 +91,48 @@ pkg update -y < /dev/null
 echo -e "\n${YELLOW}[3/5] Installazione delle dipendenze di sistema...${NC_REG}"
 # Enable X11 repo for mkvtoolnix
 pkg install -y x11-repo < /dev/null
-pkg install -y python ffmpeg mkvtoolnix rust clang git cmake make < /dev/null || {
+pkg install -y python ffmpeg mkvtoolnix rust clang git curl < /dev/null || {
     echo -e "${RED}Errore durante l'installazione dei pacchetti di sistema!${NC_REG}"
     exit 1
 }
 
-# 4b. Compile Bento4 (mp4decrypt) from source
-echo -e "\n${YELLOW}[3b/5] Compilazione di Bento4 (mp4decrypt) da sorgente...${NC_REG}"
-if [ -f "$HOME/.local/bin/binary/mp4decrypt" ]; then
-    echo -e "${GREEN}Bento4 (mp4decrypt) è già compilato e presente.${NC_REG}"
-else
-    echo -e "${BLUE}Clonazione e compilazione di Bento4 (axiomatic-systems/Bento4)...${NC_REG}"
-    git clone https://github.com/axiomatic-systems/Bento4.git "$HOME/Bento4_src" < /dev/null || {
-        echo -e "${RED}Errore nel clonare Bento4!${NC_REG}"
-        exit 1
-    }
-    cd "$HOME/Bento4_src" || exit 1
-    mkdir cmakebuild
-    cd cmakebuild || exit 1
-    cmake -DCMAKE_BUILD_TYPE=Release .. < /dev/null
-    make -j$(nproc 2>/dev/null || echo 2) < /dev/null || {
-        echo -e "${RED}Errore durante la compilazione di Bento4!${NC_REG}"
-        exit 1
-    }
-    mkdir -p "$HOME/.local/bin/binary"
-    cp mp4decrypt "$HOME/.local/bin/binary/"
-    chmod +x "$HOME/.local/bin/binary/mp4decrypt"
-    cd "$HOME" || exit 1
-    rm -rf "$HOME/Bento4_src"
-    echo -e "${GREEN}Bento4 compilato con successo!${NC_REG}"
-fi
 
-# 5. Compile Velora
-echo -e "\n${YELLOW}[4/5] Installazione e compilazione di Velora...${NC_REG}"
+# Map uname -m to the arch suffix used by AstraeLabs/Binary's termux assets
+case "$(uname -m)" in
+    aarch64|arm64) TERMUX_ARCH="arm64" ;;
+    armv7l|armv8l) TERMUX_ARCH="arm" ;;
+    *) TERMUX_ARCH="" ;;
+esac
+BINARY_RAW_BASE="https://raw.githubusercontent.com/AstraeLabs/Binary/main/binaries"
+
+# Try to fetch a prebuilt android-target binary
+fetch_prebuilt_binary() {
+    local tool_dir="$1" dest="$2" tmp
+    [ -n "$TERMUX_ARCH" ] || return 1
+    tmp="${dest}.tmp.$$"
+    local url="$BINARY_RAW_BASE/linux/$TERMUX_ARCH/${tool_dir}/$(basename "$dest")"
+    if curl -fsSL "$url" -o "$tmp" < /dev/null && [ -s "$tmp" ]; then
+        chmod +x "$tmp" && mv "$tmp" "$dest"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+# 5. Install Velora
+echo -e "\n${YELLOW}[4/5] Installazione di Velora...${NC_REG}"
 mkdir -p "$HOME/.local/bin/binary"
 if [ -f "$HOME/.local/bin/binary/velora" ]; then
     echo -e "${GREEN}Velora è già installato in local binary directory.${NC_REG}"
+elif fetch_prebuilt_binary "velora_termux" "$HOME/.local/bin/binary/velora"; then
+    echo -e "${GREEN}Velora scaricato (prebuilt) in ~/.local/bin/binary/velora${NC_REG}"
 else
-    echo -e "${BLUE}Compilazione di Velora da sorgente tramite Cargo (potrebbe richiedere qualche minuto)...${NC_REG}"
+    echo -e "${BLUE}Nessun binario precompilato disponibile, compilazione di Velora da sorgente tramite Cargo (potrebbe richiedere qualche minuto)...${NC_REG}"
     cargo install --quiet --git https://github.com/AstraeLabs/Velora --root "$HOME/.local" < /dev/null || {
         echo -e "${RED}Errore durante la compilazione di Velora!${NC_REG}"
         exit 1
     }
-    
+
     if [ -f "$HOME/.local/bin/Velora" ]; then
         mv "$HOME/.local/bin/Velora" "$HOME/.local/bin/binary/velora"
     elif [ -f "$HOME/.local/bin/velora" ]; then
@@ -143,8 +142,18 @@ else
     echo -e "${GREEN}Velora compilato ed installato correttamente in ~/.local/bin/binary/velora${NC_REG}"
 fi
 
-# 5b. Compile dovi_tool
-echo -e "\n${YELLOW}[4b/5] Installazione e compilazione di dovi_tool...${NC_REG}"
+# 5b. Install flux
+echo -e "\n${YELLOW}[4b/5] Installazione di flux...${NC_REG}"
+if [ -f "$HOME/.local/bin/binary/flux" ]; then
+    echo -e "${GREEN}flux è già installato in local binary directory.${NC_REG}"
+elif fetch_prebuilt_binary "flux_termux" "$HOME/.local/bin/binary/flux"; then
+    echo -e "${GREEN}flux scaricato (prebuilt) in ~/.local/bin/binary/flux${NC_REG}"
+else
+    echo -e "${YELLOW}Nessun binario flux precompilato disponibile per questo dispositivo (opzionale, si può saltare).${NC_REG}"
+fi
+
+# 5c. Compile dovi_tool
+echo -e "\n${YELLOW}[4c/5] Installazione e compilazione di dovi_tool...${NC_REG}"
 if [ -f "$HOME/.local/bin/binary/dovi_tool" ]; then
     echo -e "${GREEN}dovi_tool è già installato in local binary directory.${NC_REG}"
 else

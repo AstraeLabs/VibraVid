@@ -19,16 +19,21 @@ from VibraVid.core.muxing.helper.video import get_media_metadata, is_mpegts_file
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import resolve_ietf
 from VibraVid.setup import get_dovi_tool_path, get_ffmpeg_path, get_ffprobe_path, get_mkvmerge_path
+from VibraVid.utils import config_manager, os_manager
+from VibraVid.utils.proc import run_logged
 
 console = Console()
 
 
 logger = logging.getLogger(__name__)
+CLEANUP_TMP = config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder")
 
 
 def _run_command(cmd: list[str], description: str) -> bool:
-    logger.info(f"{description}: {' '.join(str(part) for part in cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace")
+    result = run_logged(
+        cmd, description, log=logger,
+        capture_output=True, text=True, check=False, encoding="utf-8", errors="replace",
+    )
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
@@ -45,13 +50,10 @@ def _run_command(cmd: list[str], description: str) -> bool:
 def _rpu_profile(dovi_tool: str, rpu_file: Path) -> int | None:
     """Return the Dolby Vision profile of an extracted RPU (via ``dovi_tool info``), or None."""
     try:
-        result = subprocess.run(
+        result = run_logged(
             [dovi_tool, "info", "-i", str(rpu_file), "-s"],
-            capture_output=True,
-            text=True,
-            check=False,
-            encoding="utf-8",
-            errors="replace",
+            "dovi_tool info (RPU profile)", log=logger,
+            capture_output=True, text=True, check=False, encoding="utf-8", errors="replace",
         )
         m = re.search(r"Profile:\s*(\d+)", result.stdout or "")
         if m is None:
@@ -65,55 +67,15 @@ def _rpu_profile(dovi_tool: str, rpu_file: Path) -> int | None:
 def _dump_rpu_info(dovi_tool: str, rpu_file: Path, label: str) -> None:
     """Debug helper: dump full dovi_tool info (non -s) for a given RPU file."""
     try:
-        result = subprocess.run(
+        result = run_logged(
             [dovi_tool, "info", "-i", str(rpu_file)],
-            capture_output=True,
-            text=True,
-            check=False,
-            encoding="utf-8",
-            errors="replace",
+            f"dovi_tool info (dump RPU for {label})", log=logger,
+            capture_output=True, text=True, check=False, encoding="utf-8", errors="replace",
         )
         if result.stderr:
             logger.info(f"dovi_tool info STDERR for {label}:\n{result.stderr}")
     except Exception as exc:
         logger.warning(f"Could not dump RPU info for {label}: {exc}")
-
-
-def _validate_rpu_in_stream(dovi_tool: str, hevc_file: Path, label: str) -> bool:
-    """Debug/safety helper: re-extract the RPU from a muxed hevc stream and check for validation errors dovi_tool/ffmpeg would otherwise raise silently later."""
-    tmp_out = hevc_file.with_suffix(".validate_rpu.bin")
-    try:
-        result = subprocess.run(
-            [dovi_tool, "extract-rpu", str(hevc_file), "-o", str(tmp_out)],
-            capture_output=True,
-            text=True,
-            check=False,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if result.stdout:
-            logger.debug(f"stdout rpu:\n{result.stdout}")
-        if result.stderr:
-            logger.debug(f"stderr rpu:\n{result.stderr}")
-
-        combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-        if "validation failed" in combined or "error parsing" in combined:
-            logger.warning(f"Extraction of RPU from {label} failed validation: {combined.strip()}")
-            return False
-        if result.returncode != 0:
-            logger.error(f"Extraction of RPU from {label} failed with exit code {result.returncode}: {combined.strip()}")
-            return False
-        return True
-    except Exception as exc:
-        logger.warning(f"Could not validate RPU in stream {label}: {exc}")
-        return False
-    
-    finally:
-        try:
-            if tmp_out.exists():
-                tmp_out.unlink()
-        except OSError:
-            pass
 
 
 def _run_progress_command(
@@ -436,10 +398,6 @@ def build_hybrid_output(
     ):
         return None
 
-    if not _validate_rpu_in_stream(dovi_tool, hybrid_hevc, "hybrid_hevc post inject-rpu"):
-        logger.error("Hybrid mux abortito: RPU corrotto rilevato subito dopo inject-rpu (vedi debug log)")
-        return None
-
     if output_file.exists():
         try:
             output_file.unlink()
@@ -523,4 +481,8 @@ def build_hybrid_output(
         return None
 
     logger.info(f"Hybrid output created: {output_file}")
+
+    if CLEANUP_TMP:
+        os_manager.fast_rmtree(work_dir)
+
     return str(output_file)

@@ -28,6 +28,7 @@ class FakeDownloader(VodStreamMixin):
         self.max_time = None
         self.max_segments = None
         self.manifest_refresh_fn = None
+        self.key = None
         self.multiperiod_calls: list = []
         self.generic_calls: list = []
 

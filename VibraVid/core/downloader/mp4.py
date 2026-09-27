@@ -8,20 +8,23 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
 from VibraVid.core.muxing import embed_poster, inject_chapters
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.utils.codec import format_bitrate, format_disposition_flags
 from VibraVid.utils import config_manager, internet_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.http_client import create_client, get_userAgent
 from VibraVid.utils.storage_upload.hook import is_cached, try_fetch, upload_after
+from VibraVid.utils.vault.vault_1 import claudio_vault
 
-from .util._claudio_tracker import ClaudioTracker
 from .util._drm_probe import PROBE_BYTES, PROBE_BYTES_FAST, DRMProbe
 from .util._interrupt import InterruptHandler
 from .util._live_frag_mp4 import LiveFragMp4Decryptor
@@ -30,17 +33,14 @@ from .util._post_decrypt import PostDownloadDecryptor
 logger = logging.getLogger(__name__)
 
 SKIP_DOWNLOAD = config_manager.config.get_bool("DOWNLOAD", "skip_download")
-SKIP_POST_DECRYPT = config_manager.config.get_bool("DOWNLOAD", "skip_post_decrypt")
 DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
-REALTIME_DECRYPT = config_manager.config.get_bool("DOWNLOAD", "realtime_decrypt")
 SPEED_WINDOW_SECONDS = 1.0
-LIVE_DECRYPT_MIN_SIZE = 100 * 1024 * 1024
+LIVE_DECRYPT_MIN_SIZE = 25 * 1024 * 1024
 
 
 class MP4FileDownloader:
     _probe = DRMProbe()
     _decryptor = PostDownloadDecryptor()
-    _tracker = ClaudioTracker()
 
     def __init__(
         self,
@@ -58,6 +58,12 @@ class MP4FileDownloader:
         check_content_type: bool = True,
         sanitize_path: bool = True,
         close_tracking: bool = True,
+        bar_mgr: "DownloadBarManager | None" = None,
+        suppress_key_log: bool = False,
+        expected_language: str | None = None,
+        expected_forced: bool = False,
+        on_clear_chunk: "Callable[[bytes], None] | None" = None,
+        on_clear_abandon: "Callable[[], None] | None" = None,
     ) -> None:
         """
         Initialize the MP4FileDownloader.
@@ -77,14 +83,24 @@ class MP4FileDownloader:
             check_content_type: Whether to check the content type of the response.
             sanitize_path: Whether to sanitize the local path.
             close_tracking: Whether to close the GUI tracker entry on completion.
+            bar_mgr: An already-entered, externally-owned DownloadBarManager to add this download's task
 
         Returns:
             None
         """
         self.url = str(url).strip()
         self.path = os_manager.get_sanitize_path(path) if sanitize_path else str(path)
+        self._final_name_template = self.path
+        self.path = self._strip_media_tokens(self.path)
         self.referer = referer
         self.headers = headers
+        self._shared_bar_mgr = bar_mgr
+        self._suppress_key_log = suppress_key_log
+        self._expected_language = expected_language
+        self._expected_forced = expected_forced
+        self._on_clear_chunk = on_clear_chunk
+        self._on_clear_abandon = on_clear_abandon
+        self._task_key = label
         self.label = label
         self.key = key
         self.check_content_type = check_content_type
@@ -116,6 +132,9 @@ class MP4FileDownloader:
         self._probe_done: bool = False
         self._probe_encrypted: bool = False
 
+        # Best-effort early media-metadata probe
+        self._early_metadata: dict | None = None
+
     @staticmethod
     def _normalize_max_percentage(value: float | None) -> float:
         try:
@@ -144,10 +163,12 @@ class MP4FileDownloader:
 
         self._install_signal_handler()
 
-        bar_mgr = DownloadBarManager(self.download_id)
-        with bar_mgr as progress_bars:
+        owns_bar = self._shared_bar_mgr is None
+        bar_mgr = self._shared_bar_mgr or DownloadBarManager(self.download_id)
+
+        def _run(progress_bars) -> tuple:
             try:
-                progress_bars.add_prebuilt_tasks([("video", self.label)])
+                progress_bars.add_prebuilt_tasks([(self._task_key, self.label)])
             except Exception:
                 pass
 
@@ -156,8 +177,11 @@ class MP4FileDownloader:
                 if self.check_content_type and not self._check_content_type(client, headers):
                     return None, False, None
 
-                if self.check_content_type:
-                    self._preflight_probe(client, headers)
+                # Cheap early DRM probe (100 KB Range) — runs for every download
+                # so audio (check_content_type=False) also gets the fast preflight
+                # instead of the heavier 1 MB in-flight scan. When it detects
+                # encryption it sets _probe_done, which skips the 1 MB in-flight probe.
+                self._preflight_probe(client, headers)
 
                 self._stream_to_disk(client, headers, bar_mgr)
 
@@ -165,6 +189,11 @@ class MP4FileDownloader:
                 client.close()
 
             return self._finalise(bar_mgr)
+
+        if owns_bar:
+            with bar_mgr as progress_bars:
+                return _run(progress_bars)
+        return _run(bar_mgr)
 
     def _preflight(self) -> bool:
         if SKIP_DOWNLOAD:
@@ -252,23 +281,38 @@ class MP4FileDownloader:
         return False
 
     def _preflight_probe(self, client, headers: dict) -> None:
-        """Cheap Range probe (PROBE_BYTES_FAST) run before the real download starts"""
+        """Cheap Range probe (PROBE_BYTES_FAST) run before the real download starts."""
         try:
-            encrypted, scheme, drm_names, kid, pssh_b64 = self._probe.probe(
-                self.url, headers, client, size=PROBE_BYTES_FAST
-            )
+            raw = self._probe.fetch(self.url, headers, client, size=PROBE_BYTES_FAST)
         except Exception as exc:
-            logger.debug(f"Preflight DRM probe failed (non-fatal): {exc}")
+            logger.debug(f"Preflight probe failed (non-fatal): {exc}")
             return
 
-        if not encrypted:
-            return  # inconclusive at this size — let the in-flight probe keep looking
+        if not raw:
+            return
 
-        self._probe_done = True
-        self._resolve_from_probe(encrypted, scheme, drm_names, kid, pssh_b64)
+        try:
+            encrypted, scheme, is_widevine, kid, pssh_b64, metadata = self._probe.inspect_full(raw)
+        except Exception as exc:
+            logger.debug(f"Preflight DRM probe failed (non-fatal): {exc}")
+            encrypted, scheme, is_widevine, kid, pssh_b64, metadata = False, None, False, None, None, {}
+
+        if not encrypted:
+            logger.info("Preflight probe: no encryption markers found — clear stream.")
+        else:
+            self._resolve_from_probe(encrypted, scheme, is_widevine, kid, pssh_b64)
+
+        metadata_conclusive = False
+        try:
+            metadata_conclusive = self._apply_early_metadata(metadata)
+        except Exception as exc:
+            logger.debug(f"Early metadata probe failed (non-fatal): {exc}")
+
+        # Only skip the deeper 1 MB in-flight probe when the cheap 100 KB one was actually conclusive
+        self._probe_done = encrypted or metadata_conclusive
 
     def _feed_probe(self, chunk: bytes) -> None:
-        """Accumulate the first ~4 MB of the *live* download and inspect them in-flight
+        """Accumulate the first ~1 MB of the *live* download and inspect them in-flight
         (no second request). Runs the DRM check exactly once, then releases the buffer."""
         if self._probe_done or not chunk:
             return
@@ -292,13 +336,88 @@ class MP4FileDownloader:
         except Exception as exc:
             logger.debug(f"In-flight DRM probe failed (non-fatal): {exc}")
 
+    def _apply_early_metadata(self, metadata: dict) -> bool:
+        """Apply expected_language/expected_forced overrides to the flux-derived metadata
+        (from inspect_full) and build the progress-bar label from it.
+        """
+        if not any(metadata.get(k) for k in ("quality", "video_codec", "audio_codec", "sub_codec", "sub_language")):
+            logger.debug("Early metadata probe inconclusive (moov atom not in first bytes) -- will resolve after download.")
+            return False
+
+        if self._expected_language:
+            lang_up = self._expected_language.upper()
+            if metadata.get("audio_tracks") or metadata.get("audio_codec"):
+                metadata["language"] = lang_up
+            if metadata.get("subtitle_tracks") or metadata.get("sub_codec"):
+                metadata["sub_language"] = lang_up
+
+        if self._expected_forced and metadata.get("sub_codec"):
+            metadata["sub_forced"] = True
+
+        self._early_metadata = metadata
+        logger.info(f"Early metadata probe succeeded (in-flight): {metadata}")
+
+        label = self._build_rich_label(metadata)
+        if label:
+            self.label = label
+        return True
+
+    @staticmethod
+    def _build_rich_label(metadata: dict) -> str:
+        """Rich-markup label for the progress bar, matching the "Vid [H.264, AAC] 480p 1.1 Mbps" /
+        "Sub [vtt] en-US" style built by MediaDownloader._prepare_labels/_sub_stream_label for
+        HLS/DASH streams (VibraVid/core/velora/base.py)"""
+        vcodec = metadata.get("video_codec")
+        quality = metadata.get("quality")
+        if vcodec or quality:
+            parts = []
+            if vcodec:
+                parts.append(f"[yellow]\\[{vcodec}][/yellow]")
+            if quality:
+                parts.append(f"[white]{quality}[/white]")
+            bitrate = format_bitrate(metadata.get("video_bitrate"))
+            if bitrate:
+                parts.append(f"[blue]{bitrate}[/blue]")
+            return f"[bold cyan]Vid[/bold cyan] {' '.join(parts)}"
+
+        acodec = metadata.get("audio_codec")
+        lang = metadata.get("language")
+        if acodec or lang:
+            parts = []
+            if acodec:
+                parts.append(f"[yellow]\\[{acodec}][/yellow]")
+            if lang:
+                parts.append(f"[bold white]{lang}[/bold white]")
+            return f"[bold cyan]Aud[/bold cyan] {' '.join(parts)}"
+
+        scodec = metadata.get("sub_codec")
+        slang = metadata.get("sub_language")
+        if scodec or slang:
+            st = (metadata.get("subtitle_tracks") or [{}])[0]
+            flags = format_disposition_flags(
+                forced=bool(st.get("forced")) or bool(metadata.get("sub_forced")),
+                sdh=bool(st.get("sdh")),
+                cc=bool(st.get("cc")),
+                default="DEFAULT" in (st.get("flags") or []),
+            )
+            parts = [f"[bold white]{slang}[/bold white]"] if slang else []
+            if flags:
+                parts.append(f"[bold red]{flags}[/bold red]")
+            return f"[bold cyan]Sub[/bold cyan] [yellow]\\[{scodec or 'VTT'}][/yellow] {' '.join(parts)}"
+
+        return "[bold cyan]MP4[/bold cyan]"
+
     def _evaluate_probe(self, raw: bytes) -> None:
-        logger.info("Probing first 4 MB for DRM/encryption markers (in-flight)")
-        encrypted, scheme, drm_names, kid, pssh_b64 = self._probe.inspect(raw)
-        self._resolve_from_probe(encrypted, scheme, drm_names, kid, pssh_b64)
+        logger.info("Probing first 1 MB for DRM/encryption markers (in-flight)")
+        encrypted, scheme, is_widevine, kid, pssh_b64, metadata = self._probe.inspect_full(raw)
+        self._resolve_from_probe(encrypted, scheme, is_widevine, kid, pssh_b64)
+        try:
+            self._apply_early_metadata(metadata)
+        except Exception as exc:
+            logger.debug(f"Early metadata probe failed (non-fatal): {exc}")
 
     def _resolve_from_probe(
-        self, encrypted: bool, scheme: str | None, drm_names: list, kid: str | None, pssh_b64: str | None
+        self, encrypted: bool, scheme: str | None, is_widevine: bool, kid: str | None, pssh_b64: str | None
     ) -> None:
         """Shared outcome handling for both the fast preflight probe and the in-flight fallback"""
         if not encrypted:
@@ -306,13 +425,14 @@ class MP4FileDownloader:
             return
 
         self._probe_encrypted = True
+        drm_label = "Widevine" if is_widevine else (scheme or "unknown DRM")
 
         if not kid:
             if PostDownloadDecryptor.has_keys(self.key):
-                logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{', '.join(drm_names)}]) — no KID found yet, keys present, will decrypt after download.")
+                logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{drm_label}]) — no KID found yet, keys present, will decrypt after download.")
             else:
-                console.print(f"[yellow]Stream appears [red]encrypted[/red] ([cyan]{', '.join(drm_names) or 'unknown DRM'}[/cyan]), no KID found yet and no key provided.")
-                logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{', '.join(drm_names)}]) — no KID, no manual key.")
+                console.print(f"[yellow]Stream appears [red]encrypted[/red] ([cyan]{drm_label}[/cyan]), no KID found yet and no key provided.")
+                logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{drm_label}]) — no KID, no manual key.")
             return
 
         from VibraVid.core.drm.manager import DRMManager
@@ -323,20 +443,20 @@ class MP4FileDownloader:
         if resolved:
             resolved_key, source = resolved
             self.key = resolved_key
-            drm_label = ", ".join(drm_names) if drm_names else (scheme or "mp4").upper()
-            if source == "manual":
-                mgr._display_keys([resolved_key], [], drm_label, pssh_b64, None, header=True, default_label="manual")
-            else:
-                mgr._display_keys([resolved_key], [resolved_key], drm_label, pssh_b64, source, header=True)
-            logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{', '.join(drm_names)}]) — key resolved (kid={kid}, source={source}).")
+            if not self._suppress_key_log:
+                if source == "manual":
+                    mgr._display_keys([resolved_key], [], drm_label, pssh_b64, None, header=True, default_label="manual")
+                else:
+                    mgr._display_keys([resolved_key], [resolved_key], drm_label, pssh_b64, source, header=True)
+            logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{drm_label}]) — key resolved (kid={kid}, source={source}).")
             return
 
         if PostDownloadDecryptor.has_keys(self.key):
-            logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{', '.join(drm_names)}]) — keys present, will decrypt after download.")
+            logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{drm_label}]) — keys present, will decrypt after download.")
             return
 
-        console.print(f"[yellow]Stream appears [red]encrypted[/red] ([cyan]{', '.join(drm_names) or 'unknown DRM'}[/cyan]), no key in vault or provided.")
-        logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{', '.join(drm_names)}]) — no manual key, none in vault.")
+        console.print(f"[yellow]Stream appears [red]encrypted[/red] ([cyan]{drm_label}[/cyan]), no key in vault or provided.")
+        logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{drm_label}]) — no manual key, none in vault.")
 
     def _stream_to_disk(self, client, headers: dict, bar_mgr: DownloadBarManager) -> None:
         response = client.get(self.url, stream=True)
@@ -352,9 +472,15 @@ class MP4FileDownloader:
 
             live_worth_it = self._total is None or self._total >= LIVE_DECRYPT_MIN_SIZE
             with open(self._temp_path, "wb") as fh:
-                if REALTIME_DECRYPT and live_worth_it and PostDownloadDecryptor.has_keys(self.key):
+                # In-flight fragment decrypt is automatic: wire it whenever we have
+                # keys and the stream is worth it; LiveFragMp4Decryptor inspects
+                # the box structure and self-abandons (feed() -> False) for
+                # anything that isn't a real self-initializing fMP4, letting the
+                # post-download decrypt pass take over. `skip_post_decrypt` is the
+                # debug override that disables every decrypt path.
+                if live_worth_it and PostDownloadDecryptor.has_keys(self.key) and not context_tracker.skip_decrypt:
                     out_dir = Path(self._temp_path).resolve().parent
-                    self._live_frag = LiveFragMp4Decryptor(fh, self.key, out_dir)
+                    self._live_frag = LiveFragMp4Decryptor(fh, self.key, out_dir, on_chunk=self._on_clear_chunk)
                 self._write_chunks(fh, response, bar_mgr, time.time(), bar_mgr)
         finally:
             response.close()
@@ -382,12 +508,21 @@ class MP4FileDownloader:
                     self._downloaded += len(chunk)
                     if self._live_frag is not None:
                         if not self._live_frag.feed(chunk):
-                            # Ineligible/abandoned (not front-moov fragmented, not actually encrypted, or no usable key)
                             fh.write(self._live_frag.finish())
                             self._live_frag.cleanup()
                             self._live_frag = None
+                            if self._on_clear_abandon is not None:
+                                try:
+                                    self._on_clear_abandon()
+                                except Exception:
+                                    logger.debug("on_clear_abandon callback failed (non-fatal)", exc_info=True)
                     else:
                         fh.write(chunk)
+                        if self._on_clear_chunk is not None and not self._probe_encrypted:
+                            try:
+                                self._on_clear_chunk(chunk)
+                            except Exception:
+                                logger.debug("on_clear_chunk callback failed (non-fatal)", exc_info=True)
 
                     self._feed_probe(chunk)
                     self._tick_progress(progress_bars, start_time, bar_mgr)
@@ -441,7 +576,7 @@ class MP4FileDownloader:
         pct_int = max(0, min(100, int(percent)))
 
         parsed = {
-            "task_key": "video",
+            "task_key": self._task_key,
             "pct": percent,
             "speed": speed_str,
             "size": f"{downloaded_str}/{total_size_str}",
@@ -449,6 +584,9 @@ class MP4FileDownloader:
             "label": self.label,
             "display_label": self.label,
         }
+        if self._early_metadata:
+            parsed["quality"] = self._early_metadata.get("quality")
+            parsed["language"] = self._early_metadata.get("language")
 
         try:
             if bar_mgr:
@@ -467,14 +605,14 @@ class MP4FileDownloader:
                 pass
 
     def _run_decrypt(self, bar_mgr: DownloadBarManager) -> None:
-        """Decrypt while continuing the same "video" bar in place."""
+        """Decrypt while continuing the same bar row in place."""
 
         def _decrypt_cb(parsed: dict[str, Any] | None) -> None:
             if not parsed:
                 return
             bar_mgr.handle_progress_line(
                 {
-                    "task_key": "video",
+                    "task_key": self._task_key,
                     "pct": parsed.get("pct"),
                     "speed": parsed.get("status") or "Decrypt",
                 }
@@ -505,7 +643,7 @@ class MP4FileDownloader:
             # fragment it got through before the stop -- detect_encryption()
             # inside _run_decrypt correctly reports "not encrypted" on that
             # already-plaintext partial file)
-            if SKIP_POST_DECRYPT:
+            if context_tracker.skip_decrypt:
                 logger.info(f"skip_post_decrypt: leaving {os.path.basename(self.path)} encrypted (kept for testing)")
             elif self._probe_encrypted or PostDownloadDecryptor.has_keys(self.key):
                 self._run_decrypt(bar_mgr)
@@ -538,7 +676,7 @@ class MP4FileDownloader:
         # decrypted every fragment as it arrived -- see _live_decrypt_done)
         if self._live_decrypt_done:
             logger.info(f"Live fragment decrypt already handled {os.path.basename(self.path)} -- skipping post-download decrypt pass")
-        elif SKIP_POST_DECRYPT:
+        elif context_tracker.skip_decrypt:
             if self._probe_encrypted or PostDownloadDecryptor.has_keys(self.key):
                 logger.info(f"skip_post_decrypt: leaving {os.path.basename(self.path)} encrypted (kept for testing)")
         elif PostDownloadDecryptor.has_keys(self.key):
@@ -565,10 +703,10 @@ class MP4FileDownloader:
         self._complete_tracking(success=True, path=os.path.abspath(self.path))
 
         # Analytics (fire-and-forget)
-        self._tracker.fire(
+        claudio_vault.track_download_async(
             title=context_tracker.title or os.path.basename(self.path),
             media_type=self.media_type or "Film",
-            site=self.site_name or "",
+            service=self.site_name or "",
         )
 
         execute_hooks("post_run")
@@ -578,14 +716,12 @@ class MP4FileDownloader:
 
         return self.path, self._interrupt.kill_download, None
 
-    _MEDIA_PLACEHOLDERS = (
-        "%(quality)",
-        "%(language)",
-        "%(video_codec)",
-        "%(audio_codec)",
-        "%(audio_flags)",
-        "%(sub_flags)",
-    )
+    _MEDIA_PLACEHOLDERS = MEDIA_PLACEHOLDERS
+
+    @classmethod
+    def _strip_media_tokens(cls, path: str) -> str:
+        """Remove unresolved media-token placeholders from *path* (shared with BaseDownloader)."""
+        return strip_media_tokens(path)
 
     def _resolve_media_tokens(self) -> None:
         """Probe the finished file and resolve media tokens (quality/codec/language) in self.path.
@@ -594,12 +730,17 @@ class MP4FileDownloader:
         like ``[%(quality)]`` survive unless we probe the muxed file here (the same
         way BaseDownloader._finalize does for segmented downloaders).
         """
-        if not any(p in self.path for p in self._MEDIA_PLACEHOLDERS):
+        template = getattr(self, "_final_name_template", self.path)
+        if not any(p in template for p in self._MEDIA_PLACEHOLDERS):
             return
 
         try:
-            metadata = get_media_metadata(self.path)
-            logger.info(f"Metadata for dynamic rename: {metadata}")
+            if self._early_metadata is not None:
+                metadata = self._early_metadata
+                logger.info(f"Reusing early-probed metadata for dynamic rename: {metadata}")
+            else:
+                metadata = get_media_metadata(self.path)
+                logger.info(f"Metadata for dynamic rename: {metadata}")
 
             replacements = {
                 "quality": metadata.get("quality", ""),
@@ -610,18 +751,19 @@ class MP4FileDownloader:
                 "sub_flags": metadata.get("sub_flags", ""),
             }
 
-            root, ext = os.path.splitext(self.path)
+            new_root = os.path.splitext(template)[0]
+            cur_ext = os.path.splitext(self.path)[1]
             for key, val in replacements.items():
                 placeholder = f"%({key})"
                 if val:
-                    root = root.replace(placeholder, str(val))
+                    new_root = new_root.replace(placeholder, str(val))
                 else:
-                    root = root.replace(f" [{placeholder}]", "").replace(f"[{placeholder}]", "")
-                    root = root.replace(f" ({placeholder})", "").replace(f"({placeholder})", "")
-                    root = root.replace(placeholder, "")
+                    new_root = new_root.replace(f" [{placeholder}]", "").replace(f"[{placeholder}]", "")
+                    new_root = new_root.replace(f" ({placeholder})", "").replace(f"({placeholder})", "")
+                    new_root = new_root.replace(placeholder, "")
 
-            root = root.replace("  ", " ").rstrip(" .")
-            new_path = root + ext
+            new_root = new_root.replace("  ", " ").rstrip(" .")
+            new_path = new_root + cur_ext
 
             if new_path != self.path:
                 new_dir = os.path.dirname(new_path)
@@ -667,6 +809,12 @@ def MP4_Downloader(
     check_content_type: bool = True,
     sanitize_path: bool = True,
     close_tracking: bool = True,
+    bar_mgr: "DownloadBarManager | None" = None,
+    suppress_key_log: bool = False,
+    expected_language: str | None = None,
+    expected_forced: bool = False,
+    on_clear_chunk: "Callable[[bytes], None] | None" = None,
+    on_clear_abandon: "Callable[[], None] | None" = None,
 ) -> tuple:
     """Backward-compatible entry point — wraps ``MP4FileDownloader.download()``."""
     if context_tracker.resolve_only:
@@ -697,6 +845,12 @@ def MP4_Downloader(
         check_content_type=check_content_type,
         sanitize_path=sanitize_path,
         close_tracking=close_tracking,
+        bar_mgr=bar_mgr,
+        suppress_key_log=suppress_key_log,
+        expected_language=expected_language,
+        expected_forced=expected_forced,
+        on_clear_chunk=on_clear_chunk,
+        on_clear_abandon=on_clear_abandon,
     ).download()
 
     return result

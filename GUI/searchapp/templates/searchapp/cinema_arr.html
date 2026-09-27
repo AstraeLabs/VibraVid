@@ -91,7 +91,7 @@
 			<table class="cn-table">
 				<thead>
 					<tr>
-						<th>Title</th><th>Status</th><th>Source</th><th>Queue</th><th>Dates</th>
+						<th>Title</th><th>Status</th><th>Source</th><th>Queue</th><th>Dates</th><th></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -135,6 +135,17 @@
 									<span class="cn-s">queued {{ entry.enqueued_at|date:"m/d/y H:i" }}</span>
 									<span class="cn-s">started {% if entry.started_at %}{{ entry.started_at|date:"m/d/y H:i" }}{% else %}—{% endif %}</span>
 									<span class="cn-s">closed {% if entry.completed_at %}{{ entry.completed_at|date:"m/d/y H:i" }}{% else %}—{% endif %}</span>
+								</td>
+
+								<td>
+									{% if entry.started_at and not entry.completed_at %}
+										<button class="cn-cta is-ghost" type="button" disabled
+										        title="Download in progress, wait for it to finish">Delete</button>
+									{% else %}
+										<button class="cn-cta is-ghost cn-arr-delete" type="button"
+										        data-url="{% url 'arr_delete_request' entry.id %}"
+										        data-title="{{ item.title }}">Delete</button>
+									{% endif %}
 								</td>
 							</tr>
 						{% endwith %}
@@ -187,6 +198,43 @@
 				say("Not started: " + err.message, "bad");
 				btn.disabled = false;
 			});
+	});
+
+	document.querySelectorAll(".cn-arr-delete").forEach(function (del) {
+		del.addEventListener("click", function () {
+			var title = del.dataset.title || "this request";
+			if (!window.confirm(
+				"Delete the ARR request for \"" + title + "\"?\n\n" +
+				"This removes the ARR queue/request entries only. " +
+				"Any downloaded file will be left untouched."
+			)) {
+				return;
+			}
+
+			del.disabled = true;
+			say("Deleting…");
+
+			fetch(del.dataset.url, {
+				method: "POST",
+				headers: { "X-CSRFToken": "{{ csrf_token }}" }
+			})
+				.then(function (r) {
+					return r.json().then(function (data) {
+						if (!r.ok || data.status === "error") {
+							throw new Error(data.message || "delete failed");
+						}
+						return data;
+					});
+				})
+				.then(function () {
+					say("Request deleted. Reloading…", "good");
+					setTimeout(function () { window.location.reload(); }, 500);
+				})
+				.catch(function (err) {
+					say("Delete failed: " + err.message, "bad");
+					del.disabled = false;
+				});
+		});
 	});
 })();
 </script>

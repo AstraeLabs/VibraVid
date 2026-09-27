@@ -24,6 +24,7 @@ def has_audio(file_path: str) -> bool:
             ffprobe_cmd += ["-f", "mpegts"]
         
         ffprobe_cmd += ["-show_streams", "-print_format", "json", file_path]
+        logger.info(f"Running has_audio check for {os.path.basename(file_path)} with cmd: {' '.join(ffprobe_cmd)}")
         with subprocess.Popen(
             ffprobe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace"
         ) as proc:
@@ -48,7 +49,7 @@ def has_audio(file_path: str) -> bool:
 
 
 @ffprobe_cached
-def get_video_duration(file_path: str, file_type: str = "file") -> float:
+def get_video_duration(file_path: str) -> float:
     """Get the duration of a media file (video or audio)."""
     if not os.path.exists(file_path):
         logger.error(f"[get_video_duration] File not found: {file_path}")
@@ -74,6 +75,8 @@ def get_video_duration(file_path: str, file_type: str = "file") -> float:
         "json",
         file_path,
     ]
+
+    logger.info(f"Running get_video_duration for {os.path.basename(file_path)} with cmd: {' '.join(ffprobe_cmd)}")
     with subprocess.Popen(
         ffprobe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace"
     ) as proc:
@@ -118,6 +121,7 @@ def get_video_duration(file_path: str, file_type: str = "file") -> float:
         return dur
 
 
+@ffprobe_cached
 def _estimate_duration_via_packet_count(file_path: str, is_ts: bool) -> float | None:
     """Re-probe with -count_packets to get a real frame/sample count when the container's own duration field is missing or corrupt"""
     ffprobe_cmd = [get_ffprobe_path(), "-v", "error"]
@@ -132,7 +136,8 @@ def _estimate_duration_via_packet_count(file_path: str, is_ts: bool) -> float | 
         "json",
         file_path,
     ]
-    
+
+    logger.info(f"Running _estimate_duration_via_packet_count for {os.path.basename(file_path)} with cmd: {' '.join(ffprobe_cmd)}")
     with subprocess.Popen(
         ffprobe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace"
     ) as proc:
@@ -192,8 +197,8 @@ def _estimate_duration_from_frames(streams: list) -> float | None:
 
 def check_duration_v_a(video_path, audio_path, tolerance=1.0):
     """Check if the duration of the video and audio matches."""
-    video_duration = get_video_duration(video_path, file_type="video")
-    audio_duration = get_video_duration(audio_path, file_type="audio")
+    video_duration = get_video_duration(video_path)
+    audio_duration = get_video_duration(audio_path)
 
     # Check if either duration is None and specify which one is None
     if video_duration is None and audio_duration is None:

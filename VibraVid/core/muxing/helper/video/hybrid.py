@@ -166,7 +166,7 @@ def download_other_tracks(
             max_time=max_time,
         )
         quality = str(track.get("quality") or "worst").strip() or "worst"
-        downloader.custom_filters = _kind_to_filters(kind, tag, quality)
+        downloader.custom_filters = {**_kind_to_filters(kind, tag, quality), "dv_auto": False}
 
         try:
             downloader.parse_stream(show_table=False)

@@ -2,7 +2,12 @@
 
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
+import threading
+import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -115,6 +120,47 @@ class OsManager:
         except Exception as e:
             logger.error(f"Path creation error: {e}")
             return False
+
+    def fast_rmtree(self, path: str) -> None:
+        """Remove *path* without blocking the caller for the full delete."""
+        if not path or not os.path.isdir(path):
+            return
+
+        trash_path = f"{path}.trash-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        last_exc: OSError | None = None
+        for attempt in range(5):
+            try:
+                os.rename(path, trash_path)
+                last_exc = None
+                break
+            except OSError as exc:
+                last_exc = exc
+                if attempt < 4:
+                    time.sleep(0.1)
+
+        if last_exc is not None:
+            logger.warning(f"fast_rmtree: could not rename {path!r} aside ({last_exc}) after 5 attempts -- falling back to a direct (blocking) delete")
+            shutil.rmtree(path, ignore_errors=True)
+            if os.path.isdir(path):
+                logger.warning(f"fast_rmtree: {path!r} still exists after cleanup -- a file inside it is likely locked by another process")
+            return
+
+        self._delete_detached(trash_path)
+
+    def _delete_detached(self, path: str) -> None:
+        """Delete *path* in a process detached from this one, so it survives this process exiting."""
+        try:
+            if self.system == "windows":
+                subprocess.Popen(
+                    ["cmd", "/c", "rd", "/s", "/q", path],
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True,
+                )
+            else:
+                subprocess.Popen(["rm", "-rf", path], start_new_session=True, close_fds=True)
+        except OSError as exc:
+            logger.warning(f"fast_rmtree: could not spawn a detached delete for {path!r} ({exc}) -- deleting on a background thread instead")
+            threading.Thread(target=shutil.rmtree, args=(path,), kwargs={"ignore_errors": True}, daemon=True).start()
 
     @staticmethod
     @contextmanager

@@ -1,12 +1,10 @@
 # 06.06.25
 
-import argparse
 import concurrent.futures
 import inspect
 import json
 import logging
 import os
-import shlex
 import shutil
 import threading
 import time
@@ -21,8 +19,15 @@ from GUI.searchapp.api import get_api, get_available_sites, get_site_categories
 from GUI.searchapp.api.base import Entries
 from VibraVid.cli.run import equivalent_command_builder
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
-from VibraVid.services._base.site_loader import load_search_functions
-from VibraVid.utils import config_manager
+from VibraVid.services._base.site_extra_args import (
+    get_site_extra_args_schema as get_site_extra_args_schema,
+)
+from VibraVid.services._base.site_extra_args import (
+    parse_site_extra_args as parse_site_extra_args,
+)
+from VibraVid.services._base.site_extra_args import (
+    resolve_persisted_site_options as _resolve_persisted_site_options,
+)
 
 from .._download_infra import (
     _acquire_download_slot,
@@ -42,6 +47,23 @@ _recent_webhooks = {}
 _recent_webhooks_lock = threading.Lock()
 _WEBHOOK_DEDUP_WINDOW = 300
 _GLOBAL_SEARCH_TIMEOUT = 45
+
+
+def _mark_task_failed(download_id: str, title: str, site: str, media_type: str, error: str) -> None:
+    """Write the terminal 'failed' state for a GUI download task."""
+    try:
+        _remove_scheduled_download(download_id)
+        already_in_history = any(
+            item.get("id") == download_id for item in download_tracker.get_history()
+        )
+
+        if download_id not in download_tracker.downloads and not already_in_history:
+            download_tracker.start_download(download_id, title, site, media_type)
+
+        if not already_in_history:
+            download_tracker.complete_download(download_id, success=False, error=error)
+    except Exception as tracker_err:
+        logger.exception("[_task] Failed to update download tracker: %s", tracker_err)
 
 
 def _is_recent_webhook(tmdb_id, source=None, window_seconds=None, touch=True):
@@ -193,53 +215,6 @@ def _run_global_search(query: str, sites: list[str]):
     return results, failed
 
 
-def parse_site_extra_args(site: str, raw: str) -> dict:
-    """
-    Parse a free-text CLI-style string (e.g. "--optimize-audio --quality UHD") using the target
-    site's own register_cli_args(parser), the same argparse definitions the CLI already uses.
-    """
-    if not raw or not raw.strip():
-        return {}
-
-    lazy = load_search_functions().get(f"{site}_search")
-    module = lazy.get_module() if lazy else None
-    register = getattr(module, "register_cli_args", None) if module else None
-    if not callable(register):
-        return {}
-
-    mini_parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
-    dests = list(register(mini_parser) or [])
-
-    try:
-        tokens = shlex.split(raw)
-        parsed, _unknown = mini_parser.parse_known_args(tokens)
-    except (SystemExit, argparse.ArgumentError, ValueError) as e:
-        raise ValueError(f"Invalid custom option for '{site}': {e}") from e
-
-    return {dest: getattr(parsed, dest) for dest in dests}
-
-
-def _resolve_persisted_site_options(site: str) -> dict:
-    """
-    Look up this site's persisted custom CLI args (Settings > Overview, login.json's
-    per-site "extra_args" key) and parse them, so every future download for that site
-    automatically picks them up without any per-download input.
-    """
-    if not site:
-        return {}
-
-    section = config_manager.login.get_section(site) or config_manager.login.get_section(site.lower())
-    raw = (section or {}).get("extra_args", "")
-    if not raw:
-        return {}
-
-    try:
-        return parse_site_extra_args(site, raw)
-    except ValueError:
-        logger.warning("Invalid persisted custom CLI args for site '%s': %r", site, raw)
-        return {}
-
-
 def _log_gui_equivalent_command(site: str, item_payload: dict[str, Any], season: str = None, episodes: str = None) -> None:
     """Log the CLI command equivalent to a GUI download."""
     try:
@@ -326,24 +301,7 @@ def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str
         except Exception as e:
             error_msg = str(e) or "Unknown error"
             logger.exception("[_task] Download task failed: %s", error_msg)
-
-            try:
-                _remove_scheduled_download(download_id)
-
-                already_in_history = any(
-                    item.get("id") == download_id
-                    for item in download_tracker.get_history()
-                )
-
-                # Start it briefly only when nothing downstream already wrote
-                # the final state to the tracker.
-                if download_id not in download_tracker.downloads and not already_in_history:
-                    download_tracker.start_download(download_id, title, site, media_type)
-
-                if not already_in_history:
-                    download_tracker.complete_download(download_id, success=False, error=error_msg)
-            except Exception as tracker_err:
-                logger.exception("[_task] Failed to update download tracker: %s", tracker_err)
+            _mark_task_failed(download_id, title, site, media_type, error_msg)
             raise
         finally:
             context_tracker.output_path = None
@@ -431,15 +389,9 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
                     except Exception as e:
                         error_msg = str(e) or "Unknown error"
                         logger.exception("[_task] Download season %s: %s", season_num, e)
-
-                        try:
-                            _remove_scheduled_download(download_id)
-                            if download_id not in download_tracker.downloads:
-                                season_title = f"{name} - S{season_num}"
-                                download_tracker.start_download(download_id, season_title, source_alias, media_type)
-                            download_tracker.complete_download(download_id, success=False, error=error_msg)
-                        except Exception as tracker_err:
-                            logger.exception("[_task] Failed to update download tracker: %s", tracker_err)
+                        _mark_task_failed(
+                            download_id, f"{name} - S{season_num}", source_alias, media_type, error_msg
+                        )
                     finally:
                         context_tracker.site_options = None
                         _release_download_slot()
@@ -521,15 +473,9 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
                     except Exception as e:
                         error_msg = str(e) or "Unknown error"
                         logger.exception("[_task] Download season %s: %s", season_num, e)
-
-                        try:
-                            _remove_scheduled_download(download_id)
-                            if download_id not in download_tracker.downloads:
-                                season_title = f"{name} - S{season_num}"
-                                download_tracker.start_download(download_id, season_title, source_alias, media_type)
-                            download_tracker.complete_download(download_id, success=False, error=error_msg)
-                        except Exception as tracker_err:
-                            logger.exception("[_task] Failed to update download tracker: %s", tracker_err)
+                        _mark_task_failed(
+                            download_id, f"{name} - S{season_num}", source_alias, media_type, error_msg
+                        )
                     finally:
                         context_tracker.site_options = None
                         _release_download_slot()

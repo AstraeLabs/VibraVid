@@ -30,11 +30,12 @@ auto_update_check = config_manager.config.get_bool("DEFAULT", "auto_update_check
 timeout = config_manager.config.get_int("REQUESTS", "timeout")
 _GENERIC_UPDATABLE_TOOLS = {
     "ffmpeg": ["ffmpeg", "ffprobe"],
-    "bento4": ["mp4decrypt", "mp4dump"],
-    "shaka_packager": ["packager"],
+    "flux": ["flux"],
     "dovi_tool": ["dovi_tool"],
     "mkvtoolnix": ["mkvmerge", "mkvinfo"],
     "velora": ["velora"],
+    "yt-dlp": ["yt-dlp"],
+    "deno": ["deno"],
 }
 
 def fetch_github_releases():
@@ -156,76 +157,121 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
     """Re-download *tool*'s binaries when AstraeLabs/Binary has published a newer version."""
     remote = binary_paths.get_remote_tool_version(tool)
     if not remote:
+        if tool in {"yt-dlp", "deno"}:
+            from VibraVid.setup.checker import check_deno, check_yt_dlp
+
+            checker = check_yt_dlp if tool == "yt-dlp" else check_deno
+            if checker(download=False):
+                return {
+                    "success": True,
+                    "updated": False,
+                    "message": "up to date.",
+                }
+            return {
+                "success": False,
+                "updated": False,
+                "message": "not installed.",
+            }
         return {"success": False, "message": f"Could not fetch the latest {tool} version."}
 
     local = binary_paths.get_local_tool_version(tool)
-    if local is None:
-        binary_paths.set_local_tool_version(tool, remote)
-        return {
-            "success": True,
-            "updated": False,
-            "local": None,
-            "latest": remote,
-            "message": f"{tool} version baseline recorded ({remote}).",
-        }
-
-    if local == remote:
-        logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
-        return {
-            "success": True,
-            "updated": False,
-            "local": local,
-            "latest": remote,
-            "message": f"{tool} is up to date ({local}).",
-        }
-
-    console.print(f"[#FFD60A]{tool} outdated (local: {local} -> latest: {remote}), updating...")
 
     managed_dir = os.path.abspath(binary_paths.get_binary_directory())
     ext = ".exe" if binary_paths.system == "windows" else ""
+
+    if local is not None and local == remote:
+        missing = [f"{name}{ext}" for name in exec_names if not binary_paths.get_binary_path(tool, f"{name}{ext}")]
+        if not missing:
+            logger.debug(f"{tool} is up to date (local: {local}, latest: {remote})")
+            return {
+                "success": True,
+                "updated": False,
+                "local": local,
+                "latest": remote,
+                "message": f"{tool} is up to date ({local}).",
+            }
+
+        console.print(f"[#FFD60A]{tool} is up to date ({local}) but missing locally, reinstalling {len(missing)} binary(ies)...")
+        reinstalled_any = False
+        for binary_name in missing:
+            if binary_paths.download_binary(tool, binary_name):
+                reinstalled_any = True
+
+        return {
+            "success": True,
+            "updated": reinstalled_any,
+            "local": local,
+            "latest": remote,
+            "message": (
+                f"{tool}: reinstalled {len(missing)} missing binary(ies) ({local})."
+                if reinstalled_any
+                else f"{tool}: {len(missing)} binary(ies) missing locally and reinstall failed."
+            ),
+        }
+
+    if local is None:
+        console.print(f"[#FFD60A]{tool} local version unknown, verifying installation against latest ({remote})...")
+    else:
+        console.print(f"[#FFD60A]{tool} outdated (local: {local} -> latest: {remote}), updating...")
+
     updated_any = False
 
     for name in exec_names:
         binary_name = f"{name}{ext}"
         path = binary_paths.get_binary_path(tool, binary_name)
-        if not path:
-            continue  # not installed locally; nothing to refresh
 
-        # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
-        if os.path.dirname(os.path.abspath(path)) != managed_dir:
-            logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
-            continue
+        if path:
+            # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
+            if os.path.dirname(os.path.abspath(path)) != managed_dir:
+                logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
+                continue
 
-        try:
-            os.remove(path)
-        except OSError as e:
-            logger.warning(f"Failed to remove stale {binary_name}: {e}")
-            continue
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.warning(f"Failed to remove stale {binary_name}: {e}")
+                continue
 
-        binary_paths.invalidate_binary(binary_name)
+            binary_paths.invalidate_binary(binary_name)
+
         if binary_paths.download_binary(tool, binary_name):
             updated_any = True
 
+    # Only record the remote version once it has actually been installed/verified;
+    # never baseline an unknown local version against a binary we haven't confirmed.
     if updated_any:
         binary_paths.set_local_tool_version(tool, remote)
+
+    if local is None:
+        message = (
+            f"{tool} installation verified ({remote})."
+            if updated_any
+            else f"{tool}: nothing installed locally and installation failed."
+        )
+    else:
+        message = (
+            f"{tool} updated: {local} -> {remote}."
+            if updated_any
+            else f"{tool}: nothing installed locally to update."
+        )
 
     return {
         "success": True,
         "updated": updated_any,
         "local": local,
         "latest": remote,
-        "message": (
-            f"{tool} updated: {local} -> {remote}."
-            if updated_any
-            else f"{tool}: nothing installed locally to update."
-        ),
+        "message": message,
     }
 
 
 def check_all_binaries_update() -> dict:
-    """Refresh every managed third-party binary (FFmpeg, Bento4, Shaka Packager, dovi_tool, MKVToolNix) that is behind the version published in AstraeLabs/Binary."""
+    """Refresh every managed third-party binary published in AstraeLabs/Binary"""
+    from VibraVid.setup.checker import _should_download
+
     results = {}
     for tool, exec_names in _GENERIC_UPDATABLE_TOOLS.items():
+        if not _should_download(tool):
+            continue
         try:
             results[tool] = check_binary_update(tool, exec_names)
         except Exception as e:
@@ -281,6 +327,6 @@ def update():
         tag_url = last_version if last_version.startswith("v") else f"v{last_version}"
         mode = get_execution_mode()
         if mode == "installer":
-            console.print(f"\n[red]New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run with [#FFD60A]-UP [#00BCD4]to auto-update")
+            console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run with [#FFD60A]-UP [#00BCD4]to auto-update\n")
         elif mode == "source_code":
-            console.print(f"\n[red]New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run [#FFD60A]git pull [#00BCD4]to update")
+            console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run [#FFD60A]git pull [#00BCD4]to update\n")

@@ -2,6 +2,7 @@
 # By @UrloMythus
 
 import difflib
+import html
 import logging
 import re
 import threading
@@ -17,8 +18,8 @@ _YEAR_RE = re.compile(r"(?<![/\d])(19|20)\d{2}(?![/\d])")
 
 class GetSerieInfo:
     def __init__(self, series_name: str, base_url: str):
-        self.series_name = series_name
-        self.series_display_name = series_name
+        self.series_name = html.unescape(series_name)
+        self.series_display_name = self.series_name
         self.base_url = base_url.rstrip("/")
         self.year = None
         self.seasons_manager = SeasonManager()
@@ -63,7 +64,7 @@ class GetSerieInfo:
                     )
                     post_resp.raise_for_status()
                     data = post_resp.json()
-                    title = data.get("title", {}).get("rendered", "")
+                    title = html.unescape(data.get("title", {}).get("rendered", ""))
                     content = data.get("content", {}).get("rendered", "")
 
                     ratio = difflib.SequenceMatcher(None, title.lower(), self.series_name.lower()).ratio()
@@ -100,7 +101,7 @@ class GetSerieInfo:
                     rf"{season_num}&#215;{ep_num:02d}\s*[-–]\s*([^<\n]+)",
                     self._content,
                 )
-                ep_title = title_m.group(1).strip() if title_m else f"Episodio {ep_num}"
+                ep_title = html.unescape(title_m.group(1).strip()) if title_m else f"Episodio {ep_num}"
                 em.add(Episode(id=ep_num, number=ep_num, name=ep_title))
 
             s = Season(id=season_num, number=season_num, name=f"Stagione {season_num}", slug="")

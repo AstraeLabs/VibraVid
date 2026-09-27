@@ -42,7 +42,7 @@ class InteractiveStreamSelector:
             return set()
 
         console.print("\n[cyan]Stream Selection Mode[/cyan]")
-        console.print("[green]Use ↑/↓ to navigate, [bold]SPACE[/bold] to toggle, [bold]ENTER[/bold] to confirm[/green]\n")
+        console.print("[green]Use Up/Down to navigate, [bold]SPACE[/bold] to toggle, [bold]ENTER[/bold] to confirm[/green]\n")
 
         while True:
             # Clear and redraw table with current selection
@@ -57,7 +57,7 @@ class InteractiveStreamSelector:
             console.print(table)
 
             # Show controls info
-            console.print("\n[dim]Controls: ↑/↓ navigate | SPACE toggle | ENTER confirm | ESC cancel[/dim]")
+            console.print("\n[dim]Controls: Up/Down navigate | SPACE toggle | ENTER confirm | ESC cancel[/dim]")
 
             # Wait for key input
             key = get_key()
@@ -80,7 +80,7 @@ class InteractiveStreamSelector:
                     console.print("\n[green]OK Selection confirmed[/green]\n")
                     return self.selected
                 else:
-                    console.print("\n[yellow]⚠ Please select at least one stream![/yellow]")
+                    console.print("\n[yellow]! Please select at least one stream![/yellow]")
 
             elif key == "ESC":
                 console.print("\n[yellow]Selection cancelled - keeping original[/yellow]\n")

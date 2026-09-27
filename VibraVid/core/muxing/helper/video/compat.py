@@ -57,6 +57,7 @@ def get_stream_codecs(file_path: str) -> list[dict]:
     """
     cmd = [get_ffprobe_path(), "-v", "error", "-show_streams", "-print_format", "json", file_path]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace")
+    logger.info(f"Running get_stream_codecs for {os.path.basename(file_path)} with cmd: {' '.join(cmd)}")
 
     if result.returncode != 0:
         console.print(f"[red]ffprobe error while reading codecs: {result.stderr.strip()}")
@@ -66,7 +67,12 @@ def get_stream_codecs(file_path: str) -> list[dict]:
     try:
         info = json.loads(result.stdout)
         return [
-            {"codec_name": s.get("codec_name", "").lower(), "codec_type": s.get("codec_type", "").lower()}
+            {
+                "index": s.get("index"),
+                "codec_name": s.get("codec_name", "").lower(),
+                "codec_type": s.get("codec_type", "").lower(),
+                "language": (s.get("tags") or {}).get("language", "").lower(),
+            }
             for s in info.get("streams", [])
             if s.get("codec_name")
         ]

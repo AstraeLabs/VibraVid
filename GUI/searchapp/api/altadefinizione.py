@@ -1,8 +1,5 @@
 # 26.05.24
 
-import importlib
-
-from VibraVid.services._base.site_loader import get_folder_name
 from VibraVid.services.altadefinizione.scrapper import GetSerieInfo
 
 from .base import BaseStreamingAPI, Entries, Episode, Season
@@ -14,13 +11,6 @@ class AltadefinizioneApi(BaseStreamingAPI):
         self.site_name = "altadefinizione"
         self._search_fn = None
         self.scrape_serie = None
-
-    def _get_search_fn(self):
-        """Lazy load the search function."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
 
     def search(self, query: str) -> list[Entries]:
         """Search for content on Altadefinizione."""

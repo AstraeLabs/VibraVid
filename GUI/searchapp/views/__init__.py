@@ -6,6 +6,7 @@ from .arr import *  # noqa: F401,F403
 from .cinema import *  # noqa: F401,F403
 from .dashboard import *  # noqa: F401,F403
 from .download import *  # noqa: F401,F403
+from .logs_view import *  # noqa: F401,F403
 from .search import *  # noqa: F401,F403
 from .series import *  # noqa: F401,F403
 from .settings_view import *  # noqa: F401,F403

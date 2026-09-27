@@ -21,6 +21,7 @@ django.setup()
 import pytest
 
 from searchapp.views import _shared
+from VibraVid.services._base import site_extra_args
 from VibraVid.utils import config_manager
 
 
@@ -33,7 +34,7 @@ def _fake_register_cli_args(parser):
 @pytest.fixture
 def fake_site(monkeypatch):
     lazy = SimpleNamespace(get_module=lambda: SimpleNamespace(register_cli_args=_fake_register_cli_args))
-    monkeypatch.setattr(_shared, "load_search_functions", lambda: {"mysite_search": lazy})
+    monkeypatch.setattr(site_extra_args, "load_search_functions", lambda: {"mysite_search": lazy})
     return "mysite"
 
 
@@ -53,7 +54,7 @@ def test_parse_site_extra_args_invalid_shlex_raises_value_error(fake_site):
 
 
 def test_parse_site_extra_args_unknown_site_returns_empty_dict(monkeypatch):
-    monkeypatch.setattr(_shared, "load_search_functions", lambda: {})
+    monkeypatch.setattr(site_extra_args, "load_search_functions", lambda: {})
     assert _shared.parse_site_extra_args("nosuchsite", "--quality UHD") == {}
 
 

@@ -34,6 +34,18 @@ def track_label(s) -> str:
 logger = logging.getLogger(__name__)
 
 
+def format_duration(seconds: float) -> str:
+    """Compact human-readable duration, e.g. '1h02m', '3m20s', '45s'."""
+    total = int(round(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
+
 class DRMInfo:
     WIDEVINE_SYSTEM_ID = _DRMSystems.to_system_id(_DRMSystems.WIDEVINE)
     PLAYREADY_SYSTEM_ID = _DRMSystems.to_system_id(_DRMSystems.PLAYREADY)
@@ -196,41 +208,43 @@ class DRMInfo:
         return self._key_uri_by_type.get((drm_type or self.drm_type or "").upper())
 
     def to_dict(self) -> dict:
-        """Canonical DRM dict consumed by the HLS/ISM downloader fallbacks::
-
-        {'widevine': [{'pssh','type','kid','key_uri'}], 'playready': [...], 'fairplay': [{'uri',...}]}
-        """
+        """Return a dict of all DRM info, including every KID and PSSH variant."""
         result: dict = {"widevine": [], "playready": [], "fairplay": []}
+        kids = self.get_all_kids() or [self.kid]
+
         pssh_wv = self.get_pssh_for(DRMType.WIDEVINE)
         if pssh_wv:
-            result["widevine"].append(
-                {
-                    "pssh": pssh_wv,
-                    "type": "Widevine",
-                    "kid": self.kid,
-                    "key_uri": self.get_key_uri(DRMType.WIDEVINE, pssh_wv),
-                }
-            )
+            for kid in kids:
+                result["widevine"].append(
+                    {
+                        "pssh": pssh_wv,
+                        "type": "Widevine",
+                        "kid": kid,
+                        "key_uri": self.get_key_uri(DRMType.WIDEVINE, pssh_wv),
+                    }
+                )
         pssh_pr = self.get_pssh_for(DRMType.PLAYREADY)
         if pssh_pr:
-            result["playready"].append(
-                {
-                    "pssh": pssh_pr,
-                    "type": "PlayReady",
-                    "kid": self.kid,
-                    "key_uri": self.get_key_uri(DRMType.PLAYREADY, pssh_pr),
-                }
-            )
+            for kid in kids:
+                result["playready"].append(
+                    {
+                        "pssh": pssh_pr,
+                        "type": "PlayReady",
+                        "kid": kid,
+                        "key_uri": self.get_key_uri(DRMType.PLAYREADY, pssh_pr),
+                    }
+                )
         pssh_fp = self.get_pssh_for(DRMType.FAIRPLAY)
         if pssh_fp:
-            result["fairplay"].append(
-                {
-                    "uri": pssh_fp,
-                    "type": "FairPlay",
-                    "kid": self.kid,
-                    "key_uri": self.get_key_uri(DRMType.FAIRPLAY, pssh_fp),
-                }
-            )
+            for kid in kids:
+                result["fairplay"].append(
+                    {
+                        "uri": pssh_fp,
+                        "type": "FairPlay",
+                        "kid": kid,
+                        "key_uri": self.get_key_uri(DRMType.FAIRPLAY, pssh_fp),
+                    }
+                )
         return result
 
     def add_advertised_type(self, drm_type: str) -> None:
@@ -300,14 +314,21 @@ class DRMInfo:
 
         return "-"
 
+    def get_kid_display(self) -> str:
+        """Return a comma-separated list of all KIDs, or the single KID/default_kid if none."""
+        kids = self.get_all_kids()
+        if kids:
+            return ",".join(kids)
+        
+        kid = self.kid or self.default_kid
+        return f"{kid}" if kid else ""
+
     def __repr__(self) -> str:
         if not self.is_encrypted():
             return "DRMInfo(plain)"
 
-        kid_source = self.kid or self.default_kid or (self.default_kids[0] if self.default_kids else "")
-        kid = kid_source[:8]
         types = "+".join(self._drm_types) if self._drm_types else (self.drm_type or "?")
-        return f"DRMInfo({types}, KID={kid}…)"
+        return f"DRMInfo({types}, KID={self.get_kid_display()})"
 
 
 @dataclass
@@ -355,6 +376,7 @@ class Stream:
     video_range: str = ""
     hdcp_level: str = ""
     scan_type: str = ""
+    supplemental_codecs: str = ""
 
     # Audio-only
     default: bool = False
@@ -389,6 +411,7 @@ class Stream:
     supports_live_decryption: bool = True  # Default True, parsers will set False when needed
     is_live: bool = False
     is_wvtt_mp4: bool = False
+    no_range_split: bool = False
 
     # ── Size estimation ───────────────────────────────────────────────────────
     # Populated by compute_estimated_size(); do not set manually.
@@ -515,6 +538,18 @@ class Stream:
             flags = self.get_flags_display() or None
             drm = self.drm.get_drm_display() if self.drm.is_encrypted() else None
             id_s = f"id={self.id!r}" if self.id else None
+            
+            seg_count = len(self.segments)
+            segs_s = f"segs={seg_count}" if seg_count else None
+            dur_s = f"~{format_duration(self.duration)}" if self.bitrate and self.duration > 0 else None
+            size_s = None
+            if self.bitrate and self.duration > 0:
+                from VibraVid.core.velora.util.formatting import format_size as _format_size
+                est_size = self.compute_estimated_size()
+                if est_size:
+                    size_s = f"~{_format_size(est_size)}"
+            
+            kid_s = f"KID={self.drm.get_kid_display()}" if self.drm.is_encrypted() and self.drm.get_kid_display() else None
 
             if self.type == "video":
                 fps_s = f"{self.fps_float:.0f}fps" if self.fps_float else None
@@ -530,17 +565,24 @@ class Stream:
                     fps_s,
                     vrange,
                     scan_s,
+                    segs_s,
+                    dur_s,
+                    size_s,
                     drm,
+                    kid_s,
                 ]
 
             elif self.type == "audio":
                 ch = self.get_channel_label() or (self.channels if self.channels else None)
                 sr = f"{self.sample_rate}Hz" if self.sample_rate else None
-                parts = [id_s, lang, self.bitrate_display if self.bitrate else None, codec, ch, sr, flags, drm]
+                parts = [
+                    id_s, lang, self.bitrate_display if self.bitrate else None, codec, ch, sr, flags,
+                    segs_s, dur_s, size_s, drm, kid_s,
+                ]
 
             else:  # subtitle
                 wvtt_tag = "wvtt-mp4" if self.is_wvtt_mp4 else None
-                parts = [id_s, lang, codec, wvtt_tag, flags]
+                parts = [id_s, lang, codec, wvtt_tag, flags, segs_s, dur_s, size_s, drm, kid_s]
 
             filtered = [p for p in parts if p]
             return f"Stream({self.type} | {' | '.join(filtered)})"

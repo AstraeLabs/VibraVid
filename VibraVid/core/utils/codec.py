@@ -47,6 +47,7 @@ AUDIO_CODEC_MAP: dict[str, str] = {
     "dtsc": "DTS",
     "dtse": "DTS",
     "dtsh": "DTS",
+    "dtsx": "DTS",
     "flac": "FLAC",
     "alac": "ALAC",
     "pcm": "PCM",
@@ -122,6 +123,7 @@ AUDIO_CODEC_PREFIXES: tuple[str, ...] = (
     "dtsc",
     "dtse",
     "dtsh",
+    "dtsx",
     "dts",
     "pcm",
     "lpcm",
@@ -312,6 +314,12 @@ def get_short_codec(stream_type: str, codec_str: str) -> str:
         for part in codec_parts:
             detected_type = detect_stream_type(part)
 
+            # An HLS #EXT-X-STREAM-INF's CODECS attribute lists every codec used by
+            # the whole variant (video + its paired audio), not just the caller's
+            # track type.
+            if detected_type and detected_type != stream_type.lower():
+                continue
+
             # Choose the appropriate codec map
             if detected_type == "video":
                 codec_map = VIDEO_CODEC_MAP
@@ -366,6 +374,31 @@ def detect_stream_type(codec_str: str) -> str:
     if any(c.startswith(p) for p in VIDEO_CODEC_PREFIXES):
         return "video"
     return ""
+
+
+def format_bitrate(bps: int | float | None) -> str:
+    """Human-readable bitrate, same formatting as Stream.bitrate_display ('1.1 Mbps', '128 Kbps')."""
+    bw = bps or 0
+    if bw >= 1_000_000:
+        return f"{bw / 1e6:.1f} Mbps"
+    if bw >= 1_000:
+        return f"{bw / 1e3:.0f} Kbps"
+    return f"{bw:.0f} bps" if bw else ""
+
+
+def format_disposition_flags(*, forced: bool = False, sdh: bool = False, cc: bool = False, default: bool = False) -> str:
+    """Rich-markup subtitle disposition tags (e.g. "[FORCED] [SDH]")."""
+    default = default and not forced
+    flags = []
+    if forced:
+        flags.append("[FORCED]")
+    if sdh:
+        flags.append("[SDH]")
+    if cc:
+        flags.append("[CC]")
+    if default:
+        flags.append("[DEFAULT]")
+    return " ".join(flags)
 
 
 def get_channel_label(channels: str) -> str:

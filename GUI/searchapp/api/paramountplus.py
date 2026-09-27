@@ -1,9 +1,11 @@
 # 05.08.26
 
-from VibraVid.services.paramountplus.scrapper import GetSerieInfo
+from VibraVid.services._base.site_loader import resolve_service_submodule
 
 from .base import Entries
 from .generic import GenericStreamingAPI
+
+GetSerieInfo = resolve_service_submodule("paramountplus", "scrapper").GetSerieInfo
 
 
 class ParamountPlus(GenericStreamingAPI):

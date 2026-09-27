@@ -66,7 +66,7 @@ class DeviceSearcher:
             try:
                 target_path = os.path.join(self.base_dir, filename)
                 if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                    logger.info(f"Found {filename} in binary directory: {target_path}")
+                    logger.debug(f"Found {filename} in binary directory: {target_path}")
                     return target_path
             except Exception as e:
                 logger.exception(f"Error checking for existing file {filename}")

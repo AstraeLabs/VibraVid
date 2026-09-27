@@ -1,17 +1,4 @@
 services:
-  flaresolverr:
-    profiles: ["flaresolverr"]
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: ${FLARESOLVERR_CONTAINER_NAME:-flaresolverr}
-    environment:
-      LOG_LEVEL: "info"
-      PROXY_URL: "${FLARESOLVERR_PROXY_URL:-}"
-    ports:
-      - "8191:8191"
-    networks:
-      - vibravid_network
-    restart: unless-stopped
-
   bypasser:
     profiles: ["bypasser"]
     build:
@@ -34,20 +21,15 @@ services:
     ### Networking
     ports:
       - "${VIBRAVID_PORT:-8000}:8000"
-    # Uncomment for custom DNS (e.g., Cloudflare DNS)
-    # dns:
-    #   - 1.1.1.1
-    #   - 8.8.8.8
+    # Bypass Docker's embedded DNS proxy (127.0.0.11)
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - vibravid_network
 
     ### Service dependencies
-    # Both sidecars are optional (see their "profiles" above) and gated with
-    # required: false so `docker compose up` works fine with neither enabled.
     depends_on:
-      flaresolverr:
-        condition: service_started
-        required: false
       bypasser:
         condition: service_started
         required: false
@@ -84,7 +66,7 @@ services:
       DJANGO_DB_DIR: "/app/data"
       DJANGO_SECRET_KEY: "change-me-to-a-secure-key"
       PYTHONUNBUFFERED: "1"
-      PYTHONPATH: "/app:${PYTHONPATH}"
+      PYTHONPATH: "/app"
 
       # User / group ID for file ownership on host-mounted volumes.
       # Set these to match the uid/gid that owns your NAS share so that
@@ -97,8 +79,7 @@ services:
       ALLOWED_HOSTS: "localhost,127.0.0.1,vibravid"
       CSRF_TRUSTED_ORIGINS: "http://localhost:8000,http://127.0.0.1:8000"
 
-      # ── Cloudflare-challenge solver sidecars ──
-      FLARESOLVERR_URL: "http://flaresolverr:8191"
+      # ── Turnstile solver sidecar ──
       BYPASSER_URL: "http://bypasser:8192"
       
       # Uncomment for private network deployment (behind reverse proxy)
@@ -167,7 +148,7 @@ services:
 
     environment:
       PYTHONUNBUFFERED: "1"
-      PYTHONPATH: "/app:${PYTHONPATH}"
+      PYTHONPATH: "/app"
       STATE_DIR: "/app/tgstate"
       VIBRAVID_CONFIG: "/app/Conf/config.json"
       # TG_GUI_URL default (http://vibravid:8000) already matches this

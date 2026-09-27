@@ -1,0 +1,21 @@
+{
+  "include": ["VibraVid", "GUI", "manual.py", "tui.py"],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.*",
+    "Test",
+    ".venv",
+    "venv",
+    "GUI/**/migrations"
+  ],
+  "extraPaths": [".", "GUI"],
+  "pythonVersion": "3.13",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "off",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "reportUnusedImport": "warning",
+  "reportPrivateImportUsage": "none"
+}

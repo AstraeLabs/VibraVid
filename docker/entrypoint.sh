@@ -31,12 +31,12 @@ if [ -z "$(ls -A /app/Conf 2>/dev/null)" ]; then
     chown -R appuser:appuser /app/Conf
 fi
 
-# ── 2a. First-run binary directory seeding ────────────────────────────────────
-if [ -z "$(ls -A /home/appuser/.local/bin/binary 2>/dev/null)" ]; then
-    echo "VibraVid: seeding /home/appuser/.local/bin/binary from image defaults..."
-    cp -r /home/appuser/.local/bin/binary.defaults/. /home/appuser/.local/bin/binary/
-    chown -R appuser:appuser /home/appuser/.local/bin/binary
-fi
+# ── 2a. Pre-fetch lazily-downloaded binaries (velora, flux) ──────────────────
+gosu appuser python -c "
+from VibraVid.setup.checker import check_velora, check_flux
+check_velora()
+check_flux()
+" || echo "VibraVid: binary pre-fetch failed, will retry lazily at runtime"
 
 # ── 2b. Docker socket access (in-app updater) ────────────────────────────────
 if [ -S /var/run/docker.sock ]; then

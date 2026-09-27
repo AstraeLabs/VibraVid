@@ -3,8 +3,6 @@
 import logging
 import re
 
-from ._models import extract_widevine_kid
-
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +13,7 @@ class KeysManager:
 
     def __init__(self, keys=None) -> None:
         self._keys: list[tuple[str, str]] = []
+        self._rejected: list[str] = []
         if keys:
             self.add_keys(keys)
 
@@ -25,10 +24,17 @@ class KeysManager:
 
             if not self._HEX32_RE.match(ckey):
                 logger.warning(f"Skipping key with invalid format (expected 32 hex chars, got len={len(ckey)}): kid={ckid[:8]}...")
+                self._rejected.append(f"{ckid}:{ckey}")
                 continue
 
             if ckid != "1" and not self._HEX32_RE.match(ckid):
                 logger.warning(f"Skipping pair with invalid KID (expected 32 hex chars, got len={len(ckid)}): kid={ckid}")
+                self._rejected.append(f"{ckid}:{ckey}")
+                continue
+
+            if ckid == ckey and ckid != "1":
+                logger.warning(f"Skipping key where KID == KEY (always invalid): kid={ckid}")
+                self._rejected.append(f"{ckid}:{ckey}")
                 continue
 
             pair = (ckid, ckey)
@@ -39,13 +45,16 @@ class KeysManager:
         """Return keys as a list of clean ``"kid:key"`` strings."""
         return [f"{kid}:{key}" for kid, key in self._keys]
 
+    def get_rejected_list(self) -> list[str]:
+        """Raw ``"kid:key"`` strings that failed validation while parsing"""
+        return list(self._rejected)
+
     @staticmethod
     def _clean(value: str) -> str:
         """Canonical form for a KID or KEY: dash-stripped, trimmed, lowercase hex."""
         return str(value).replace("-", "").strip().lower()
 
-    @classmethod
-    def _iter_pairs(cls, keys):
+    def _iter_pairs(self, keys):
         """Yield raw (uncleaned) ``(kid, key)`` pairs from any supported representation."""
         if not keys:
             return
@@ -66,7 +75,7 @@ class KeysManager:
                 yield (keys[0], keys[1])
             else:
                 for item in keys:
-                    yield from cls._iter_pairs(item)
+                    yield from self._iter_pairs(item)
             return
 
         if isinstance(keys, str):
@@ -74,19 +83,23 @@ class KeysManager:
             if not s:
                 return
 
-            matches = list(cls._HEX_PAIR_RE.finditer(s))
+            matches = list(self._HEX_PAIR_RE.finditer(s))
             if matches:
                 remainder = s
                 for m in reversed(matches):
                     remainder = remainder[: m.start()] + " " + remainder[m.end() :]
-                for token in cls._SPLIT_RE.split(remainder):
+
+                for token in self._SPLIT_RE.split(remainder):
                     if token and ":" in token:
                         logger.warning(f"Skipping malformed key segment (expected 32 hex chars on each side of ':'): {token!r}")
+                        kid_raw, _, key_raw = token.partition(":")
+                        self._rejected.append(f"{self._clean(kid_raw)}:{self._clean(key_raw)}")
+
                 yield from (m.groups() for m in matches)
                 return
 
             # Generic path: split on separators, then on the first ':' of each token.
-            for token in cls._SPLIT_RE.split(s):
+            for token in self._SPLIT_RE.split(s):
                 if not token:
                     continue
                 if ":" in token:
@@ -122,21 +135,14 @@ class KeysManager:
     def resolve_fixed_key(
         cls, encrypted_path: str, detected_kid: str | None, normalized_keys: list[tuple[str, str]]
     ) -> list[tuple[str, str]]:
-        """For fixed-key streams (all-zero KID) with multiple candidates, narrow to the correct key by extracting the real KID from the Widevine PSSH."""
+        """For fixed-key streams (all-zero KID) with multiple candidates, refuse to guess.
+
+        `detected_kid` already comes from `flux -d -j`'s `default_kid`.
+        """
         if not cls.is_zero_kid(detected_kid) or len(normalized_keys) <= 1:
             return normalized_keys
 
-        pssh_kid = extract_widevine_kid(encrypted_path)
-        if not pssh_kid:
-            logger.error("Fixed-key stream with multiple keys but no PSSH KID extracted; refusing to guess a key")
-            return []
-
-        for pair in normalized_keys:
-            if pair[0].lower() == pssh_kid:
-                logger.info(f"Fixed-key stream: selected key by PSSH KID match ({pssh_kid})")
-                return [pair]
-
-        logger.error(f"No key matched PSSH KID {pssh_kid} (have: {', '.join(p[0][:8] for p in normalized_keys)}); refusing to guess a key")
+        logger.error(f"Fixed-key stream ({encrypted_path}) with multiple candidate keys but no resolvable KID (flux found no matching PSSH either); refusing to guess a key")
         return []
 
     def __len__(self) -> int:

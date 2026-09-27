@@ -21,11 +21,10 @@ from VibraVid.core.velora.util.formatting import (
     parse_max_time as _parse_max_time,
 )
 from VibraVid.setup import get_prd_path, get_wvd_path, resolve_service_cdm_paths
-from VibraVid.utils import config_manager, os_manager
+from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
-from VibraVid.utils.storage_upload.hook import is_cached, try_fetch
 
-from .base import BaseDownloader
+from .base import BaseDownloader, DownloadResult
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -208,24 +207,16 @@ class ISM_Downloader(BaseDownloader):
         """
         Dispatch key-fetch to :class:`DRMManager`.
 
-        * ``"playready"`` → PlayReady only (native ISM DRM)
-        * ``"widevine"``  → Widevine only
+        When the manifest only carries the *other* DRM type, fall back to that type instead of skipping key resolution entirely.
         """
         keys = None
+        effective_pref = self.drm_preference
+        if not drm_psshs.get(effective_pref):
+            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
+            if drm_psshs.get(other):
+                effective_pref = other
 
-        if self.drm_preference == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
-            try:
-                keys = self.drm_manager.get_pr_keys(
-                    drm_psshs[DRMType.PLAYREADY],
-                    self.license_url,
-                    headers=self.license_headers,
-                    key=self.key,
-                    license_data=self.license_data,
-                )
-            except Exception as exc:
-                logger.error(f"PlayReady key fetch failed: {exc}")
-
-        if self.drm_preference == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
+        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
             try:
                 keys = self.drm_manager.get_wv_keys(
                     drm_psshs[DRMType.WIDEVINE],
@@ -238,32 +229,29 @@ class ISM_Downloader(BaseDownloader):
             except Exception as exc:
                 logger.error(f"Widevine key fetch failed: {exc}")
 
+        if effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
+            try:
+                keys = self.drm_manager.get_pr_keys(
+                    drm_psshs[DRMType.PLAYREADY],
+                    self.license_url,
+                    headers=self.license_headers,
+                    key=self.key,
+                    license_data=self.license_data,
+                )
+            except Exception as exc:
+                logger.error(f"PlayReady key fetch failed: {exc}")
+
         # Manual key supplied directly
         if not keys and self.key:
             keys = [self.key] if isinstance(self.key, str) else list(self.key)
 
         return keys or []
 
-    def start(self) -> tuple[str | None, bool, str | None]:
+    def start(self) -> DownloadResult:
         """Execute the full ISM download pipeline."""
-        if self.file_already_exists:
-            console.print("[yellow]File already exists.")
-            return self.output_path, False, None
-
-        if context_tracker.resolve_only:
-            from VibraVid.cli.command.queue import enqueue_down_from_context
-
-            enqueue_down_from_context(self.ism_url, self.output_path)
-            return self.output_path, False, None
-
-        if is_cached():
-            console.print("[dim]Skipping — already in cache.")
-            return self.output_path, False, None
-
-        if try_fetch(self.output_path):
-            return self.output_path, False, None
-
-        os_manager.create_path(self.output_dir)
+        precheck = self._precheck(self.ism_url)
+        if precheck is not None:
+            return precheck
 
         self.media_downloader = MediaDownloader(
             url=self.ism_url,
@@ -295,27 +283,35 @@ class ISM_Downloader(BaseDownloader):
 
         streams = self.media_downloader.parse_stream(show_table=context_tracker.should_print and not context_tracker.hide_manifest_info)
 
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+
         # ── DRM key fetch ─────────────────────────────────────────────────────
-        if self.license_url or self.key:
-            raw_ism = (
-                str(self.media_downloader.raw_ism)
-                if hasattr(self.media_downloader, "raw_ism") and self.media_downloader.raw_ism
-                else None
-            )
+        raw_ism = (
+            str(self.media_downloader.raw_ism)
+            if hasattr(self.media_downloader, "raw_ism") and self.media_downloader.raw_ism
+            else None
+        )
 
-            # Primary: PSSH / PRO from Stream.drm (populated by ISMParser)
-            drm_psshs = self._collect_drm_from_streams(streams)
+        # Primary: PSSH / PRO from Stream.drm (populated by ISMParser)
+        drm_psshs = self._collect_drm_from_streams(streams)
 
-            # Fallback: re-scan raw manifest via ISMParser
-            if not drm_psshs[DRMType.WIDEVINE] and not drm_psshs[DRMType.PLAYREADY]:
-                logger.info("No PSSH in Stream objects — falling back to ISMParser")
-                drm_psshs = self._collect_drm_from_ism(raw_ism)
+        # Fallback: re-scan raw manifest via ISMParser
+        if not drm_psshs[DRMType.WIDEVINE] and not drm_psshs[DRMType.PLAYREADY]:
+            logger.info("No PSSH in Stream objects — falling back to ISMParser")
+            drm_psshs = self._collect_drm_from_ism(raw_ism)
 
+        is_protected = bool(drm_psshs.get(DRMType.WIDEVINE) or drm_psshs.get(DRMType.PLAYREADY))
+
+        if is_protected:
+            if self.download_id:
+                download_tracker.update_status(self.download_id, "Fetching keys ...")
             keys = self._fetch_keys(drm_psshs)
 
             if keys:
                 self.media_downloader.set_key(keys)
-            elif drm_psshs.get(DRMType.WIDEVINE) or drm_psshs.get(DRMType.PLAYREADY):
+            else:
                 console.print("[red]Warning: DRM detected but no decryption keys found")
         else:
             keys = []
@@ -327,7 +323,7 @@ class ISM_Downloader(BaseDownloader):
             if DELAY_SS > 0:
                 console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
                 time.sleep(DELAY_SS)
-            return self.output_path, False, None
+            return DownloadResult(self.output_path, False, None)
 
         try:
             self.media_players = MediaPlayers(self.output_dir)
@@ -339,39 +335,8 @@ class ISM_Downloader(BaseDownloader):
             download_tracker.update_status(self.download_id, "Downloading ...")
         print()
 
+        self._maybe_enable_streaming_mux()
         status = self.media_downloader.start_download()
 
-        if status.get("error") == "cancelled":
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-            return None, True, "cancelled"
-
-        if self._no_media_downloaded(status):
-            logger.error("No media downloaded")
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error="No media downloaded")
-            return None, True, "No media downloaded"
-
-        # ── Merge ─────────────────────────────────────────────────────────────
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Muxing ...")
-
-        final_file = self._merge_files(status)
-        if not final_file:
-            if self.download_id and download_tracker.is_stopped(self.download_id):
-                download_tracker.complete_download(self.download_id, success=False, error="cancelled")
-                return None, True, "cancelled"
-            
-            merge_error = self.error or "Merge failed"
-            logger.error(merge_error)
-            if self.download_id:
-                download_tracker.complete_download(self.download_id, success=False, error=merge_error)
-            return None, True, merge_error
-
-        self._finalize(final_file=final_file)
-
-        if DELAY_SS > 0:
-            console.print(f"\n[green]Sleeping {DELAY_SS} seconds before finishing...")
-            time.sleep(DELAY_SS)
-
-        return self.output_path, False, None
+        # ── Guards → merge → finalize (shared tail)
+        return self._finish_from_status(status)

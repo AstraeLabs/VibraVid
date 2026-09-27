@@ -28,14 +28,13 @@ def cache_path(service: str, name: str) -> str:
     return os.path.join(config_manager.base_path, ".cache", "services", service, f"{name}.json")
 
 
-def load(service: str, name: str) -> dict | None:
-    """Load a service's disk-persisted cache dict. None if missing/corrupt."""
+def load(service: str, name: str):
+    """Load a service's disk-persisted cache value (any JSON type). None if missing/corrupt."""
     path = cache_path(service, name)
     with _lock_for(path):
         try:
             with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-            return data if isinstance(data, dict) else None
+                return json.load(fh)
         except Exception:
             return None
 
@@ -62,6 +61,30 @@ def invalidate(service: str, name: str) -> None:
             pass
         except Exception as e:
             logger.warning(f"[disk_cache] could not remove {service}/{name}: {e}")
+
+
+def clear_service(service: str) -> int:
+    """Delete every cached file for a service (e.g. stale MSL/ESN data after a cookie/account change).
+
+    Returns the number of files removed.
+    """
+    service_dir = os.path.join(config_manager.base_path, ".cache", "services", service)
+    removed = 0
+    try:
+        entries = os.listdir(service_dir)
+    except FileNotFoundError:
+        return 0
+    for entry in entries:
+        if not entry.endswith(".json"):
+            continue
+        path = os.path.join(service_dir, entry)
+        with _lock_for(path):
+            try:
+                os.remove(path)
+                removed += 1
+            except Exception as e:
+                logger.warning(f"[disk_cache] could not remove {service}/{entry}: {e}")
+    return removed
 
 
 def is_fresh(data: dict | None, expiry_key: str = "expiry", buffer_seconds: float = 0) -> bool:

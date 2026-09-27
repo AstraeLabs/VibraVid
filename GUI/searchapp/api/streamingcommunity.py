@@ -1,9 +1,6 @@
 # 06.06.25
 
 
-import importlib
-
-from VibraVid.services._base.site_loader import get_folder_name
 from VibraVid.services.streamingcommunity import _effective_languages
 from VibraVid.services.streamingcommunity.scrapper import GetSerieInfo
 from VibraVid.utils import config_manager
@@ -24,12 +21,6 @@ class StreamingCommunityAPI(BaseStreamingAPI):
         self.base_url = config_manager.domain.get(self.site_name, "full_url")
         print(f"[{self.site_name}] Configuration loaded: base_url={self.base_url}")
 
-    def _get_search_fn(self):
-        """Lazy load the search function."""
-        if self._search_fn is None:
-            module = importlib.import_module(f"VibraVid.{get_folder_name()}.{self.site_name}")
-            self._search_fn = module.search
-        return self._search_fn
 
     def search(self, query: str) -> list[Entries]:
         """Search for content on StreamingCommunity."""

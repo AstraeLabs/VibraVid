@@ -1,5 +1,6 @@
 # 17.01.25
 
+import logging
 import os
 import platform
 import subprocess
@@ -7,7 +8,7 @@ import subprocess
 from rich.console import Console
 
 console = Console()
-
+logger = logging.getLogger(__name__)
 
 class FontManager:
     def __init__(self):
@@ -120,6 +121,7 @@ class FontManager:
 
         # Try using fc-list (fontconfig)
         try:
+            logger.info(f"Running fc-list to get installed fonts with cmd: {'fc-list : family'}")
             result = subprocess.run(["fc-list", ":", "family"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 for line in result.stdout.splitlines():

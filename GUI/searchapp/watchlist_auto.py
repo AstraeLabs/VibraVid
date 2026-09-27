@@ -84,21 +84,20 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
         now = timezone.now()
 
         # Always download the selected season — the downloader itself skips already-downloaded files
-        if True:
-            from .views import _run_download_in_thread
+        from .views import _run_download_in_thread
 
-            media_type = (item_payload.get("type") or "tv").lower()
-            logger.info("'%s': starting download S%s episodes=* media_type=%s", item.name, season_number, media_type,)
-            _run_download_in_thread(
-                site=item.source_alias,
-                item_payload=item_payload,
-                season=str(season_number),
-                episodes="*",
-                media_type=media_type,
-            )
-            item.auto_last_episode_count = current_count
-            item.auto_last_downloaded_at = now
-            item.has_new_episodes = True
+        media_type = (item_payload.get("type") or "tv").lower()
+        logger.info("'%s': starting download S%s episodes=* media_type=%s", item.name, season_number, media_type,)
+        _run_download_in_thread(
+            site=item.source_alias,
+            item_payload=item_payload,
+            season=str(season_number),
+            episodes="*",
+            media_type=media_type,
+        )
+        item.auto_last_episode_count = current_count
+        item.auto_last_downloaded_at = now
+        item.has_new_episodes = True
 
         # Keep display fields in sync with the live metadata already fetched
         item.num_seasons = len(seasons)

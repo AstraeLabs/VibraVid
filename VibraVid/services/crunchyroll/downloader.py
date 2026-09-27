@@ -9,7 +9,7 @@ from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.utils.language import resolve_locale
-from VibraVid.core.utils.selector import FilterSpec
+from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
 from VibraVid.services._base import Entries, anime_folder, movie_folder, site_constants
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
@@ -86,39 +86,42 @@ def _merge_subtitles(base: list, extra: list) -> list:
 
 def parse_select_audio_filter(select_audio: str) -> list:
     """
-    Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all") to extract language codes.
-
-    Returns:
-        List of resolved locales (e.g., ["it-IT", "en-US"])
-        Empty list = no filter / use all tracks
+    Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all", or exclusive-priority slots "1ita|2eng") to extract locale groups.
     """
     if not select_audio:
         return []
 
-    spec = FilterSpec.parse(select_audio.strip(), "audio")
+    raw = select_audio.strip()
+    slots = split_audio_slots(raw)
 
-    # "for=all" / "all" -> no filter, use every track
-    if spec.select_all or spec.drop:
-        return []
+    if slots is not None:
+        groups_raw = [slots[num] for num in sorted(slots)]
+    else:
+        spec = FilterSpec.parse(raw, "audio")
+        if spec.select_all or spec.drop:
+            return []
+        groups_raw = [spec.langs] if spec.langs else []
 
-    raw_codes = [c.strip() for c in (spec.langs or "").split("|") if c.strip()]
-    if not raw_codes:
-        return []
+    groups = []
+    for langs in groups_raw:
+        raw_codes = [c.strip() for c in langs.split("|") if c.strip()]
+        locales = []
+        seen = set()
+        for code in raw_codes:
+            locale = resolve_locale(code)
 
-    locales = []
-    seen = set()
-    for code in raw_codes:
-        locale = resolve_locale(code)
+            if not locale:
+                console.print(f"[yellow]Warning: language code '{code}' not recognised, skipping")
+                continue
 
-        if locale is None:
-            console.print(f"[yellow]Warning: language code '{code}' not recognised, skipping")
-            continue
+            if locale not in seen:
+                locales.append(locale)
+                seen.add(locale)
 
-        if locale not in seen:
-            locales.append(locale)
-            seen.add(locale)
+        if locales:
+            groups.append(locales)
 
-    return locales
+    return groups
 
 
 def _build_license_headers(base_headers: dict, content_id: str, mpd_url: str, fallback_token: str) -> dict:
@@ -154,37 +157,54 @@ def download_film(select_title: Entries) -> str:
 
     # Extract media ID
     url_id = select_title.get("url").split("/")[-1]
-    preferred_locales = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
+    preferred_groups = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
 
-    # Resolve requested locale to GUID using a single slot open, then fetch extras one by one
+    # Build the locale -> version GUID map from the playback API
+    available = client.get_available_versions(url_id)
+    time.sleep(2)
+    locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
+
+    preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
+    if not preferred_locales and len(preferred_groups) > 1:
+        console.print("[yellow]Skipping — no audio slot matched the requested select_audio filter.")
+        client.close()
+        return None, True, "no audio slot matched select_audio filter"
+
     main_id = url_id
-    extra_audio_tracks = []
-    if preferred_locales:
-        available = client.get_available_versions(url_id)
-        time.sleep(2)
-
-        locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
-        for locale in preferred_locales:
-            if locale in locale_to_guid:
-                main_id = locale_to_guid[locale]
-                break
-
-        for locale in preferred_locales[1:]:
-            guid = locale_to_guid.get(locale)
-            if not guid or guid == main_id:
-                continue
-            try:
-                time.sleep(2)
-                ex_mpd_url, ex_hdrs, _, ex_token, _ = get_playback_session(client, guid, None)
-                ex_license_hdrs = _build_license_headers(ex_hdrs, guid, ex_mpd_url, ex_token)
-                extra_audio_tracks.append(_make_dash_audio_track(ex_mpd_url, locale, ex_hdrs, ex_license_hdrs))
-            except Exception as e:
-                console.print(f"[yellow]Error fetching audio {locale}: {e}")
-
-        if extra_audio_tracks:
-            console.print(f"[dim]Extra audio: {[v['language'] for v in extra_audio_tracks]}")
+    main_locale = None
+    for locale in preferred_locales:
+        if locale in locale_to_guid:
+            main_id = locale_to_guid[locale]
+            main_locale = locale
+            break
 
     mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, None)
+    extra_audio_tracks = []
+    for locale in preferred_locales:
+        if locale == main_locale:
+            continue
+
+        guid = locale_to_guid.get(locale)
+        if not guid or guid == main_id:
+            if locale not in locale_to_guid:
+                console.print(f"[yellow]Locale {locale} not available for this film")
+            continue
+
+        try:
+            time.sleep(2)
+            ex_mpd_url, ex_hdrs, _, ex_token, _ = get_playback_session(client, guid, None)
+            if not ex_mpd_url:
+                console.print(f"[yellow]Locale {locale} not available for this film")
+                continue
+            
+            ex_license_hdrs = _build_license_headers(ex_hdrs, guid, ex_mpd_url, ex_token)
+            extra_audio_tracks.append(_make_dash_audio_track(ex_mpd_url, locale, ex_hdrs, ex_license_hdrs))
+        except Exception as e:
+            console.print(f"[yellow]Error fetching audio {locale}: {e}")
+
+    if extra_audio_tracks:
+        console.print(f"[dim]Extra audio: {[v['language'] for v in extra_audio_tracks]}")
+
     license_headers = _build_license_headers(mpd_headers, main_id, mpd_url, token)
     other_tracks = _subtitles_to_other_tracks(mpd_list_sub)
     other_tracks.extend(extra_audio_tracks)
@@ -223,54 +243,72 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     url_id = obj_episode.url.split("/")[-1]
     main_guid = getattr(obj_episode, "main_guid", None)
 
-    # Parse preferred audio locales (single metadata cache call)
-    preferred_locales = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
-    _, urls_by_locale, resolved_main_guid = scrape_serie._get_episode_audio_locales(url_id) if preferred_locales else ([], {}, None)
-    main_guid = main_guid or resolved_main_guid
+    # Parse preferred audio locale groups
+    preferred_groups = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
 
-    # Determine GUID for primary language
+    # Build the map of audio locale -> version GUID from the playback API.
+    available = client.get_available_versions(url_id)
+    time.sleep(2)
+    locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
+    api_main_guid = next((v["guid"] for v in available if "main" in v.get("roles", [])), None)
+
+    preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
+    if not preferred_locales and len(preferred_groups) > 1:
+        console.print("[yellow]Skipping — no audio slot matched the requested select_audio filter.")
+        return None, True, "no audio slot matched select_audio filter"
+
+    # main_guid unlocks the complete subtitle set (prefer the "main" version, else metadata)
+    main_guid = main_guid or api_main_guid
+
+    # Determine primary audio: first preferred locale that is actually available
     main_id = url_id
     main_locale = None
     for locale in preferred_locales:
-        if locale in urls_by_locale:
-            main_id = urls_by_locale[locale].split("/")[-1]
+        if locale in locale_to_guid:
+            main_id = locale_to_guid[locale]
             main_locale = locale
             break
 
-    # Get playback session for main language (main_guid unlocks the complete subtitle set)
     mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, main_guid)
+    audio_locale = main_locale or audio_locale
     all_subtitles = _merge_subtitles(mpd_list_sub, [])
     license_headers = _build_license_headers(mpd_headers, main_id, mpd_url, token)
 
-    # Fetch extra audio tracks for other preferred locales
+    # Fetch extra audio tracks for the remaining preferred locales
     extra_locales = []
-    for locale in preferred_locales[1:]:
-        if locale not in urls_by_locale:
-            console.print(f"[yellow]Locale {locale} not available for this episode")
+    for locale in preferred_locales:
+        if locale == main_locale:
             continue
 
-        extra_guid = urls_by_locale[locale].split("/")[-1]
-        if extra_guid == main_id:
+        guid = locale_to_guid.get(locale)
+        if not guid or guid == main_id:
+            if locale not in locale_to_guid:
+                console.print(f"[yellow]Locale {locale} not available for this episode")
             continue
 
         try:
-            extra_mpd_url, extra_mpd_headers, extra_subs, extra_token, _ = get_playback_session(client, extra_guid, None)
-            extra_license_hdrs = _build_license_headers(extra_mpd_headers, extra_guid, extra_mpd_url, extra_token)
+            time.sleep(2)
+            ex_mpd_url, ex_hdrs, ex_subs, ex_token, _ = get_playback_session(client, guid, None)
+            if not ex_mpd_url:
+                console.print(f"[yellow]Locale {locale} not available for this episode")
+                continue
+            
+            ex_license_hdrs = _build_license_headers(ex_hdrs, guid, ex_mpd_url, ex_token)
             extra_locales.append(
                 {
                     "locale": locale,
-                    "mpd_url": extra_mpd_url,
-                    "headers": extra_mpd_headers,
-                    "license_headers": extra_license_hdrs,
+                    "mpd_url": ex_mpd_url,
+                    "headers": ex_hdrs,
+                    "license_headers": ex_license_hdrs,
                 }
             )
-            all_subtitles = _merge_subtitles(all_subtitles, extra_subs)
+            all_subtitles = _merge_subtitles(all_subtitles, ex_subs)
             time.sleep(5)  # Small delay to avoid rate limiting between calls
         except Exception as e:
             console.print(f"[yellow]Errore fetch audio {locale}: {e}")
 
     if not extra_locales:
-        console.print(f"[dim]No extra audio (only {audio_locale})")
+        console.print(f"[dim]No extra audio (only {main_locale or audio_locale})")
 
     manifest_json, merged_keys = build_unified_manifest(
         main_locale=main_locale or audio_locale or main_id,

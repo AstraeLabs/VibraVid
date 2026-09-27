@@ -1,0 +1,127 @@
+{% extends "searchapp/cinema_base.html" %}
+
+{% block title %}Logs — ARROWAR{% endblock %}
+
+{% block content %}
+<div class="cn-pad" style="padding-top:34px">
+
+	<div class="cn-page-hd">
+		<h1 class="cn-blast">Logs</h1>
+		<p>Browse the app log files and the ARR (Sonarr/Radarr/Overseerr) log files, newest first.</p>
+	</div>
+
+	<div class="cn-duo">
+		<div class="cn-box">
+			<h3>App logs <span class="cn-sp"></span><span class="cn-st is-done" id="cn-logs-count">0</span></h3>
+			<div class="cn-lines" id="cn-logs-list-logs" style="gap:2px;max-height:380px;overflow-y:auto"></div>
+		</div>
+
+		<div class="cn-box">
+			<h3>ARR logs <span class="cn-sp"></span><span class="cn-st is-done" id="cn-logs-arr-count">0</span></h3>
+			<div class="cn-lines" id="cn-logs-list-arr" style="gap:2px;max-height:380px;overflow-y:auto"></div>
+		</div>
+	</div>
+
+	<div class="cn-box" style="margin-top:20px">
+		<h3 id="cn-logs-current">Select a log file</h3>
+		<pre class="cn-area" id="cn-logs-content" style="max-height:460px;overflow:auto;white-space:pre-wrap"></pre>
+	</div>
+
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function () {
+	"use strict";
+
+	var URL_LOGS_LIST = "{% url 'logs_list' %}";
+	var URL_LOGS_CONTENT = "{% url 'logs_content' %}";
+
+	function el(id) { return document.getElementById(id); }
+
+	var logsCurrentTitle = el("cn-logs-current");
+	var logsContent = el("cn-logs-content");
+
+	function fmtSize(bytes) {
+		if (bytes < 1024) return bytes + " B";
+		if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+		return (bytes / 1024 / 1024).toFixed(1) + " MB";
+	}
+
+	function fmtTime(unixSeconds) {
+		return new Date(unixSeconds * 1000).toLocaleString();
+	}
+
+	function renderLogList(containerId, category, files) {
+		var container = el(containerId);
+		container.innerHTML = "";
+		if (!files.length) {
+			container.innerHTML = '<p class="cn-empty" style="padding:14px 0">No log files found.</p>';
+			return;
+		}
+		files.forEach(function (f) {
+			var row = document.createElement("div");
+			row.className = "cn-ln";
+			row.style.background = "var(--cn-surf-2)";
+			row.style.padding = "9px 13px";
+			row.style.cursor = "pointer";
+
+			var label = document.createElement("span");
+			label.className = "cn-grow";
+			var t = document.createElement("span");
+			t.className = "cn-t";
+			t.style.fontSize = "13px";
+			t.textContent = f.name;
+			var s = document.createElement("span");
+			s.className = "cn-s";
+			s.textContent = fmtTime(f.mtime) + " · " + fmtSize(f.size);
+			label.appendChild(t);
+			label.appendChild(s);
+
+			row.appendChild(label);
+			row.addEventListener("click", function () { loadLogContent(category, f.name); });
+			container.appendChild(row);
+		});
+	}
+
+	function loadLogsList() {
+		fetch(URL_LOGS_LIST)
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var appFiles = data.logs || [];
+				var arrFiles = data.arr || [];
+				el("cn-logs-count").textContent = appFiles.length;
+				el("cn-logs-arr-count").textContent = arrFiles.length;
+				renderLogList("cn-logs-list-logs", "logs", appFiles);
+				renderLogList("cn-logs-list-arr", "arr", arrFiles);
+			})
+			.catch(function (err) {
+				logsCurrentTitle.textContent = "Could not load log list: " + err.message;
+			});
+	}
+
+	function loadLogContent(category, name) {
+		logsCurrentTitle.textContent = "Loading " + name + "…";
+		fetch(URL_LOGS_CONTENT + "?category=" + encodeURIComponent(category) + "&name=" + encodeURIComponent(name))
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				logsCurrentTitle.textContent = name;
+				if (data.error) {
+					logsContent.textContent = "Error: " + data.error;
+					return;
+				}
+				logsContent.textContent = (data.lines || []).join("\n");
+				logsContent.scrollTop = logsContent.scrollHeight;
+			})
+			.catch(function (err) {
+				logsCurrentTitle.textContent = name;
+				logsContent.textContent = "Network error: " + err.message;
+			});
+	}
+
+	loadLogsList();
+})();
+</script>
+{% endblock %}

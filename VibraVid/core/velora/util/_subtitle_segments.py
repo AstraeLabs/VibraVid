@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,7 @@ def resolve_subtitle_segments_sync(url: str, headers: dict) -> tuple[list[tuple[
         hdrs = dict(headers)
         hdrs.setdefault("User-Agent", get_headers().get("User-Agent", ""))
         with create_client(headers=hdrs, timeout=15, follow_redirects=True) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
+            resp = get_with_retry(client, url)
             text = resp.text.strip()
     except Exception as exc:
         logger.info(f"resolve_subtitle_segments_sync: request failed for {url!r}: {exc}")
@@ -100,13 +99,24 @@ async def download_and_merge_subtitle_segments(client: Any, segments: list[tuple
     """Fetch every subtitle segment concurrently and merge them (in order) into a single WebVTT track, using each segment's nominal (EXTINF) duration to shift segments that restart their clock."""
     import asyncio
 
+    max_retry = config_manager.config.get_int("REQUESTS", "max_retry")
+
     texts: list[str] = [""] * len(segments)
     durations = [dur for _url, dur in segments]
 
     async def _fetch(index: int, url: str) -> None:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        texts[index] = resp.text
+        last_exc: Exception | None = None
+        for attempt in range(max_retry + 1):
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                texts[index] = resp.text
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retry:
+                    await asyncio.sleep(min(1.0 * (attempt + 1), 4.0))
+        logger.warning(f"Subtitle segment failed after {max_retry + 1} attempt(s), skipping it: {url} ({last_exc})")
 
     await asyncio.gather(*(_fetch(i, url) for i, (url, _dur) in enumerate(segments)))
     return merge_vtt_segments(texts, durations=durations)

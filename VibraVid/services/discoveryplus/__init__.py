@@ -1,13 +1,13 @@
 # 22.12.25
 
 import re
+from datetime import datetime
 
 from rich.console import Console
 from rich.prompt import Prompt
 
-from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.services._base import Entries, EntriesManager, site_constants
-from VibraVid.services._base.site_search_manager import base_process_search_result, base_search
+from VibraVid.services._base import Entries, EntriesManager
+from VibraVid.services._base.site_search_manager import make_search_entrypoints
 from VibraVid.utils import TVShowManager
 from VibraVid.utils.http_client import create_client
 
@@ -31,7 +31,7 @@ def register_cli_args(parser) -> list:
     Returns:
         list[str]: the argparse 'dest' names this function registered.
     """
-    group = parser.add_argument_group("Discovery+ options (--site 10)")
+    group = parser.add_argument_group("Discovery+ options")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Discovery+ title URL (show or movie).")
     return ["url"]
 
@@ -45,9 +45,40 @@ def _resolve_url_to_item(url: str):
     content_id = uuid_match.group(1)
 
     client = get_client()
-    is_movie = "/show/" not in url
+    is_live_sport = "/video/watch-sport/" in url
+    is_movie = not is_live_sport and "/show/" not in url
 
     try:
+        if is_live_sport:
+            api_url = f"{client.base_url}/cms/routes/video/watch-sport/{content_id}"
+            params = {"include": "default", "decorators": "badges"}
+            with create_client(headers=client.headers, cookies=client.cookies) as http_client:
+                response = http_client.get(api_url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            video_info = next(
+                (x for x in data.get("included", []) if x.get("type") == "video" and x.get("id") == content_id), None
+            )
+            if not video_info:
+                console.print(f"[red]Could not resolve live-sport metadata for id '{content_id}'")
+                return None
+
+            attrs = video_info.get("attributes", {})
+            edit_id = video_info.get("relationships", {}).get("edit", {}).get("data", {}).get("id")
+            if not edit_id:
+                console.print(f"[red]Could not resolve edit ID for live-sport event '{content_id}'")
+                return None
+
+            name = attrs.get("name", content_id)
+            secondary_title = attrs.get("secondaryTitle")
+            if secondary_title:
+                name = f"{name} - {secondary_title}"
+            schedule_start = attrs.get("scheduleStart", "")
+            year = schedule_start[:4] if schedule_start else "9999"
+            console.print(f"[cyan]Detected live sport event from URL: [green]{name}")
+            return {"id": content_id, "name": name, "type": "live", "url": url, "year": year, "edit_id": edit_id}
+
         if is_movie:
             api_url = f"{client.base_url}/cms/routes/movie/{content_id}"
             params = {"include": "default", "decorators": "badges"}
@@ -198,6 +229,16 @@ def title_search(query: str) -> int:
             if secondary_title:
                 name = f"{name} - {secondary_title}"
 
+            # Multiple LIVE entries can share the exact same name/secondaryTitle
+            if content_type == "live":
+                schedule_start = attrs.get("scheduleStart", "")
+                if schedule_start:
+                    try:
+                        start_local = datetime.fromisoformat(schedule_start.replace("Z", "+00:00")).astimezone()
+                        name = f"{name} [{start_local.strftime('%d/%m %H:%M')}]"
+                    except ValueError:
+                        pass
+
             edit_id = relationships.get("edit", {}).get("data", {}).get("id")
 
             entries_manager.add(
@@ -207,44 +248,12 @@ def title_search(query: str) -> int:
     return len(entries_manager)
 
 
-def process_search_result(select_title, selections=None, scrape_serie=None):
-    """Wrapper for the generalized process_search_result function."""
-    return base_process_search_result(
-        select_title=select_title,
-        download_film_func=download_film,
-        download_series_func=download_series,
-        download_live_func=download_live,
-        media_search_manager=entries_manager,
-        table_show_manager=table_show_manager,
-        selections=selections,
-        scrape_serie=scrape_serie,
-    )
-
-
-def search(
-    string_to_search: str = None,
-    get_onlyDatabase: bool = False,
-    direct_item: dict = None,
-    selections: dict = None,
-    scrape_serie=None,
-):
-    """Wrapper for the generalized search function."""
-    if direct_item is None and not get_onlyDatabase:
-        url = (context_tracker.site_options or {}).get("url")
-        if url:
-            direct_item = _resolve_url_to_item(url)
-            if not direct_item:
-                return False
-
-    return base_search(
-        title_search_func=title_search,
-        process_result_func=process_search_result,
-        media_search_manager=entries_manager,
-        table_show_manager=table_show_manager,
-        site_name=site_constants.SITE_NAME,
-        string_to_search=string_to_search,
-        get_onlyDatabase=get_onlyDatabase,
-        direct_item=direct_item,
-        selections=selections,
-        scrape_serie=scrape_serie,
-    )
+search, process_search_result = make_search_entrypoints(
+    title_search=title_search,
+    entries_manager=entries_manager,
+    table_show_manager=table_show_manager,
+    download_film=download_film,
+    download_series=download_series,
+    download_live=download_live,
+    resolve_url=_resolve_url_to_item,
+)

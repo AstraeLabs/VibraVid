@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.velora.util.formatting import estimate_total_size, format_size, format_speed, normalize_path_key
+from VibraVid.core.velora.util.formatting import format_size, format_speed, normalize_path_key, resolve_display_total
 from VibraVid.setup import get_velora_path
 
 logger = logging.getLogger("velora_bridge")
@@ -211,6 +211,7 @@ def run_download_plan(
     event_cb: Callable[[dict[str, Any]], None] | None = None,
     stop_check: Callable[[], bool] | None = None,
     wait_timeout_seconds: float = DEFAULT_WAIT_TIMEOUT_SECONDS,
+    known_total: int = 0,
 ) -> list[dict[str, Any]]:
     """
     Launch the Velora binary for *plan* and stream its events back to the caller.
@@ -219,6 +220,7 @@ def run_download_plan(
         - progress_cb: Called with ``(done_count, total, total_bytes, speed_bps)`` after each completed segment.
         - event_cb: Called with the raw (normalised) event dict for every ``completed``, ``retry``, ``error`` and ``cancelled`` event.
         - stop_check: Zero-argument callable; when it returns ``True`` the Velora process is terminated and the function returns immediately.
+        - known_total: Exact byte total (HTTP Content-Length or stream.estimated_size) for stable ``X/Y`` display.
 
     Returns: List of ``{"path", "bytes", "task_key", "label", "display_label", "skipped"}`` dicts — one per successfully completed segment.
     """
@@ -243,6 +245,7 @@ def run_download_plan(
     done_count = 0
     total_bytes = 0
     started_at = time.monotonic()
+    prev_estimated = 0
     speed_window: deque[tuple[float, int]] = deque()
     speed_window.append((started_at, 0))
 
@@ -400,7 +403,15 @@ def run_download_plan(
                 progress_event.setdefault("display_label", plan.get("display_label", ""))
                 progress_event.setdefault("pct", int((done_count / total) * 100) if total else 100)
                 progress_event.setdefault("segments", f"{done_count}/{total}")
-                estimated_total = max(estimate_total_size(total_bytes, done_count, total), display_bytes)
+                estimated_total = max(
+                    resolve_display_total(
+                        total_bytes, done_count, total,
+                        known_total=known_total,
+                        prev_estimated=prev_estimated,
+                    ),
+                    display_bytes,
+                )
+                prev_estimated = estimated_total
                 progress_event["size"] = (
                     f"{format_size(display_bytes)}/{format_size(estimated_total)}"
                     if estimated_total
@@ -432,7 +443,12 @@ def run_download_plan(
                 progress_event.setdefault("display_label", plan.get("display_label", ""))
                 progress_event.setdefault("pct", int((done_count / total) * 100) if total else 100)
                 progress_event.setdefault("segments", f"{done_count}/{total}")
-                estimated_total = estimate_total_size(total_bytes, done_count, total)
+                estimated_total = resolve_display_total(
+                    total_bytes, done_count, total,
+                    known_total=known_total,
+                    prev_estimated=prev_estimated,
+                )
+                prev_estimated = estimated_total
                 progress_event.setdefault(
                     "size",
                     f"{format_size(total_bytes)}/{format_size(estimated_total)}"

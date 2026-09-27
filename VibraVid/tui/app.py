@@ -14,10 +14,12 @@ Directional navigation:
 """
 
 import logging
+from collections.abc import Callable
 
 from textual.app import App
 from textual.binding import Binding
 from textual.events import Resize
+from textual.screen import Screen
 from textual.timer import Timer
 
 from VibraVid.core.ui.tracker import download_tracker
@@ -80,6 +82,9 @@ class VibraVidApp(App):
         super().__init__()
         self._small_terminal_warned = False
         self._header_timer: Timer | None = None
+        # Last search, kept alive so its results survive leaving the search screen.
+        # Written by SearchScreen; see VibraVid/tui/screens/search.py.
+        self.search_snapshot: object | None = None
 
     def on_mount(self) -> None:
         self.push_screen(HomeScreen())
@@ -105,11 +110,29 @@ class VibraVidApp(App):
             while len(self.screen_stack) > 1 and not isinstance(self.screen, HomeScreen):
                 self.pop_screen()
 
+    def _return_to(self, screen_type: type[Screen]) -> bool:
+        """Pop back to a screen already in the stack, instead of stacking a duplicate.
+
+        Pushing a second instance would bury the first one with all of its state:
+        the search results, the active filters and the current selection.
+        """
+        if not any(isinstance(screen, screen_type) for screen in self.screen_stack):
+            return False
+        while not isinstance(self.screen, screen_type):
+            self.pop_screen()
+        return True
+
+    def _open_unique(self, screen_type: type[Screen], factory: Callable[[], Screen] | None = None) -> None:
+        """Show the one instance of this screen, creating it only if there is none."""
+        if isinstance(self.screen, screen_type) or self._return_to(screen_type):
+            return
+        self.push_screen(factory() if factory is not None else screen_type())
+
     def action_go_search(self) -> None:
-        """Jump directly to the global SearchScreen."""
+        """Jump directly to the global SearchScreen, reusing the open one if there is one."""
         from VibraVid.tui.screens.search import SearchScreen
-        if not isinstance(self.screen, SearchScreen):
-            self.push_screen(SearchScreen(site=None))
+
+        self._open_unique(SearchScreen, lambda: SearchScreen(site=None))
 
     def action_nav_left(self) -> None:
         """Move left between columns, or ascend/go back one level."""
@@ -133,25 +156,15 @@ class VibraVidApp(App):
             self.pop_screen()
 
     def action_open_area(self, area: str) -> None:
-        if area == "downloads":
-            if not isinstance(self.screen, DownloadsScreen):
-                self.push_screen(DownloadsScreen())
-            return
-        if area == "queue":
-            if not isinstance(self.screen, QueueScreen):
-                self.push_screen(QueueScreen())
-            return
-        if area == "history":
-            if not isinstance(self.screen, HistoryScreen):
-                self.push_screen(HistoryScreen())
-            return
-        if area == "settings":
-            if not isinstance(self.screen, SettingsScreen):
-                self.push_screen(SettingsScreen())
-            return
-        if area == "system":
-            if not isinstance(self.screen, SystemScreen):
-                self.push_screen(SystemScreen())
+        area_screens: dict[str, type[Screen]] = {
+            "downloads": DownloadsScreen,
+            "queue": QueueScreen,
+            "history": HistoryScreen,
+            "settings": SettingsScreen,
+            "system": SystemScreen,
+        }
+        if area in area_screens:
+            self._open_unique(area_screens[area])
             return
         if isinstance(self.screen, PlaceholderScreen) and self.screen.area == area:
             return

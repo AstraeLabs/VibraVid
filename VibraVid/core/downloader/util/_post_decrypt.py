@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from VibraVid.core.decryptor import Decryptor, KeysManager
+from VibraVid.core.decryptor._models import detect_encryption_info
 from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import download_tracker
 
@@ -41,20 +42,26 @@ class PostDownloadDecryptor:
         dec_path = path + ".dec"
         try:
             decryptor = Decryptor()
-            mode, kid, pssh, *_rest = decryptor.detect_encryption(path)
+            detected_info = detect_encryption_info(path)
+            encrypted, kid, pssh, scheme = (
+                detected_info.encrypted,
+                detected_info.kid,
+                detected_info.pssh_b64,
+                detected_info.scheme,
+            )
 
-            if mode is None:
+            if not encrypted:
                 logger.info("PostDownloadDecryptor: file is not encrypted — skipping.")
                 console.print("[dim]Keys provided but file is not encrypted — skipping decryption.")
                 return True
 
-            logger.info(f"PostDownloadDecryptor: encryption found (mode={mode}, kid={kid}) — starting decryption.")
+            logger.info(f"PostDownloadDecryptor: encryption found (scheme={scheme}, kid={kid}) — starting decryption.")
 
             if kid:
                 if not KeysManager.is_zero_kid(kid):
                     from VibraVid.core.drm.manager import DRMManager
 
-                    resolved = DRMManager().resolve_flat_key(kid, pssh, key, drm_type=mode or "mp4")
+                    resolved = DRMManager().resolve_flat_key(kid, pssh, key, drm_type=scheme or "mp4")
                     if resolved:
                         key = resolved[0]
                 self._warn_if_kid_missing(kid, key)
@@ -65,6 +72,7 @@ class PostDownloadDecryptor:
                 output_path=dec_path,
                 stream_type="video",
                 progress_cb=progress_cb,
+                detected=detected_info,
             )
 
             if ok and os.path.exists(dec_path) and os.path.getsize(dec_path) > 0:

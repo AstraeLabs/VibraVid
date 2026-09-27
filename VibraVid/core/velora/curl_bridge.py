@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.velora.util.formatting import estimate_total_size, format_size, format_speed
+from VibraVid.core.velora.util.formatting import format_size, format_speed, resolve_display_total
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
@@ -106,6 +106,7 @@ def run_download_plan_curl_cffi(
     progress_cb: Callable[[int, int, int, float], None] | None = None,
     event_cb: Callable[[dict[str, Any]], None] | None = None,
     stop_check: Callable[[], bool] | None = None,
+    known_total: int = 0,
 ) -> list[dict[str, Any]]:
     """Run a Velora download plan using curl_cffi with concurrency, progress reporting, and retry/backoff."""
     tasks = plan.get("tasks") or []
@@ -122,6 +123,7 @@ def run_download_plan_curl_cffi(
     results: list[dict[str, Any]] = []
     done_count = 0
     total_bytes = 0
+    prev_estimated = 0
     speed_window: deque[tuple[float, int]] = deque()
     speed_window.append((time.monotonic(), 0))
     lock = threading.Lock()
@@ -163,7 +165,8 @@ def run_download_plan_curl_cffi(
                             logger.debug(f"progress_cb raised: {exc}")
 
                     if event_cb:
-                        estimated_total = estimate_total_size(total_bytes, done_count, total)
+                        estimated_total = resolve_display_total(total_bytes, done_count, total, known_total=known_total, prev_estimated=prev_estimated)
+                        prev_estimated = estimated_total
                         progress_event = dict(event)
                         progress_event["pct"] = int((done_count / total) * 100) if total else 100
                         progress_event["segments"] = f"{done_count}/{total}"

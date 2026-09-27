@@ -24,13 +24,12 @@ from textual.widgets import (
 
 from VibraVid.cli.run import _probe_binary_version
 from VibraVid.setup.system import (
-    get_bento4_decrypt_path,
     get_dovi_tool_path,
     get_ffmpeg_path,
     get_ffprobe_path,
+    get_flux_path,
     get_mkvmerge_path,
     get_prd_path,
-    get_shaka_packager_path,
     get_velora_path,
     get_wvd_path,
 )
@@ -106,8 +105,7 @@ class SystemScreen(Screen):
         deps: list[tuple[str, str]] = [
             ("FFmpeg", get_ffmpeg_path()),
             ("FFprobe", get_ffprobe_path()),
-            ("Bento4 (mp4decrypt)", get_bento4_decrypt_path()),
-            ("Shaka Packager", get_shaka_packager_path()),
+            ("flux", get_flux_path()),
             ("dovi_tool", get_dovi_tool_path()),
             ("mkvmerge", get_mkvmerge_path()),
             ("Velora", get_velora_path()),

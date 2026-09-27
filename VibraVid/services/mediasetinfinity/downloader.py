@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
+from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
@@ -94,7 +95,7 @@ def resolve_manifest(base):
     return mpd_url
 
 
-def _resolve_and_download(content_id: str, output_path: str) -> tuple[str, bool]:
+def _resolve_and_download(content_id: str, output_path: str) -> DownloadResult:
     """Shared pipeline: content id -> playback -> SMIL -> MPD -> DASH download"""
     try:
         playback_json = get_playback_url(content_id)
@@ -108,7 +109,7 @@ def _resolve_and_download(content_id: str, output_path: str) -> tuple[str, bool]
     if not tracking or not tracking.get("videos"):
         if tracking is not None:
             console.print("[red]No playable video stream returned (geo/DRM/anonymous-proxy block?)")
-        return output_path, False
+        return DownloadResult(output_path, False)
 
     video = tracking["videos"][0]
     mpd_url = resolve_manifest(video["url"])
@@ -125,7 +126,7 @@ def _resolve_and_download(content_id: str, output_path: str) -> tuple[str, bool]
     ).start()
 
 
-def download_film(select_title: Entries) -> tuple[str, bool]:
+def download_film(select_title: Entries) -> DownloadResult:
     """Download a single film / episode (used for ES /player/ URLs too)."""
     start_message()
     console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{select_title.name} \n")

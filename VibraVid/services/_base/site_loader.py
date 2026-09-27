@@ -22,6 +22,26 @@ folder_name = "services"
 imp_sources = config_manager.config.get_list("DEFAULT", "imp_service")
 KNOWN_CONTENT_TYPES = ("Anime", "Film_Serie", "Serie", "Song", "Tor")
 current_site_var: "contextvars.ContextVar[str | None]" = contextvars.ContextVar("vibravid_current_site", default=None)
+_BINARY_MISMATCH_MARKERS = (
+    "dll load failed",
+    "%1 is not a valid win32 application",
+    "invalid elf header",
+    "wrong elf class",
+    "mach-o",
+    "wrong architecture",
+    "incompatible architecture",
+    "magic number is wrong",
+)
+
+
+def _reraise_if_binary_mismatch(module_name: str, submodule: str, exc: Exception) -> None:
+    """Re-raise as a clearer error when the failure looks like a compiled-extension (.pyd/.so) mismatch."""
+    if any(marker in str(exc).lower() for marker in _BINARY_MISMATCH_MARKERS):
+        raise ImportError(
+            f"Compiled submodule '{submodule}' of service '{module_name}' is not compatible with this "
+            f"platform/Python version (looks like a .pyd/.so build made for a different OS, architecture, "
+            f"or Python ABI). A build matching this system is required. Original error: {exc}"
+        ) from exc
 
 
 class LazySearchModule:
@@ -62,7 +82,11 @@ class LazySearchModule:
         if self._module is None:
             try:
                 if self.source.lower() == "default":
-                    self._module = importlib.import_module(f"VibraVid.{folder_name}.{self.module_name}")
+                    try:
+                        self._module = importlib.import_module(f"VibraVid.{folder_name}.{self.module_name}")
+                    except (ImportError, OSError) as exc:
+                        _reraise_if_binary_mismatch(self.module_name, self.module_name, exc)
+                        raise
                 else:
                     # Load from custom path
                     paths_to_add = [self.base_path]
@@ -80,7 +104,7 @@ class LazySearchModule:
                             added_paths.append(path)
 
                     try:
-                        logger.info(f"Loading module '{self.module_name}' from custom path: {self.base_path}")
+                        logger.debug(f"Loading module '{self.module_name}' from custom path: {self.base_path}")
                         spec = importlib.util.spec_from_file_location(
                             self.module_name,
                             os.path.join(self.base_path, self.module_name, "__init__.py"),
@@ -89,7 +113,11 @@ class LazySearchModule:
                         if spec and spec.loader:
                             self._module = importlib.util.module_from_spec(spec)
                             sys.modules[self.module_name] = self._module
-                            spec.loader.exec_module(self._module)
+                            try:
+                                spec.loader.exec_module(self._module)
+                            except (ImportError, OSError) as exc:
+                                _reraise_if_binary_mismatch(self.module_name, self.module_name, exc)
+                                raise
                         else:
                             raise ImportError(f"Could not load module {self.module_name} from {self.base_path}")
 
@@ -107,7 +135,7 @@ class LazySearchModule:
                 if self._use_for is None:
                     raise AttributeError(f"Module '{self.module_name}' does not define '_useFor'")
 
-                logger.info(f"Successfully loaded module '{self.module_name}' from source '{self.source}'")
+                logger.debug(f"Successfully loaded module '{self.module_name}' from source '{self.source}'")
             except Exception as e:
                 console.print(f"[red]Failed to load module {self.module_name} from source '{self.source}': {str(e)}")
                 raise
@@ -206,7 +234,7 @@ def load_search_functions() -> dict[str, LazySearchModule]:
             logger.error(f"Import source path not found: {base_path}")
             continue
 
-        logger.info(f"Loading site modules from source '{source_label}': {base_path}")
+        logger.debug(f"Loading site modules from source '{source_label}': {base_path}")
 
         # Escape base_path for glob to handle paths with special characters like brackets
         escaped_base_path = os_manager.get_glob_path(base_path)
@@ -388,4 +416,8 @@ def resolve_service_submodule(module_name: str, submodule: str):
         raise ModuleNotFoundError(f"No module named '{module_name}' (not found in any imp_service source)")
 
     base_module = lazy.get_module()
-    return importlib.import_module(f"{base_module.__name__}.{submodule}")
+    try:
+        return importlib.import_module(f"{base_module.__name__}.{submodule}")
+    except (ImportError, OSError) as exc:
+        _reraise_if_binary_mismatch(module_name, submodule, exc)
+        raise

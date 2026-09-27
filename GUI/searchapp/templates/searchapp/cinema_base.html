@@ -62,6 +62,8 @@
 				   {% if nav_active == 'watchlist' %}aria-current="page"{% endif %}>Watchlist</a>
 				<a href="{% url 'settings_editor' %}"
 				   {% if nav_active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+				<a href="{% url 'logs_page' %}"
+				   {% if nav_active == 'logs' %}aria-current="page"{% endif %}>Logs</a>
 			</nav>
 
 			<div class="cn-top-right">
@@ -72,7 +74,7 @@
 
 		{% comment %}
 			App-update banner (not the "Update binaries" panel in Settings, which
-			checks ffmpeg/bento4/etc. against AstraeLabs/Binary -- this one checks
+			checks ffmpeg/flux/velora against AstraeLabs/Binary -- this one checks
 			the app itself against AstraeLabs/VibraVid's latest GitHub release).
 			Hidden by default; JS below shows it only when GET api/version/check/
 			reports update_available. Global shell, so it shows on every page.

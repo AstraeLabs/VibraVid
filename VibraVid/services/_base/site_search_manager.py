@@ -7,6 +7,7 @@ from typing import Any
 from rich.console import Console
 from rich.prompt import Prompt
 
+from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import Entries, EntriesManager, tmdb_artwork
 from VibraVid.services._base.site_costant import site_constants
@@ -30,6 +31,7 @@ column_to_hide = [
     "Desc",
     "Genres",
     "Duration",
+    "Tmdb_id"
 ]
 
 
@@ -89,22 +91,56 @@ def _apply_year_filter(media_search_manager: EntriesManager, year_filter: str) -
 
 def _handle_download_result(result: Any) -> None:
     """Print a download error message when a downloader returns one."""
-    if isinstance(result, tuple) and len(result) >= 3:
-        msg_error = result[2]
-        if msg_error:
-            console.print(f"[red]{msg_error}")
+    if result is None:
+        return
+    err = DownloadResult.from_raw(result).error
+    if err:
+        console.print(f"[red]{err}")
+
+
+def _parse_index_selection(cmd_insert: str, max_count: int) -> list[int]:
+    """
+    Parse a media index selection string into a sorted list of unique 0-based indices.
+
+    Supports a single index ('2'), '*' for all, comma-separated lists ('1,3,5'),
+    and ranges ('1-3', '3-*').
+
+    Raises:
+        ValueError: If the input is empty or contains an unparseable/out-of-range token.
+    """
+    if cmd_insert == "*":
+        return list(range(max_count))
+
+    indices: set[int] = set()
+    for part in cmd_insert.split(","):
+        part = part.strip()
+        if not part:
+            continue
+
+        if "-" in part:
+            start_str, end_str = (p.strip() for p in part.split("-", 1))
+            start = int(start_str)
+            end = int(end_str) if end_str.isnumeric() else max_count - 1
+            indices.update(range(start, end + 1))
+        else:
+            indices.add(int(part))
+
+    if not indices or any(i < 0 or i >= max_count for i in indices):
+        raise ValueError("Index out of range")
+
+    return sorted(indices)
 
 
 def get_select_title(table_show_manager, media_search_manager):
     """
-    Display a selection of titles and prompt the user to choose one.
+    Display a selection of titles and prompt the user to choose one or more.
 
     Parameters:
         table_show_manager: Manager for console table display.
         media_search_manager: Manager holding the list of media items.
 
     Returns:
-        Entries: The selected media item, or None if no selection is made or an error occurs.
+        list[Entries]: The selected media items, or None if no selection is made or an error occurs.
     """
     if not media_search_manager.media_list:
         return None
@@ -147,9 +183,7 @@ def get_select_title(table_show_manager, media_search_manager):
         table_show_manager.add_tv_show(media_dict)
 
     while True:
-        last_command_str = table_show_manager.run(
-            force_int_input=True, max_int_input=len(media_search_manager.media_list)
-        )
+        last_command_str = table_show_manager.run()
 
         if last_command_str is None or last_command_str.lower() in ["q", "quit"]:
             table_show_manager.clear()
@@ -157,20 +191,17 @@ def get_select_title(table_show_manager, media_search_manager):
             return None
 
         try:
-            selected_index = int(last_command_str)
+            selected_indices = _parse_index_selection(last_command_str, len(media_search_manager.media_list))
 
-            if 0 <= selected_index < len(media_search_manager.media_list):
-                table_show_manager.clear()
-                logger.info(f"Media item selected: {media_search_manager.media_list[selected_index]}")
-                context_tracker.cli_item = selected_index
-                return media_search_manager.get(selected_index)
-            else:
-                console.print("\n[red]Invalid or out-of-range index. Please try again.")
-                logger.error("Invalid or out-of-range index selected.")
+            table_show_manager.clear()
+            selected_items = [media_search_manager.get(i) for i in selected_indices]
+            logger.info(f"Media item(s) selected: {selected_indices}")
+            context_tracker.cli_item = selected_indices[0] if len(selected_indices) == 1 else selected_indices
+            return selected_items
 
         except ValueError:
-            console.print("\n[red]Non-numeric input received. Please try again.")
-            logger.error("Non-numeric input received.")
+            console.print("\n[red]Invalid or out-of-range index. Please try again.")
+            logger.error("Invalid or out-of-range index selected.")
 
 
 def base_process_search_result(
@@ -276,11 +307,10 @@ def base_process_search_result(
 
         _handle_download_result(film_result)
 
-        # A (path, stopped, error) tuple is always truthy, so a plain `not film_result`
-        # check never catches a real failure — inspect the error element instead.
-        film_failed = film_result is None or (
-            isinstance(film_result, tuple) and len(film_result) >= 3 and bool(film_result[2])
-        )
+        # A (path, stopped, error) result is always truthy, so a plain
+        # `not film_result` check never catches a real failure — inspect the
+        # normalised error element instead.
+        film_failed = film_result is None or bool(DownloadResult.from_raw(film_result).error)
         if film_failed:
             console.print(f"[red]Download failed for: {getattr(select_title, 'name', select_title)}")
             logger.error(f"download_film_func failed for: {select_title} (result={film_result!r})")
@@ -431,9 +461,95 @@ def base_search(
 
     # Process results
     if len_database > 0:
-        select_title = get_select_title(table_show_manager, media_search_manager)
-        result = process_result_func(select_title, selections, scrape_serie)
-        return result
+        selected_items = get_select_title(table_show_manager, media_search_manager)
+
+        if not selected_items:
+            return process_result_func(None, selections, scrape_serie)
+
+        if len(selected_items) == 1:
+            return process_result_func(selected_items[0], selections, scrape_serie)
+
+        overall_result = True
+        for i, item in enumerate(selected_items, 1):
+            console.print(f"\n[cyan]Processing {i}/{len(selected_items)}: [magenta]{getattr(item, 'name', item)}")
+            item_result = process_result_func(item, selections, scrape_serie)
+            if not item_result:
+                overall_result = False
+
+        return overall_result
     else:
         console.print(f"\n[red]Nothing matching was found for[white]: [purple]{actual_search_query}")
         return False
+
+
+def make_search_entrypoints(
+    *,
+    title_search: Callable[[str], int],
+    entries_manager: EntriesManager,
+    table_show_manager: TVShowManager,
+    download_film: Callable[[Entries], Any] | None = None,
+    download_series: Callable[[Entries, str | None, str | None, Any | None], Any] | None = None,
+    download_live: Callable[[Entries], Any] | None = None,
+    resolve_url: Callable[[str], Any] | None = None,
+    process_result: Callable[[Entries | None, dict[str, str] | None, Any | None], bool] | None = None,
+    site_name: str | None = None,
+) -> tuple[Callable[..., Any], Callable[..., bool]]:
+    """
+    Build the module-level ``(search, process_search_result)`` pair that every
+    service otherwise copy-pastes verbatim into its ``__init__.py``.
+
+    Only the parts that actually vary per service are parameters: the
+    ``download_*`` callables, an optional ``resolve_url`` prestep (``--url`` ->
+    ``direct_item``), and — for the couple of services with bespoke routing
+    (e.g. monochrome album/song) — a ``process_result`` override.
+
+    Canonical minimal call: ``services/streamingcommunity/__init__.py``.
+
+    Returns:
+        (search, process_search_result) — bind both at module level:
+        ``search, process_search_result = make_search_entrypoints(...)``.
+    """
+    resolved_site_name = site_name or site_constants.SITE_NAME
+
+    def process_search_result(select_title, selections=None, scrape_serie=None):
+        return base_process_search_result(
+            select_title=select_title,
+            download_film_func=download_film,
+            download_series_func=download_series,
+            download_live_func=download_live,
+            media_search_manager=entries_manager,
+            table_show_manager=table_show_manager,
+            selections=selections,
+            scrape_serie=scrape_serie,
+        )
+
+    process_result_func = process_result or process_search_result
+
+    def search(
+        string_to_search: str = None,
+        get_onlyDatabase: bool = False,
+        direct_item: dict = None,
+        selections: dict = None,
+        scrape_serie=None,
+    ):
+        if resolve_url is not None and direct_item is None and not get_onlyDatabase:
+            url = (context_tracker.site_options or {}).get("url")
+            if url:
+                direct_item = resolve_url(url)
+                if not direct_item:
+                    return False
+
+        return base_search(
+            title_search_func=title_search,
+            process_result_func=process_result_func,
+            media_search_manager=entries_manager,
+            table_show_manager=table_show_manager,
+            site_name=resolved_site_name,
+            string_to_search=string_to_search,
+            get_onlyDatabase=get_onlyDatabase,
+            direct_item=direct_item,
+            selections=selections,
+            scrape_serie=scrape_serie,
+        )
+
+    return search, process_search_result

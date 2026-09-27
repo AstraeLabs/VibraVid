@@ -9,6 +9,7 @@ from VibraVid.utils import config_manager
 logger = logging.getLogger(__name__)
 _TV_MATCH_SITES = {
     "streamingcommunity",
+    "eurostreaming",
     "altadefinizione",
     "cinezo",
     "tubitv",

@@ -54,7 +54,7 @@ class EquivalentCommandBuilder:
         if not site:
             return None
 
-        parts = ["python", self._program_name, "--site", str(site)]
+        parts = ["python", self._program_name, "-i", str(site)]
         parts += self._context_tracker_parts(context_tracker)
         parts += self._standard_flag_parts(args, parser, site_option_dests)
         parts += self._site_option_parts(context_tracker)
@@ -72,7 +72,7 @@ class EquivalentCommandBuilder:
         if site is None or site == "":
             return None
 
-        parts = ["python", self._program_name, "--site", str(site)]
+        parts = ["python", self._program_name, "-i", str(site)]
         for flag, value in (("-s", search), ("--item", item), ("--season", season), ("--episode", episode)):
             if value is None or value == "":
                 continue
@@ -91,7 +91,7 @@ class EquivalentCommandBuilder:
         if site is None or site == "":
             return []
 
-        parts = ["--site", str(site)]
+        parts = ["-i", str(site)]
         for flag, value in (("-s", search), ("--item", item), ("--season", season), ("--episode", episode)):
             if value is None or value == "":
                 continue

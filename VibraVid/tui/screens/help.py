@@ -31,11 +31,19 @@ _NAV_KEYS = [
 ]
 
 _CONTEXT_KEYS = [
-    ("a", "hk_select_all"),
-    ("u", "hk_deselect_all"),
-    ("r", "hk_range_modal"),
-    ("v", "hk_visual_range"),
-    ("i", "hk_invert_selection"),
+    ("q (Ricerca)", "hk_search_quick_queue"),
+    ("SPAZIO", "hk_search_select"),
+    ("Q / Shift+Q", "hk_search_batch_queue"),
+    ("s (Ricerca)", "hk_search_sort"),
+    ("c / y", "hk_search_copy_cli"),
+    ("R (Ricerca)", "hk_search_retry"),
+    ("i (Ricerca)", "hk_search_detail"),
+    ("1 - 5", "hk_search_select_provider"),
+    ("a (Serie)", "hk_select_all"),
+    ("u (Serie/Batch)", "hk_deselect_all"),
+    ("r (Serie)", "hk_range_modal"),
+    ("v (Serie)", "hk_visual_range"),
+    ("i (Serie)", "hk_invert_selection"),
     ("Shift+Frecce", "hk_range_arrows"),
     ("Shift+Click", "hk_range_click"),
     ("Ctrl+S", "hk_save_section"),
@@ -61,13 +69,16 @@ class HelpScreen(ModalScreen):
                 for key, desc_key in _GLOBAL_KEYS:
                     yield Static(f"[bold #7dcfff]{key:>10}[/bold #7dcfff]  [#c0caf5]{t(desc_key)}[/#c0caf5]")
 
-                yield Static(f"\n[bold #7aa2f7]{t('navigation_keyboard')}[/bold #7aa2f7]", classes="help-section-header")
+                yield Static(
+                    f"\n[bold #7aa2f7]{t('navigation_keyboard')}[/bold #7aa2f7]", classes="help-section-header"
+                )
                 for key, desc_key in _NAV_KEYS:
                     yield Static(f"[bold #7dcfff]{key:>10}[/bold #7dcfff]  [#c0caf5]{t(desc_key)}[/#c0caf5]")
 
-                yield Static(f"\n[bold #7aa2f7]{t('contextual_shortcuts')}[/bold #7aa2f7]", classes="help-section-header")
+                yield Static(
+                    f"\n[bold #7aa2f7]{t('contextual_shortcuts')}[/bold #7aa2f7]", classes="help-section-header"
+                )
                 for key, desc_key in _CONTEXT_KEYS:
                     yield Static(f"[bold #7dcfff]{key:>10}[/bold #7dcfff]  [#c0caf5]{t(desc_key)}[/#c0caf5]")
 
             yield Static(f"\n{t('press_esc_to_close')}", classes="placeholder-hint")
-

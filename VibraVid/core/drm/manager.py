@@ -18,6 +18,7 @@ from .widevine import get_widevine_keys
 logger = logging.getLogger(__name__)
 USE_CDM = config_manager.config.get_bool("DRM", "use_cdm")
 BYPASS_VAULT_CACHE = config_manager.config.get_bool("DRM", "bypass_vault_cache")
+BYPASS_TAG_SUFFIX = " (BYPASS)"
 
 
 def _anonymize(value: str) -> str:
@@ -68,9 +69,12 @@ class DRMManager:
         header: bool,
         default_label: str | None = None,
         required_kids: set | None = None,
+        failed: list[str] | None = None,
+        tag_suffix: str | None = None,
+        kid_flags: dict[str, str] | None = None,
     ) -> None:
         """Display resolved keys in the console, indicating which came from vaults and which were newly extracted."""
-        if not resolved:
+        if not resolved and not failed:
             return
 
         if header:
@@ -94,6 +98,13 @@ class DRMManager:
             else:
                 tag = None
 
+            if tag and tag_suffix:
+                tag = f"{tag}{tag_suffix}"
+
+            flag = kid_flags.get(kid_val.strip().lower()) if kid_flags else None
+            if tag and flag:
+                tag = f"{tag} ({flag})"
+
             if tag:
                 marker = "*" if required_kids and kid_val.strip().lower() in required_kids else ""
                 suffix = f" [cyan]| [#a855f7]{marker}{tag}"
@@ -101,19 +112,27 @@ class DRMManager:
             else:
                 suffix = ""
                 log_suffix = ""
+
             console.print(f"    - [red]{kid_val}[white]:[green]{key_val}{suffix}")
             if "*" in log_suffix:
-                logger.info(f"DRM key {drm_type}: {kid_val}:{key_val}")
+                logger.info(f"Using {kid_val}:{key_val}")
+
+        for k in failed or []:
+            kid_val, _, key_val = k.partition(":")
+            if anonymize:
+                kid_val, key_val = _anonymize(kid_val), _anonymize(key_val)
+            console.print(f"    - [red]{kid_val}[white]:[green]{key_val} [cyan]| [red]failed")
 
     def _bypass_cache(self) -> bool:
         """Effective bypass-vault-cache flag: per-run CLI override wins over config default."""
         override = getattr(context_tracker, "bypass_vault_cache", None)
         return BYPASS_VAULT_CACHE if override is None else bool(override)
 
-    def _announce_bypass(self, all_kids: list[str], base_license_url: str, pssh_val: str, drm_type: str) -> None:
+    def _announce_bypass(self, all_kids: list[str], base_license_url: str, pssh_val: str, drm_type: str) -> dict[str, list[str]]:
         """When the cache is bypassed, query every configured vault only to report which cached keys would have been used, without actually using them."""
+        bypassed: dict[str, list[str]] = {}
         if not all_kids or not self._vaults:
-            return
+            return bypassed
 
         for vdb in self._vaults:
             name = vdb.name
@@ -123,14 +142,12 @@ class DRMManager:
                 logger.debug(f"Bypass announce lookup failed for {name} vault (non-fatal): {e}")
                 continue
 
-            label = name
-            anonymize = getattr(context_tracker, "anonymize_keys", False)
             for k in keys:
                 kid_val, _, key_val = k.partition(":")
-                logger.info(f"Bypassing cached {drm_type} key {kid_val}:{key_val} from {label}")
-                if anonymize:
-                    kid_val, key_val = _anonymize(kid_val), _anonymize(key_val)
-                console.print(f"[#a855f7]Bypassing [red]{kid_val}[white]:[green]{key_val}[#a855f7] from [cyan]{label}[#a855f7]")
+                logger.info(f"Bypassing cached {drm_type} key {kid_val}:{key_val} from {name}")
+                bypassed.setdefault(name, []).append(k)
+
+        return bypassed
 
     def _missing_kids(self, all_kids: list[str], found_keys: list[str]) -> list[str]:
         """Return list of KIDs that are in all_kids but not yet covered by found_keys."""
@@ -139,13 +156,16 @@ class DRMManager:
 
     def _db_lookup(
         self, all_kids: list[str], base_license_url: str, drm_type: str, pssh_val: str = None
-    ) -> tuple[list[str], str]:
-        """Query vaults in priority order, stopping as soon as all KIDs are covered."""
+    ) -> tuple[list[str], str, dict[str, str]]:
+        """Query vaults in priority order, stopping as soon as all KIDs are covered.
+        The third return value is a kid -> tag-string map (e.g. {"abc123": "LICENSE_MISMATCH"})
+        for display, collected from each vault's last_key_flags right after querying it."""
         found_keys: list[str] = []
         source = None
+        kid_flags: dict[str, str] = {}
 
         if not all_kids or not base_license_url or not self._vaults:
-            return found_keys, source
+            return found_keys, source, kid_flags
 
         for vdb in self._vaults:
             name = vdb.name
@@ -155,11 +175,19 @@ class DRMManager:
 
             logger.info(f"Querying {name} DB for {len(missing)} {drm_type} KID(s) | PSSH={pssh_val}" if pssh_val else f"Querying {name} DB for {len(missing)} {drm_type} KID(s)")
             keys = list(vdb.get_keys_by_kids(base_license_url, missing, pssh_val) or [])
+            kid_flags.update(getattr(vdb, "last_key_flags", None) or {})
+
+            # Dropped keys that are all-zero (unusable)
+            bad = [k for k in keys if set(k.split(":", 1)[1] if ":" in k else "") <= {"0"}]
+            if bad:
+                logger.warning(f"{name} DB returned {len(bad)} all-zero (unusable) {drm_type} key(s) — ignoring, will re-resolve via CDM")
+                keys = [k for k in keys if k not in bad]
+
             if keys:
                 found_keys.extend(keys)
                 source = name
 
-        return found_keys, source
+        return found_keys, source, kid_flags
 
     def _store_keys(
         self,
@@ -181,13 +209,25 @@ class DRMManager:
             if name == source:
                 continue  # avoid writing back to the vault we just read from
 
-            logger.info(f"Storing {len(keys_list)} {drm_type} key(s) to {name} database")
+            # Idempotent: skip keys already present in this vault so re-resolving
+            # the same key (e.g. preflight probe then post-download decrypt) does
+            # not produce a duplicate store or a redundant "Storing …" log line.
+            kids = [k.split(":", 1)[0] for k in keys_list]
+            try:
+                already = set(vdb.get_keys_by_kids(base_license_url, kids, pssh_val) or [])
+            except Exception:
+                already = set()
+            to_store = [k for k in keys_list if k not in already]
+            if not to_store:
+                continue
+
+            logger.info(f"Storing {len(to_store)} {drm_type} key(s) to {name} database")
             try:
                 # local vault does not accept kid_to_label — call with base signature
                 if name == "local":
-                    vdb.set_keys(keys_list, base_license_url, pssh_val)
+                    vdb.set_keys(to_store, base_license_url, pssh_val)
                 else:
-                    vdb.set_keys(keys_list, base_license_url, pssh_val, kid_to_label)
+                    vdb.set_keys(to_store, base_license_url, pssh_val, kid_to_label)
             except Exception as e:
                 logger.error(f"Failed to sync to {name} (will continue): {e}")
                 console.print(f"[yellow]Warning: Could not sync to {name}: {e}")
@@ -229,13 +269,15 @@ class DRMManager:
         if key:
             manual = KeysManager(key)
             manual_keys = manual.get_keys_list()
+            manual_rejected = manual.get_rejected_list()
 
-            if manual_keys:
+            if manual_keys or manual_rejected:
                 missing = self._missing_kids(all_kids, manual_keys)
                 m_base_license_url = clean_license_url(license_url) or "generic"
                 m_pssh_val = next((i.get("pssh") for i in pssh_list if i.get("pssh")), None)
 
-                self._store_keys(manual_keys, drm_type, m_base_license_url, m_pssh_val, kid_to_label, source=None)
+                if manual_keys:
+                    self._store_keys(manual_keys, drm_type, m_base_license_url, m_pssh_val, kid_to_label, source=None)
                 self._display_keys(
                     manual_keys,
                     [],
@@ -245,9 +287,10 @@ class DRMManager:
                     header=True,
                     default_label="manual",
                     required_kids=set(all_kids),
+                    failed=manual_rejected,
                 )
 
-                if not missing:
+                if manual_keys and not missing:
                     return KeysManager(manual_keys)
 
                 if not license_url:
@@ -261,9 +304,10 @@ class DRMManager:
         pssh_val = next((i.get("pssh") for i in pssh_list if i.get("pssh")), None)
 
         bypass = self._bypass_cache()
+        bypassed: dict[str, list[str]] = {}
         if bypass:
             logger.info(f"Vault cache bypassed by config/CLI; forcing fresh CDM extraction for {drm_type}")
-            self._announce_bypass(resolve_kids, base_license_url, pssh_val, drm_type)
+            bypassed = self._announce_bypass(resolve_kids, base_license_url, pssh_val, drm_type)
             if not USE_CDM:
                 msg = "bypass_vault_cache is enabled but use_cdm is disabled — no keys can be produced (vault reads skipped, CDM extraction off)."
                 logger.warning(msg)
@@ -274,7 +318,7 @@ class DRMManager:
         vault_source = None
 
         if self._vaults and base_license_url and resolve_kids and not bypass:
-            found_keys, vault_source = self._db_lookup(resolve_kids, base_license_url, drm_type, pssh_val)
+            found_keys, vault_source, kid_flags = self._db_lookup(resolve_kids, base_license_url, drm_type, pssh_val)
             vault_keys = list(set(found_keys))
 
             if vault_keys:
@@ -290,13 +334,14 @@ class DRMManager:
                     vault_source,
                     header=not manual_keys,
                     required_kids=set(all_kids),
+                    kid_flags=kid_flags,
                 )
                 return KeysManager(self._merge_manual(manual_keys, vault_keys))
 
         # Step 2: If no license_url but DRM detected → try generic lookup in database
         if not license_url and resolve_kids and self._vaults and not bypass:
             logger.warning(f"DRM detected but missing license_url. Searching database for {len(resolve_kids)} {drm_type} KID(s) using 'generic' lookup")
-            found_keys, vault_source = self._db_lookup(resolve_kids, "generic", drm_type, pssh_val)
+            found_keys, vault_source, kid_flags = self._db_lookup(resolve_kids, "generic", drm_type, pssh_val)
             vault_keys = list(set(found_keys))
 
             if vault_keys and set(resolve_kids).issubset({k.split(":")[0].strip().lower() for k in vault_keys}):
@@ -309,6 +354,7 @@ class DRMManager:
                     vault_source,
                     header=not manual_keys,
                     required_kids=set(all_kids),
+                    kid_flags=kid_flags,
                 )
                 return KeysManager(self._merge_manual(manual_keys, vault_keys))
 
@@ -333,10 +379,20 @@ class DRMManager:
                 else:
                     cdm_result = None
 
+                cdm_keys: list[str] = []
                 if cdm_result:
                     cdm_keys = cdm_result.get_keys_list()
 
-                    # Merge: vault keys + CDM keys (CDM may return extras like b770…, keep all)
+                    # Keep only the KID(s) we actually asked the CDM to resolve for this PSSH. 
+                    requested_kids = set(missing_kids)
+                    filtered_cdm_keys = [k for k in cdm_keys if k.split(":", 1)[0].strip().lower() in requested_kids]
+                    dropped = len(cdm_keys) - len(filtered_cdm_keys)
+                    if dropped:
+                        logger.warning(f"{drm_type} CDM returned {dropped} extra key(s) not matching the requested KID(s) for this PSSH; discarding before store")
+                    cdm_keys = filtered_cdm_keys
+
+                if cdm_keys:
+                    # Merge: vault keys + CDM keys
                     all_keys = list({k.split(":")[0]: k for k in vault_keys + cdm_keys}.values())
                     logger.info(f"{drm_type} CDM extraction successful: {len(cdm_keys)} new key(s), {len(all_keys)} total")
                     self._store_keys(all_keys, drm_type, base_license_url, pssh_val, kid_to_label, source=None)
@@ -350,6 +406,19 @@ class DRMManager:
                         default_label="cdm",
                         required_kids=set(all_kids),
                     )
+
+                    for vault_name, vault_bypass_keys in bypassed.items():
+                        self._display_keys(
+                            vault_bypass_keys,
+                            vault_bypass_keys,
+                            drm_type,
+                            pssh_val,
+                            vault_name,
+                            header=False,
+                            required_kids=set(all_kids),
+                            tag_suffix=BYPASS_TAG_SUFFIX,
+                        )
+                    
                     return KeysManager(self._merge_manual(manual_keys, all_keys))
 
                 elif vault_keys:
@@ -399,11 +468,17 @@ class DRMManager:
             keys_list = KeysManager(norm).get_keys_list()
             if keys_list:
                 self._store_keys(keys_list, drm_type, "generic", pssh, source=None)
-                return keys_list[0], "manual"
+                matching = next((k for k in keys_list if k.split(":", 1)[0] == kid_norm), keys_list[0])
+                return matching, "manual"
 
         if not self._vaults:
             return None
-        found_keys, source = self._db_lookup([kid_norm], "generic", drm_type, pssh)
+        
+        if self._bypass_cache():
+            logger.info(f"Vault cache bypassed by config/CLI; skipping generic vault lookup for {drm_type} KID {kid_norm}")
+            return None
+        
+        found_keys, source, _kid_flags = self._db_lookup([kid_norm], "generic", drm_type, pssh)
         return (found_keys[0], source) if found_keys else None
 
     def get_wv_keys(
@@ -510,7 +585,7 @@ class DRMManager:
                 results[name] = added
             except Exception as e:
                 logger.error(f"[add_keys] Failed to store to {name}: {e}")
-                console.print(f"[red]✗ {name}: {e}")
+                console.print(f"[red]x {name}: {e}")
                 results[name] = 0
 
         return results

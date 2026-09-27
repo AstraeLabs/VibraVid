@@ -95,8 +95,9 @@ def detect_subtitle_format(subtitle_path: str) -> str | None:
     """Detects the actual format of a subtitle file using ffprobe and fallbacks."""
     try:
         cmd = [get_ffprobe_path(), "-v", "error", "-show_entries", "stream=codec_name", "-of", "json", subtitle_path]
-
+        logger.debug(f"Running detect_subtitle_format for {os.path.basename(subtitle_path)} with cmd: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        
         if result.returncode == 0:
             data = json.loads(result.stdout)
             streams = data.get("streams", [])

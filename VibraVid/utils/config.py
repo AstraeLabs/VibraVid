@@ -303,7 +303,7 @@ class ConfigManager:
         """Load the main configuration file."""
         if not os.path.exists(self.config_file_path):
             logger.info("Configuration file not found, attempting to download from repository")
-            self._download_file(CONFIG_DOWNLOAD_URL, self.config_file_path, "config.json")
+            self._download_file(CONFIG_DOWNLOAD_URL, self.config_file_path)
 
         try:
             with open(self.config_file_path) as f:
@@ -347,7 +347,7 @@ class ConfigManager:
             logger.info("Login file not found, attempting to download from repository")
 
             try:
-                self._download_file(CONFIG_LOGIN_DOWNLOAD_URL, self.login_file_path, "login.json")
+                self._download_file(CONFIG_LOGIN_DOWNLOAD_URL, self.login_file_path)
             except Exception as e:
                 console.print(f"[yellow]Could not download login.json: {str(e)}")
                 console.print("[yellow]Creating empty login configuration...")
@@ -371,7 +371,6 @@ class ConfigManager:
         """Pre-cache commonly used configuration values."""
         common_keys = [
             ("DOWNLOAD", "thread_count", int),
-            ("DOWNLOAD", "concurrent_download", bool),
             ("DOWNLOAD", "cleanup_tmp_folder", bool),
             ("PROCESS", "use_gpu", bool),
             ("PROCESS", "param_video", str),
@@ -397,7 +396,7 @@ class ConfigManager:
     def _handle_config_error(self) -> None:
         """Handle configuration errors by downloading the reference version."""
         console.print("[yellow]Attempting to retrieve reference configuration...")
-        self._download_file(CONFIG_DOWNLOAD_URL, self.config_file_path, "config.json")
+        self._download_file(CONFIG_DOWNLOAD_URL, self.config_file_path)
         logger.info("Reference configuration downloaded successfully, attempting to load again")
 
         try:
@@ -466,7 +465,7 @@ class ConfigManager:
         default_section = self._config_data.get("DEFAULT", {})
         self.fetch_domain_online = default_section.get("fetch_domain_online", True)
 
-    def _download_file(self, url: str, file_path: str, file_name: str) -> None:
+    def _download_file(self, url: str, file_path: str) -> None:
         """Download a file from a URL."""
         try:
             response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})

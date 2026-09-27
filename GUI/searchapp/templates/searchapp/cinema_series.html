@@ -8,9 +8,8 @@
 
 <section class="cn-hero" id="cn-hero" style="min-height:420px">
 	<div class="cn-hero-art" style="--cn-h1:{{ series.p1 }};--cn-h2:{{ series.p2 }}"></div>
-	{% if series.backdrop %}
-		<div class="cn-hero-photo" style="background-image:url('{{ series.backdrop }}')"></div>
-	{% endif %}
+	<div class="cn-hero-photo" id="cn-hero-photo"
+	     style="{% if series.backdrop %}background-image:url('{{ series.backdrop }}');{% else %}display:none;{% endif %}"></div>
 	<div class="cn-hero-veil"></div>
 
 	<div class="cn-hero-in">
@@ -66,7 +65,7 @@
 	<div class="cn-ssel" role="tablist" aria-label="{% if series.is_album %}Discs{% else %}Seasons{% endif %}">
 		{% for season in seasons %}
 			<button type="button" class="cn-stab{% if forloop.first %} is-active{% endif %}"
-			        data-season="{{ season.number }}" role="tab"
+			        data-season="{{ season.number }}" data-image="{{ season.image|default:'' }}" role="tab"
 			        aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
 				<span class="cn-stab-pick">
 					<input type="checkbox" class="cn-season-pick" value="{{ season.number }}"
@@ -251,11 +250,27 @@
 	var tabs   = document.querySelectorAll(".cn-stab");
 	var panels = document.querySelectorAll(".cn-spanel");
 
+	var heroPhoto = el("cn-hero-photo");
+	var seriesBackdrop = "{{ series.backdrop|default:''|escapejs }}";
+
+	function setHeroImage(url) {
+		if (!heroPhoto) return;
+		var chosen = url || seriesBackdrop;
+		if (chosen) {
+			heroPhoto.style.backgroundImage = "url('" + chosen + "')";
+			heroPhoto.style.display = "";
+		} else {
+			heroPhoto.style.display = "none";
+		}
+	}
+
 	function activateSeason(number) {
+		var activeTab = null;
 		tabs.forEach(function (t) {
 			var active = t.dataset.season === String(number);
 			t.classList.toggle("is-active", active);
 			t.setAttribute("aria-selected", active ? "true" : "false");
+			if (active) activeTab = t;
 		});
 		panels.forEach(function (p) {
 			if (p.dataset.season === String(number)) {
@@ -267,6 +282,7 @@
 				p.hidden = true;
 			}
 		});
+		setHeroImage(activeTab ? activeTab.dataset.image : "");
 		if (typeof loadSeasonByNumber === "function") loadSeasonByNumber(number);
 	}
 

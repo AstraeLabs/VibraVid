@@ -1,15 +1,18 @@
 ﻿# 16.04.24
 
 import logging
+import os
 import re
 import subprocess
 import threading
+import time
 from collections import deque
 
 from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.velora.util.formatting import parse_time_scalar
 from VibraVid.utils.os import internet_manager
+from VibraVid.utils.proc import log_command
 
 logger = logging.getLogger(__name__)
 terminate_flag = threading.Event()
@@ -55,12 +58,29 @@ def _format_eta(eta_seconds: float) -> str:
         return f"{s}s"
 
 
+def _iter_output_chunks(stream):
+    buf = ""
+    while True:
+        ch = stream.read(1)
+        if ch == "":
+            if buf:
+                yield buf
+            return
+        if ch in ("\n", "\r"):
+            if buf:
+                yield buf
+            buf = ""
+        else:
+            buf += ch
+
+
 def capture_output(
     process: subprocess.Popen,
     description: str,
     progress_data: ProgressData,
     terminate_flag: threading.Event = None,
     total_duration: float | None = None,
+    output_path: str | None = None,
 ) -> None:
     """
     Function to capture and print output from a subprocess.
@@ -72,17 +92,19 @@ def capture_output(
         log_path (Optional[str]): Path to log file to write output.
         terminate_flag (threading.Event): Per-invocation flag to signal termination.
         total_duration (Optional[float]): Total video duration in seconds, used to compute ETA.
+        output_path (Optional[str]): Path to the file being written by the subprocess, used to compute file size for progress reporting.
     """
     if terminate_flag is None:
         terminate_flag = threading.Event()
 
     tail_lines: deque[str] = deque(maxlen=20)
+    _start_time = time.monotonic()
 
     try:
         max_length = 0
         last_progress_string = ""
 
-        for line in iter(process.stdout.readline, ""):
+        for line in _iter_output_chunks(process.stdout):
             try:
                 line = line.strip()
                 logger.debug(f"{line}")
@@ -94,6 +116,51 @@ def capture_output(
                 if terminate_flag.is_set():
                     logger.info("FFmpeg process cancelled")
                     break
+
+                if line.startswith("Progress:") and "%" in line:
+                    try:
+                        pct = int(re.search(r"Progress:\s*(\d+)%", line).group(1))
+
+                        elapsed = max(time.monotonic() - _start_time, 0.001)
+                        processed_sec = (pct / 100.0) * total_duration if total_duration else None
+                        speed = f"{processed_sec / elapsed:.2f}x" if processed_sec else "N/A"
+                        eta_str = "N/A"
+                        if processed_sec is not None and processed_sec > 0 and total_duration:
+                            eta_str = _format_eta((total_duration - processed_sec) / (processed_sec / elapsed)) if processed_sec / elapsed > 0 else "N/A"
+
+                        byte_size = 0
+                        if output_path:
+                            try:
+                                byte_size = os.path.getsize(output_path)
+                            except OSError:
+                                byte_size = 0
+
+                        json_data = {
+                            "progress_pct": pct,
+                            "speed": speed,
+                            "size": internet_manager.format_file_size(byte_size),
+                            "eta": eta_str,
+                        }
+                        progress_data.update(json_data)
+
+                        if context_tracker.is_parallel_cli and context_tracker.download_id:
+                            download_tracker.update_progress(
+                                context_tracker.download_id, "mkvmerge_join", speed=speed, status=f"joining ({pct}%)"
+                            )
+                        elif context_tracker.should_print:
+                            progress_string = (
+                                f"{description}[white]: "
+                                f"([dim]progress:[/] [yellow]{pct}%[/], "
+                                f"[dim]speed:[/] [yellow]{speed}[/], "
+                                f"[dim]size:[/] [yellow]{internet_manager.format_file_size(byte_size)}[/], "
+                                f"[dim]ETA:[/] [yellow]{eta_str}[/])"
+                            )
+                            max_length = max(max_length, len(progress_string))
+                            last_progress_string = progress_string.ljust(max_length)
+                            console.print(last_progress_string, end="\r")
+                    except Exception as e:
+                        logger.error(f"Error parsing mkvmerge progress line: {line} - {e}")
+                    continue
 
                 if "size=" in line:
                     try:
@@ -212,7 +279,11 @@ def terminate_process(process):
 
 
 def capture_ffmpeg_real_time(
-    ffmpeg_command: list, description: str, total_duration: float | None = None, wait_timeout_seconds: float = 1800.0
+    ffmpeg_command: list,
+    description: str,
+    total_duration: float | None = None,
+    wait_timeout_seconds: float = 1800.0,
+    output_path: str | None = None,
 ) -> dict:
     """
     Function to capture real-time output from ffmpeg process.
@@ -237,8 +308,10 @@ def capture_ffmpeg_real_time(
     timed_out = False
 
     try:
+        log_command(ffmpeg_command, f"Starting ffmpeg process for {description}", log=logger)
         process = subprocess.Popen(
             ffmpeg_command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -250,7 +323,7 @@ def capture_ffmpeg_real_time(
         def _output_worker():
             context_tracker.download_id = _parent_download_id
             context_tracker.is_parallel_cli = _parent_is_parallel
-            capture_output(process, description, progress_data, terminate_flag, total_duration)
+            capture_output(process, description, progress_data, terminate_flag, total_duration, output_path)
 
         output_thread = threading.Thread(target=_output_worker, daemon=True)
         output_thread.start()

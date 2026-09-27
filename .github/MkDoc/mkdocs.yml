@@ -30,6 +30,7 @@ nav:
   - Home: index.md
   - Configuration: configuration.md
   - CLI Usage: cli.md
+  - Supported Sites: supported-sites.md
   - Web GUI: gui.md
   - TUI: tui.md
   - Telegram Bot: telegram.md
@@ -39,3 +40,4 @@ nav:
   - NAS Deployment: nas.md
   - Login: login.md
   - Adding a Service: add-service.md
+  - Adding a Vault: vault.md

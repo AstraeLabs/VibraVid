@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from django.http import HttpRequest, JsonResponse
 
@@ -42,6 +43,37 @@ def get_downloads_json(request: HttpRequest) -> JsonResponse:
         "active": _tag_anime_entries(active_downloads),
         "scheduled": _tag_anime_entries(scheduled),
         "history": _tag_anime_entries(history)
+    })
+
+
+def get_downloads_summary(request: HttpRequest) -> JsonResponse:
+    """API endpoint exposing a compact, read-only summary of the download queue
+    (counts + current item), meant for external dashboards (e.g. Homepage)."""
+    active_downloads = _enrich_active_downloads_with_series(download_tracker.get_active_downloads())
+    history = download_tracker.get_history()
+    _prune_scheduled_downloads(active_downloads, history)
+    active_ids = {d.get("id") for d in active_downloads if d.get("id")}
+    scheduled = _get_scheduled_downloads(exclude_ids=active_ids)
+
+    current = None
+    if active_downloads:
+        top = active_downloads[0]
+        current = {
+            "id": top.get("id"),
+            "title": top.get("title"),
+            "site": top.get("site"),
+            "status": top.get("status"),
+            "progress": top.get("progress"),
+            "speed": top.get("speed"),
+            "size": top.get("size"),
+        }
+
+    return JsonResponse({
+        "active": len(active_downloads),
+        "queued": len(scheduled),
+        "history": len(history),
+        "current": current,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -143,4 +175,4 @@ def clear_download_history(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
-__all__ = ['get_downloads_json', 'kill_download', 'kill_and_clear_queue', 'clear_download_history']
+__all__ = ['get_downloads_json', 'get_downloads_summary', 'kill_download', 'kill_and_clear_queue', 'clear_download_history']

@@ -17,6 +17,7 @@ urlpatterns = [
     # Download (formerly the home dashboard)
     path("downloads/", views.cinema_download, name="download_dashboard"),
     path("api/get-downloads/", views.get_downloads_json, name="get_downloads_json"),
+    path("api/downloads-summary/", views.get_downloads_summary, name="get_downloads_summary"),
     path("api/kill-download/", views.kill_download, name="kill_download"),
     path("api/kill-and-clear-queue/", views.kill_and_clear_queue, name="kill_and_clear_queue"),
     path("api/clear-history/", views.clear_download_history, name="clear_download_history"),
@@ -39,6 +40,12 @@ urlpatterns = [
     path("api/reload-config/", views.reload_config, name="reload_config"),
     path("api/upload-service/", views.upload_service_zip, name="upload_service_zip"),
     path("api/registry-status/", views.registry_status, name="registry_status"),
+    path("api/site-cli-options/", views.site_cli_options_schema, name="site_cli_options_schema"),
+
+    # Logs
+    path("logs/", views.cinema_logs, name="logs_page"),
+    path("api/logs/list/", views.logs_list, name="logs_list"),
+    path("api/logs/content/", views.logs_content, name="logs_content"),
 
     # ARR Integration
     path("api/arr/webhook/seerr/", views.seerr_webhook, name="seerr_webhook"),
@@ -46,6 +53,7 @@ urlpatterns = [
     path("api/arr/webhook/radarr/", views.radarr_webhook, name="radarr_webhook"),
     path("api/arr/status/", views.arr_status, name="arr_status"),
     path("api/arr/trigger-sync/", views.arr_trigger_sync, name="arr_trigger_sync"),
+    path("api/arr/queue/<int:queue_id>/delete/", views.arr_delete_request, name="arr_delete_request"),
     path("arr-stack/", views.arr_stack, name="arr_stack"),
 
     # In-app update

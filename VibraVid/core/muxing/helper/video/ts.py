@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import subprocess
 
 from VibraVid.setup import get_ffmpeg_path, get_ffprobe_path
@@ -66,6 +67,7 @@ def detect_ts_timestamp_issues(file_path):
         "json",
         file_path,
     ]
+    logger.info(f"Running detect_ts_timestamp_issues for {os.path.basename(file_path)} with cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace")
 
     if result.returncode != 0 or "pts_time" not in result.stdout:
@@ -110,6 +112,7 @@ def convert_ts_to_mp4(input_path, output_path):
         output_path,
     ]
 
+    logger.info(f"Running convert_ts_to_mp4 for {os.path.basename(input_path)} with cmd: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         logger.error(f"convert_ts_to_mp4 failed: {result.stderr}")
