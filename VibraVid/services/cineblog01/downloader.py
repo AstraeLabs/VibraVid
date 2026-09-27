@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 _IMDB_PATH_RE = re.compile(r"/tt(\d+)(?:/|$)", re.IGNORECASE)
-_SUPPORTED_RESOLVER_KINDS = {"hls", "vidxgo", "maxstream"}
+_SUPPORTED_RESOLVER_KINDS = {"hls", "vidxgo", "maxstream", "vixsrc"}
 
 
 def _output_path(select_title: Entries) -> str:
@@ -95,7 +95,7 @@ def download_film(select_title: Entries):
             errors.append(f"{source.host or source.label}: browser verification required")
             continue
 
-        if kind not in _SUPPORTED_RESOLVER_KINDS | {"vixsrc"}:
+        if kind not in _SUPPORTED_RESOLVER_KINDS:
             errors.append(
                 f"{source.host or source.label}: unsupported external source"
             )
