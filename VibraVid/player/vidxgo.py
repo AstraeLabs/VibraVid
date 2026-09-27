@@ -37,6 +37,7 @@ class VideoSource:
         episode_number: int = None,
         embed_domain: str = "https://v.vidxgo.co",
         content_type: str = "series",
+        referer: str | None = None,
     ):
         self.imdb_id = str(imdb_id).strip()
         if self.imdb_id.startswith("tt"):
@@ -46,6 +47,7 @@ class VideoSource:
         self.episode_number = episode_number
         self.embed_domain = embed_domain.rstrip("/")
         self.content_type = content_type
+        self.referer = referer
 
     @staticmethod
     def decode_embed_html(html_text: str) -> str | None:
@@ -86,9 +88,13 @@ class VideoSource:
         else:
             embed_url = f"{self.embed_domain}/tt{self.imdb_id}/{self.season_number}/{self.episode_number}"
 
+        headers = VIDXGO_HEADERS.copy()
+        if self.referer:
+            headers["Referer"] = self.referer
+
         try:
             with create_client() as client:
-                response = client.get(embed_url, headers=VIDXGO_HEADERS, timeout=30)
+                response = client.get(embed_url, headers=headers, timeout=30)
             response.raise_for_status()
             return self.decode_embed_html(response.text)
         except Exception as error:
