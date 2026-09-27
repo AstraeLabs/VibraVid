@@ -45,23 +45,36 @@ def _clean_title(raw_title: str) -> tuple[str, str | None]:
 
 
 def parse_search_results(html: str, base_url: str) -> list[SearchResult]:
-    """Parse all CB01 WordPress search results without choosing a first match."""
+    """Parse CB01 search results without selecting unrelated page content."""
     soup = BeautifulSoup(html, "html.parser")
     results: list[SearchResult] = []
     seen: set[str] = set()
 
-    containers = list(soup.select("div.card.mp-post.horizontal"))
-    if not containers:
-        containers = list(soup.select("article, .post, .type-post"))
+    layouts = (
+        ("article.short.block-list", "h3.story-heading a"),
+        ("div.card.mp-post.horizontal", "h3.card-title a"),
+        ("article.post, article.type-post, .post.type-post", ".entry-title a"),
+    )
+
+    containers = []
+    title_selector = None
+
+    for container_selector, candidate_title_selector in layouts:
+        containers = list(soup.select(container_selector))
+        if containers:
+            title_selector = candidate_title_selector
+            break
+
+    if not containers or not title_selector:
+        return results
 
     for card in containers:
-        link = (
-            card.select_one("h3.card-title a")
-            or card.select_one("h2.entry-title a")
-            or card.select_one("h3.entry-title a")
-            or card.select_one(".entry-title a")
-        )
+        link = card.select_one(title_selector)
         if not link or not link.get("href"):
+            continue
+
+        raw_title = link.get_text(" ", strip=True)
+        if not raw_title:
             continue
 
         url = urljoin(base_url, str(link.get("href")))
@@ -69,13 +82,13 @@ def parse_search_results(html: str, base_url: str) -> list[SearchResult]:
             continue
         seen.add(url)
 
-        raw_title = link.get_text(" ", strip=True)
-        if not raw_title:
-            continue
-
         title, year = _clean_title(raw_title)
 
-        image_tag = card.find("img")
+        image_tag = (
+            card.select_one(".story-cover img")
+            or card.select_one(".card-image img")
+            or card.find("img")
+        )
         image = None
         if image_tag:
             image = (
