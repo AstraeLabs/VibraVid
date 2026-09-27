@@ -274,9 +274,21 @@ def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str
             _log_gui_equivalent_command(site, item_payload, season, episodes)
             logger.debug("[_task] Calling api.start_download with: season=%s, episodes=%s, output_path=%s, audio_format=%s", season, episodes, output_path, audio_format,)
             if audio_format and _accepts_audio_format(api.start_download):
-                api.start_download(media_item, season=season, episodes=episodes, audio_format=audio_format)
+                provider_result = api.start_download(
+                    media_item,
+                    season=season,
+                    episodes=episodes,
+                    audio_format=audio_format,
+                )
             else:
-                api.start_download(media_item, season=season, episodes=episodes)
+                provider_result = api.start_download(
+                    media_item,
+                    season=season,
+                    episodes=episodes,
+                )
+
+            if provider_result is False:
+                raise RuntimeError(f"{site} reported that the download did not complete successfully")
 
             final_state = next(
                 (item for item in download_tracker.get_history() if item.get("id") == download_id),
