@@ -1,4 +1,16 @@
-from VibraVid.utils import _startup_prefetch
+import importlib.util
+from pathlib import Path
+
+
+def _load_startup_prefetch():
+    path = Path(__file__).resolve().parents[2] / "VibraVid" / "utils" / "_startup_prefetch.py"
+    spec = importlib.util.spec_from_file_location("cb01_startup_prefetch_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_startup_prefetch = _load_startup_prefetch()
 
 
 def test_extract_cb01_domain_from_updated_section():
