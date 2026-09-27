@@ -102,3 +102,19 @@ def test_direct_hls_is_classified_first():
     )
 
     assert scrapper.source_kind(source) == "hls"
+
+
+def test_iframe_vidxgo_source_is_extracted():
+    html = """
+    <article>
+      <iframe src="https://v.vidxgo.co/tt1234567" title="Player HD"></iframe>
+      <iframe src="about:blank"></iframe>
+    </article>
+    """
+
+    sources = scrapper.parse_detail_sources(html, "https://cineblog001.download/movie/")
+
+    assert len(sources) == 1
+    assert sources[0].url == "https://v.vidxgo.co/tt1234567"
+    assert sources[0].section == "player"
+    assert scrapper.source_kind(sources[0]) == "vidxgo"
