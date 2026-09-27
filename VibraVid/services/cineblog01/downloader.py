@@ -138,7 +138,7 @@ def download_film(select_title: Entries, *, manifest_resolver=None):
     if errors:
         return (None, True, "CB01 source unavailable: " + "; ".join(errors))
 
-    return DownloadResult(
+    return (
         None,
         True,
         "CB01 sources are external and no compatible VibraVid resolver is available",
