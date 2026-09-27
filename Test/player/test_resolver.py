@@ -78,7 +78,7 @@ def test_resolves_static_hls_manifest():
 
 def test_relative_manifest_url_is_resolved_against_player_page():
     player_url = "https://example.com/player-x/movie/tt1234567"
-    manifest_url = "https://example.com/player-x/media/master.m3u8"
+    manifest_url = "https://example.com/player-x/movie/media/master.m3u8"
 
     http = FakeHttpClient(
         {
