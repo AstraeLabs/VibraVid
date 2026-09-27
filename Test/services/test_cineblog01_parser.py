@@ -226,3 +226,50 @@ def test_dle_search_layout_ignores_promos_and_duplicate_grid_cards():
     )
     assert results[1].title == "Cime Tempestose"
     assert results[1].year == "1992"
+
+
+def test_script_backed_vixsrc_player_is_detected():
+    html = """
+    <div class="fix_playerx">
+      <div class="box">
+        <iframe id="vidxgo-player" src=""></iframe>
+      </div>
+    </div>
+    <script>
+      (function(){
+        var imdb = 'tt32897959';
+        var key = /^tt\\d+$/i.test(imdb) ? imdb : '';
+        var iframe = document.getElementById('vidxgo-player');
+        if (iframe && key) {
+          iframe.src = 'https://vixsrc.to/movie/' + key + '?lang=it';
+        }
+      })();
+    </script>
+    """
+
+    sources = scrapper.parse_detail_sources(
+        html,
+        "https://cineblog001.download/cb01-streaming/example.html",
+    )
+
+    assert len(sources) == 1
+    assert sources[0].url == "https://vixsrc.to/movie/tt32897959?lang=it"
+    assert sources[0].label == "VixSrc"
+    assert scrapper.source_kind(sources[0]) == "vixsrc"
+
+
+def test_script_backed_vixsrc_requires_an_imdb_key():
+    html = """
+    <iframe id="vidxgo-player" src=""></iframe>
+    <script>
+      var key = '';
+      iframe.src = 'https://vixsrc.to/movie/' + key + '?lang=it';
+    </script>
+    """
+
+    sources = scrapper.parse_detail_sources(
+        html,
+        "https://cineblog001.download/cb01-streaming/example.html",
+    )
+
+    assert sources == []
