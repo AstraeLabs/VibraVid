@@ -11,6 +11,8 @@ from bs4 import BeautifulSoup
 _YEAR_RE = re.compile(r"\((19|20)\d{2}\)\s*$")
 _TAG_RE = re.compile(r"\s*\[[^\]]+\]\s*")
 _QUALITY_RE = re.compile(r"\b(2160p|1080p|720p|576p|480p|4k|uhd|fullhd|hd)\b", re.IGNORECASE)
+_IMDB_RE = re.compile(r"\btt\d+\b", re.IGNORECASE)
+_VIXSRC_MARKER = "https://vixsrc.to/movie/"
 
 
 @dataclass
@@ -150,10 +152,40 @@ def _verification_required(host: str) -> bool:
 
 
 def parse_detail_sources(html: str, base_url: str) -> list[CineblogSource]:
-    """Extract public source links and player data-src values from a CB01 detail page."""
+    """Extract public source links and player targets from a CB01 detail page."""
     soup = BeautifulSoup(html, "html.parser")
     sources: list[CineblogSource] = []
     seen: set[tuple[str, str]] = set()
+
+    empty_player = soup.select_one("iframe#vidxgo-player")
+    if empty_player is not None and not str(empty_player.get("src") or "").strip():
+        for script in soup.find_all("script"):
+            body = script.string or script.get_text()
+            if not body or _VIXSRC_MARKER not in body:
+                continue
+
+            imdb_match = _IMDB_RE.search(body)
+            if not imdb_match:
+                continue
+
+            imdb_key = imdb_match.group(0).lower()
+            url = f"{_VIXSRC_MARKER}{imdb_key}?lang=it"
+            key = ("player", url)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            host = _source_host(url)
+            sources.append(
+                CineblogSource(
+                    section="player",
+                    label="VixSrc",
+                    host=host,
+                    url=url,
+                    verification_required=False,
+                )
+            )
+            break
 
     for table in soup.select("table.tableinside"):
         section = _section_name(table)
@@ -258,6 +290,8 @@ def source_kind(source: CineblogSource) -> str:
 
     if ".m3u8" in path:
         return "hls"
+    if source.host.endswith("vixsrc.to"):
+        return "vixsrc"
     if source.host.endswith("vidxgo.co") or "vidxgo" in source.host:
         return "vidxgo"
     if source.host.endswith("uprot.net") or "maxstream" in source.host:
