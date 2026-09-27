@@ -13,8 +13,7 @@ from .scrapper import parse_search_results
 
 indice = 98
 _useFor = "Film_Serie"
-# Keep hidden until every live player type used by CB01 has a compatible resolver.
-_hide = True
+_hide = False
 
 msg = Prompt()
 console = Console()
