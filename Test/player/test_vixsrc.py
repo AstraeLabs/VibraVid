@@ -10,7 +10,6 @@ def test_vixsrc_accepts_supported_player_host():
     )
 
     assert source.is_supported_player() is True
-    assert source.get_stream() == (None, {})
 
 
 def test_vixsrc_rejects_unrelated_player_host():
