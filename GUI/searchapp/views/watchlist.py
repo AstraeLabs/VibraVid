@@ -52,7 +52,9 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
         name = item_payload.get("name")
         poster = item_payload.get("poster")
         tmdb_id = item_payload.get("tmdb_id")
-        is_movie = _to_bool(item_payload.get("is_movie"))
+        is_movie = _to_bool(item_payload.get("is_movie")) or str(item_payload.get("type", "")).lower() in {"film", "movie", "ova"}
+        from VibraVid.core.utils.quality import normalize_quality
+        quality = normalize_quality(request.POST.get("quality"))
 
         # Check if already in watchlist
         existing = WatchlistItem.objects.filter(name=name, source_alias=source_alias).first()
@@ -65,6 +67,9 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
                 source_alias=source_alias,
                 item_payload=item_payload_raw,
                 is_movie=is_movie,
+                preferred_quality=quality,
+                auto_enabled=request.POST.get("auto_enabled") == "on",
+                auto_all_seasons=not is_movie and request.POST.get("auto_enabled") == "on",
                 poster_url=poster,
                 tmdb_id=tmdb_id,
                 num_seasons=0,
@@ -119,48 +124,25 @@ def update_watchlist_auto(request: HttpRequest, item_id: int) -> HttpResponse:
         messages.error(request, "Item not found.")
         return redirect("watchlist")
 
-    if item.is_movie:
-        if item.auto_enabled or item.auto_season:
-            item.auto_enabled = False
-            item.auto_season = None
-            item.auto_last_episode_count = 0
-            item.auto_last_downloaded_at = None
-            item.save(
-                update_fields=[
-                    "auto_enabled",
-                    "auto_season",
-                    "auto_last_episode_count",
-                    "auto_last_downloaded_at",
-                ]
-            )
-        messages.error(request, "Auto-download is not available for movies.")
+    from VibraVid.core.utils.quality import normalize_quality
+    try:
+        quality = normalize_quality(request.POST.get("quality"))
+        scope = request.POST.get("auto_season", "")
+        auto_enabled = request.POST.get("auto_enabled") == "on"
+        all_seasons = scope == "all" and not item.is_movie
+        season = int(scope) if scope and scope != "all" and not item.is_movie else None
+        if auto_enabled and not item.is_movie and not (all_seasons or season is not None):
+            raise ValueError("Select a season or all seasons.")
+    except (ValueError, TypeError) as exc:
+        messages.error(request, str(exc))
         return redirect("watchlist")
-
-    auto_enabled = request.POST.get("auto_enabled") == "on"
-    auto_season_raw = request.POST.get("auto_season")
-    auto_season = None
-    if auto_season_raw:
-        try:
-            auto_season = int(auto_season_raw)
-        except (ValueError, TypeError):
-            auto_season = None
-
-    if auto_enabled and not auto_season:
-        messages.error(request, "Select a season for auto-download.")
-        return redirect("watchlist")
-
-    if item.auto_season != auto_season:
-        item.auto_last_episode_count = 0
-        item.auto_last_downloaded_at = None
-
+    item.preferred_quality = quality
     item.auto_enabled = auto_enabled
-    item.auto_season = auto_season if auto_enabled else None
-
-    if not auto_enabled:
-        item.auto_last_episode_count = 0
-
-    item.save()
-    messages.success(request, "Auto-download settings updated.")
+    item.auto_season = season if auto_enabled else None
+    item.auto_all_seasons = all_seasons if auto_enabled else False
+    item.auto_status = "Waiting for next check" if auto_enabled else "Paused"
+    item.save(update_fields=["preferred_quality", "auto_enabled", "auto_season", "auto_all_seasons", "auto_status"])
+    messages.success(request, "Watchlist quality and monitoring updated.")
     return redirect("watchlist")
 
 

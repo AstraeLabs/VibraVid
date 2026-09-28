@@ -141,6 +141,30 @@ class StreamingCommunityAPI(BaseStreamingAPI):
 
         return seasons if seasons else None
 
+    def get_available_qualities(self, media_item: Entries, season=None, episode=None) -> list[str]:
+        from VibraVid.core.utils.quality import manifest_qualities
+        from VibraVid.player.vixcloud import VideoSource
+
+        language = media_item.provider_language or "it"
+        base = f"{self.base_url.rstrip('/')}/{language}"
+        video_id = media_item.id
+        if not media_item.is_movie:
+            scraper = GetSerieInfo(base, media_item.id, media_item.slug, media_item.year,
+                                   language, series_display_name=media_item.name,
+                                   languages=_effective_languages())
+            scraper.getNumberSeason()
+            episodes = scraper.getEpisodeSeasons(int(season)) or []
+            selected = next((ep for index, ep in enumerate(episodes, 1)
+                             if int(getattr(ep, "number", None) or index) == int(episode)), None)
+            if selected is None:
+                return []
+            video_id = selected.id
+        source = VideoSource(base, not media_item.is_movie, media_item.id)
+        source.get_iframe(video_id)
+        source.get_content()
+        playlist = source.get_playlist()
+        return manifest_qualities(playlist) if playlist else []
+
     def start_download(self, media_item: Entries, season: str | None = None, episodes: str | None = None) -> bool:
         """Start downloading from StreamingCommunity."""
         search_fn = self._get_search_fn()

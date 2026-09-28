@@ -44,111 +44,143 @@ def _should_start_loop() -> bool:
     return any(cmd in sys.argv for cmd in ("runserver", "runserver_plus"))
 
 
-def _process_item(item: WatchlistItem, force: bool = False) -> None:
-    """Process a single watchlist item for auto-download.
+_pending_downloads: set[tuple] = set()
+_pending_lock = threading.Lock()
+_scan_lock = threading.Lock()
+_completion_lock = threading.Lock()
 
-    Args:
-        item: The watchlist item to process.
-        force: If True, download even if episode count hasn't changed.
+
+def _record_result(future, item_id, key, reservation, quality):
+    close_old_connections()
+    try:
+        success = future.result() is True
+        with _completion_lock:
+            item = WatchlistItem.objects.filter(pk=item_id).first()
+            if item is None:
+                return
+            if success:
+                completed = dict(item.auto_completed or {})
+                completed[key] = quality or "config"
+                item.auto_completed = completed
+                item.auto_last_downloaded_at = timezone.now()
+                item.auto_status = "Downloaded; monitoring for new content"
+                item.save(update_fields=["auto_completed", "auto_last_downloaded_at", "auto_status"])
+            else:
+                WatchlistItem.objects.filter(pk=item_id).update(auto_status="Not completed; waiting for next check")
+    except Exception as exc:
+        logger.warning("Watchlist download failed for %s: %s", item_id, exc)
+        WatchlistItem.objects.filter(pk=item_id).update(auto_status="Download failed; will retry on next check")
+    finally:
+        with _pending_lock:
+            _pending_downloads.discard(reservation)
+        close_old_connections()
+
+
+def _process_item(item: WatchlistItem, force: bool = False) -> None:
+    """Recheck every unfinished video, including older releases awaiting quality.
+
+    `force` requests a check now; it never re-downloads a completed target.
     """
     try:
-        logger.info("Processing '%s' (id=%s, season=%s, last_count=%s)", item.name, item.id, item.auto_season, item.auto_last_episode_count,)
-
-        api = get_api(item.source_alias)
-        item_payload = json.loads(item.item_payload)
-        entries_fields = {k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__}
-        media_item = Entries(**entries_fields)
-
-        if media_item.is_movie or item.is_movie:
-            logger.info("'%s': movies are not eligible for auto-download", item.name)
-            return
-
-        seasons = api.get_series_metadata(media_item)
-
-        if not seasons:
-            logger.warning("'%s': no seasons returned from API", item.name)
-            return
-
-        season_number = item.auto_season
-        if not season_number:
-            logger.info("'%s': no auto_season set", item.name)
-            return
-
-        current_count = _get_season_episode_count(seasons, season_number)
-        if current_count is None:
-            logger.warning("'%s': season %s not found in metadata", item.name, season_number)
-            return
-
-        logger.info("'%s': season %s has %s episodes (stored: %s)", item.name, season_number, current_count, item.auto_last_episode_count,)
-
-        now = timezone.now()
-
-        # Always download the selected season — the downloader itself skips already-downloaded files
         from .views import _run_download_in_thread
+        api = get_api(item.source_alias)
+        payload = json.loads(item.item_payload)
+        media = Entries(**{k: v for k, v in payload.items() if k in Entries.__dataclass_fields__})
+        quality = item.preferred_quality
+        seasons = []
+        if media.is_movie or item.is_movie:
+            videos = [(None, None)]
+        else:
+            # Don't let the metadata cache hide a newly published season/episode.
+            api._scraper_cache.pop(api._get_cache_key(media), None)
+            seasons = api.get_series_metadata(media) or []
+            videos = [(s.number, ep.number) for s in seasons
+                      if item.auto_all_seasons or s.number == item.auto_season for ep in s.episodes]
+            WatchlistItem.objects.filter(pk=item.pk).update(
+                num_seasons=len(seasons), last_season_episodes=seasons[-1].episode_count if seasons else 0,
+                has_new_seasons=len(seasons) > item.num_seasons,
+                has_new_episodes=bool(seasons and seasons[-1].episode_count > item.last_season_episodes),
+            )
+        videos = list(dict.fromkeys(videos))
+        now = timezone.now()
+        WatchlistItem.objects.filter(pk=item.pk).update(auto_last_checked_at=now, last_checked_at=now)
+        for season, episode in videos:
+            key = f"{season}:{episode}:{quality or 'config'}"
+            reservation = (item.pk, key)
+            if key in (item.auto_completed or {}):
+                continue
+            with _pending_lock:
+                if reservation in _pending_downloads:
+                    continue
+                _pending_downloads.add(reservation)
+            handed_off = False
+            try:
+                try:
+                    available = api.get_available_qualities(media, season, episode) if quality else None
+                except NotImplementedError:
+                    if quality:
+                        WatchlistItem.objects.filter(pk=item.pk).update(
+                            auto_status="Provider does not expose quality availability yet")
+                        continue
+                    available = None
+                if available is not None and (not available or (quality and quality not in available)):
+                    WatchlistItem.objects.filter(pk=item.pk).update(
+                        auto_status=f"Waiting for {quality or 'video availability'}")
+                    continue
+                # A user can pause/change the watchlist while the provider is responding.
+                current = WatchlistItem.objects.filter(pk=item.pk, auto_enabled=True,
+                    preferred_quality=quality, auto_season=item.auto_season,
+                    auto_all_seasons=item.auto_all_seasons).first()
+                if current is None:
+                    return
+                if key in (current.auto_completed or {}):
+                    continue
+                future = _run_download_in_thread(
+                    item.source_alias, payload,
+                    season=str(season) if season is not None else None,
+                    episodes=str(episode) if episode is not None else None,
+                    media_type="Film" if item.is_movie else "Serie", quality=quality or None,
+                    _metadata=seasons,
+                )
+                WatchlistItem.objects.filter(pk=item.pk).update(auto_status="Queued / downloading")
+                future.add_done_callback(lambda result, pk=item.pk, k=key, r=reservation, q=quality:
+                                         _record_result(result, pk, k, r, q))
+                handed_off = True
+            except Exception as exc:
+                logger.warning("Quality check failed for %s S%s E%s: %s", item.name, season, episode, exc)
+                WatchlistItem.objects.filter(pk=item.pk).update(auto_status="Provider unavailable; will retry")
+            finally:
+                if not handed_off:
+                    with _pending_lock:
+                        _pending_downloads.discard(reservation)
+    except Exception:
+        logger.exception("Error processing watchlist item %s", item.pk)
+        WatchlistItem.objects.filter(pk=item.pk).update(auto_status="Check failed; will retry")
 
-        media_type = (item_payload.get("type") or "tv").lower()
-        logger.info("'%s': starting download S%s episodes=* media_type=%s", item.name, season_number, media_type,)
-        _run_download_in_thread(
-            site=item.source_alias,
-            item_payload=item_payload,
-            season=str(season_number),
-            episodes="*",
-            media_type=media_type,
-        )
-        item.auto_last_episode_count = current_count
-        item.auto_last_downloaded_at = now
-        item.has_new_episodes = True
 
-        # Keep display fields in sync with the live metadata already fetched
-        item.num_seasons = len(seasons)
-        item.last_season_episodes = seasons[-1].episode_count
-        item.auto_last_checked_at = now
-        item.last_checked_at = now
-        item.save(
-            update_fields=[
-                "auto_last_episode_count",
-                "auto_last_checked_at",
-                "auto_last_downloaded_at",
-                "has_new_episodes",
-                "last_checked_at",
-                "num_seasons",
-                "last_season_episodes",
-            ]
-        )
-    except Exception as exc:
-        logger.exception("Error processing %s '%s': %s", item.id, item.name, exc)
+def _scan_watchlist(force=False):
+    if not _scan_lock.acquire(blocking=False):
+        return
+    try:
+        close_old_connections()
+        for item in WatchlistItem.objects.filter(auto_enabled=True):
+            _process_item(item, force=force)
+    finally:
+        close_old_connections()
+        _scan_lock.release()
 
 
 def _auto_loop(interval_seconds: int) -> None:
     while True:
         try:
-            close_old_connections()
-            items = list(
-                WatchlistItem.objects.filter(auto_enabled=True).exclude(auto_season__isnull=True).exclude(is_movie=True)
-            )
-            logger.info("Periodic check: %d items with auto-download enabled", len(items))
-            for item in items:
-                _process_item(item)
-        except Exception as exc:
-            logger.exception("Loop error: %s", exc)
+            _scan_watchlist()
+        except Exception:
+            logger.exception("Watchlist scan failed")
         time.sleep(_get_interval_seconds())
 
 
 def run_watchlist_auto_once(force: bool = True) -> None:
-    """Run auto-download scan once. force=True downloads even without new episodes."""
-    try:
-        close_old_connections()
-        items = list(
-            WatchlistItem.objects.filter(auto_enabled=True).exclude(auto_season__isnull=True).exclude(is_movie=True)
-        )
-        logger.info("Manual trigger: %d items with auto-download enabled (force=%s)", len(items), force)
-        if not items:
-            logger.info("No items have auto-download enabled with a season selected.")
-            return
-        for item in items:
-            _process_item(item, force=force)
-    except Exception as exc:
-        logger.exception("One-shot error: %s", exc)
+    _scan_watchlist(force=force)
 
 
 def start_watchlist_auto_loop() -> None:

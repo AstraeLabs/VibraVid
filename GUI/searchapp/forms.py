@@ -65,4 +65,12 @@ class DownloadForm(forms.Form):
     item_payload = forms.CharField(widget=forms.HiddenInput, required=False)
     season = forms.CharField(max_length=100, required=False, label="Stagione")
     episode = forms.CharField(max_length=1000, required=False, label="Episodio (es: 1-3)")
+    quality = forms.RegexField(regex=r"^(?:[1-9][0-9]{1,3}p)?$", max_length=5, required=False)
     audio_format = forms.CharField(max_length=16, required=False, label="Formato audio")
+
+    def clean_quality(self):
+        from VibraVid.core.utils.quality import normalize_quality
+        try:
+            return normalize_quality(self.cleaned_data.get("quality"))
+        except ValueError as exc:
+            raise forms.ValidationError("Choose a quality up to 1080p.") from exc

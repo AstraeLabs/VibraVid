@@ -62,6 +62,17 @@ class CinezoAPI(BaseStreamingAPI):
 
         return seasons if seasons else None
 
+    def get_available_qualities(self, media_item: Entries, season=None, episode=None) -> list[str]:
+        from VibraVid.core.utils.quality import manifest_qualities
+        from VibraVid.services.cinezo.client import get_stream
+        if media_item.is_movie:
+            url, headers, _ = get_stream(int(media_item.id), "movie")
+        else:
+            url, headers, _ = get_stream(int(media_item.id), "tv", int(season), int(episode))
+        if "/mp4/" in url:
+            raise NotImplementedError("This direct file does not advertise video resolutions. Use config.")
+        return manifest_qualities(url, headers)
+
     def start_download(self, media_item: Entries, season: str | None = None, episodes: str | None = None) -> bool:
         """Start downloading from Cinezo."""
         search_fn = self._get_search_fn()

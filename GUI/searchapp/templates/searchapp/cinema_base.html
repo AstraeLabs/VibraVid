@@ -158,6 +158,10 @@
 			})();
 		</script>
 
+        <script src="{% static 'searchapp/quality.js' %}"
+                data-quality-url="{% url 'available_qualities' %}"
+                data-download-url="{% url 'start_download' %}"
+                data-watchlist-url="{% url 'add_to_watchlist' %}"></script>
 		{% block scripts %}{% endblock %}
 	</body>
 </html>

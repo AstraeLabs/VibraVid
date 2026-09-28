@@ -31,9 +31,11 @@ class DownloadTracker(metaclass=SingletonMeta):
         self.downloads: dict[str, dict[str, Any]] = {}
         self.history: list[dict[str, Any]] = []
         self.stop_events: dict[str, threading.Event] = {}
+        self.cancelled_downloads: set[str] = set()
         self.active_processes: dict[str, list[any]] = {}
         self.stale_timeout_seconds = 30 * 60
         self._lock = threading.Lock()
+        self._history_retry_at = 0.0
         self._history_loaded = False
         self._load_persisted_history()
 
@@ -45,7 +47,6 @@ class DownloadTracker(metaclass=SingletonMeta):
             return False
         try:
             from django.apps import apps
-
             return apps.ready
         except Exception:
             return False
@@ -55,56 +56,56 @@ class DownloadTracker(metaclass=SingletonMeta):
             return None
         try:
             from django.apps import apps
-
             return apps.get_model("searchapp", "DownloadHistory")
         except Exception as exc:
             logger.warning("Unable to load Django download history model: %s", exc)
             return None
 
+    def _history_file_path(self) -> str:
+        from VibraVid.utils import config_manager
+        return os.path.join(config_manager.base_path, ".cache", "history.json")
+
     def _load_persisted_history(self) -> None:
-        if self._history_loaded:
+        if self._history_loaded or time.monotonic() < self._history_retry_at:
+            return
+        if self._django_enabled() and not self._django_apps_ready():
             return
 
-        if self._django_enabled():
-            if not self._django_apps_ready():
-                return
-
-            model = self._get_history_model()
-            if model is None:
-                return
-
+        payloads = []
+        database_loaded = False
+        model = self._get_history_model()
+        if model is not None:
             try:
                 rows = list(model.objects.order_by("-created_at")[:50])
-                payloads: list[dict[str, Any]] = []
                 for row in reversed(rows):
                     try:
                         payloads.append(json.loads(row.payload))
-                    except Exception as exc:
-                        logger.warning(
-                            "Unable to decode persisted download history entry %s: %s",
-                            getattr(row, "download_id", ""),
-                            exc,
-                        )
-                self.history = payloads
-                self._history_loaded = True
-                return
+                    except (ValueError, TypeError) as exc:
+                        logger.warning("Unable to decode history entry %s: %s", row.download_id, exc)
+                database_loaded = True
             except Exception as exc:
-                logger.warning("Unable to load persisted download history from Django: %s", exc)
-                return
+                self._history_retry_at = time.monotonic() + 30
+                logger.warning("Unable to load SQLite history; using JSON fallback: %s", exc)
 
+        # Include fallback entries even after SQLite recovers, without losing
+        # downloads completed in memory while the database was unavailable.
         try:
-            from VibraVid.utils import config_manager
-
-            path = os.path.join(config_manager.base_path, ".cache", "history.json")
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as fh:
-                    data = json.load(fh)
-                if isinstance(data, list):
-                    self.history = data[-50:]
+            with open(self._history_file_path(), encoding="utf-8") as fh:
+                entries = json.load(fh)
+            if isinstance(entries, list):
+                payloads.extend(item for item in entries if isinstance(item, dict))
+        except FileNotFoundError:
+            pass
         except Exception as exc:
-            logger.warning("Unable to load persisted download history file: %s", exc)
-        finally:
-            self._history_loaded = True
+            logger.warning("Unable to load history JSON fallback: %s", exc)
+
+        payloads.extend(self.history)
+        unique = {}
+        for item in payloads:
+            key = (item.get("id"), item.get("start_time"), item.get("end_time"))
+            unique[key] = item
+        self.history = sorted(unique.values(), key=lambda item: item.get("end_time") or item.get("start_time") or 0)[-50:]
+        self._history_loaded = database_loaded or not self._django_enabled()
 
     def _ensure_persisted_history_loaded(self) -> None:
         if not self._history_loaded:
@@ -112,53 +113,45 @@ class DownloadTracker(metaclass=SingletonMeta):
 
     def _persist_history_entry(self, entry: dict[str, Any]) -> None:
         model = self._get_history_model()
-        persisted_to_model = False
-        if model:
+        if model is not None:
             try:
-                model.objects.create(
-                    download_id=str(entry.get("id") or ""),
-                    payload=json.dumps(entry),
-                )
-                persisted_to_model = True
+                model.objects.create(download_id=str(entry.get("id") or ""), payload=json.dumps(entry))
+                return
             except Exception as exc:
-                logger.warning(
-                    "Unable to persist download history entry %s to Django: %s",
-                    entry.get("id"),
-                    exc,
-                )
-
-        if persisted_to_model:
-            return
+                logger.warning("Unable to save history to SQLite; using JSON fallback: %s", exc)
 
         try:
-            from VibraVid.utils import config_manager
-
-            path = os.path.join(config_manager.base_path, ".cache", "history.json")
+            path = self._history_file_path()
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as fh:
+            # Replace atomically so readers never see a partially written file.
+            temporary_path = path + ".tmp"
+            with open(temporary_path, "w", encoding="utf-8") as fh:
                 json.dump(self.history[-50:], fh, indent=2)
+            os.replace(temporary_path, path)
         except Exception as exc:
-            logger.warning(
-                "Unable to persist download history entry %s to file: %s",
-                entry.get("id"),
-                exc,
-            )
+            logger.warning("Unable to save history JSON fallback: %s", exc)
 
     def start_download(
         self, download_id: str, title: str, site: str, media_type: str = "Film", path: str = None, poster: str = None
     ):
-        self._ensure_persisted_history_loaded()
         hook_context = None
         poster = poster if poster is not None else context_tracker.poster_url
+        callback = context_tracker.is_cancelled_callback
         with self._lock:
+            self._ensure_persisted_history_loaded()
+            cancelled = download_id in self.cancelled_downloads or bool(callback and callback(download_id))
             self.stop_events[download_id] = threading.Event()
+            if cancelled:
+                self.stop_events[download_id].set()
             self.active_processes[download_id] = []
             self.downloads[download_id] = {
                 "id": download_id,
                 "title": title,
+                "season": context_tracker.season,
+                "episode": context_tracker.episode,
                 "site": site,
                 "type": media_type,
-                "status": "starting",
+                "status": "cancelling..." if cancelled else "starting",
                 "path": path,
                 "poster": poster,
                 "progress": 0,
@@ -208,7 +201,7 @@ class DownloadTracker(metaclass=SingletonMeta):
         with self._lock:
             if download_id in self.downloads:
                 dl = self.downloads[download_id]
-                dl["status"] = status or "downloading"
+                dl["status"] = "cancelling..." if download_id in self.cancelled_downloads else status or "downloading"
                 dl["last_update"] = time.time()
 
                 if quality:
@@ -268,44 +261,59 @@ class DownloadTracker(metaclass=SingletonMeta):
                     dl["size"] = task["size"]
                     dl["segments"] = task["segments"]
 
+    def update_metadata(self, download_id: str, *, quality: str = None, language: str = None):
+        """Publish selected stream metadata without adding a progress task."""
+        with self._lock:
+            dl = self.downloads.get(download_id)
+            if dl is not None:
+                if quality:
+                    dl["quality"] = quality
+                if language:
+                    dl["language"] = language
+
     def update_status(self, download_id: str, status: str):
         with self._lock:
             if download_id in self.downloads:
-                self.downloads[download_id]["status"] = status
+                self.downloads[download_id]["status"] = "cancelling..." if download_id in self.cancelled_downloads else status
                 self.downloads[download_id]["last_update"] = time.time()
 
     def request_stop(self, download_id: str):
-        """Signal a download to stop and terminate its processes."""
+        """Latch cancellation for the whole job, including episode transitions."""
         with self._lock:
+            self.cancelled_downloads.add(download_id)
             if download_id in self.stop_events:
                 self.stop_events[download_id].set()
-
             if download_id in self.downloads:
                 self.downloads[download_id]["status"] = "cancelling..."
-
-            # Terminate registered processes
-            if download_id in self.active_processes:
-                for proc in self.active_processes[download_id]:
-                    try:
-                        if hasattr(proc, "terminate"):
-                            proc.terminate()
-                        elif hasattr(proc, "cancel"):
-                            proc.cancel()
-                    except Exception:
-                        pass
+            processes = list(self.active_processes.get(download_id, []))
+        # Process termination can block; never hold the tracker lock while doing it.
+        for proc in processes:
+            try:
+                if hasattr(proc, "terminate"):
+                    proc.terminate()
+                elif hasattr(proc, "cancel"):
+                    proc.cancel()
+            except Exception:
+                pass
 
     def is_stopped(self, download_id: str) -> bool:
-        """Check if a stop has been requested for this download."""
         with self._lock:
             event = self.stop_events.get(download_id)
-            return event.is_set() if event else False
+            return download_id in self.cancelled_downloads or bool(event and event.is_set())
+
+    def clear_stop_request(self, download_id: str) -> None:
+        """Release the cancellation only when the GUI job has fully exited."""
+        with self._lock:
+            self.cancelled_downloads.discard(download_id)
 
     def shutdown(self):
         """Shutdown all active downloads and kill their processes."""
         print("Shutting down DownloadTracker, stopping all active downloads...")
         with self._lock:
-            for download_id in list(self.downloads.keys()):
-                self.request_stop(download_id)
+            download_ids = list(self.downloads)
+        for download_id in download_ids:
+            self.request_stop(download_id)
+        with self._lock:
 
             # Kill all registered processes
             for processes in self.active_processes.values():
@@ -357,6 +365,8 @@ class DownloadTracker(metaclass=SingletonMeta):
                     self.history.remove(dl)
                 except ValueError:
                     pass
+            if self._django_enabled() and not self._history_loaded:
+                self._load_persisted_history()
             self.history.append(dl)
 
             hook_context = {
@@ -413,27 +423,24 @@ class DownloadTracker(metaclass=SingletonMeta):
             return list(self.downloads.values())
 
     def get_history(self) -> list[dict[str, Any]]:
-        self._ensure_persisted_history_loaded()
         with self._lock:
+            if self._django_enabled() and not self._history_loaded:
+                self._load_persisted_history()
             return list(reversed(self.history))
 
     def clear_history(self):
         """Clear all download history."""
         with self._lock:
-            self.history.clear()
-        model = self._get_history_model()
-        if model:
-            try:
+            model = self._get_history_model()
+            if self._django_enabled():
+                if model is None:
+                    raise RuntimeError("Download history database is not ready")
                 model.objects.all().delete()
-            except Exception:
-                pass
-        try:
-            from VibraVid.utils import config_manager
-            path = os.path.join(config_manager.base_path, ".cache", "history.json")
+                self._history_loaded = True
+            path = self._history_file_path()
             if os.path.exists(path):
                 os.remove(path)
-        except Exception:
-            pass
+            self.history.clear()
 
 
 class ContextTracker:
@@ -449,6 +456,14 @@ class ContextTracker:
     @download_id.setter
     def download_id(self, value):
         self.local.download_id = value
+
+    @property
+    def video_quality(self):
+        return getattr(self.local, "video_quality", None)
+
+    @video_quality.setter
+    def video_quality(self, value):
+        self.local.video_quality = value
 
     @property
     def media_type(self):

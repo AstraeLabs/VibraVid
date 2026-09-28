@@ -531,7 +531,7 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
   background: none; color: inherit; cursor: pointer;
 }
 
-.cn-tile.is-firing { animation: cn-flash .5s ease; pointer-events: none; }
+.cn-tile.is-firing { animation: cn-flash .5s ease; }
 @keyframes cn-flash { 0%, 100% { opacity: 1; } 40% { opacity: .45; } }
 
 /* ═══ TAB DELLE STAGIONI═══════════ */
@@ -762,3 +762,20 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
   .cn-slab { gap: 22px; }
   .cn-tray { left: 14px; right: 14px; bottom: 14px; }
 }
+
+/* Manual download quality and watchlist targets share a compact picker. */
+
+.cn-quality-picker { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.cn-quality-picker label { display:flex; align-items:center; gap:8px; }
+.cn-quality-select { background:var(--cn-surf); color:#fff; border:1px solid var(--cn-edge); border-radius:6px; padding:9px; max-width:100%; }
+.cn-quality-result { flex-basis:100%; font-size:12px; color:var(--cn-mute); }
+.cn-pick .cn-quality-picker { padding:8px; background:var(--cn-deep); border-radius:8px; }
+.cn-pick .cn-quality-select { width:100%; }
+.cn-pick .cn-quality-picker label { flex-wrap:wrap; width:100%; }
+.cn-series-actions { align-items:center; }
+.cn-series-actions > form, .cn-season-hd > form { display:flex !important; margin:0; }
+.cn-series-actions .cn-cta { min-height:46px; }
+.cn-season-hd { align-items:center; }
+.cn-season-hd button { min-height:38px; display:inline-flex; align-items:center; justify-content:center; }
+.cn-watch-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 520px; }
+.cn-watch-settings .cn-quality-result { flex-basis: 100%; font-size: 12px; }

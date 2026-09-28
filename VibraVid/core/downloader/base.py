@@ -112,6 +112,16 @@ class BaseDownloader:
         if not output_path:
             output_path = f"download.{EXTENSION_OUTPUT}"
 
+        if context_tracker.video_quality:
+            quality = context_tracker.video_quality
+            output_path = str(output_path)
+            if "%(quality)" in output_path:
+                # Resolve the configured slot early so temporary files and
+                # existing-file checks remain specific to the chosen quality.
+                output_path = output_path.replace("%(quality)", quality)
+            elif not re.search(rf"(?<!\w){re.escape(quality)}(?!\w)", os.path.basename(output_path)):
+                stem, extension = os.path.splitext(output_path)
+                output_path = f"{stem} [{quality}]{extension}"
         self.output_path = os_manager.get_sanitize_path(output_path) if sanitize_path else str(output_path)
         if not self.output_path.endswith(f".{EXTENSION_OUTPUT}"):
             self.output_path += f".{EXTENSION_OUTPUT}"
@@ -333,11 +343,11 @@ class BaseDownloader:
             enqueue_down_from_context(manifest_url, self.output_path)
             return DownloadResult(self.output_path, False, None)
 
-        if is_cached():
+        if not context_tracker.video_quality and is_cached():
             console.print("[dim]Skipping — already in cache.")
             return DownloadResult(self.output_path, False, None)
 
-        if try_fetch(self.output_path):
+        if not context_tracker.video_quality and try_fetch(self.output_path):
             return DownloadResult(self.output_path, False, None)
 
         os_manager.create_path(self.output_dir)

@@ -73,7 +73,8 @@ def _release_download_slot() -> None:
 
 def _add_scheduled_download(
     download_id: str, title: str, site: str, media_type: str = "Film", season: str = None, episodes: str = None,
-    poster: str = None,
+    poster: str = None, planned_episodes: list[int] | None = None,
+    stop_scope: str = "download", batch_id: str | None = None,
 ) -> None:
     with scheduled_downloads_lock:
         scheduled_downloads[download_id] = {
@@ -84,6 +85,9 @@ def _add_scheduled_download(
             "season": season,
             "episodes": episodes,
             "poster": poster,
+            "planned_episodes": planned_episodes,
+            "stop_scope": stop_scope,
+            "batch_id": batch_id,
             "scheduled_at": time.time(),
         }
         cancelled_scheduled_downloads.discard(download_id)
@@ -124,11 +128,30 @@ def _same_series(title: str, series_base: str) -> bool:
 
 def _get_scheduled_downloads(exclude_ids: set | None = None) -> list[dict[str, Any]]:
     exclude_ids = exclude_ids or set()
+    progress = {}
+    for item in download_tracker.get_history() + download_tracker.get_active_downloads():
+        episode = item.get("episode")
+        if isinstance(episode, int):
+            progress[item.get("id")] = max(progress.get(item.get("id"), 0), episode)
     with scheduled_downloads_lock:
-        return sorted(
-            (item for item in scheduled_downloads.values() if item.get("id") not in exclude_ids),
-            key=lambda item: item.get("scheduled_at", 0),
-        )
+        # Keep progress independent from the user-clearable, bounded history.
+        for item in scheduled_downloads.values():
+            item["last_episode"] = max(item.get("last_episode", 0), progress.get(item["id"], 0))
+        scheduled = sorted((dict(item) for item in scheduled_downloads.values()),
+                           key=lambda item: item.get("scheduled_at", 0))
+    rows = []
+    for item in scheduled:
+        planned = item.pop("planned_episodes", None)
+        if planned:
+            for episode in planned:
+                if episode <= item.get("last_episode", 0):
+                    continue
+                rows.append({**item, "id": f"{item['id']}:E{episode}",
+                             "parent_id": item["id"], "episodes": str(episode),
+                             "title": f"{_extract_series_base_title(item['title'])} - S{item['season']} E{episode}"})
+        elif item["id"] not in exclude_ids:
+            rows.append(item)
+    return rows
 
 
 def _enrich_active_downloads_with_series(active_downloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -140,6 +163,10 @@ def _enrich_active_downloads_with_series(active_downloads: list[dict[str, Any]])
     for item in active_downloads:
         row = dict(item)
         media_type = str(row.get("type") or "").lower()
+        scheduled_info = scheduled_by_id.get(row.get("id"), {})
+        row["stop_scope"] = scheduled_info.get("stop_scope") or (
+            "episode" if media_type in {"serie", "tv", "series", "anime"} else "download"
+        )
 
         if media_type in {"serie", "tv", "series", "anime"}:
             series_name = ""
@@ -165,19 +192,12 @@ def _enrich_active_downloads_with_series(active_downloads: list[dict[str, Any]])
 
 
 def _prune_scheduled_downloads(_active_downloads: list[dict[str, Any]], history: list[dict[str, Any]]) -> None:
-    """Remove scheduled downloads that are older than 6 hours."""
-    now = time.time()
-    max_age_seconds = 6 * 60 * 60
+    """Jobs are removed by their worker, never by age or episode history.
 
-    with scheduled_downloads_lock:
-        to_remove = [
-            download_id for download_id, item in scheduled_downloads.items()
-            if now - float(item.get("scheduled_at", now)) > max_age_seconds
-        ]
-
-        for download_id in to_remove:
-            scheduled_downloads.pop(download_id, None)
-            cancelled_scheduled_downloads.discard(download_id)
+    A queued season can legitimately wait more than six hours, and all its
+    episodes share the job ID. Neither condition means the job has finished.
+    """
+    return
 
 
 def shutdown_downloads():

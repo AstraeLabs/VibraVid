@@ -11,6 +11,7 @@ urlpatterns = [
     path("search/", views.search, name="search"),
     path("api/resolve-tmdb-posters/", views.resolve_tmdb_posters, name="resolve_tmdb_posters"),
     path("download/", views.start_download, name="start_download"),
+    path("api/available-qualities/", views.available_qualities, name="available_qualities"),
     path("series-metadata/", views.series_metadata, name="series_metadata"),
     path("series-detail/", views.series_detail, name="series_detail"),
 
@@ -20,6 +21,7 @@ urlpatterns = [
     path("api/downloads-summary/", views.get_downloads_summary, name="get_downloads_summary"),
     path("api/kill-download/", views.kill_download, name="kill_download"),
     path("api/kill-and-clear-queue/", views.kill_and_clear_queue, name="kill_and_clear_queue"),
+    path("api/stop-all-downloads/", views.stop_all_downloads, name="stop_all_downloads"),
     path("api/clear-history/", views.clear_download_history, name="clear_download_history"),
 
     # Watchlist

@@ -120,8 +120,54 @@ def start_download(request: HttpRequest) -> HttpResponse:
     if media_type == "Serie" and season and not episode:
         messages.error(request, "Select at least one episode before downloading!")
 
+    quality = form.cleaned_data.get("quality") or None
+
     # Run download
-    _run_download_in_thread(source_alias, item_payload, season, episode, media_type, audio_format=audio_format)
+    _run_download_in_thread(source_alias, item_payload, season, episode, media_type, audio_format=audio_format, quality=quality)
     return redirect("download_dashboard")
 
-__all__ = ['series_metadata', 'start_download']
+@require_http_methods(["POST"])
+def available_qualities(request: HttpRequest) -> JsonResponse:
+    """Inspect one exact provider video, without starting a download."""
+    try:
+        data = json.loads(request.body)
+        payload = data.get("item_payload") or {}
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        item = Entries(**{k: v for k, v in payload.items() if k in Entries.__dataclass_fields__})
+        api = get_api(data.get("source_alias") or "")
+        season = episode = None
+        description = item.name
+        if not item.is_movie:
+            import re
+            seasons = api.get_series_metadata(item) or []
+            season_match = re.match(r"\d+", str(data.get("season") or ""))
+            season = int(season_match.group()) if season_match else (seasons[0].number if seasons else None)
+            selected = next((s for s in seasons if int(s.number) == season), None)
+            episode_match = re.match(r"\d+", str(data.get("episode") or ""))
+            episode = int(episode_match.group()) if episode_match else (
+                selected.episodes[0].number if selected and selected.episodes else None
+            )
+            if season is None or episode is None:
+                return JsonResponse({"qualities": [], "message": "No episode is available yet."})
+            description += f" S{season} E{episode}"
+        from VibraVid.core.utils.quality import normalize_quality
+        qualities = set()
+        for candidate in api.get_available_qualities(item, season, episode):
+            try:
+                quality = normalize_quality(candidate)
+            except ValueError:
+                continue
+            if quality and quality != "360p":
+                qualities.add(quality)
+        return JsonResponse({"qualities": sorted(qualities, key=lambda q: int(q[:-1]), reverse=True),
+                             "sample": description,
+                             "message": "For batches, availability is checked again for each episode." if season is not None else ""})
+    except NotImplementedError as exc:
+        return JsonResponse({"qualities": [], "supported": False, "message": str(exc)})
+    except Exception:
+        logger.exception("Unable to discover provider qualities")
+        return JsonResponse({"qualities": [], "message": "Unable to check qualities right now. You can use config or retry."}, status=502)
+
+
+__all__ = ['series_metadata', 'start_download', 'available_qualities']

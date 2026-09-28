@@ -46,6 +46,10 @@ def _watchlist_tiles(limit: int | None = None) -> list[dict]:
                 "season_numbers": list(range(1, item.num_seasons + 1)),
                 "auto": item.auto_enabled,
                 "auto_season": item.auto_season,
+                "auto_all_seasons": item.auto_all_seasons,
+                "quality": item.preferred_quality,
+                "auto_status": item.auto_status,
+                "item_payload": item.item_payload,
                 "last_checked": item.auto_last_checked_at or item.last_checked_at,
                 "p1": p1, "p2": p2,
             })
@@ -88,9 +92,14 @@ def cinema_watchlist(request: HttpRequest) -> HttpResponse:
 
     items = _watchlist_tiles()
     interval = _get_interval_seconds()
+    targets = {"1080p", "720p", "480p"}
+    targets.update(i["quality"] for i in items
+                   if i["quality"].endswith("p") and i["quality"][:-1].isdigit()
+                   and 0 < int(i["quality"][:-1]) <= 1080 and i["quality"] != "360p")
 
     return render(request, "searchapp/cinema_watchlist.html", {
         "nav_active": "watchlist",
+        "quality_targets": sorted(targets, key=lambda q: int(q[:-1]), reverse=True),
         "items": items,
         "new_count": sum(1 for i in items if i["is_new"]),
         "auto_count": sum(1 for i in items if i["auto"]),

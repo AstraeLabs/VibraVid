@@ -104,7 +104,11 @@
 							<div class="cn-pmeta">{{ result.source_alias|provider }}</div>
 						</div>
 
-						<div class="cn-pick"><div class="cn-pick-row">
+						<div class="cn-pick">
+                            {% if result.media_kind == "movie" or result.media_kind == "series" %}
+                            {% include "searchapp/quality_picker.html" %}
+                            {% endif %}
+                            <div class="cn-pick-row">
 							{% comment %}
 								`media_kind` e non `is_song`: il dizionario dei risultati
 								non ha mai avuto quella chiave (vedi
@@ -234,11 +238,12 @@
 		var form = tile.dataset.fire && document.getElementById(tile.dataset.fire);
 		if (!form) return;
 		tile.classList.add("is-firing");
-		form.submit();
+		tile.addEventListener("animationend", function () { tile.classList.remove("is-firing"); }, {once: true});
+		form.requestSubmit();
 	}
 
 	grid.addEventListener("click", function (e) {
-		if (e.target.closest("button, a, form, select, label")) return;
+		if (e.target.closest("button, a, form, select, label, .cn-quality-picker")) return;
 		var tile = e.target.closest(".cn-tile");
 		if (tile) activate(tile);
 	});
