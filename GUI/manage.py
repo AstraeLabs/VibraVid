@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
-import sys
 import subprocess
+import sys
 
 # Fix PYTHONPATH
 current_dir = os.path.dirname(os.path.abspath(__file__))
