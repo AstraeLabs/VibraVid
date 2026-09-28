@@ -129,27 +129,33 @@ file — including hybrid **Dolby Vision + HDR10** output (the DV RPU is injecte
 HDR10 base via `mkvmerge`/`dovi_tool`).
 
 When sources are full manifests (DASH MPD, HLS master) the tracks are auto-selected from
-the advertised codec/resolution/range.
+the advertised codec/resolution/range — including the Dolby Vision base/companion pairing
+when `custom_filters={"video": "hybrid"}` is set (see [Companion Dolby Vision](configuration.md)),
+across any number of sources, with no per-source tagging needed.
 
 ```python
 from VibraVid.core.downloader import Generic_Downloader
 
 sources = [
-    {"role": "video:hdr10", "url": "<hdr10 m3u8>", "key": "<kid:key>"},
-    {"role": "video:dv", "url": "<dv m3u8>", "key": "<kid:key>"},
+    {"url": "<hdr10+dv m3u8>", "key": "<kid:key>"},
     {"role": "audio", "language": "en", "url": "<audio m3u8>", "key": "<kid:key>"},
     {"role": "subtitle", "language": "en", "url": "<sub url>"},
 ]
 
-Generic_Downloader(sources=sources, output_path="./Video/out.mkv").start()
+Generic_Downloader(
+    sources=sources,
+    output_path="./Video/out.mkv",
+    custom_filters={"video": "hybrid"},
+).start()
 ```
 
-Supported `role` values: `video`, `video:dv`, `video:hdr10` (or any range tag),
-`audio`, `subtitle`. A `video:dv` source is automatically routed as the Dolby Vision
-companion for hybrid muxing. Optional per-source fields: `language`, `name`, `label`,
-`headers`, `cookies`, `protocol`. Limit a test run with `max_segments=N` or
-`max_time="HH:MM:SS"`, or grab a specific clip with a range: `max_segments="10-50"`
-or `max_time="00:01:00-00:05:00"`.
+Supported `role` values: `video`, `audio`, `subtitle` (a range tag like `video:hdr10`
+is accepted but is purely a cosmetic label). Roles are only needed for attribute-less
+rendition manifests (e.g. Apple TV+, where every stream parses with no codec/resolution
+metadata) to tell sources apart — a normal manifest doesn't need any. Optional per-source
+fields: `language`, `name`, `label`, `headers`, `cookies`, `protocol`. Limit a test run
+with `max_segments=N` or `max_time="HH:MM:SS"`, or grab a specific clip with a range:
+`max_segments="10-50"` or `max_time="00:01:00-00:05:00"`.
 
 ## Related Projects
 

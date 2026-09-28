@@ -31,9 +31,7 @@ from VibraVid.core.utils.selector import (
     FilterSpec,
     StreamSelector,
     StreamSelectorFormatter,
-    _height,
     _matches_res,
-    strip_dv_suffix,
 )
 from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.core.velora.util._stream_helpers import join_interruptible
@@ -159,7 +157,6 @@ class Generic_Downloader(BaseDownloader):
         context_tracker.poster_url = self.poster_url
         self._active: list[tuple[MediaDownloader, dict[str, Any]]] = []
         self._dv_stream = None
-        self._dv_isolated = False
         self._no_match = False
         self.other_tracks: list = []
         self._direct_sources: list[dict[str, Any]] = []
@@ -221,6 +218,7 @@ class Generic_Downloader(BaseDownloader):
                 manifest_protocol=protocol,
             )
 
+            md.custom_filters = {"dv_auto": False}
             md.parse_stream(show_table=False)
             for s in md.streams:
                 s._src_label = label
@@ -598,17 +596,20 @@ class Generic_Downloader(BaseDownloader):
     ) -> tuple[list, list[tuple[MediaDownloader, dict[str, Any]]]]:
         """Apply per-source explicit ``role`` tags and split them off from auto-selection.
 
-            {"url": ..., "key": ..., "role": "video:dv"}   # Dolby Vision video
-            {"url": ..., "key": ..., "role": "video:hdr10"}
+            {"url": ..., "key": ..., "role": "video"}   # attribute-less video manifest
             {"url": ..., "key": ..., "role": "audio", "language": "en"}
             {"url": ..., "key": ..., "role": "subtitle", "language": "en"}
+
+        A role tag other than a bare kind (e.g. "video:hdr10") is just a
+        cosmetic ``video_range`` label -- Dolby Vision routing is handled by
+        ``select_video="hybrid"`` across the whole pool, not by per-source
+        roles (see ``_select``).
 
         Returns ``(role_streams, auto_parsed)`` where ``auto_parsed`` are the sources left to the normal pool/dedup/StreamSelector path.
         """
         role_streams: list = []
         auto_parsed: list[tuple[MediaDownloader, dict[str, Any]]] = []
-        vf_stripped, _ = strip_dv_suffix(video_filter or "")
-        video_res = FilterSpec.parse(vf_stripped, "video").res if vf_stripped else None
+        video_res = FilterSpec.parse(video_filter, "video").res if video_filter else None
 
         for md, src in parsed:
             role = str(src.get("role") or src.get("type") or "").strip().lower()
@@ -633,19 +634,14 @@ class Generic_Downloader(BaseDownloader):
                 else:
                     logger.warning(f"Source role '{role}': manifest has no {expected_type} stream, using full pool as fallback")
 
-            # "video:dv" is a compatibility companion track
-            if expected_type == "video" and tag == "dv":
-                stream = min(cands, key=lambda s: getattr(s, "bitrate", 0) or 0)
-            else:
-                # Other video roles (e.g. "video:hdr10", the base/primary track)
-                if expected_type == "video" and video_res:
-                    res_cands = [s for s in cands if _matches_res(s, video_res)]
-                    if res_cands:
-                        cands = res_cands
-                    else:
-                        logger.info(f"Source role '{role}': no stream matches res={video_res}, using full pool")
+            if expected_type == "video" and video_res:
+                res_cands = [s for s in cands if _matches_res(s, video_res)]
+                if res_cands:
+                    cands = res_cands
+                else:
+                    logger.info(f"Source role '{role}': no stream matches res={video_res}, using full pool")
 
-                stream = max(cands, key=lambda s: getattr(s, "bitrate", 0) or 0)
+            stream = max(cands, key=lambda s: getattr(s, "bitrate", 0) or 0)
 
             # Only `stream` itself, plus any other stream of the SAME type
             # (to avoid a second, competing auto-pick of e.g. a second video
@@ -662,13 +658,8 @@ class Generic_Downloader(BaseDownloader):
 
             if kind in ("video", "vid"):
                 stream.type = "video"
-                if tag == "dv":
-                    stream.video_range = "DV"
-                    stream.resolution = stream.resolution or "DV"
-                    self._dv_stream = stream
-                    self._dv_isolated = True
-                elif tag:
-                    stream.video_range = tag.upper()  # HDR10, HDR10PLUS, SDR, ...
+                if tag:
+                    stream.video_range = tag.upper()  # HDR10, DV, SDR, ... (cosmetic label only)
 
             elif kind in ("audio", "aud"):
                 stream.type = "audio"
@@ -746,35 +737,16 @@ class Generic_Downloader(BaseDownloader):
         for s in role_streams:
             s.selected = True
 
-        # Check for the &dv companion tag in the video filter. If present, we run a first pass of selection on the non-DV pool with the main video filter.
-        v_main, dv_quality = strip_dv_suffix(v)
-        if dv_quality is not None:
-            v_main = v_main or "best"
-            non_dv_pool = [s for s in pool if not _is_dv(s)]
-            selector = self._build_selector(v_main, a, sub)
-            selector.apply(non_dv_pool)
-            self._no_match = selector.no_match
+        selector = self._build_selector(v, a, sub)
+        selector.apply(pool)
+        self._no_match = selector.no_match
 
-            dv_videos = [s for s in pool if _is_dv(s)]
-            if dv_videos:
-                primary_video = next((s for s in non_dv_pool if getattr(s, "type", "") == "video" and s.selected), None)
-                if primary_video is not None:
-                    target_res = str(_height(primary_video)) if _height(primary_video) else None
-                else:
-                    target_res = FilterSpec.parse(v_main, "video").res
-                selector._mark_dv_companion(dv_videos, dv_quality, target_res)
-        else:
-            selector = self._build_selector(v, a, sub)
-            selector.apply(pool)
-            self._no_match = selector.no_match
-
-        # If a DV companion was selected, keep a reference to it for special handling in the download and muxing phases.
-        # An explicit-role DV (self._dv_stream already set) takes precedence over &dv auto-detection.
-        if self._dv_stream is None:
-            self._dv_stream = next((s for s in pool if getattr(s, "dv_companion", False)), None)
-            if self._dv_stream is not None:
-                self._dv_stream.selected = True
-                logger.info(f"&dv: companion selected -> {self._dv_stream}")
+        # If a DV companion was selected (select_video="hybrid" or CODEC.dv_auto),
+        # keep a reference to it for special handling in the download/muxing phases.
+        self._dv_stream = next((s for s in pool if getattr(s, "dv_companion", False)), None)
+        if self._dv_stream is not None:
+            self._dv_stream.selected = True
+            logger.info(f"hybrid: companion selected -> {self._dv_stream}")
 
         return role_streams + [s for s in pool if s.selected]
 
@@ -793,17 +765,13 @@ class Generic_Downloader(BaseDownloader):
             strict_no_match=context_tracker.skip_no_match,
             dv_auto=bool(f.get("dv_auto", config_manager.config.get_bool("CODEC", "dv_auto"))),
             mux_dtsx=bool(f.get("mux_dtsx", config_manager.config.get_bool("CODEC", "mux_dtsx"))),
+            drop_clear_av=bool(f.get("drop_clear_av")),
+            dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
         )
 
     def _setup_dv_companion(self) -> None:
         """Re download the manifest of the DV companion in a dedicated MediaDownloader, to isolate it from the main video stream and avoid filename collisions on disk (both have the same "{filename}.{ext}")."""
         if self._dv_stream is None:
-            return
-
-        # An explicit-role DV source already lives in its own MediaDownloader
-        # (own out_dir), so there is no filename collision and no re-parse needed.
-        if self._dv_isolated:
-            logger.info("&dv: DV companion came from an explicit role source — already isolated")
             return
 
         owner = next(((md, src) for md, src in self._active if self._dv_stream in md.streams), None)
@@ -836,7 +804,7 @@ class Generic_Downloader(BaseDownloader):
         target._src_label = "dv"
         self._dv_stream = target
         self._active.append((dv_md, source))
-        logger.info(f"&dv: companion isolated in dedicated downloader -> {target}")
+        logger.info(f"hybrid: companion isolated in dedicated downloader -> {target}")
 
     def _preresolve_manifest_keys(self) -> None:
         """Probe every manifest source's selected streams for KIDs, then resolve+print all of them as ONE consolidated key block, instead of each concurrent thread probing and printing its own."""

@@ -1,18 +1,22 @@
-# 22.12.25
+# 22.08.26
+# By @sync-luca98
 
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 
 from rich.console import Console
 from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.drm.system import DRMType
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, os_manager, start_message
+from VibraVid.utils.http_client import create_client, get_headers
 
 from .client import get_client
 from .scrapper import GetLiveInfo, GetSerieInfo, GetStandaloneInfo
@@ -21,6 +25,11 @@ msg = Prompt()
 console = Console()
 logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
+DISPLAY_SELECTED_ONLY = True
+HBOMAX_CUSTOM_FILTERS = {
+    "drop_clear_av": True, 
+    "dv_top_tier_tolerance": 0.02
+}
 
 
 def _drm_preference(playback_info: dict) -> str:
@@ -30,21 +39,60 @@ def _drm_preference(playback_info: dict) -> str:
 
 def _create_dash_downloader(**kwargs) -> DASH_Downloader:
     """Create a DASH downloader using the global media-selection configuration."""
-    downloader = DASH_Downloader(**kwargs)
-    downloader.custom_filters = {
-        "video": "best",
-        "audio": config_manager.config.get("DOWNLOAD", "select_audio"),
-        "subtitle": config_manager.config.get("DOWNLOAD", "select_subtitle"),
-        "prefer_drm": True,
-        "require_drm": True,
-        "prefer_h265": True,
-        "minimum_video_height": 720,
-    }
-    downloader.display_min_video_height = 720
-    downloader.display_audio_codecs = {"eac3", "ec-3"}
-    downloader.display_only_drm_video = True
-    downloader.display_only_drm_audio = True
+    downloader = DASH_Downloader(display_selected_only=DISPLAY_SELECTED_ONLY, **kwargs)
+    downloader.custom_filters = HBOMAX_CUSTOM_FILTERS
     return downloader
+
+
+def _fetch_manifest(manifest_url: str, headers: dict) -> str:
+    """Download the raw MPD, using the same headers as the DASH downloader."""
+    with create_client(headers=headers) as client:
+        response = client.get(manifest_url)
+    response.raise_for_status()
+    return response.text
+
+
+def _save_mpd_enabled() -> bool:
+    """Opt-in diagnostic (--save-mpd): persist the raw MPD to disk."""
+    return bool((context_tracker.site_options or {}).get("save_mpd"))
+
+
+def _save_mpd(label: str, raw: str) -> None:
+    """Write the raw MPD next to a short summary, for offline inspection."""
+    try:
+        out_dir = Path(config_manager.base_path or ".") / ".cache" / "logs" / "hbomax_mpd"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        tag = f"{stamp}_{label}"
+        (out_dir / f"{tag}_raw.mpd").write_text(raw, encoding="utf-8")
+        periods = raw.count("<Period")
+        summary = f"raw={len(raw)} chars  periods={periods}  adaptation_sets={raw.count('<AdaptationSet')}\n"
+        (out_dir / f"{tag}_summary.txt").write_text(summary, encoding="utf-8")
+        logger.info(f"HBO Max: MPD salvato su disco in {out_dir} ({summary.strip()})")
+        console.print(f"[dim]HBO Max: MPD salvato in {out_dir}[/dim]")
+    except Exception as exc:
+        logger.warning(f"HBO Max: salvataggio MPD fallito: {exc}")
+
+
+def _manifest_with_refresh(manifest_url: str, headers: dict) -> tuple[str, object]:
+    """Fetch the raw manifest, plus a refresh callback that re-fetches it."""
+    def _refresh() -> str:
+        fresh = _fetch_manifest(manifest_url, headers)
+        if _save_mpd_enabled():
+            _save_mpd("refresh", fresh)
+        return fresh
+
+    return _fetch_manifest(manifest_url, headers), _refresh
+
+
+def _manifest_kwargs(playback_info: dict) -> dict:
+    """Manifest arguments for `DASH_Downloader`."""
+    manifest, refresh = _manifest_with_refresh(playback_info["manifest"], get_headers())
+    return {
+        "mpd_url": playback_info["manifest"],
+        "mpd_content": manifest,
+        "manifest_refresh_fn": refresh,
+    }
 
 
 def _compute_event_duration(scrape_content) -> float | None:
@@ -94,7 +142,7 @@ def download_live(select_title: Entries):
         console.print(f"[cyan]Scheduled event duration: [green]{h:02d}:{m:02d}[/green] — recording will stop at the scheduled end")
 
     return _create_dash_downloader(
-        mpd_url=playback_info["manifest"],
+        **_manifest_kwargs(playback_info),
         license_url=playback_info["license"],
         license_headers=playback_info.get("license_headers", {}),
         output_path=os.path.join(live_path, live_name),
@@ -129,7 +177,7 @@ def download_film(select_title: Entries):
     playback_info = client.get_playback_info(edit_id)
 
     return _create_dash_downloader(
-        mpd_url=playback_info["manifest"],
+        **_manifest_kwargs(playback_info),
         license_url=playback_info["license"],
         license_headers=playback_info.get("license_headers", {}),
         output_path=os.path.join(movie_path, movie_name),
@@ -160,7 +208,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     playback_info = client.get_playback_info(obj_episode.id)
 
     return _create_dash_downloader(
-        mpd_url=playback_info["manifest"],
+        **_manifest_kwargs(playback_info),
         license_url=playback_info["license"],
         license_headers=playback_info.get("license_headers", {}),
         output_path=os.path.join(episode_path, episode_name),

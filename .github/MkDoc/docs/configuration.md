@@ -297,6 +297,7 @@ Use `select_video`, `select_audio`, and `select_subtitle` to control which track
 | Value | Description |
 |-------|-------------|
 | `"best"` | Best available resolution |
+| `"hybrid"` | Best HDR (non-DV) base + worst Dolby Vision companion |
 | `"worst"` | Worst available resolution |
 | `"1080"` | Exact height (falls back to worst if not found) |
 | `"1080,H265"` | Height + codec constraint |
@@ -341,19 +342,6 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 | `"ita_forced\|eng_cc"` | Multiple languages with flags |
 | `"false"` | Skip subtitles |
 
-**Companion Dolby Vision (`select_video` only):**
-
-Add `&dv=<quality>` to the video filter to also download a Dolby Vision companion alongside the main (non-DV) video. `<quality>` is `best`/`worst` (default `worst`) or an explicit height override (e.g. `&dv=720`):
-
-| Value | Description |
-|-------|-------------|
-| `"best&dv"` | Best non-DV video + DV companion at worst quality |
-| `"1080&dv=best"` | 1080p main video + DV companion at best quality, matched to 1080p when available |
-
-When `<quality>` is `best`/`worst`, the companion is picked from DV streams at the **same resolution** as the main video (falling back to the nearest available resolution if none matches exactly). An explicit height override (`&dv=720`) bypasses this matching and always targets that height directly.
-
-The DV track is muxed as an additional video track via mkvmerge.
-
 ## CODEC
 
 ```json
@@ -367,7 +355,7 @@ The DV track is muxed as an additional video track via mkvmerge.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `dv_auto` | `true` | Automatically pair a Dolby Vision companion with the main video when the title ships a DV variant, even without an explicit `&dv` in `select_video` (see [Companion Dolby Vision](#stream-selection-filters) above). Set to `false` to only pair a companion when `&dv` is explicitly requested |
+| `dv_auto` | `true` | Automatically pair a Dolby Vision companion with the main video (at the cheapest available quality) when `select_video` picks a non-DV video and the title also ships a DV variant, even without `select_video="hybrid"`. Set to `false` to only pair a companion when `select_video="hybrid"` is explicitly requested |
 | `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio tracks instead of dropping them at selection time. ffmpeg cannot demux DTS:X, so this requires mkvmerge to be installed |
 
 ## PROCESS (Post-Processing)

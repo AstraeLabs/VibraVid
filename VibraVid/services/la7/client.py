@@ -1,3 +1,6 @@
+# 22.08.26
+# By @sync-luca98
+
 import json
 import re
 from urllib.parse import urljoin

@@ -186,7 +186,6 @@ def run_with_progress(
 
     stderr_lines: list[str] = []
     stdout_lines: list[str] = []
-    logger.info(f"Starting subprocess for {label}: {' '.join(cmd)}")
     try:
         process = subprocess.Popen(
             cmd,

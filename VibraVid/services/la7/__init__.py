@@ -1,3 +1,6 @@
+# 22.08.26
+# By @sync-luca98
+
 import re
 import sys
 import unicodedata

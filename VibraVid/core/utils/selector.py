@@ -11,7 +11,6 @@ from VibraVid.core.utils.language import resolve_iso639_1, resolve_iso639_2, res
 logger = logging.getLogger(__name__)
 
 _RES_TOKEN_RE = re.compile(r"^(\d+)[pP]?$")
-_DV_SUFFIX_RE = re.compile(r"&dv(?:=([^&]*))?", re.IGNORECASE)
 _AUDIO_SLOT_TOKEN_RE = re.compile(r"^(\d+)([A-Za-z][A-Za-z_-]*)$")
 _AUDIO_SLOT_RESERVED = {"best", "worst", "all", "false", "default", "non-default"}
 NON_MUXABLE_AUDIO_CODECS = frozenset({"dtsx"})
@@ -36,16 +35,6 @@ def split_audio_slots(raw: str) -> dict[int, str] | None:
         slots.setdefault(slot_num, []).append(lang)
 
     return {num: "|".join(langs) for num, langs in slots.items()}
-
-
-def strip_dv_suffix(video_filter: str) -> tuple[str, str | None]:
-    """Strip a trailing '&dv' / '&dv=<quality>' companion tag from a video filter string."""
-    vf = video_filter or ""
-    m = _DV_SUFFIX_RE.search(vf)
-    if not m:
-        return vf.strip(), None
-    quality = (m.group(1) or "worst").strip() or "worst"
-    return (vf[: m.start()] + vf[m.end() :]).strip(), quality
 
 
 def _height(s) -> int:
@@ -116,7 +105,7 @@ def _native_dv_codec(s) -> str:
             return token
 
     codecs = (getattr(s, "codecs", "") or "").lower().strip()
-    if codecs.startswith(DV_CODEC_PREFIXES) and codecs.split(".")[1:2] == ["08"]:
+    if codecs.startswith(DV_CODEC_PREFIXES) and codecs.split(".")[1:2] in (["05"], ["08"]):
         return codecs.split(",")[0]
 
     return ""
@@ -785,9 +774,12 @@ class StreamSelector:
         strict_no_match: bool = False,
         dv_auto: bool = True,
         mux_dtsx: bool = False,
+        drop_clear_av: bool = False,
+        dv_top_tier_tolerance: float | None = None,
     ):
         raw_vf = _normalize_filter_value(video_filter, "best").strip()
-        self._vf, self._dv_quality = strip_dv_suffix(raw_vf)  # select_video in config.json
+        self._hybrid = raw_vf.lower() == "hybrid"  # select_video in config.json
+        self._vf = "best" if self._hybrid else raw_vf
         self._af = _normalize_filter_value(audio_filter, "best").strip()
         self._sf = _normalize_filter_value(subtitle_filter, "all").strip()
         self._formatter = formatter or StreamSelectorFormatter()
@@ -799,10 +791,15 @@ class StreamSelector:
         self._strict_no_match = strict_no_match
         self._dv_auto = dv_auto
         self._mux_dtsx = mux_dtsx
+        self._drop_clear_av = drop_clear_av
+        self._dv_top_tier_tolerance = dv_top_tier_tolerance
         self.no_match = False
 
     def apply(self, streams: list) -> tuple[str, str, str]:
         """Mark stream.selected and return (sv, sa, ss) formatter strings."""
+        if self._drop_clear_av:
+            streams = self._strip_unencrypted_av(streams)
+
         muxable, dropped, kept_dtsx = [], 0, 0
         for s in streams:
             if _is_unmuxable_audio(s, self._mux_dtsx):
@@ -839,21 +836,28 @@ class StreamSelector:
 
         self.no_match = bool(rv.no_match or ra.no_match or rs.no_match)
 
-        if self._dv_quality is not None or self._dv_auto:
+        if self._hybrid:
             videos = [s for s in muxable if getattr(s, "type", "") == "video"]
-            target_res = rv.matched_res or pv.res
             native_dv = next(
                 (_native_dv_codec(s) for s in videos if getattr(s, "selected", False) and _native_dv_codec(s)),
                 "",
             )
-            if self._dv_quality is not None:
-                if native_dv:
-                    logger.warning(
-                        f"StreamSelector &dv: the selected video already carries Dolby Vision ({native_dv}) — "
-                        f"the companion RPU will overwrite the native one"
-                    )
-                self._mark_dv_companion(videos, self._dv_quality, target_res)
-            elif native_dv:
+            if native_dv:
+                logger.info(
+                    f"StreamSelector hybrid: primary already carries Dolby Vision ({native_dv}), "
+                    f"no companion needed"
+                )
+            elif not any(_is_dv(s) and not getattr(s, "selected", False) for s in videos):
+                logger.warning("StreamSelector hybrid: no Dolby Vision stream available, falling back to plain best selection")
+            else:
+                self._mark_dv_companion(videos)
+        elif self._dv_auto:
+            videos = [s for s in muxable if getattr(s, "type", "") == "video"]
+            native_dv = next(
+                (_native_dv_codec(s) for s in videos if getattr(s, "selected", False) and _native_dv_codec(s)),
+                "",
+            )
+            if native_dv:
                 logger.info(
                     f"StreamSelector auto-dv: no companion needed, the selected video already carries "
                     f"Dolby Vision ({native_dv})"
@@ -861,7 +865,7 @@ class StreamSelector:
             else:
                 # Only the RPU is extracted from the companion, so its resolution
                 # and bitrate never reach the output: take the cheapest DV stream.
-                self._mark_dv_companion(videos, "worst", None, auto=True)
+                self._mark_dv_companion(videos)
 
         sv = self._formatter.format(rv)
         sa = self._formatter.format(ra)
@@ -900,10 +904,58 @@ class StreamSelector:
             logger.info(f"StreamSelector: dropped unsupported video variant(s): {', '.join(dropped)}")
         return kept or videos
 
+    @staticmethod
+    def _strip_unencrypted_av(streams: list) -> list:
+        """Drop clear (unencrypted) video/audio streams when at least one is encrypted."""
+        protectable = [s for s in streams if getattr(s, "type", "") in ("video", "audio")]
+        if not protectable or not any(_is_encrypted(s) for s in protectable):
+            return streams
+
+        dropped = [s for s in protectable if not _is_encrypted(s)]
+        if not dropped:
+            return streams
+
+        dropped_ids = {id(s) for s in dropped}
+        kept = [s for s in streams if id(s) not in dropped_ids]
+        labels = [f"{getattr(s, 'type', '?')} {_height(s) or _language(s) or ''}".strip() for s in dropped]
+        logger.info(f"StreamSelector: dropped {len(dropped)} unencrypted audio/video stream(s) (likely ad break(s)): {', '.join(labels)}")
+        return kept
+
+    @staticmethod
+    def _drop_rogue_top_tier(videos: list, tolerance: float) -> list:
+        """Drop the top video tier when its height disagrees with the Dolby Vision one."""
+        dv_heights = {_height(s) for s in videos if _is_dv(s) and _height(s)}
+        heights = {_height(s) for s in videos if _height(s)}
+        if not dv_heights or not heights:
+            return videos
+
+        top = max(heights)
+        dv_top = max(dv_heights)
+        if top == dv_top or abs(top - dv_top) > dv_top * tolerance:
+            return videos
+
+        dropped = [s for s in videos if _height(s) == top and not _is_dv(s)]
+        if not dropped:
+            return videos
+
+        dropped_ids = {id(s) for s in dropped}
+        kept = [s for s in videos if id(s) not in dropped_ids]
+        logger.info(
+            f"StreamSelector: dropped {len(dropped)} top-tier video rendition(s) at {top}p that disagree "
+            f"with the Dolby Vision height(s) {sorted(dv_heights)}"
+        )
+        return kept or videos
+
     def _select_video(self, streams: list, spec: FilterSpec) -> SelectionResult:
         result = SelectionResult(select_best=spec.select_best, extra=dict(spec.extra))
         videos = [s for s in streams if getattr(s, "type", "") == "video"]
         videos = self._drop_unsupported_video(videos)
+        if self._dv_top_tier_tolerance is not None:
+            videos = self._drop_rogue_top_tier(videos, self._dv_top_tier_tolerance)
+        if self._hybrid:
+            non_dv = [s for s in videos if not _is_dv(s)]
+            if non_dv:
+                videos = non_dv  # prefer an HDR base; an all-DV pool falls through and picks best DV directly
         logger.debug(f"Video available: {[f'{_height(s)}p/{_codecs(s)}' for s in videos]} | filter: id={spec.id} res={spec.res} codec={spec.codec} bitrate=[{spec.bitrate_min},{spec.bitrate_max}] all={spec.select_all} drop={spec.drop} default={spec.select_default}")
 
         if spec.drop or not videos:
@@ -1456,60 +1508,26 @@ class StreamSelector:
                 seen[lang] = True
                 s.selected = True
 
-    def _mark_dv_companion(
-        self,
-        video_streams: list,
-        quality: str,
-        target_res: str | None = None,
-        auto: bool = False,
-    ) -> None:
-        """Find the DV companion stream and mark it with dv_companion=True (not selected)."""
+    def _mark_dv_companion(self, video_streams: list, quality: str = "worst") -> None:
+        """Find the cheapest unselected DV stream and mark it with dv_companion=True (RPU donor, not selected)."""
 
-        tag = "StreamSelector auto-dv" if auto else "StreamSelector &dv"
         dv_streams = [s for s in video_streams if _is_dv(s) and not getattr(s, "selected", False)]
         if not dv_streams:
-            if not auto:
-                logger.info(f"{tag}: no unselected DV streams found")
             return
 
-        q = (quality or "worst").strip().lower()
-        is_explicit_height = bool(re.match(r"^\d+$", q))
-
-        pool = dv_streams
-        if target_res and not is_explicit_height:
-            res_pool = [s for s in dv_streams if _matches_res(s, target_res)]
-            if res_pool:
-                pool = res_pool
-            else:
-                nearest = _nearest_by_res(dv_streams, target_res)
-                if nearest:
-                    nearest.dv_companion = True
-                    nearest.dv_companion_quality = quality
-                    logger.info(f"{tag}: no DV stream at {target_res}p, using nearest available ({_height(nearest)}p/{_codecs(nearest)})")
-                    return
-
-        sortable = [s for s in pool if _bitrate(s)]
-        pool = sortable or pool
-
-        if is_explicit_height:
-            target_h = int(q)
-            min_diff = min(abs(_height(s) - target_h) for s in pool)
-            tied = [s for s in pool if abs(_height(s) - target_h) == min_diff]
-            companion = min(tied, key=_bitrate)
-        elif q == "best":
-            companion = max(pool, key=_bitrate)
-        else:
-            companion = min(pool, key=_bitrate)
+        sortable = [s for s in dv_streams if _bitrate(s)]
+        pool = sortable or dv_streams
+        companion = min(pool, key=_bitrate)
 
         companion.dv_companion = True
         companion.dv_companion_quality = quality
-        logger.info(f"{tag}: marked companion {_height(companion)}p/{_codecs(companion)} (quality={quality!r})")
+        logger.info(f"StreamSelector: marked DV companion {_height(companion)}p/{_codecs(companion)} (quality={quality!r})")
 
 def _best(streams: list):
-    """Best video stream, with Dolby Vision always ranked last."""
+    """Best video stream by resolution/bitrate -- Dolby Vision wins outright if it objectively is the best."""
     if not streams:
         return None
-    return max(streams, key=lambda stream: (int(not _is_dv(stream)), _height(stream), _bitrate(stream)))
+    return max(streams, key=lambda stream: (_height(stream), _bitrate(stream)))
 
 
 def _worst(streams: list):

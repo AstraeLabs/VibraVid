@@ -2,12 +2,14 @@
 
 import bisect
 import gzip
+import io
 import logging
 import os
 import re
 import shutil
 import subprocess
 import time
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -16,6 +18,7 @@ _COPY_BUFSIZE_DEFAULT = 2 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _PNG_SCAN_WINDOW = 64 * 1024
 _TS_SYNC_RE = re.compile(rb"\x47(?:.{187}\x47){4}", re.DOTALL)
+_STEGO_PNG_MAGIC = b"TIKTIKPX"
 
 
 def _copy_bufsize() -> int:
@@ -62,6 +65,43 @@ def _find_ts_start(buf: bytes) -> int:
     """Return the offset of the first MPEG-TS packet inside a PNG-wrapped segment."""
     m = _TS_SYNC_RE.search(buf)
     return m.start() if m else 0
+
+
+def _try_decode_stego_png(buf: bytes) -> bytes | None:
+    """If the PNG segment is a stego-PNG, return the hidden payload bytes; else None."""
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(buf))
+        if img.mode != "RGB":
+            return None
+        
+        pixels = img.tobytes()
+        if pixels[:8] != _STEGO_PNG_MAGIC:
+            return None
+        
+        length = int.from_bytes(pixels[8:12], "big")
+        d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        data = d.decompress(pixels[12:12 + length]) + d.flush()
+        if data[:1] != b"\x47" or _find_ts_start(data[:_PNG_SCAN_WINDOW]) != 0:
+            return None
+        
+        return data
+    except Exception:
+        return None
+
+
+def _resolve_png_segment(buf: bytes) -> tuple[bytes, str]:
+    """Given a PNG-signed segment's full bytes, return (payload_bytes, kind)."""
+    stego_data = _try_decode_stego_png(buf)
+    if stego_data is not None:
+        return stego_data, "stego_png"
+
+    ts_off = _find_ts_start(buf[:_PNG_SCAN_WINDOW])
+    if ts_off > 0:
+        return buf[ts_off:], "png"
+
+    return buf, "raw"
 
 
 def _merge_fmt_size(nb: int) -> str:
@@ -158,6 +198,7 @@ def _binary_merge_segments_serial(
     total_written = 0
     with open(output_path, "wb") as out_f:
         png_wrapped = 0
+        stego_png_wrapped = 0
         for seg_path, _, seg_size in valid:
             with open(seg_path, "rb") as in_f:
                 head = in_f.read(8)
@@ -179,21 +220,16 @@ def _binary_merge_segments_serial(
 
                 # PNG-wrapped segment: a fake image cover hides the real MPEG-TS payload.
                 if head == _PNG_SIGNATURE:
-                    prefix = head + in_f.read(_PNG_SCAN_WINDOW - len(head))
-                    ts_off = _find_ts_start(prefix)
-                    if ts_off > 0:
+                    full_buf = head + in_f.read()
+                    payload, kind = _resolve_png_segment(full_buf)
+                    if kind == "stego_png":
+                        stego_png_wrapped += 1
+                    elif kind == "png":
                         png_wrapped += 1
-                        out_f.write(prefix[ts_off:])
-                        shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
-
-                        # Written = (prefix after the wrapper) + (streamed tail past the scan window).
-                        total_written += (len(prefix) - ts_off) + (seg_size - len(prefix))
-                        continue
-
-                    log.warning(f"[binary_merge] PNG-wrapped segment {seg_path.name} has no TS sync, using raw data")
-                    out_f.write(prefix)
-                    shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
-                    total_written += seg_size
+                    else:
+                        log.warning(f"[binary_merge] PNG-wrapped segment {seg_path.name} has no TS sync, using raw data")
+                    out_f.write(payload)
+                    total_written += len(payload)
                     continue
 
                 # Raw segment: stream in fixed-size blocks instead of loading it whole.
@@ -204,6 +240,8 @@ def _binary_merge_segments_serial(
     elapsed = time.monotonic() - t0
     if png_wrapped:
         log.info(f"[binary_merge] stripped PNG wrapper from {png_wrapped}/{len(valid)} segment(s)")
+    if stego_png_wrapped:
+        log.info(f"[binary_merge] recovered {stego_png_wrapped}/{len(valid)} stego-PNG segment(s)")
 
     if output_path.exists() and output_path.stat().st_size > 0:
         mb_s = (total_written / 1_048_576) / elapsed if elapsed > 0 else 0.0
@@ -213,10 +251,7 @@ def _binary_merge_segments_serial(
 
 
 def _classify_segment(seg_path: Path, seg_size: int) -> tuple[str, int, int, bytes | None]:
-    """Return (kind, effective_size, extra_offset, cached_bytes).
-
-    kind: 'raw' | 'gzip' | 'png'. For 'gzip', cached_bytes holds the fully decompressed payload.
-    """
+    """Return (kind, effective_size, extra_offset, cached_bytes)."""
     with open(seg_path, "rb") as f:
         head = f.read(8)
 
@@ -229,11 +264,11 @@ def _classify_segment(seg_path: Path, seg_size: int) -> tuple[str, int, int, byt
                 return "raw", seg_size, 0, None
 
         if head == _PNG_SIGNATURE:
-            prefix = head + f.read(_PNG_SCAN_WINDOW - len(head))
-            ts_off = _find_ts_start(prefix)
-            if ts_off > 0:
-                return "png", seg_size - ts_off, ts_off, None
-            return "raw", seg_size, 0, None
+            full_buf = head + f.read()
+            payload, kind = _resolve_png_segment(full_buf)
+            if kind == "raw":
+                return "raw", seg_size, 0, None
+            return kind, len(payload), 0, payload
 
     return "raw", seg_size, 0, None
 
@@ -247,17 +282,11 @@ def _write_chunk(
     written = 0
     with open(output_path, "r+b") as out_f:
         out_f.seek(start_offset)
-        for seg_path, kind, effective_size, ts_off, cached_bytes in chunk:
-            if kind == "gzip":
+        for seg_path, kind, effective_size, _ts_off, cached_bytes in chunk:
+            if kind in ("gzip", "stego_png", "png"):
                 assert cached_bytes is not None
                 out_f.write(cached_bytes)
                 written += len(cached_bytes)
-                continue
-            if kind == "png":
-                with open(seg_path, "rb") as in_f:
-                    in_f.seek(ts_off)
-                    shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
-                written += effective_size
                 continue
             with open(seg_path, "rb") as in_f:
                 shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
@@ -271,10 +300,12 @@ def _binary_merge_segments_parallel(
     workers = _parallel_workers()
     t0 = time.monotonic()
 
-    # Pass 1: classify each segment (cheap -- only peeks the first few KB, except for the rare gzip case which must fully decompress to learn its real size)
+    # Pass 1: classify each segment (cheap -- only peeks the first few KB, except for the rare
+    # gzip/PNG-wrapped cases, which must be fully read/decompressed to learn their real size)
     classified: list[tuple[Path, str, int, int, bytes | None]] = [None] * len(valid)  # type: ignore[list-item]
     png_wrapped = 0
     gzip_count = 0
+    stego_png_count = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(_classify_segment, seg_path, seg_size): idx
@@ -289,10 +320,12 @@ def _binary_merge_segments_parallel(
             elif kind == "gzip":
                 gzip_count += 1
                 log.debug(f"[binary_merge] detected gzip-compressed segment: {seg_path.name}, decompressing ...")
+            elif kind == "stego_png":
+                stego_png_count += 1
             classified[idx] = (seg_path, kind, effective_size, extra_off, cached_bytes)
 
     t_classify = time.monotonic()
-    log.debug(f"[binary_merge] classify phase: {len(valid)} segment(s) in {t_classify - t0:.2f}s ({workers} workers, {png_wrapped} png-wrapped, {gzip_count} gzip)")
+    log.debug(f"[binary_merge] classify phase: {len(valid)} segment(s) in {t_classify - t0:.2f}s ({workers} workers, {png_wrapped} png-wrapped, {stego_png_count} stego-png, {gzip_count} gzip)")
 
     offsets: list[int] = [0] * len(valid)
     running = 0
@@ -338,6 +371,8 @@ def _binary_merge_segments_parallel(
 
     if png_wrapped:
         log.info(f"[binary_merge] stripped PNG wrapper from {png_wrapped}/{len(valid)} segment(s)")
+    if stego_png_count:
+        log.info(f"[binary_merge] recovered {stego_png_count}/{len(valid)} stego-PNG segment(s)")
 
     if output_path.exists() and output_path.stat().st_size > 0:
         mb_s = (total_written / 1_048_576) / write_elapsed if write_elapsed > 0 else 0.0

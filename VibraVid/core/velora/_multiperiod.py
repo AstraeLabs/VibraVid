@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,6 +26,19 @@ from .util.formatting import (
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT = config_manager.config.get_int("REQUESTS", "timeout")
+_VTT_HEADER = re.compile(r"^\ufeff?WEBVTT", re.IGNORECASE)
+_VTT_CUE = re.compile(
+    r"^(\d{2,}):(\d{2}):(\d{2})[.,](\d{3})"
+    r"\s*-->\s*"
+    r"(\d{2,}):(\d{2}):(\d{2})[.,](\d{3})"
+    r"(.*)$"
+)
+_VTT_PERIOD_ZERO_TOLERANCE = 60.0
+
+
+def _stream_confirmed_unencrypted(stream) -> bool:
+    drm = getattr(stream, "drm", None)
+    return drm is not None and not drm.is_encrypted()
 
 
 def _seg_number_from_path(path: Path) -> int:
@@ -35,6 +49,93 @@ def _seg_number_from_path(path: Path) -> int:
         except ValueError:
             pass
     return 999_999_999
+
+
+def _vtt_parts_to_s(h: str, m: str, s: str, ms: str) -> float:
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+
+
+def _vtt_s_to_stamp(value: float) -> str:
+    value = max(0.0, value)
+    h = int(value // 3600)
+    m = int((value % 3600) // 60)
+    s = value - h * 3600 - m * 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+
+def _vtt_cue_bounds(text: str) -> tuple[float | None, float | None]:
+    """First cue start and last cue end of a WebVTT payload, in seconds."""
+    first: float | None = None
+    last: float | None = None
+    for line in text.splitlines():
+        m = _VTT_CUE.match(line)
+        if not m:
+            continue
+        if first is None:
+            first = _vtt_parts_to_s(m.group(1), m.group(2), m.group(3), m.group(4))
+        last = _vtt_parts_to_s(m.group(5), m.group(6), m.group(7), m.group(8))
+    return first, last
+
+
+def _vtt_timeline_is_absolute(bodies: list[str]) -> bool:
+    """Whether the per-Period payloads already sit on the presentation timeline."""
+    prev_end: float | None = None
+    for idx, body in enumerate(bodies):
+        first, last = _vtt_cue_bounds(body)
+        if first is None:
+            continue
+        if idx == 0:
+            if first > _VTT_PERIOD_ZERO_TOLERANCE:
+                return False
+        elif prev_end is not None and first < prev_end:
+            return False
+        prev_end = last if prev_end is None else max(prev_end, last)
+    return True
+
+
+def _vtt_strip_header(text: str) -> str:
+    """Drop the ``WEBVTT`` signature and its metadata block, keeping the cues."""
+    lines = text.lstrip("\ufeff").splitlines()
+    if not lines or not _VTT_HEADER.match(lines[0]):
+        return text
+    i = 1
+    while i < len(lines) and lines[i].strip() and "-->" not in lines[i]:
+        i += 1
+    if i < len(lines) and not lines[i].strip():
+        i += 1
+    return "\n".join(lines[i:])
+
+
+def _vtt_shift(text: str, offset: float) -> str:
+    """Move every cue in a Period-relative payload onto the presentation timeline."""
+    if offset <= 0:
+        return text
+    out: list[str] = []
+    for line in text.splitlines():
+        m = _VTT_CUE.match(line)
+        if m:
+            start = _vtt_parts_to_s(m.group(1), m.group(2), m.group(3), m.group(4)) + offset
+            end = _vtt_parts_to_s(m.group(5), m.group(6), m.group(7), m.group(8)) + offset
+            line = f"{_vtt_s_to_stamp(start)} --> {_vtt_s_to_stamp(end)}{m.group(9)}"
+        out.append(line)
+    return "\n".join(out)
+
+
+def _merge_plain_subtitle_parts(part_files: list[Path], period_offsets: list[float], out_path: Path) -> str:
+    """Join plain WebVTT Period parts into ``out_path``."""
+    bodies = [p.read_text(encoding="utf-8", errors="replace") for p in part_files]
+    absolute = _vtt_timeline_is_absolute(bodies)
+
+    chunks: list[str] = []
+    for idx, body in enumerate(bodies):
+        cue_text = _vtt_strip_header(body)
+        if not absolute and idx < len(period_offsets):
+            cue_text = _vtt_shift(cue_text, period_offsets[idx])
+        if cue_text.strip():
+            chunks.append(cue_text.rstrip("\n") + "\n\n")
+
+    out_path.write_text("WEBVTT\n\n" + "".join(chunks), encoding="utf-8")
+    return "absolute" if absolute else "period-relative (shifted)"
 
 
 def _run_ffmpeg_concat(list_path: Path, out_path: Path, codec_args: list[str]) -> subprocess.CompletedProcess:
@@ -149,6 +250,23 @@ class MultiPeriodMixin:
 
         num_to_period = {e["number"]: e["period_idx"] for e in dl_segs}
 
+        # Presentation-timeline start of each Period, rebuilt from the segment
+        # durations the parser recorded. Only plain subtitle payloads that turn
+        # out to be Period-relative consume it, but deriving it is cheap.
+        period_durations: dict[int, float] = {}
+        for e in dl_segs:
+            src_idx = e["number"]
+            if 0 <= src_idx < len(stream.segments):
+                seg_dur = getattr(stream.segments[src_idx], "duration", 0.0) or 0.0
+                if seg_dur > 0:
+                    period_durations[e["period_idx"]] = period_durations.get(e["period_idx"], 0.0) + seg_dur
+
+        period_start_of: dict[int, float] = {}
+        _elapsed = 0.0
+        for per in ordered_periods:
+            period_start_of[per] = _elapsed
+            _elapsed += period_durations.get(per, 0.0)
+
         total = len(dl_segs)
         _prev_estimated = [0]
 
@@ -192,8 +310,9 @@ class MultiPeriodMixin:
             if per is not None and p.exists() and p.stat().st_size > 0:
                 period_paths.setdefault(per, []).append(p)
 
-        decryptor = Decryptor() if self.key else None
+        decryptor = Decryptor() if self.key and not _stream_confirmed_unencrypted(stream) else None
         part_files: list[Path] = []
+        part_offsets: list[float] = []
 
         # A plain-WebVTT subtitle Period is raw text concatenated by
         # binary_merge_segments below never real fragmented MP4
@@ -259,6 +378,7 @@ class MultiPeriodMixin:
                 self._needs_join_ts_fix = True
 
             part_files.append(part_merged)
+            part_offsets.append(period_start_of.get(per, 0.0))
 
         if not part_files:
             logger.error("[multiperiod] no Period produced a usable file")
@@ -267,7 +387,14 @@ class MultiPeriodMixin:
         out_path = self.output_dir / self._out_filename(stream, "mp4")
         bar_manager.handle_progress_line({"task_key": task_key, "pct": 100, "speed": "Concat"})
 
-        if _ffmpeg_concat(part_files, out_path) and out_path.exists() and out_path.stat().st_size > 0:
+        if is_plain_subtitle:
+            basis = _merge_plain_subtitle_parts(part_files, part_offsets, out_path)
+            joined = out_path.exists() and out_path.stat().st_size > 0
+            logger.info(f"[multiperiod] joined {len(part_files)} plain WebVTT Period file(s) -> {out_path.name} (cue timeline: {basis})")
+        else:
+            joined = _ffmpeg_concat(part_files, out_path) and out_path.exists() and out_path.stat().st_size > 0
+
+        if joined:
             logger.info(f"[multiperiod] {len(part_files)} Period(s), {len(dl_segs)} segs joined -> {out_path.name} ({out_path.stat().st_size // 1024} KB)")
             bar_manager.handle_progress_line(
                 {
