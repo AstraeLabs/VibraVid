@@ -501,82 +501,43 @@ class ConfigManager:
         )
         thread.start()
 
-    def _apply_cb01_domain(self, domain: str | None) -> bool:
-        """Override CB01 domain entries with the value published by GiardiniBlog."""
-        if not domain:
-            return False
-
-        normalized = domain.rstrip("/") + "/"
-        changed = False
-
-        for section in ("cb01new", "cb01_2"):
-            current = self._domains_data.setdefault(section, {}).get("full_url")
-            if current != normalized:
-                self._domains_data[section]["full_url"] = normalized
-                changed = True
-
-        if changed:
-            logger.info("CB01 domain updated from GiardiniBlog: %s", normalized)
-
-        return changed
-
-    def _invalidate_domain_cache(self) -> None:
-        stale = [key for key in self.cache if key.startswith("domain.")]
-        for key in stale:
-            del self.cache[key]
-
     def _domain_refresh_worker(self) -> None:
         while True:
             time.sleep(DOMAIN_REFRESH_INTERVAL_SECONDS)
-
-            data = None
-            cb01_domain = None
-
             try:
                 data = _startup_prefetch._fetch_domains()
-            except Exception as e:
-                logger.warning(f"Background domain tracker refresh failed: {e}")
-
-            try:
-                cb01_domain = _startup_prefetch._fetch_cb01_domain()
-            except Exception as e:
-                logger.warning(f"Background CB01 domain refresh failed: {e}")
-
-            if data is None and cb01_domain is None:
-                continue
-
-            if data is not None:
                 self._domains_data.clear()
                 self._domains_data.update(data)
+                self._save_domains_to_appropriate_location()
 
-            self._apply_cb01_domain(cb01_domain)
-            self._save_domains_to_appropriate_location()
-            self._invalidate_domain_cache()
-            logger.info("Domains refreshed in background (%d entries).", len(self._domains_data))
+                stale = [key for key in self.cache if key.startswith("domain.")]
+                for key in stale:
+                    del self.cache[key]
+                logger.info("Domains refreshed in background (%d entries).", len(self._domains_data))
+            except Exception as e:
+                logger.warning(f"Background domain refresh failed: {e}")
 
     def _load_site_data_online(self) -> None:
-        """Load site data online and update local domains.json."""
+        """Load site data from GitHub and update local domains.json file."""
         try:
             _startup_prefetch.start()
             logger.debug(f"Fetching site data from: {DOMAINS_DOWNLOAD_URL}")
             data = _startup_prefetch.collect("domains", timeout=5)
-            cb01_domain = _startup_prefetch.collect("cb01_domain", timeout=5)
 
             if data is not None:
                 self._domains_data.clear()
                 self._domains_data.update(data)
+                self._save_domains_to_appropriate_location()
+
+                stale = [key for key in self.cache if key.startswith("domain.")]
+                for key in stale:
+                    del self.cache[key]
             else:
                 console.print("[yellow]Cloudflare request failed, using local domains.json fallback")
                 self._handle_site_data_fallback()
 
-            self._apply_cb01_domain(cb01_domain)
-
-            if self._domains_data:
-                self._save_domains_to_appropriate_location()
-                self._invalidate_domain_cache()
-
         except Exception as e:
-            console.print(f"[yellow]Online domain refresh failed ({str(e)}), using local domains.json fallback")
+            console.print(f"[yellow]Cloudflare request failed ({str(e)}), using local domains.json fallback")
             self._handle_site_data_fallback()
 
     def _save_domains_to_appropriate_location(self) -> None:
