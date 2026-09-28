@@ -1,4 +1,21 @@
-from GUI.searchapp.views import _shared
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GUI_ROOT = ROOT / "GUI"
+
+for path in (str(ROOT), str(GUI_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "webgui.settings")
+
+import django
+
+django.setup()
+
+from searchapp.views import _shared
 
 
 class _FailedProvider:
@@ -46,6 +63,6 @@ def test_provider_false_result_fails_gui_download_task(monkeypatch):
     try:
         future.result()
     except RuntimeError as exc:
-        assert str(exc) == "Provider reported download failure"
+        assert str(exc) == "cineblog01 reported that the download did not complete successfully"
     else:
         raise AssertionError("provider False result must fail the GUI download task")
