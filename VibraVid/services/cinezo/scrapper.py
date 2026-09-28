@@ -1,5 +1,4 @@
-# 17.04.26
-# by @nu00
+# 28.09.26
 
 import logging
 import threading
@@ -11,12 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class GetSerieInfo:
-    """
-    Fetches season/episode metadata for a Cinezo series via TMDB.
-    """
+    """Fetch Cinezo series metadata from TMDB."""
 
     def __init__(self, tmdb_id: int, series_name: str):
-        self.tmdb_id = tmdb_id
+        self.tmdb_id = int(tmdb_id)
         self.series_name = series_name
         self.series_year = None
         self.seasons_manager = SeasonManager()
@@ -30,46 +27,89 @@ class GetSerieInfo:
     def _load_locked(self):
         if self._loaded:
             return
+
         self._loaded = True
+
         try:
-            details = tmdb_client._make_request(f"tv/{self.tmdb_id}", {"language": "it"}) or {}
-            first_air = details.get("first_air_date", "") or ""
+            details = tmdb_client._make_request(
+                f"tv/{self.tmdb_id}",
+                {"language": "it"},
+            ) or {}
+
+            if details.get("name"):
+                self.series_name = details["name"]
+
+            first_air = details.get("first_air_date") or ""
             if first_air:
-                self.series_year = int(first_air[:4])
+                try:
+                    self.series_year = int(first_air[:4])
+                except ValueError:
+                    self.series_year = None
 
-            for raw_s in details.get("seasons", []):
-                sn = raw_s.get("season_number", 0)
-                if sn == 0:
-                    continue  # skip specials
+            for raw_season in details.get("seasons", []):
+                season_number = raw_season.get("season_number")
+                if season_number in (None, 0):
+                    continue
 
-                ep_count = raw_s.get("episode_count", 0)
-                em = EpisodeManager()
-                for ep_num in range(1, ep_count + 1):
-                    em.add(
-                        Episode(
-                            id=ep_num,
-                            number=ep_num,
-                            name=f"Episodio {ep_num}",
-                        )
-                    )
+                season = Season(
+                    id=raw_season.get("id"),
+                    number=season_number,
+                    name=raw_season.get("name") or f"Stagione {season_number}",
+                    slug="",
+                    tmdb_id=raw_season.get("id"),
+                )
+                self.seasons_manager.add(season)
 
-                s = Season(id=sn, number=sn, name=raw_s.get("name", f"Stagione {sn}"), slug="")
-                s.episodes = em
-                self.seasons_manager.add(s)
-        except Exception as e:
-            logger.error(f"[Cinezo] TMDB series load failed: {e}")
+        except Exception as error:
+            logger.error(f"[Cinezo] TMDB series load failed: {error}")
 
     def getNumberSeason(self) -> int:
-        """Get the total number of seasons available for the series."""
+        """Get the total number of regular seasons."""
         self._load()
         return len(self.seasons_manager.seasons)
 
     def getEpisodeSeasons(self, season_number: int) -> list:
-        """Get all episodes for a specific season."""
+        """Get full TMDB episode metadata for one season."""
         self._load()
-        season = self.seasons_manager.get_season_by_number(season_number)
 
-        if not season:
+        season = self.seasons_manager.get_season_by_number(int(season_number))
+        if season is None:
             return []
 
+        if len(season.episodes):
+            return season.episodes.episodes
+
+        try:
+            details = tmdb_client._make_request(
+                f"tv/{self.tmdb_id}/season/{int(season_number)}",
+                {"language": "it"},
+            ) or {}
+        except Exception as error:
+            logger.error(
+                f"[Cinezo] TMDB episode load failed for S{int(season_number)}: {error}"
+            )
+            return []
+
+        episodes = EpisodeManager()
+
+        for raw_episode in details.get("episodes", []):
+            episode_number = raw_episode.get("episode_number")
+            if episode_number is None:
+                continue
+
+            still_path = raw_episode.get("still_path")
+            episodes.add(
+                Episode(
+                    id=raw_episode.get("id"),
+                    tmdb_id=raw_episode.get("id"),
+                    number=episode_number,
+                    name=raw_episode.get("name") or f"Episodio {episode_number}",
+                    duration=raw_episode.get("runtime"),
+                    description=raw_episode.get("overview"),
+                    image=f"https://image.tmdb.org/t/p/w780{still_path}" if still_path else None,
+                    year=(raw_episode.get("air_date") or "")[:4] or None,
+                )
+            )
+
+        season.episodes = episodes
         return season.episodes.episodes

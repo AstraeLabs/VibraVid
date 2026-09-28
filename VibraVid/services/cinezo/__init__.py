@@ -1,5 +1,4 @@
-# 17.04.26
-# by @nu00
+# 28.09.26
 
 from rich.console import Console
 from rich.prompt import Prompt
@@ -9,6 +8,7 @@ from VibraVid.services._base import Entries, EntriesManager
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
 from VibraVid.utils import TVShowManager
 
+from .client import get_player_url
 from .downloader import download_film, download_series
 
 indice = 15
@@ -32,31 +32,35 @@ def title_search(query: str) -> int:
         )
         return 0
 
-    for m in tmdb_client.search_movies(query):
-        poster = f"{_TMDB_IMG}{m['poster_path']}" if m.get("poster_path") else None
-        year = (m.get("release_date") or "")[:4] or None
+    for movie in tmdb_client.search_movies(query):
+        tmdb_id = movie["id"]
+        poster = f"{_TMDB_IMG}{movie['poster_path']}" if movie.get("poster_path") else None
+        year = (movie.get("release_date") or "")[:4] or None
         entries_manager.add(
             Entries(
-                id=m["id"],
-                name=m.get("title", ""),
+                id=tmdb_id,
+                tmdb_id=tmdb_id,
+                name=movie.get("title", ""),
                 type="film",
                 slug="movie",
-                url=f"https://www.cinezo.net/watch/movie/{m['id']}",
+                url=get_player_url(tmdb_id, "movie"),
                 image=poster,
                 year=year,
             )
         )
 
-    for s in tmdb_client.search_series(query):
-        poster = f"{_TMDB_IMG}{s['poster_path']}" if s.get("poster_path") else None
-        year = (s.get("first_air_date") or "")[:4] or None
+    for show in tmdb_client.search_series(query):
+        tmdb_id = show["id"]
+        poster = f"{_TMDB_IMG}{show['poster_path']}" if show.get("poster_path") else None
+        year = (show.get("first_air_date") or "")[:4] or None
         entries_manager.add(
             Entries(
-                id=s["id"],
-                name=s.get("name", ""),
+                id=tmdb_id,
+                tmdb_id=tmdb_id,
+                name=show.get("name", ""),
                 type="tv",
                 slug="tv",
-                url=f"https://www.cinezo.net/watch/tv/{s['id']}",
+                url=None,
                 image=poster,
                 year=year,
             )
