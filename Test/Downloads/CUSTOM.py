@@ -22,7 +22,7 @@ context_tracker.force_livemux = True
 
 SOURCES = [
     {"url": "<url>", "key": "<key>", "type": "video"},
-    {"url": "<url>", "key": "<key>", "language": "en", "type": "audio"},
+    {"url": "<url>", "key": "<key>", "type": "audio"},
 ]
 
 t0 = time.monotonic()

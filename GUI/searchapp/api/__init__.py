@@ -40,9 +40,6 @@ _PREFERRED_ORDER = [
     "foodnetwork",
     "tubitv",
     "plutotv",
-    "cinezo",
-    "altadefinizione",
-    "eurostreaming",
     "amazon_music",
 ]
 _OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music"}

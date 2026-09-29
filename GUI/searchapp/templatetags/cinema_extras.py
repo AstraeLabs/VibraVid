@@ -7,7 +7,6 @@ _PROVIDER_LABELS = {
     "animeunity": "AnimeUnity",
     "animeworld": "AnimeWorld",
     "annasarchive": "Anna's Archive",
-    "altadefinizione": "AltaDefinizione",
     "appletv": "Apple TV",
     "discoveryplus": "Discovery+",
     "dmax": "DMAX",

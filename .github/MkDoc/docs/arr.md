@@ -210,7 +210,6 @@ Recommended full configuration (covers general content, anime, and niche service
     "crunchyroll",
     "primevideo",
     "tubitv",
-    "cinezo",
     "mostraguarda"
 ]
 ```

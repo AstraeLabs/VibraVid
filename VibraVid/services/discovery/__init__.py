@@ -10,7 +10,7 @@ from VibraVid.utils.http_client import check_region_availability, create_client,
 
 from .downloader import download_series
 
-indice = 11
+indice = 10
 _useFor = "Serie"
 _region = ["IT"]
 msg = Prompt()

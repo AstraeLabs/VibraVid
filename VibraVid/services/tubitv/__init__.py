@@ -13,7 +13,7 @@ from VibraVid.utils.http_client import check_region_availability, create_client,
 from .client import get_bearer_token, tubi_email, tubi_password
 from .downloader import download_film, download_series
 
-indice = 9
+indice = 8
 _useFor = "Film_Serie"
 _region = ["US"]
 msg = Prompt()

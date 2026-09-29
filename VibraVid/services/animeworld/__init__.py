@@ -11,7 +11,7 @@ from VibraVid.utils.http_client import create_client, get_headers
 
 from .downloader import download_film, download_series
 
-indice = 5
+indice = 4
 _useFor = "Anime"
 _db_upload = True
 msg = Prompt()

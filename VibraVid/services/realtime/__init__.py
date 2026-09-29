@@ -10,7 +10,7 @@ from VibraVid.utils.http_client import check_region_availability, create_client,
 
 from .downloader import download_series
 
-indice = 7
+indice = 6
 _useFor = "Serie"
 _region = ["IT"]
 _live_mux = True

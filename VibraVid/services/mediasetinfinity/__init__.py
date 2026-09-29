@@ -14,7 +14,7 @@ from .client import get_client, get_metadata_by_guid
 from .downloader import download_film, download_series
 from .regions import get_region, region_conf
 
-indice = 3
+indice = 2
 _useFor = "Film_Serie"
 _region = ["IT", "ES"]
 _live_mux = True
