@@ -1,6 +1,6 @@
 import pytest
 
-from VibraVid.player.cinezo import CinezoResolverChain, CinezoSourceProbe
+from VibraVid.player.cinezo import CinezoSourceProbe
 from VibraVid.services.cinezo import client as cinezo_client
 
 
@@ -47,7 +47,7 @@ def test_probe_sources_delegates_to_chain():
     assert results[0].available is True
 
 
-def test_get_stream_reports_available_backend_without_exposing_media(monkeypatch):
+def test_get_stream_reports_available_backend_without_resolver(monkeypatch):
     monkeypatch.setattr(
         cinezo_client,
         "probe_sources",
@@ -62,6 +62,106 @@ def test_get_stream_reports_available_backend_without_exposing_media(monkeypatch
 
     with pytest.raises(RuntimeError, match=r"Source backend available \(zendaya\)"):
         cinezo_client.get_stream(27205, "movie")
+
+
+def test_get_stream_uses_first_available_backend(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_client,
+        "probe_sources",
+        lambda *args, **kwargs: [
+            CinezoSourceProbe(
+                name="zendaya",
+                endpoint="https://example.test/zendaya",
+                available=False,
+            ),
+            CinezoSourceProbe(
+                name="berlin",
+                endpoint="https://example.test/berlin",
+                available=True,
+            ),
+        ],
+    )
+    seen = {}
+
+    def resolver(source, tmdb_id, media_type, season, episode):
+        seen["source"] = source.name
+        seen["tmdb_id"] = tmdb_id
+        seen["media_type"] = media_type
+        seen["season"] = season
+        seen["episode"] = episode
+        return (
+            "https://authorized.example/master.m3u8",
+            {"Referer": "https://authorized.example/"},
+            [{"type": "subtitle", "url": "https://authorized.example/it.vtt"}],
+        )
+
+    stream_url, headers, subtitles = cinezo_client.get_stream(
+        1399,
+        "tv",
+        season=1,
+        episode=1,
+        media_resolver=resolver,
+    )
+
+    assert seen == {
+        "source": "berlin",
+        "tmdb_id": 1399,
+        "media_type": "tv",
+        "season": 1,
+        "episode": 1,
+    }
+    assert stream_url == "https://authorized.example/master.m3u8"
+    assert headers == {"Referer": "https://authorized.example/"}
+    assert subtitles == [
+        {"type": "subtitle", "url": "https://authorized.example/it.vtt"}
+    ]
+
+
+def test_get_stream_accepts_mapping_from_authorized_resolver(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_client,
+        "probe_sources",
+        lambda *args, **kwargs: [
+            CinezoSourceProbe(
+                name="berlin",
+                endpoint="https://example.test/berlin",
+                available=True,
+            )
+        ],
+    )
+
+    result = cinezo_client.get_stream(
+        27205,
+        "movie",
+        media_resolver=lambda *args: {
+            "url": "https://authorized.example/video.mp4",
+            "headers": None,
+            "subtitles": None,
+        },
+    )
+
+    assert result == ("https://authorized.example/video.mp4", {}, [])
+
+
+def test_get_stream_rejects_invalid_authorized_result(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_client,
+        "probe_sources",
+        lambda *args, **kwargs: [
+            CinezoSourceProbe(
+                name="berlin",
+                endpoint="https://example.test/berlin",
+                available=True,
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="empty stream URL"):
+        cinezo_client.get_stream(
+            27205,
+            "movie",
+            media_resolver=lambda *args: {"url": ""},
+        )
 
 
 def test_get_stream_reports_source_failures(monkeypatch):
