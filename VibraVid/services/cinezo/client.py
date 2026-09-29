@@ -1,7 +1,8 @@
-# 28.09.26
+# 29.09.26
 
 import logging
 
+from VibraVid.player.cinezo import CinezoResolverChain
 from VibraVid.utils.http_client import create_client, get_userAgent
 
 logger = logging.getLogger(__name__)
@@ -62,14 +63,27 @@ def player_is_available(
     return True
 
 
-def get_stream(tmdb_id: int, media_type: str, season: int | None = None, episode: int | None = None):
-    """Resolve a downloadable media source for Cinezo."""
+def get_stream(
+    tmdb_id: int,
+    media_type: str,
+    season: int | None = None,
+    episode: int | None = None,
+    resolver_chain: CinezoResolverChain | None = None,
+):
+    """Resolve Cinezo playback information for the service downloader."""
     player_url = get_player_url(tmdb_id, media_type, season, episode)
+    chain = resolver_chain or CinezoResolverChain()
 
-    # TODO: implement media source resolution from the current Cinezo player.
-    # The old api.cinezo.live /sources backend is no longer used by the public
-    # player and now returns HTML instead of the JSON contract this provider
-    # previously consumed.
-    raise RuntimeError(
-        f"[Cinezo] Media source resolution is not implemented for the current player: {player_url}"
+    resolved = chain.resolve(
+        tmdb_id=tmdb_id,
+        media_type=media_type,
+        season=season,
+        episode=episode,
     )
+
+    if resolved is None:
+        raise RuntimeError(
+            f"[Cinezo] No source resolver produced a playable stream for the current player: {player_url}"
+        )
+
+    return resolved.url, resolved.headers, resolved.subtitles
