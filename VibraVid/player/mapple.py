@@ -463,6 +463,7 @@ class MappleResolver:
         client = self.client_factory(
             headers={"User-Agent": self.user_agent},
             timeout=self.timeout,
+            browser=None,
         )
 
         try:
@@ -532,6 +533,7 @@ class MappleResolver:
         client = self.client_factory(
             headers={"User-Agent": self.user_agent},
             timeout=self.timeout,
+            browser=None,
         )
 
         try:
