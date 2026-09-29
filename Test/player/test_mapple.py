@@ -412,3 +412,49 @@ def test_manifest_probe_rejects_source_with_dead_media_segment(monkeypatch):
         session,
         "https://cdn.example/master.m3u8",
     )
+
+
+def test_source_resolution_retries_fresh_stream_after_transient_manifest(monkeypatch):
+    class FreshStreamSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.stream_calls = 0
+
+        def get(self, url, **kwargs):
+            if "/api/stream-encrypted" in url and "data=s2" in url:
+                self.calls.append(("GET", url, kwargs))
+                self.stream_calls += 1
+                stream_url = (
+                    "https://bad.example/master.m3u8"
+                    if self.stream_calls == 1
+                    else "https://cdn.example/playlist/master.m3u8"
+                )
+                return FakeResponse(
+                    200,
+                    {
+                        "success": True,
+                        "data": {"stream_url": stream_url},
+                    },
+                    headers={"content-type": "application/json"},
+                )
+
+            if url == "https://bad.example/master.m3u8":
+                self.calls.append(("GET", url, kwargs))
+                return FakeResponse(404, text="not found")
+
+            return super().get(url, **kwargs)
+
+    monkeypatch.setattr("VibraVid.player.mapple.time.sleep", lambda _: None)
+
+    session = FreshStreamSession()
+    resolver = MappleResolver(
+        sources=("s2",),
+        client_factory=_client_factory(session),
+        user_agent="pytest",
+    )
+
+    result = resolver.resolve_stream(27205, "movie")
+
+    assert result.source == "s2"
+    assert result.url.startswith("https://cdn.example/playlist/master.m3u8")
+    assert session.stream_calls == 2
