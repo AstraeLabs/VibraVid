@@ -62,6 +62,8 @@ class MediaDownloader(
         has_drm: bool = False,
         display_selected_only: bool = False,
         use_curl_cffi_segments: bool | None = None,
+        hls_playlist_retry_statuses: tuple[int, ...] | None = None,
+        hls_playlist_retry_attempts: int = 3,
     ) -> None:
         super().__init__(
             url=url,
@@ -81,6 +83,8 @@ class MediaDownloader(
         self.max_segments = max_segments
         self.max_time = max_time
         self.use_curl_cffi_segments = use_curl_cffi_segments
+        self.hls_playlist_retry_statuses = tuple(hls_playlist_retry_statuses or ())
+        self.hls_playlist_retry_attempts = max(1, int(hls_playlist_retry_attempts))
 
         # Cancellation
         self._stop_event: threading.Event = threading.Event()
