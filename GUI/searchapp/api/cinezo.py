@@ -21,21 +21,32 @@ class CinezoAPI(BaseStreamingAPI):
         if database and hasattr(database, "media_list"):
             for element in database.media_list:
                 item_dict = element.__dict__.copy() if hasattr(element, "__dict__") else {}
-                results.append(
-                    Entries(
-                        id=item_dict.get("id"),
-                        name=item_dict.get("name"),
-                        slug=item_dict.get("slug", ""),
-                        type=item_dict.get("type"),
-                        url=item_dict.get("url"),
-                        poster=item_dict.get("image"),
-                        year=item_dict.get("year"),
-                        tmdb_id=item_dict.get("tmdb_id") or item_dict.get("id"),
-                        raw_data=item_dict,
-                    )
+                entry = Entries(
+                    id=item_dict.get("id"),
+                    name=item_dict.get("name"),
+                    slug=item_dict.get("slug", ""),
+                    type=item_dict.get("type"),
+                    url=item_dict.get("url"),
+                    poster=item_dict.get("image"),
+                    year=item_dict.get("year"),
+                    tmdb_id=item_dict.get("tmdb_id") or item_dict.get("id"),
+                    raw_data=item_dict,
                 )
 
+                if not self._has_available_search_source(entry):
+                    continue
+
+                results.append(entry)
+
         return results
+
+    def _has_available_search_source(self, media_item: Entries) -> bool:
+        """Hide Cinezo movie results that have no playable source backend."""
+        if not media_item.is_movie:
+            return True
+
+        tmdb_id = int(media_item.tmdb_id or media_item.id or 0)
+        return any(source.available for source in probe_sources(tmdb_id, "movie"))
 
     def get_player_url(
         self,

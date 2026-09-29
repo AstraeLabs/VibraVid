@@ -24,22 +24,42 @@ def test_media_resolver_requires_tv_coordinates():
         cinezo_media.resolve_cinezo_media(source, 1399, "tv")
 
 
-def test_media_resolver_uses_configured_authorized_url(monkeypatch):
+def test_media_resolver_fetches_selected_backend_payload(monkeypatch):
     source = CinezoSourceProbe(
         name="berlin",
         endpoint="https://example.test/berlin",
         available=True,
     )
-    monkeypatch.setattr(
-        cinezo_media,
-        "AUTHORIZED_MEDIA_URL",
-        "https://example.test/authorized-master.m3u8",
-    )
-    monkeypatch.setattr(
-        cinezo_media,
-        "get_userAgent",
-        lambda: "test-agent",
-    )
+
+    class _Response:
+        ok = True
+        status_code = 200
+
+        def json(self):
+            return {
+                "source": {
+                    "url": "https://example.test/authorized-master.m3u8",
+                    "headers": {"Referer": "https://example.test/"},
+                },
+                "subtitles": [
+                    {"file": "https://example.test/it.vtt", "label": "Italiano"}
+                ],
+            }
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, url, timeout=30):
+            assert url == "https://example.test/berlin"
+            assert timeout == 30
+            return _Response()
+
+    monkeypatch.setattr(cinezo_media, "create_client", lambda headers=None: _Client())
+    monkeypatch.setattr(cinezo_media, "get_userAgent", lambda: "test-agent")
 
     result = cinezo_media.resolve_cinezo_media(source, 27205, "movie")
 
@@ -47,9 +67,17 @@ def test_media_resolver_uses_configured_authorized_url(monkeypatch):
         "url": "https://example.test/authorized-master.m3u8",
         "headers": {
             "User-Agent": "test-agent",
-            "Referer": "https://player.cinezo.live/",
+            "Referer": "https://example.test/",
         },
-        "subtitles": [],
+        "subtitles": [
+            {
+                "type": "subtitle",
+                "language": "Italiano",
+                "name": "Italiano",
+                "url": "https://example.test/it.vtt",
+                "extension": "vtt",
+            }
+        ],
     }
 
 

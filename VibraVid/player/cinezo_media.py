@@ -3,10 +3,9 @@
 from typing import Any
 
 from VibraVid.player.cinezo import CinezoSourceProbe
-from VibraVid.utils.http_client import get_userAgent
+from VibraVid.utils.http_client import create_client, get_userAgent
 
 PLAYER_REFERER = "https://player.cinezo.live/"
-AUTHORIZED_MEDIA_URL = "https://example.com/authorized-test.m3u8"
 
 
 def _default_headers() -> dict[str, str]:
@@ -98,6 +97,83 @@ def _build_result(
     }
 
 
+def _stream_url_from_payload(data: dict[str, Any]) -> str:
+    """Extract the playable media URL from the current Cinezo backend payload."""
+    source = data.get("source")
+    if isinstance(source, dict) and source.get("url"):
+        return str(source["url"]).strip()
+
+    stream = data.get("stream")
+    if isinstance(stream, dict):
+        for key in ("original", "hls", "url"):
+            if stream.get(key):
+                return str(stream[key]).strip()
+
+    if data.get("url"):
+        return str(data["url"]).strip()
+
+    return ""
+
+
+def _headers_from_payload(data: dict[str, Any]) -> dict[str, str]:
+    """Extract optional playback headers from backend payloads."""
+    for key in ("headers", "requestHeaders", "playback_headers"):
+        headers = data.get(key)
+        if isinstance(headers, dict):
+            return headers
+
+    source = data.get("source")
+    if isinstance(source, dict):
+        headers = source.get("headers")
+        if isinstance(headers, dict):
+            return headers
+
+    stream = data.get("stream")
+    if isinstance(stream, dict):
+        headers = stream.get("headers")
+        if isinstance(headers, dict):
+            return headers
+
+    return {}
+
+
+def _subtitles_from_payload(data: dict[str, Any]) -> list[dict]:
+    """Extract subtitle metadata from backend payloads."""
+    for key in ("subtitles", "tracks", "captions"):
+        items = data.get(key)
+        if isinstance(items, list):
+            return items
+
+    return []
+
+
+def _fetch_source_payload(source: CinezoSourceProbe) -> dict[str, Any]:
+    """Fetch and validate the selected Cinezo source endpoint payload."""
+    headers = _default_headers()
+
+    with create_client(headers=headers) as client:
+        response = client.get(source.endpoint, timeout=30)
+
+    if not response.ok:
+        raise RuntimeError(
+            f"[Cinezo] Source backend returned HTTP {response.status_code}: {source.name}"
+        )
+
+    try:
+        data = response.json()
+    except Exception as error:
+        raise RuntimeError(
+            f"[Cinezo] Source backend returned invalid JSON: {source.name}"
+        ) from error
+
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"[Cinezo] Source backend returned unexpected payload: {type(data).__name__}"
+        )
+
+    return data
+
+
 def resolve_cinezo_media(
     source: CinezoSourceProbe,
     tmdb_id: int,
@@ -117,11 +193,13 @@ def resolve_cinezo_media(
     if media_type == "tv" and (season is None or episode is None):
         raise ValueError("[Cinezo] season and episode are required for TV media resolution")
 
-    playback_headers = _default_headers()
-    subtitle_items = []
+    payload = _fetch_source_payload(source)
+    stream_url = _stream_url_from_payload(payload)
+    playback_headers = _headers_from_payload(payload)
+    subtitle_items = _subtitles_from_payload(payload)
 
     return _build_result(
-        AUTHORIZED_MEDIA_URL,
+        stream_url,
         playback_headers,
         subtitle_items,
     )

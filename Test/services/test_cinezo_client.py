@@ -60,11 +60,26 @@ def test_get_stream_reaches_default_media_resolver(monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(
-        cinezo_media,
-        "AUTHORIZED_MEDIA_URL",
-        "https://example.test/authorized-master.m3u8",
-    )
+
+    class _Response:
+        ok = True
+        status_code = 200
+
+        def json(self):
+            return {"source": {"url": "https://example.test/authorized-master.m3u8"}}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, url, timeout=30):
+            assert url == "https://example.test/source"
+            return _Response()
+
+    monkeypatch.setattr(cinezo_media, "create_client", lambda headers=None: _Client())
 
     stream_url, headers, subtitles = cinezo_client.get_stream(27205, "movie")
 
