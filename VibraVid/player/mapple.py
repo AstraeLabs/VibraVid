@@ -205,8 +205,10 @@ class MappleResolver:
         media_type: str,
         season: int | None,
         episode: int | None,
+        attempts: int = 3,
     ) -> str:
         errors = []
+        transient_statuses = {403, 429, 500, 502, 503, 504}
 
         for page_url in self._watch_candidates(
             tmdb_id,
@@ -214,21 +216,49 @@ class MappleResolver:
             season,
             episode,
         ):
-            try:
-                response = client.get(
-                    page_url,
-                    headers=self._html_headers(),
-                    timeout=self.timeout,
+            for attempt in range(attempts):
+                try:
+                    response = client.get(
+                        page_url,
+                        headers=self._html_headers(),
+                        timeout=self.timeout,
+                    )
+                except Exception as error:
+                    if attempt + 1 >= attempts:
+                        errors.append(f"{page_url}: {type(error).__name__}")
+                        break
+
+                    delay = 0.5 * (attempt + 1)
+                    logger.warning(
+                        "[Mapple] player page request failed with %s, retrying in %.1fs (%s/%s)",
+                        type(error).__name__,
+                        delay,
+                        attempt + 1,
+                        attempts,
+                    )
+                    time.sleep(delay)
+                    continue
+
+                content_type = (response.headers.get("content-type") or "").lower()
+                if response.ok and ("html" in content_type or not content_type):
+                    return page_url
+
+                if (
+                    response.status_code not in transient_statuses
+                    or attempt + 1 >= attempts
+                ):
+                    errors.append(f"{page_url}: HTTP {response.status_code}")
+                    break
+
+                delay = 0.5 * (attempt + 1)
+                logger.warning(
+                    "[Mapple] player page returned HTTP %s, retrying in %.1fs (%s/%s)",
+                    response.status_code,
+                    delay,
+                    attempt + 1,
+                    attempts,
                 )
-            except Exception as error:
-                errors.append(f"{page_url}: {type(error).__name__}")
-                continue
-
-            content_type = (response.headers.get("content-type") or "").lower()
-            if response.ok and ("html" in content_type or not content_type):
-                return page_url
-
-            errors.append(f"{page_url}: HTTP {response.status_code}")
+                time.sleep(delay)
 
         detail = "; ".join(errors)
         raise RuntimeError(f"[Mapple] Player page is unavailable: {detail}")
