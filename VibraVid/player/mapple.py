@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -342,40 +343,85 @@ class MappleResolver:
 
         return MappleResolver._append_query(stream_url, format=".m3u8")
 
+    @staticmethod
+    def _best_variant_url(master_url: str, content: str) -> str | None:
+        """Return the highest-bandwidth variant advertised by an HLS master."""
+        lines = str(content or "").splitlines()
+        variants: list[tuple[int, str]] = []
+
+        for index, line in enumerate(lines):
+            line = line.strip()
+            if not line.startswith("#EXT-X-STREAM-INF:"):
+                continue
+            if index + 1 >= len(lines):
+                continue
+
+            child = lines[index + 1].strip()
+            if not child or child.startswith("#"):
+                continue
+
+            bandwidth_match = re.search(r"(?:^|,)BANDWIDTH=(\d+)", line)
+            bandwidth = int(bandwidth_match.group(1)) if bandwidth_match else 0
+            variants.append((bandwidth, urljoin(master_url, child)))
+
+        if not variants:
+            return None
+
+        return max(variants, key=lambda item: item[0])[1]
+
+    def _probe_hls_url(
+        self,
+        client,
+        url: str,
+        *,
+        attempts: int = 3,
+        delay: float = 0.25,
+    ) -> str | None:
+        """Fetch an HLS URL with short retries for transient Mapple CDN 404s."""
+        last_status = None
+
+        for attempt in range(attempts):
+            try:
+                response = client.get(
+                    url,
+                    headers=self._stream_headers(),
+                    timeout=self.timeout,
+                )
+                last_status = response.status_code
+
+                if response.ok:
+                    content = str(response.text or "")
+                    if content.lstrip().startswith("#EXTM3U"):
+                        return content
+
+            except Exception as error:
+                logger.debug("[Mapple] HLS probe failed for %s: %s", url, error)
+
+            if attempt + 1 < attempts:
+                time.sleep(delay * (attempt + 1))
+
+        logger.debug(
+            "[Mapple] HLS probe exhausted for %s (last HTTP=%s)",
+            url,
+            last_status,
+        )
+        return None
+
     def _manifest_is_playable(
         self,
         client,
         stream_url: str,
     ) -> bool:
-        """Return whether a resolved Mapple URL is a readable HLS manifest."""
-        try:
-            response = client.get(
-                stream_url,
-                headers=self._stream_headers(),
-                timeout=self.timeout,
-            )
-        except Exception as error:
-            logger.debug("[Mapple] manifest probe failed: %s", error)
+        """Validate both the master and its best child playlist before selection."""
+        content = self._probe_hls_url(client, stream_url)
+        if content is None:
             return False
 
-        if not response.ok:
-            logger.debug(
-                "[Mapple] manifest probe returned HTTP %s",
-                response.status_code,
-            )
-            return False
+        best_variant = self._best_variant_url(stream_url, content)
+        if best_variant is None:
+            return True
 
-        try:
-            content = response.text
-        except Exception as error:
-            logger.debug("[Mapple] manifest probe body read failed: %s", error)
-            return False
-
-        if not str(content or "").lstrip().startswith("#EXTM3U"):
-            logger.debug("[Mapple] resolved source is not an HLS manifest")
-            return False
-
-        return True
+        return self._probe_hls_url(client, best_variant) is not None
 
     def _resolve_source(
         self,
