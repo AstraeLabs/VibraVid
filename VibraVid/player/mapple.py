@@ -76,6 +76,10 @@ class MappleResolvedStream:
     headers: dict[str, str]
 
 
+class _TransientMappleSourceError(RuntimeError):
+    """A resolved Mapple source produced a temporarily unusable HLS stream."""
+
+
 class MappleResolver:
     def __init__(
         self,
@@ -501,7 +505,7 @@ class MappleResolver:
 
         return True
 
-    def _resolve_source(
+    def _resolve_source_once(
         self,
         client,
         *,
@@ -602,14 +606,66 @@ class MappleResolver:
         stream_url = self._ensure_hls_hint(stream_url)
 
         if not self._manifest_is_playable(client, stream_url):
-            logger.debug("[Mapple] source %s returned an unusable HLS manifest", source)
-            return None
+            raise _TransientMappleSourceError(
+                f"[Mapple] source {source} returned a temporarily unusable HLS manifest"
+            )
 
         return MappleResolvedStream(
             url=stream_url,
             source=source,
             headers=self._stream_headers(),
         )
+
+    def _resolve_source(
+        self,
+        client,
+        *,
+        source: str,
+        tmdb_id: int,
+        media_type: str,
+        season: int | None,
+        episode: int | None,
+        request_token: str,
+        playback_token: str,
+        referer: str,
+    ) -> MappleResolvedStream | None:
+        attempts = 3
+
+        for attempt in range(attempts):
+            try:
+                return self._resolve_source_once(
+                    client,
+                    source=source,
+                    tmdb_id=tmdb_id,
+                    media_type=media_type,
+                    season=season,
+                    episode=episode,
+                    request_token=request_token,
+                    playback_token=playback_token,
+                    referer=referer,
+                )
+            except _TransientMappleSourceError as error:
+                if attempt + 1 >= attempts:
+                    logger.debug(
+                        "[Mapple] source %s exhausted %s fresh resolution attempts: %s",
+                        source,
+                        attempts,
+                        error,
+                    )
+                    return None
+
+                delay = float(attempt + 1)
+                logger.debug(
+                    "[Mapple] source %s HLS probe failed, regenerating a fresh stream URL "
+                    "after %.1fs (%s/%s)",
+                    source,
+                    delay,
+                    attempt + 1,
+                    attempts,
+                )
+                time.sleep(delay)
+
+        return None
 
     def resolve_stream(
         self,
