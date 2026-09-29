@@ -63,6 +63,13 @@ class FakeSession:
                 headers={"content-type": "application/json"},
             )
 
+        if url.startswith("https://cdn.example/playlist/"):
+            return FakeResponse(
+                200,
+                headers={"content-type": "application/vnd.apple.mpegurl"},
+                text="#EXTM3U\n#EXT-X-VERSION:3\n",
+            )
+
         raise AssertionError(f"Unexpected GET {url}")
 
     def post(self, url, **kwargs):
@@ -213,3 +220,59 @@ def test_resolver_disables_browser_impersonation():
 
     assert captured
     assert captured[0]["browser"] is None
+
+
+def test_manifest_probe_rejects_unusable_source():
+    class ManifestFallbackSession(FakeSession):
+        def get(self, url, **kwargs):
+            if url.startswith("https://bad.example/"):
+                self.calls.append(("GET", url, kwargs))
+                return FakeResponse(
+                    404,
+                    headers={"content-type": "text/plain"},
+                    text="not found",
+                )
+
+            return super().get(url, **kwargs)
+
+        def post(self, url, **kwargs):
+            if url.endswith("/api/encrypt"):
+                self.calls.append(("POST", url, kwargs))
+                source = kwargs["json"]["data"]["source"]
+                return FakeResponse(
+                    200,
+                    {"url": f"/api/stream-encrypted?data={source}"},
+                )
+            return super().post(url, **kwargs)
+
+        def get_stream_response(self, url):
+            return None
+
+    session = ManifestFallbackSession()
+
+    original_get = session.get
+
+    def get_with_bad_first(url, **kwargs):
+        if "/api/stream-encrypted" in url and "data=mapple" in url:
+            session.calls.append(("GET", url, kwargs))
+            return FakeResponse(
+                200,
+                {
+                    "success": True,
+                    "data": {"stream_url": "https://bad.example/master.m3u8"},
+                },
+                headers={"content-type": "application/json"},
+            )
+        return original_get(url, **kwargs)
+
+    session.get = get_with_bad_first
+
+    resolver = MappleResolver(
+        sources=("mapple", "s2"),
+        client_factory=_client_factory(session),
+        user_agent="pytest",
+    )
+
+    result = resolver.resolve_stream(27205, "movie")
+
+    assert result.source == "s2"
