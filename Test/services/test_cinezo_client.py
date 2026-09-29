@@ -60,7 +60,7 @@ def test_get_stream_reports_available_backend_without_exposing_media(monkeypatch
         ],
     )
 
-    with pytest.raises(RuntimeError, match="Source backend available \(zendaya\)"):
+    with pytest.raises(RuntimeError, match=r"Source backend available \(zendaya\)"):
         cinezo_client.get_stream(27205, "movie")
 
 
