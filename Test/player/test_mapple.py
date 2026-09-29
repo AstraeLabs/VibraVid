@@ -6,11 +6,20 @@ from VibraVid.player.mapple import MappleResolver, get_player_url
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, payload=None, *, headers=None, text=""):
+    def __init__(
+        self,
+        status_code=200,
+        payload=None,
+        *,
+        headers=None,
+        text="",
+        content=None,
+    ):
         self.status_code = status_code
         self._payload = payload
         self.headers = headers or {}
         self.text = text
+        self.content = content if content is not None else text.encode()
 
     @property
     def ok(self):
@@ -245,9 +254,6 @@ def test_manifest_probe_rejects_unusable_source():
                 )
             return super().post(url, **kwargs)
 
-        def get_stream_response(self, url):
-            return None
-
     session = ManifestFallbackSession()
 
     original_get = session.get
@@ -321,8 +327,20 @@ def test_manifest_probe_retries_transient_child_404(monkeypatch):
                 return FakeResponse(
                     200,
                     headers={"content-type": "application/vnd.apple.mpegurl"},
-                    text="#EXTM3U\n#EXT-X-ENDLIST\n",
+                    text=(
+                        "#EXTM3U\n"
+                        "#EXTINF:5.0,\n"
+                        "seg-1.ts\n"
+                        "#EXTINF:5.0,\n"
+                        "seg-2.ts\n"
+                        "#EXTINF:5.0,\n"
+                        "seg-3.ts\n"
+                        "#EXT-X-ENDLIST\n"
+                    ),
                 )
+
+            if "seg-" in url:
+                return FakeResponse(200, content=b"media")
 
             raise AssertionError(url)
 
@@ -340,3 +358,57 @@ def test_manifest_probe_retries_transient_child_404(monkeypatch):
         "https://cdn.example/master.m3u8",
     )
     assert session.variant_calls == 3
+
+
+def test_manifest_probe_rejects_source_with_dead_media_segment(monkeypatch):
+    class DeadMediaSession:
+        def get(self, url, **kwargs):
+            if url.endswith("master.m3u8"):
+                return FakeResponse(
+                    200,
+                    text=(
+                        "#EXTM3U\n"
+                        "#EXT-X-STREAM-INF:BANDWIDTH=4000000\n"
+                        "high.m3u8\n"
+                    ),
+                )
+
+            if url.endswith("high.m3u8"):
+                return FakeResponse(
+                    200,
+                    text=(
+                        "#EXTM3U\n"
+                        "#EXTINF:5.0,\n"
+                        "seg-1.ts\n"
+                        "#EXTINF:5.0,\n"
+                        "seg-2.ts\n"
+                        "#EXTINF:5.0,\n"
+                        "seg-3.ts\n"
+                        "#EXT-X-ENDLIST\n"
+                    ),
+                )
+
+            if url.endswith("seg-1.ts"):
+                return FakeResponse(200, content=b"media")
+
+            if url.endswith("seg-2.ts"):
+                return FakeResponse(404, text="not found")
+
+            if url.endswith("seg-3.ts"):
+                return FakeResponse(200, content=b"media")
+
+            raise AssertionError(url)
+
+    monkeypatch.setattr("VibraVid.player.mapple.time.sleep", lambda _: None)
+
+    session = DeadMediaSession()
+    resolver = MappleResolver(
+        sources=("mapple",),
+        client_factory=lambda **kwargs: session,
+        user_agent="pytest",
+    )
+
+    assert not resolver._manifest_is_playable(
+        session,
+        "https://cdn.example/master.m3u8",
+    )
