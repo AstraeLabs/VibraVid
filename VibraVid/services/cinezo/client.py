@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from VibraVid.player.cinezo import CinezoResolverChain, CinezoSourceProbe
+from VibraVid.player.cinezo_media import resolve_cinezo_media
 from VibraVid.utils.http_client import create_client, get_userAgent
 
 logger = logging.getLogger(__name__)
@@ -144,15 +145,8 @@ def get_stream(
     if available:
         selected = available[0]
 
-        if media_resolver is None:
-            # TODO: provide an authorized resolver that converts the selected
-            # backend into (url, headers, subtitle_tracks).
-            raise RuntimeError(
-                f"[Cinezo] Source backend available ({', '.join(source.name for source in available)}), "
-                f"but media URL extraction is not implemented: {player_url}"
-            )
-
-        result = media_resolver(
+        resolver = media_resolver or resolve_cinezo_media
+        result = resolver(
             selected,
             int(tmdb_id),
             str(media_type),
