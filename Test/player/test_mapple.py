@@ -276,3 +276,67 @@ def test_manifest_probe_rejects_unusable_source():
     result = resolver.resolve_stream(27205, "movie")
 
     assert result.source == "s2"
+
+
+def test_best_variant_url_prefers_highest_bandwidth():
+    content = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1920x1080
+high.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720
+mid.m3u8
+"""
+
+    assert (
+        MappleResolver._best_variant_url(
+            "https://cdn.example/playlist/master.m3u8?token=abc",
+            content,
+        )
+        == "https://cdn.example/playlist/high.m3u8"
+    )
+
+
+def test_manifest_probe_retries_transient_child_404(monkeypatch):
+    class TransientVariantSession:
+        def __init__(self):
+            self.variant_calls = 0
+
+        def get(self, url, **kwargs):
+            if url.endswith("master.m3u8"):
+                return FakeResponse(
+                    200,
+                    headers={"content-type": "application/vnd.apple.mpegurl"},
+                    text=(
+                        "#EXTM3U\n"
+                        "#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1920x1080\n"
+                        "high.m3u8\n"
+                    ),
+                )
+
+            if url.endswith("high.m3u8"):
+                self.variant_calls += 1
+                if self.variant_calls < 3:
+                    return FakeResponse(404, text="not found")
+                return FakeResponse(
+                    200,
+                    headers={"content-type": "application/vnd.apple.mpegurl"},
+                    text="#EXTM3U\n#EXT-X-ENDLIST\n",
+                )
+
+            raise AssertionError(url)
+
+    monkeypatch.setattr("VibraVid.player.mapple.time.sleep", lambda _: None)
+
+    session = TransientVariantSession()
+    resolver = MappleResolver(
+        sources=("mapple",),
+        client_factory=lambda **kwargs: session,
+        user_agent="pytest",
+    )
+
+    assert resolver._manifest_is_playable(
+        session,
+        "https://cdn.example/master.m3u8",
+    )
+    assert session.variant_calls == 3
