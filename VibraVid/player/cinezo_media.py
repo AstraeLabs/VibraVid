@@ -5,7 +5,8 @@ from typing import Any
 from VibraVid.player.cinezo import CinezoSourceProbe
 from VibraVid.utils.http_client import get_userAgent
 
-PLAYER_REFERER = "https://player.cinezo.live/"\nAUTHORIZED_MEDIA_URL = "https://example.com/authorized-test.m3u8"
+PLAYER_REFERER = "https://player.cinezo.live/"
+AUTHORIZED_MEDIA_URL = "https://example.com/authorized-test.m3u8"
 
 
 def _default_headers() -> dict[str, str]:
