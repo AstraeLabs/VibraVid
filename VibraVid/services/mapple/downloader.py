@@ -28,6 +28,7 @@ def _download_hls(
         headers=stream_headers or None,
         output_path=output_path,
         other_tracks=subtitle_tracks or None,
+        use_curl_cffi_segments=True,
     ).start()
 
 
