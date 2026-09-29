@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -407,12 +408,60 @@ class MappleResolver:
         )
         return None
 
+    @staticmethod
+    def _media_segment_urls(
+        playlist_url: str,
+        content: str,
+    ) -> list[str]:
+        """Return media segment URLs from a child HLS playlist."""
+        return [
+            urljoin(playlist_url, line.strip())
+            for line in str(content or "").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    def _probe_media_url(
+        self,
+        client,
+        url: str,
+        *,
+        attempts: int = 3,
+        delay: float = 0.25,
+    ) -> bool:
+        """Return whether a Mapple media segment is readable."""
+        last_status = None
+
+        for attempt in range(attempts):
+            try:
+                response = client.get(
+                    url,
+                    headers=self._stream_headers(),
+                    timeout=self.timeout,
+                )
+                last_status = response.status_code
+
+                if response.ok and response.content:
+                    return True
+
+            except Exception as error:
+                logger.debug("[Mapple] media probe failed for %s: %s", url, error)
+
+            if attempt + 1 < attempts:
+                time.sleep(delay * (attempt + 1))
+
+        logger.debug(
+            "[Mapple] media probe exhausted for %s (last HTTP=%s)",
+            url,
+            last_status,
+        )
+        return False
+
     def _manifest_is_playable(
         self,
         client,
         stream_url: str,
     ) -> bool:
-        """Validate both the master and its best child playlist before selection."""
+        """Validate the master, best variant, and representative media segments."""
         content = self._probe_hls_url(client, stream_url)
         if content is None:
             return False
@@ -421,7 +470,36 @@ class MappleResolver:
         if best_variant is None:
             return True
 
-        return self._probe_hls_url(client, best_variant) is not None
+        variant_content = self._probe_hls_url(client, best_variant)
+        if variant_content is None:
+            return False
+
+        segments = self._media_segment_urls(
+            best_variant,
+            variant_content,
+        )
+        if not segments:
+            logger.debug("[Mapple] best HLS variant contains no media segments")
+            return False
+
+        sample_indexes = sorted(
+            {
+                0,
+                len(segments) // 2,
+                len(segments) - 1,
+            }
+        )
+
+        for index in sample_indexes:
+            if not self._probe_media_url(client, segments[index]):
+                logger.debug(
+                    "[Mapple] HLS source rejected: segment %s/%s is unavailable",
+                    index + 1,
+                    len(segments),
+                )
+                return False
+
+        return True
 
     def _resolve_source(
         self,
