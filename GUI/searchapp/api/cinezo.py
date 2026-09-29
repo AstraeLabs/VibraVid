@@ -1,6 +1,6 @@
-# 28.09.26
+# 29.09.26
 
-from VibraVid.services.cinezo.client import get_player_url, player_is_available
+from VibraVid.services.cinezo.client import get_player_url, player_is_available, probe_sources
 from VibraVid.services.cinezo.scrapper import GetSerieInfo
 
 from .base import BaseStreamingAPI, Entries, Episode, Season
@@ -58,6 +58,29 @@ class CinezoAPI(BaseStreamingAPI):
         tmdb_id = int(media_item.tmdb_id or media_item.id)
         media_type = "movie" if media_item.is_movie else "tv"
         return player_is_available(tmdb_id, media_type, season, episode)
+
+    def get_source_status(
+        self,
+        media_item: Entries,
+        season: int | None = None,
+        episode: int | None = None,
+    ) -> list[dict]:
+        """Return non-media source health information for diagnostics."""
+        tmdb_id = int(media_item.tmdb_id or media_item.id)
+        media_type = "movie" if media_item.is_movie else "tv"
+        return [
+            {
+                "name": source.name,
+                "status_code": source.status_code,
+                "content_type": source.content_type,
+                "available": source.available,
+                "source_shape": source.source_shape,
+                "source_keys": source.source_keys,
+                "subtitle_count": source.subtitle_count,
+                "error": source.error,
+            }
+            for source in probe_sources(tmdb_id, media_type, season, episode)
+        ]
 
     def get_series_metadata(self, media_item: Entries) -> list[Season] | None:
         """Get seasons and episodes for a Cinezo series."""

@@ -1,6 +1,6 @@
 import pytest
 
-from VibraVid.player.cinezo import CinezoResolverChain, CinezoStream
+from VibraVid.player.cinezo import CinezoResolverChain, CinezoSourceProbe
 from VibraVid.services.cinezo import client as cinezo_client
 
 
@@ -21,28 +21,62 @@ def test_tv_player_url_requires_episode_coordinates():
         cinezo_client.get_player_url(1399, "tv")
 
 
-def test_stream_resolution_reports_missing_resolver_result():
-    with pytest.raises(RuntimeError, match="No source resolver produced a playable stream"):
+def test_probe_sources_delegates_to_chain():
+    class _Chain:
+        def probe_sources(self, tmdb_id, media_type, season=None, episode=None):
+            return [
+                CinezoSourceProbe(
+                    name="fixture",
+                    endpoint="https://example.test/source",
+                    status_code=200,
+                    content_type="application/json",
+                    available=True,
+                    source_shape="source",
+                    source_keys=["type", "url"],
+                )
+            ]
+
+    results = cinezo_client.probe_sources(
+        27205,
+        "movie",
+        resolver_chain=_Chain(),
+    )
+
+    assert len(results) == 1
+    assert results[0].name == "fixture"
+    assert results[0].available is True
+
+
+def test_get_stream_reports_available_backend_without_exposing_media(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_client,
+        "probe_sources",
+        lambda *args, **kwargs: [
+            CinezoSourceProbe(
+                name="zendaya",
+                endpoint="https://example.test/source",
+                available=True,
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="Source backend available \(zendaya\)"):
         cinezo_client.get_stream(27205, "movie")
 
 
-def test_get_stream_returns_normalized_resolver_output():
-    class _Resolver:
-        name = "fixture"
-
-        def resolve(self, tmdb_id, media_type, season=None, episode=None):
-            return CinezoStream(
-                url="https://example.test/master.m3u8",
-                headers={"Referer": "https://example.test/"},
-                subtitles=[{"type": "subtitle", "url": "https://example.test/it.vtt"}],
+def test_get_stream_reports_source_failures(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_client,
+        "probe_sources",
+        lambda *args, **kwargs: [
+            CinezoSourceProbe(
+                name="jennifer",
+                endpoint="https://example.test/source",
+                status_code=530,
+                error="HTTP 530",
             )
-
-    stream_url, headers, subtitles = cinezo_client.get_stream(
-        27205,
-        "movie",
-        resolver_chain=CinezoResolverChain([_Resolver()]),
+        ],
     )
 
-    assert stream_url == "https://example.test/master.m3u8"
-    assert headers == {"Referer": "https://example.test/"}
-    assert subtitles == [{"type": "subtitle", "url": "https://example.test/it.vtt"}]
+    with pytest.raises(RuntimeError, match="jennifer=HTTP 530"):
+        cinezo_client.get_stream(27205, "movie")

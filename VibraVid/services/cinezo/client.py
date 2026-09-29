@@ -2,7 +2,7 @@
 
 import logging
 
-from VibraVid.player.cinezo import CinezoResolverChain
+from VibraVid.player.cinezo import CinezoResolverChain, CinezoSourceProbe
 from VibraVid.utils.http_client import create_client, get_userAgent
 
 logger = logging.getLogger(__name__)
@@ -63,27 +63,45 @@ def player_is_available(
     return True
 
 
-def get_stream(
+def probe_sources(
     tmdb_id: int,
     media_type: str,
     season: int | None = None,
     episode: int | None = None,
     resolver_chain: CinezoResolverChain | None = None,
-):
-    """Resolve Cinezo playback information for the service downloader."""
-    player_url = get_player_url(tmdb_id, media_type, season, episode)
+) -> list[CinezoSourceProbe]:
+    """Inspect current Cinezo source availability without returning media URLs."""
     chain = resolver_chain or CinezoResolverChain()
-
-    resolved = chain.resolve(
+    return chain.probe_sources(
         tmdb_id=tmdb_id,
         media_type=media_type,
         season=season,
         episode=episode,
     )
 
-    if resolved is None:
+
+def get_stream(
+    tmdb_id: int,
+    media_type: str,
+    season: int | None = None,
+    episode: int | None = None,
+):
+    """Resolve Cinezo playback information for the service downloader."""
+    player_url = get_player_url(tmdb_id, media_type, season, episode)
+    sources = probe_sources(tmdb_id, media_type, season, episode)
+    available = [source.name for source in sources if source.available]
+
+    if available:
+        # TODO: implement authorized media URL extraction for the selected
+        # current Cinezo source and return (url, headers, subtitle_tracks).
         raise RuntimeError(
-            f"[Cinezo] No source resolver produced a playable stream for the current player: {player_url}"
+            f"[Cinezo] Source backend available ({', '.join(available)}), "
+            f"but media URL extraction is not implemented: {player_url}"
         )
 
-    return resolved.url, resolved.headers, resolved.subtitles
+    errors = [f"{source.name}={source.error}" for source in sources if source.error]
+    detail = f" ({'; '.join(errors)})" if errors else ""
+
+    raise RuntimeError(
+        f"[Cinezo] No source backend is currently available for: {player_url}{detail}"
+    )

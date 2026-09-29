@@ -1,53 +1,118 @@
-from VibraVid.player.cinezo import CinezoResolverChain, CinezoStream
+from VibraVid.player import cinezo as cinezo_player
 
 
-class _Resolver:
-    def __init__(self, name, result=None, error=None):
-        self.name = name
-        self.result = result
-        self.error = error
-        self.calls = 0
+class _Response:
+    def __init__(self, status_code=200, content_type="application/json", data=None):
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 400
+        self.headers = {"content-type": content_type}
+        self._data = data
 
-    def resolve(self, tmdb_id, media_type, season=None, episode=None):
-        self.calls += 1
-        if self.error is not None:
-            raise self.error
-        return self.result
+    def json(self):
+        if isinstance(self._data, Exception):
+            raise self._data
+        return self._data
 
 
-def test_chain_uses_first_successful_resolver():
-    first = _Resolver("first", result=None)
-    second = _Resolver(
-        "second",
-        result=CinezoStream(
-            url="https://example.test/master.m3u8",
-            headers={"Referer": "https://example.test/"},
-            subtitles=[{"type": "subtitle", "url": "https://example.test/it.vtt"}],
-        ),
+class _Client:
+    def __init__(self, response):
+        self.response = response
+
+    def get(self, *args, **kwargs):
+        return self.response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_current_source_endpoints():
+    assert cinezo_player.ZendayaResolver().build_endpoint(27205, "movie") == (
+        "https://proxy3.flikhub.net/movie?id=27205&mode=json&sources=zendaya&hevc=1"
     )
-    third = _Resolver("third", result=CinezoStream(url="https://unused.test/master.m3u8"))
-
-    result = CinezoResolverChain([first, second, third]).resolve(27205, "movie")
-
-    assert result is not None
-    assert result.url == "https://example.test/master.m3u8"
-    assert result.headers["Referer"] == "https://example.test/"
-    assert first.calls == 1
-    assert second.calls == 1
-    assert third.calls == 0
-
-
-def test_chain_continues_after_resolver_exception():
-    failing = _Resolver("broken", error=RuntimeError("boom"))
-    working = _Resolver("working", result=CinezoStream(url="https://example.test/video.mp4"))
-
-    result = CinezoResolverChain([failing, working]).resolve(27205, "movie")
-
-    assert result is not None
-    assert result.url == "https://example.test/video.mp4"
-    assert failing.calls == 1
-    assert working.calls == 1
+    assert cinezo_player.BerlinResolver().build_endpoint(1399, "tv", 1, 2) == (
+        "https://proxy1.flikhub.net/tv?id=1399&season=1&episode=2&mode=json&sources=berlin&hevc=1"
+    )
+    assert cinezo_player.JenniferResolver().build_endpoint(27205, "movie") == (
+        "https://media.vidcool.net/movie/27205.json"
+    )
+    assert cinezo_player.CinefreakResolver().build_endpoint(27205, "movie") == (
+        "https://proxy1.flikhub.net/movie?id=27205&mode=json&sources=cinefreak&hevc=1"
+    )
 
 
-def test_default_pending_resolvers_return_no_stream():
-    assert CinezoResolverChain().resolve(27205, "movie") is None
+def test_standard_source_probe_detects_availability_without_returning_url(monkeypatch):
+    response = _Response(data={
+        "source": {
+            "label": "Zendaya",
+            "source": "zendaya",
+            "type": "hls",
+            "url": "https://example.test/private.m3u8",
+        }
+    })
+    monkeypatch.setattr(
+        cinezo_player,
+        "create_client",
+        lambda **kwargs: _Client(response),
+    )
+
+    result = cinezo_player.ZendayaResolver().probe(27205, "movie")
+
+    assert result.available is True
+    assert result.source_shape == "source"
+    assert result.source_keys == ["label", "source", "type", "url"]
+    assert not hasattr(result, "url")
+
+
+def test_jennifer_probe_understands_stream_shape(monkeypatch):
+    response = _Response(data={
+        "stream": {
+            "original": "https://example.test/private.m3u8",
+            "hls": None,
+        }
+    })
+    monkeypatch.setattr(
+        cinezo_player,
+        "create_client",
+        lambda **kwargs: _Client(response),
+    )
+
+    result = cinezo_player.JenniferResolver().probe(27205, "movie")
+
+    assert result.available is True
+    assert result.source_shape == "stream"
+    assert result.source_keys == ["hls", "original"]
+
+
+def test_probe_records_http_failure(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_player,
+        "create_client",
+        lambda **kwargs: _Client(_Response(status_code=530, content_type="text/html")),
+    )
+
+    result = cinezo_player.JenniferResolver().probe(27205, "movie")
+
+    assert result.available is False
+    assert result.status_code == 530
+    assert result.error == "HTTP 530"
+
+
+def test_chain_returns_all_source_results(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_player,
+        "create_client",
+        lambda **kwargs: _Client(_Response(data={"source": None})),
+    )
+
+    results = cinezo_player.CinezoResolverChain(
+        [
+            cinezo_player.ZendayaResolver(),
+            cinezo_player.BerlinResolver(),
+        ]
+    ).probe_sources(27205, "movie")
+
+    assert [result.name for result in results] == ["zendaya", "berlin"]
+    assert all(result.available is False for result in results)
