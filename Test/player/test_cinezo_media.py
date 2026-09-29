@@ -1,7 +1,7 @@
 import pytest
 
-from VibraVid.player.cinezo import CinezoSourceProbe
 from VibraVid.player import cinezo_media
+from VibraVid.player.cinezo import CinezoSourceProbe
 
 
 def test_media_resolver_rejects_unavailable_source():
@@ -32,3 +32,54 @@ def test_media_resolver_reaches_single_todo():
     )
     with pytest.raises(RuntimeError, match="Media resolver TODO for backend berlin"):
         cinezo_media.resolve_cinezo_media(source, 27205, "movie")
+
+
+def test_subtitles_to_tracks_supports_legacy_cinezo_shape():
+    tracks = cinezo_media._subtitles_to_tracks(
+        [{"file": "https://example.test/it.vtt", "label": "Italiano"}]
+    )
+
+    assert tracks == [
+        {
+            "type": "subtitle",
+            "language": "Italiano",
+            "name": "Italiano",
+            "url": "https://example.test/it.vtt",
+            "extension": "vtt",
+        }
+    ]
+
+
+def test_build_result_merges_headers_and_normalizes_subtitles(monkeypatch):
+    monkeypatch.setattr(
+        cinezo_media,
+        "get_userAgent",
+        lambda: "test-agent",
+    )
+
+    result = cinezo_media._build_result(
+        "https://example.test/master.m3u8",
+        {"Referer": "https://example.test/", "Origin": "https://example.test"},
+        [{"url": "https://example.test/it.vtt", "language": "it", "name": "Italiano"}],
+    )
+
+    assert result["url"] == "https://example.test/master.m3u8"
+    assert result["headers"] == {
+        "User-Agent": "test-agent",
+        "Referer": "https://example.test/",
+        "Origin": "https://example.test",
+    }
+    assert result["subtitles"] == [
+        {
+            "type": "subtitle",
+            "language": "it",
+            "name": "Italiano",
+            "url": "https://example.test/it.vtt",
+            "extension": "vtt",
+        }
+    ]
+
+
+def test_build_result_rejects_empty_stream_url():
+    with pytest.raises(RuntimeError, match="no playable source"):
+        cinezo_media._build_result("", {}, [])
