@@ -498,3 +498,91 @@ def test_playback_init_retries_transient_503(monkeypatch):
 
     assert result.source == "s2"
     assert session.playback_calls == 3
+
+def test_warm_session_retries_transient_403(monkeypatch):
+    class TransientPlayerSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            if self.calls < 3:
+                return FakeResponse(
+                    403,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    text="forbidden",
+                )
+            return FakeResponse(
+                200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                text="<html></html>",
+            )
+
+    sleeps = []
+    monkeypatch.setattr("VibraVid.player.mapple.time.sleep", sleeps.append)
+
+    session = TransientPlayerSession()
+    resolver = MappleResolver(
+        sources=("s2",),
+        client_factory=lambda **kwargs: session,
+        user_agent="pytest",
+    )
+
+    referer = resolver._warm_session(
+        session,
+        27205,
+        "movie",
+        None,
+        None,
+    )
+
+    assert referer == "https://mapple.fun/watch/movie/27205"
+    assert session.calls == 3
+    assert sleeps == [0.5, 1.0]
+
+
+def test_warm_session_does_not_retry_404_candidate(monkeypatch):
+    class TvFallbackSession:
+        def __init__(self):
+            self.urls = []
+
+        def get(self, url, **kwargs):
+            self.urls.append(url)
+            if url == "https://mapple.fun/watch/tv/1399/2/3":
+                return FakeResponse(
+                    404,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    text="not found",
+                )
+            return FakeResponse(
+                200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                text="<html></html>",
+            )
+
+    monkeypatch.setattr(
+        "VibraVid.player.mapple.time.sleep",
+        lambda _: pytest.fail("404 must not be retried"),
+    )
+
+    session = TvFallbackSession()
+    resolver = MappleResolver(
+        sources=("s2",),
+        client_factory=lambda **kwargs: session,
+        user_agent="pytest",
+    )
+
+    referer = resolver._warm_session(
+        session,
+        1399,
+        "tv",
+        2,
+        3,
+    )
+
+    assert referer == "https://mapple.fun/watch/tv/1399-2-3"
+    assert session.urls == [
+        "https://mapple.fun/watch/tv/1399/2/3",
+        "https://mapple.fun/watch/tv/1399-2-3",
+    ]
+
