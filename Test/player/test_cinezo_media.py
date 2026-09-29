@@ -24,14 +24,33 @@ def test_media_resolver_requires_tv_coordinates():
         cinezo_media.resolve_cinezo_media(source, 1399, "tv")
 
 
-def test_media_resolver_reaches_single_todo():
+def test_media_resolver_uses_configured_authorized_url(monkeypatch):
     source = CinezoSourceProbe(
         name="berlin",
         endpoint="https://example.test/berlin",
         available=True,
     )
-    with pytest.raises(RuntimeError, match="Media resolver TODO for backend berlin"):
-        cinezo_media.resolve_cinezo_media(source, 27205, "movie")
+    monkeypatch.setattr(
+        cinezo_media,
+        "AUTHORIZED_MEDIA_URL",
+        "https://example.test/authorized-master.m3u8",
+    )
+    monkeypatch.setattr(
+        cinezo_media,
+        "get_userAgent",
+        lambda: "test-agent",
+    )
+
+    result = cinezo_media.resolve_cinezo_media(source, 27205, "movie")
+
+    assert result == {
+        "url": "https://example.test/authorized-master.m3u8",
+        "headers": {
+            "User-Agent": "test-agent",
+            "Referer": "https://player.cinezo.live/",
+        },
+        "subtitles": [],
+    }
 
 
 def test_subtitles_to_tracks_supports_legacy_cinezo_shape():
