@@ -458,3 +458,43 @@ def test_source_resolution_retries_fresh_stream_after_transient_manifest(monkeyp
     assert result.source == "s2"
     assert result.url.startswith("https://cdn.example/playlist/master.m3u8")
     assert session.stream_calls == 2
+
+
+def test_playback_init_retries_transient_503(monkeypatch):
+    class TransientPlaybackSession(FakeSession):
+        def post(self, url, **kwargs):
+            if url.endswith("/api/playback-init"):
+                self.calls.append(("POST", url, kwargs))
+                self.playback_calls += 1
+
+                if self.playback_calls < 3:
+                    return FakeResponse(
+                        503,
+                        {"success": False},
+                        headers={"content-type": "application/json"},
+                    )
+
+                return FakeResponse(
+                    200,
+                    {
+                        "success": True,
+                        "token": "playback-token",
+                        "expiresIn": 120,
+                    },
+                )
+
+            return super().post(url, **kwargs)
+
+    monkeypatch.setattr("VibraVid.player.mapple.time.sleep", lambda _: None)
+
+    session = TransientPlaybackSession()
+    resolver = MappleResolver(
+        sources=("s2",),
+        client_factory=_client_factory(session),
+        user_agent="pytest",
+    )
+
+    result = resolver.resolve_stream(27205, "movie")
+
+    assert result.source == "s2"
+    assert session.playback_calls == 3
