@@ -65,6 +65,8 @@ class HLS_Downloader(BaseDownloader):
         custom_filters: dict | None = None,
         display_selected_only: bool = False,
         use_curl_cffi_segments: bool | None = None,
+        hls_playlist_retry_statuses: tuple[int, ...] | None = None,
+        hls_playlist_retry_attempts: int = 3,
     ):
         """
         Parameters:
@@ -89,6 +91,9 @@ class HLS_Downloader(BaseDownloader):
               to True regardless of this value if license_url/license_data/license_request_fn/key are provided.
             - use_curl_cffi_segments: Optional per-download override for the segment HTTP backend. None keeps the
               global DOWNLOAD.use_curl_cffi_segments setting, True forces curl_cffi, False forces native Velora.
+            - hls_playlist_retry_statuses: Optional HTTP status codes to retry when fetching HLS child playlists.
+              None preserves the default behavior.
+            - hls_playlist_retry_attempts: Total attempts for configured retryable HLS playlist statuses.
         """
         self.m3u8_url = self._resolve_url(str(m3u8_url).strip()) if m3u8_url else None
         self.m3u8_content = m3u8_content
@@ -116,6 +121,8 @@ class HLS_Downloader(BaseDownloader):
         self.custom_filters = custom_filters or None
         self.display_selected_only = display_selected_only
         self.use_curl_cffi_segments = use_curl_cffi_segments
+        self.hls_playlist_retry_statuses = tuple(hls_playlist_retry_statuses or ())
+        self.hls_playlist_retry_attempts = max(1, int(hls_playlist_retry_attempts))
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
@@ -418,6 +425,8 @@ class HLS_Downloader(BaseDownloader):
             manifest_protocol="hls",
             has_drm=self.has_drm,
             use_curl_cffi_segments=self.use_curl_cffi_segments,
+            hls_playlist_retry_statuses=self.hls_playlist_retry_statuses,
+            hls_playlist_retry_attempts=self.hls_playlist_retry_attempts,
         )
         self.media_downloader.other_tracks = self.other_tracks
         self.media_downloader.custom_filters = self.custom_filters
