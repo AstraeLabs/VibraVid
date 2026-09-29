@@ -64,6 +64,7 @@ class HLS_Downloader(BaseDownloader):
         has_drm: bool = False,
         custom_filters: dict | None = None,
         display_selected_only: bool = False,
+        use_curl_cffi_segments: bool | None = None,
     ):
         """
         Parameters:
@@ -86,6 +87,8 @@ class HLS_Downloader(BaseDownloader):
             - has_drm: Whether this stream is DRM-protected. Default False (skip the expensive per-track child-playlist
               DRM resolution, only fetching one representative playlist for live/VOD detection). Automatically forced
               to True regardless of this value if license_url/license_data/license_request_fn/key are provided.
+            - use_curl_cffi_segments: Optional per-download override for the segment HTTP backend. None keeps the
+              global DOWNLOAD.use_curl_cffi_segments setting, True forces curl_cffi, False forces native Velora.
         """
         self.m3u8_url = self._resolve_url(str(m3u8_url).strip()) if m3u8_url else None
         self.m3u8_content = m3u8_content
@@ -112,6 +115,7 @@ class HLS_Downloader(BaseDownloader):
         self.other_tracks = other_tracks or []
         self.custom_filters = custom_filters or None
         self.display_selected_only = display_selected_only
+        self.use_curl_cffi_segments = use_curl_cffi_segments
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
@@ -413,6 +417,7 @@ class HLS_Downloader(BaseDownloader):
             manifest_content=self.m3u8_content,
             manifest_protocol="hls",
             has_drm=self.has_drm,
+            use_curl_cffi_segments=self.use_curl_cffi_segments,
         )
         self.media_downloader.other_tracks = self.other_tracks
         self.media_downloader.custom_filters = self.custom_filters
