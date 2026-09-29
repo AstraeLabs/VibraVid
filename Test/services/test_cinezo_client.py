@@ -1,5 +1,6 @@
 import pytest
 
+from VibraVid.player import cinezo_media
 from VibraVid.player.cinezo import CinezoSourceProbe
 from VibraVid.services.cinezo import client as cinezo_client
 
@@ -59,9 +60,18 @@ def test_get_stream_reaches_default_media_resolver(monkeypatch):
             )
         ],
     )
+    monkeypatch.setattr(
+        cinezo_media,
+        "AUTHORIZED_MEDIA_URL",
+        "https://example.test/authorized-master.m3u8",
+    )
 
-    with pytest.raises(RuntimeError, match="Media resolver TODO for backend zendaya"):
-        cinezo_client.get_stream(27205, "movie")
+    stream_url, headers, subtitles = cinezo_client.get_stream(27205, "movie")
+
+    assert stream_url == "https://example.test/authorized-master.m3u8"
+    assert headers["Referer"] == "https://player.cinezo.live/"
+    assert "User-Agent" in headers
+    assert subtitles == []
 
 
 def test_get_stream_uses_first_available_backend(monkeypatch):
