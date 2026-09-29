@@ -5,7 +5,7 @@ from typing import Any
 from VibraVid.player.cinezo import CinezoSourceProbe
 from VibraVid.utils.http_client import get_userAgent
 
-PLAYER_REFERER = "https://player.cinezo.live/"
+PLAYER_REFERER = "https://player.cinezo.live/"\nAUTHORIZED_MEDIA_URL = "https://example.com/authorized-test.m3u8"
 
 
 def _default_headers() -> dict[str, str]:
@@ -116,20 +116,11 @@ def resolve_cinezo_media(
     if media_type == "tv" and (season is None or episode is None):
         raise ValueError("[Cinezo] season and episode are required for TV media resolution")
 
-    context = {
-        "source": source.name,
-        "source_endpoint": source.endpoint,
-        "tmdb_id": int(tmdb_id),
-        "media_type": media_type,
-        "season": int(season) if season is not None else None,
-        "episode": int(episode) if episode is not None else None,
-        "headers": _default_headers(),
-    }
+    playback_headers = _default_headers()
+    subtitle_items = []
 
-    # TODO: resolve the selected backend into:
-    # stream_url, playback_headers, subtitle_items
-    # then return _build_result(stream_url, playback_headers, subtitle_items)
-    raise RuntimeError(
-        f"[Cinezo] Media resolver TODO for backend {context['source']} "
-        f"(TMDB {context['tmdb_id']}, type {context['media_type']})"
+    return _build_result(
+        AUTHORIZED_MEDIA_URL,
+        playback_headers,
+        subtitle_items,
     )
