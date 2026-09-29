@@ -46,3 +46,5 @@ def test_download_hls_forces_curl_cffi_segments(monkeypatch):
 
     assert result == "ok"
     assert captured["use_curl_cffi_segments"] is True
+    assert captured["hls_playlist_retry_statuses"] == (404,)
+    assert captured["hls_playlist_retry_attempts"] == 3
