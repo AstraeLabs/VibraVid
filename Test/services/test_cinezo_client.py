@@ -47,7 +47,7 @@ def test_probe_sources_delegates_to_chain():
     assert results[0].available is True
 
 
-def test_get_stream_reports_available_backend_without_resolver(monkeypatch):
+def test_get_stream_reaches_default_media_resolver(monkeypatch):
     monkeypatch.setattr(
         cinezo_client,
         "probe_sources",
@@ -60,7 +60,7 @@ def test_get_stream_reports_available_backend_without_resolver(monkeypatch):
         ],
     )
 
-    with pytest.raises(RuntimeError, match=r"Source backend available \(zendaya\)"):
+    with pytest.raises(RuntimeError, match="Media resolver TODO for backend zendaya"):
         cinezo_client.get_stream(27205, "movie")
 
 
