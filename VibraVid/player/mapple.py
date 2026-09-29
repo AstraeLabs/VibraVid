@@ -246,6 +246,41 @@ class MappleResolver:
             raise RuntimeError("[Mapple] request-token response did not contain a token")
         return token
 
+    def _post_playback_init(
+        self,
+        client,
+        *,
+        referer: str,
+        payload: dict,
+        attempts: int = 3,
+    ):
+        transient_statuses = {429, 500, 502, 503, 504}
+        response = None
+
+        for attempt in range(attempts):
+            response = client.post(
+                f"{self.base_url}/api/playback-init",
+                headers=self._api_headers(referer),
+                json=payload,
+                timeout=self.timeout,
+            )
+
+            if response.ok or response.status_code not in transient_statuses:
+                return response
+
+            if attempt + 1 < attempts:
+                delay = float(2 ** attempt)
+                logger.warning(
+                    "[Mapple] playback-init returned HTTP %s, retrying in %.1fs (%s/%s)",
+                    response.status_code,
+                    delay,
+                    attempt + 1,
+                    attempts,
+                )
+                time.sleep(delay)
+
+        return response
+
     def _playback_token(
         self,
         client,
@@ -269,11 +304,10 @@ class MappleResolver:
             "requestToken": request_token,
         }
 
-        response = client.post(
-            f"{self.base_url}/api/playback-init",
-            headers=self._api_headers(referer),
-            json=payload,
-            timeout=self.timeout,
+        response = self._post_playback_init(
+            client,
+            referer=referer,
+            payload=payload,
         )
         data = self._json_payload(response, "playback-init")
 
@@ -299,11 +333,10 @@ class MappleResolver:
             "nonce": nonce,
         }
 
-        solved_response = client.post(
-            f"{self.base_url}/api/playback-init",
-            headers=self._api_headers(referer),
-            json=solved_payload,
-            timeout=self.timeout,
+        solved_response = self._post_playback_init(
+            client,
+            referer=referer,
+            payload=solved_payload,
         )
         solved = self._json_payload(solved_response, "playback-init PoW")
 
