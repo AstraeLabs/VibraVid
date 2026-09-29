@@ -72,6 +72,9 @@ python manual.py -i streamingcommunity --search "interstellar" -sa "eng"
 # Subtitles
 python manual.py -i streamingcommunity --search "interstellar" -ss "eng"
 
+# Only the forced subtitle track
+python manual.py -i streamingcommunity --search "interstellar" -ss "ita_forced"
+
 # Skip the whole download if the requested filter matches no track
 python manual.py -i streamingcommunity --search "interstellar" -sa "deu" --skip-no-match
 

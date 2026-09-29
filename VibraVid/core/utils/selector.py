@@ -16,6 +16,7 @@ _AUDIO_SLOT_RESERVED = {"best", "worst", "all", "false", "default", "non-default
 NON_MUXABLE_AUDIO_CODECS = frozenset({"dtsx"})
 NON_MUXABLE_AUDIO_ID_PREFIXES = ("dts-x", "atmos")
 _UNSUPPORTED_VIDEO_CODEC_PREFIXES = ("vp09", "vp90", "vp08", "av01", "av1")
+_LANG_FLAG_AFFIXES = frozenset({"forced", "cc", "sdh"})
 
 
 def split_audio_slots(raw: str) -> dict[int, str] | None:
@@ -589,6 +590,19 @@ def _matches_codec(s, token: str) -> bool:
     return raw.startswith(token.lower()) or token.lower() in raw
 
 
+def _strip_lang_flag_affixes(tag: str) -> str:
+    """Drop flag components from a language tag: "forced-ita" -> "ita", "eng-sdh" -> "eng"."""
+    if not tag:
+        return ""
+    
+    parts = [p for p in re.split(r"[-_]", tag.strip().lower()) if p]
+    kept = [p for p in parts if p not in _LANG_FLAG_AFFIXES]
+    if not kept:
+        return tag.strip().lower()
+    
+    return "-".join(kept)
+
+
 def _matches_lang(s, langs: str) -> bool:
     """
     Match lang tokens against stream.language AND stream.resolved_language.
@@ -601,8 +615,10 @@ def _matches_lang(s, langs: str) -> bool:
     tokens = [t.strip().lower() for t in re.split(r"[|\s]+", langs) if t.strip()]
     sl = _language(s)
     rl = _resolved_language(s)
-    sl_iso = resolve_iso639_2(sl) if sl else "und"
-    rl_iso = resolve_iso639_2(rl) if rl else "und"
+    sl_base = _strip_lang_flag_affixes(sl)
+    rl_base = _strip_lang_flag_affixes(rl)
+    sl_iso = resolve_iso639_2(sl_base) if sl_base else "und"
+    rl_iso = resolve_iso639_2(rl_base) if rl_base else "und"
 
     for t in tokens:
         if t == sl or t == rl:
@@ -614,7 +630,7 @@ def _matches_lang(s, langs: str) -> bool:
             # and "en-AU" both -> "eng"), losing the distinction the token
             # is asking for. Compare canonical BCP-47 locales instead.
             t_locale = (resolve_locale(t) or t).replace("_", "-").lower()
-            rl_locale = (resolve_locale(rl) or rl).replace("_", "-").lower() if rl else ""
+            rl_locale = (resolve_locale(rl_base) or rl_base).replace("_", "-").lower() if rl_base else ""
             if rl_locale and t_locale == rl_locale:
                 return True
             continue  # no base-language fallback for region-qualified tokens
@@ -689,6 +705,8 @@ def _canon_lang_token(token: str) -> str:
     t = (token or "").strip().lower().replace("_", "-")
     if not t:
         return ""
+    
+    t = _strip_lang_flag_affixes(t) or t
     base = t.split("-", 1)[0]
     if len(base) == 3 and base.isalpha():
         # Naively truncating an ISO 639-2 code to its first two letters only

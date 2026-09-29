@@ -117,8 +117,8 @@ Embed the credentials directly in the URL userinfo, as `<scheme>://<username>:<p
     "anime_folder_name": "Anime",
     "music_folder_name": "Music",
     "live_folder_name": "Live",
-    "movie_format": "%(title_name) (%(title_year))/%(title_name) (%(title_year))",
-    "episode_format": "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d)",
+    "movie_format": "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]",
+    "episode_format": "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]",
     "song_format": "%(album)/%(track_number:02d). %(title)"
   }
 }
@@ -243,13 +243,13 @@ S%(season:02d)/     ->  season folder   S01/
     "auto_select": true,
     "use_curl_cffi_segments": false,
     "delay_after_download": 0,
-    "thread_count": 10,
+    "thread_count": 5,
     "segment_delay_seconds": 0,
     "segment_delay_jitter_seconds": 0,
     "subtitle_resolve_workers": 4,
     "select_video": "best",
-    "select_audio": "it|en",
-    "select_subtitle": "it|en",
+    "select_audio": "ita|eng",
+    "select_subtitle": "ita|eng",
     "extract_embedded_cc": false,
     "live_max_empty_polls": 8,
     "max_token_refresh_rounds": 10,
@@ -268,7 +268,7 @@ S%(season:02d)/     ->  season folder   S01/
 | `auto_select` | `true` | Automatically select streams based on filters. When `false`, enables interactive track selection before download |
 | `delay_after_download` | `0` | Delay (seconds) applied after each movie or episode download |
 | `skip_download` | `false` | Skip the download step and process existing files |
-| `thread_count` | `10` | Number of concurrent segment requests for a single stream |
+| `thread_count` | `5` | Number of concurrent segment requests for a single stream |
 | `subtitle_resolve_workers` | `4` | Number of HLS subtitle renditions resolved/downloaded concurrently. `1` restores the original strictly-sequential behaviour |
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 closed captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download |
 | `cleanup_tmp_folder` | `true` | Remove temporary files after download |
@@ -411,7 +411,7 @@ See `VibraVid/core/processors/helper/ex_sub.py` in the repository for conversion
 {
   "REQUESTS": {
     "timeout": 15,
-    "max_retry": 8,
+    "max_retry": 4,
     "verify": true,
     "use_proxy": false,
     "proxy_scope": "scrap+down",
@@ -427,7 +427,7 @@ See `VibraVid/core/processors/helper/ex_sub.py` in the repository for conversion
 | Key | Default | Description |
 |-----|---------|-------------|
 | `timeout` | `15` | Request timeout in seconds |
-| `max_retry` | `8` | Maximum retry attempts for failed requests |
+| `max_retry` | `4` | Maximum retry attempts for failed requests |
 | `verify` | `true` | Verify TLS/SSL certificates on outgoing requests and segment downloads. |
 | `use_proxy` | `false` | Enable proxy support for HTTP requests |
 | `proxy_scope` | `scrap+down` | Where the proxy is applied: `scrap`, `down`, or `scrap+down` (see below) |
