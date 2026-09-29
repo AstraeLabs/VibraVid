@@ -105,8 +105,10 @@ class FakeSession:
         raise AssertionError(f"Unexpected POST {url}")
 
 
-def _client_factory(session):
+def _client_factory(session, captured_kwargs=None):
     def factory(**kwargs):
+        if captured_kwargs is not None:
+            captured_kwargs.append(kwargs)
         return session
 
     return factory
@@ -196,3 +198,18 @@ def test_tv_requires_coordinates():
 
     with pytest.raises(ValueError, match="season and episode"):
         resolver.resolve_stream(1399, "tv")
+
+
+def test_resolver_disables_browser_impersonation():
+    captured = []
+    session = FakeSession()
+    resolver = MappleResolver(
+        sources=("s2",),
+        client_factory=_client_factory(session, captured),
+        user_agent="pytest",
+    )
+
+    resolver.resolve_stream(27205, "movie")
+
+    assert captured
+    assert captured[0]["browser"] is None
