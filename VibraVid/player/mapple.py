@@ -342,6 +342,41 @@ class MappleResolver:
 
         return MappleResolver._append_query(stream_url, format=".m3u8")
 
+    def _manifest_is_playable(
+        self,
+        client,
+        stream_url: str,
+    ) -> bool:
+        """Return whether a resolved Mapple URL is a readable HLS manifest."""
+        try:
+            response = client.get(
+                stream_url,
+                headers=self._stream_headers(),
+                timeout=self.timeout,
+            )
+        except Exception as error:
+            logger.debug("[Mapple] manifest probe failed: %s", error)
+            return False
+
+        if not response.ok:
+            logger.debug(
+                "[Mapple] manifest probe returned HTTP %s",
+                response.status_code,
+            )
+            return False
+
+        try:
+            content = response.text
+        except Exception as error:
+            logger.debug("[Mapple] manifest probe body read failed: %s", error)
+            return False
+
+        if not str(content or "").lstrip().startswith("#EXTM3U"):
+            logger.debug("[Mapple] resolved source is not an HLS manifest")
+            return False
+
+        return True
+
     def _resolve_source(
         self,
         client,
@@ -441,6 +476,11 @@ class MappleResolver:
             return None
 
         stream_url = self._ensure_hls_hint(stream_url)
+
+        if not self._manifest_is_playable(client, stream_url):
+            logger.debug("[Mapple] source %s returned an unusable HLS manifest", source)
+            return None
+
         return MappleResolvedStream(
             url=stream_url,
             source=source,
