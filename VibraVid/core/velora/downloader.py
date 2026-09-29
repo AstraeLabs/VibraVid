@@ -61,6 +61,7 @@ class MediaDownloader(
         manifest_refresh_fn=None,
         has_drm: bool = False,
         display_selected_only: bool = False,
+        use_curl_cffi_segments: bool | None = None,
     ) -> None:
         super().__init__(
             url=url,
@@ -79,6 +80,7 @@ class MediaDownloader(
         )
         self.max_segments = max_segments
         self.max_time = max_time
+        self.use_curl_cffi_segments = use_curl_cffi_segments
 
         # Cancellation
         self._stop_event: threading.Event = threading.Event()
@@ -478,7 +480,11 @@ class MediaDownloader(
                 "tasks": tasks,
             }
             known_total = int(getattr(stream, "estimated_size", 0) or 0) if stream else 0
-            use_curl_cffi = config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
+            use_curl_cffi = (
+                self.use_curl_cffi_segments
+                if self.use_curl_cffi_segments is not None
+                else config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
+            )
             backend = run_download_plan_curl_cffi if use_curl_cffi else run_download_plan
             results = backend(plan, progress_cb=progress_cb, event_cb=event_cb, stop_check=stop_check or self._stop_check, known_total=known_total)
             return [Path(item["path"]) for item in results if item.get("path")]
