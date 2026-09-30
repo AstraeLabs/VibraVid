@@ -29,6 +29,7 @@ def _download_hls(
         output_path=output_path,
         other_tracks=subtitle_tracks or None,
         use_curl_cffi_segments=True,
+        curl_cffi_segment_browser=None,
         hls_playlist_retry_statuses=(404,),
         hls_playlist_retry_attempts=3,
     ).start()
