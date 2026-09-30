@@ -428,7 +428,7 @@ class MappleResolver:
             if not child or child.startswith("#"):
                 continue
 
-            bandwidth_match = re.search(r"(?:^|,)BANDWIDTH=(\d+)", line)
+            bandwidth_match = re.search(r"(?<![A-Z-])BANDWIDTH=(\d+)", line)
             bandwidth = int(bandwidth_match.group(1)) if bandwidth_match else 0
             variants.append((bandwidth, urljoin(master_url, child)))
 
