@@ -801,7 +801,7 @@ class MappleResolver:
 
         detail = "; ".join(unavailable)
         raise RuntimeError(
-            f"[Mapple] No source backend is currently available"
+            "[Mapple] No source backend is currently available"
             + (f" ({detail})" if detail else "")
         )
 
