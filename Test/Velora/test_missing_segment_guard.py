@@ -14,7 +14,7 @@ def test_missing_segment_guard_rejects_media_loss_above_limit(monkeypatch):
 
     assert error is not None
     assert "4/73" in error
-    assert "limit 5%" in error
+    assert "5.5% > 5.0% limit" in error
 
 
 def test_missing_segment_guard_allows_media_loss_within_limit(monkeypatch):
