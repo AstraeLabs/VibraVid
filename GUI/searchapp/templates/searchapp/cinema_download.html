@@ -57,6 +57,7 @@
 <section class="cn-strip">
 	<div class="cn-strip-hd">
 		<h2>Queued</h2><span class="cn-n" id="cn-n-queue">0</span>
+		<button class="cn-more" type="button" id="cn-clear-queue" hidden>Clear queued</button>
 	</div>
 	<div class="cn-reel" id="cn-reel-queue"></div>
 	<p class="cn-empty" id="cn-empty-queue">Queue is empty.</p>
@@ -108,9 +109,11 @@
 <script>
 (function () {
 	"use strict";
-	var URL_DOWNLOADS = "{% url 'get_downloads_json' %}?history=20";
-	var URL_KILL      = "{% url 'kill_download' %}";
-	var URL_POSTERS   = "{% url 'resolve_tmdb_posters' %}";
+	var URL_DOWNLOADS    = "{% url 'get_downloads_json' %}?history=20";
+	var URL_KILL         = "{% url 'kill_download' %}";
+	var URL_REMOVE_QUEUE = "{% url 'remove_queued_download' %}";
+	var URL_CLEAR_QUEUE  = "{% url 'clear_queued_downloads' %}";
+	var URL_POSTERS      = "{% url 'resolve_tmdb_posters' %}";
 	var CSRF          = "{{ csrf_token }}";
 	var esc = CN.esc, titleize = CN.titleize, duotone = CN.duotone, pct = CN.pct;
 	var posterCache = {};
@@ -157,6 +160,7 @@
 			poster(item, opts) +
 			(opts.cap ? '<span class="cn-cap">' + esc(titleize(opts.cap)) + "</span>" : "") +
 			(opts.sub ? '<span class="cn-sub">' + esc(opts.sub) + "</span>" : "") +
+			(opts.action || "") +
 			"</article>";
 	}
 
@@ -399,6 +403,42 @@
 		}).then(refresh).catch(function () { btn.disabled = false; });
 	});
 
+	function queuePost(url, payload) {
+		return fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+			body: JSON.stringify(payload || {})
+		}).then(function (response) {
+			return response.json().then(function (data) {
+				if (!response.ok) throw new Error(data.message || "Queue request failed");
+				return data;
+			});
+		});
+	}
+
+	document.getElementById("cn-reel-queue").addEventListener("click", function (e) {
+		var btn = e.target.closest("[data-remove-queued]");
+		if (!btn) return;
+		e.preventDefault();
+		e.stopPropagation();
+		btn.disabled = true;
+		queuePost(URL_REMOVE_QUEUE, { download_id: btn.dataset.removeQueued })
+			.then(refresh)
+			.catch(function () {
+				btn.disabled = false;
+				refresh();
+			});
+	});
+
+	document.getElementById("cn-clear-queue").addEventListener("click", function () {
+		var btn = this;
+		if (!window.confirm("Remove all queued downloads that have not started yet?")) return;
+		btn.disabled = true;
+		queuePost(URL_CLEAR_QUEUE, {})
+			.then(refresh)
+			.finally(function () { btn.disabled = false; });
+	});
+
 	function refresh() {
 		return fetch(URL_DOWNLOADS)
 			.then(function (r) { return r.json(); })
@@ -406,6 +446,10 @@
 				var active = data.active || [];
 				var queue  = data.scheduled || [];
 				var hist   = data.history || [];
+				var clearQueue = document.getElementById("cn-clear-queue");
+
+				clearQueue.hidden = queue.length === 0;
+				clearQueue.disabled = queue.length === 0;
 
 				renderHero(active);
 
@@ -438,7 +482,11 @@
 								ruleColor: "var(--cn-cool)",
 								posterMeta: d.season ? "S" + d.season : d.type,
 								cap: d.title,
-								sub: d.site
+								sub: d.site,
+								action: d.id
+									? '<button class="cn-cta is-ghost" type="button" data-remove-queued="' +
+										esc(d.id) + '" style="margin-top:8px;padding:7px 12px;font-size:12px">Remove</button>'
+									: ""
 							});
 						},
 						// quando la coda avanza cambia solo il numero d'ordine

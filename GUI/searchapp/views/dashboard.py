@@ -10,10 +10,12 @@ from VibraVid.core.ui.tracker import download_tracker
 
 from .._download_infra import (
     _cancel_scheduled_download,
+    _clear_queued_downloads,
     _enrich_active_downloads_with_series,
     _extract_series_base_title,
     _get_scheduled_downloads,
     _prune_scheduled_downloads,
+    _remove_queued_download,
     _same_series,
     cancelled_scheduled_downloads,
     scheduled_downloads,
@@ -91,6 +93,70 @@ def kill_download(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
     return JsonResponse({"status": "error", "message": "Method not allowed", "status_code": 405}, status=405)
+
+
+def remove_queued_download(request: HttpRequest) -> JsonResponse:
+    """Remove one scheduled download without stopping active downloads."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"status": "error", "message": "Method not allowed"},
+            status=405,
+        )
+
+    try:
+        data = json.loads(request.body)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        return JsonResponse({"status": "error", "message": str(error)}, status=400)
+
+    download_id = str(data.get("download_id") or "").strip()
+    if not download_id:
+        return JsonResponse(
+            {"status": "error", "message": "download_id is required"},
+            status=400,
+        )
+
+    active_ids = {
+        item.get("id")
+        for item in download_tracker.get_active_downloads()
+        if item.get("id")
+    }
+    if download_id in active_ids:
+        return JsonResponse(
+            {"status": "error", "message": "Download has already started"},
+            status=409,
+        )
+
+    if not _remove_queued_download(download_id, active_ids=active_ids):
+        return JsonResponse(
+            {"status": "error", "message": "Queued download not found"},
+            status=404,
+        )
+
+    return JsonResponse({"status": "success", "download_id": download_id})
+
+
+def clear_queued_downloads(request: HttpRequest) -> JsonResponse:
+    """Remove every scheduled download that has not started."""
+    if request.method != "POST":
+        return JsonResponse(
+            {"status": "error", "message": "Method not allowed"},
+            status=405,
+        )
+
+    active_ids = {
+        item.get("id")
+        for item in download_tracker.get_active_downloads()
+        if item.get("id")
+    }
+    removed_ids = _clear_queued_downloads(active_ids=active_ids)
+
+    return JsonResponse(
+        {
+            "status": "success",
+            "removed": len(removed_ids),
+            "download_ids": removed_ids,
+        }
+    )
 
 
 def kill_and_clear_queue(request: HttpRequest) -> JsonResponse:
@@ -175,4 +241,12 @@ def clear_download_history(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
 
 
-__all__ = ['get_downloads_json', 'get_downloads_summary', 'kill_download', 'kill_and_clear_queue', 'clear_download_history']
+__all__ = [
+    'get_downloads_json',
+    'get_downloads_summary',
+    'kill_download',
+    'remove_queued_download',
+    'clear_queued_downloads',
+    'kill_and_clear_queue',
+    'clear_download_history',
+]
