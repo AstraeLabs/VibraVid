@@ -246,6 +246,7 @@ S%(season:02d)/     ->  season folder   S01/
     "thread_count": 5,
     "segment_delay_seconds": 0,
     "segment_delay_jitter_seconds": 0,
+    "max_missing_segment_ratio": 0.05,
     "subtitle_resolve_workers": 4,
     "select_video": "best",
     "select_audio": "ita|eng",
@@ -283,6 +284,7 @@ S%(season:02d)/     ->  season folder   S01/
 | `use_curl_cffi_segments` | `false` | Download segments through `curl_cffi` (TLS/JA3 fingerprint impersonation) instead of the default Velora HTTP backend. |
 | `segment_delay_seconds` | `0` | Fixed delay inserted before each segment request — throttles download speed to stay under a CDN's rate limit |
 | `segment_delay_jitter_seconds` | `0` | Random jitter (0 to this value, seconds) added on top of `segment_delay_seconds` so requests aren't perfectly periodic |
+| `max_missing_segment_ratio` | `0.05` | Maximum fraction of missing video or audio segments allowed before the download fails instead of muxing a partial media file |
 | `live_max_empty_polls` | `8` | Live HLS/DASH downloads only: number of consecutive polls with no new segments (or poll failures) before VibraVid concludes the live stream has ended and stops |
 | `max_token_refresh_rounds` | `10` | Maximum retry rounds when segments fail mid-download (e.g. the CDN manifest token expired -> HTTP 403, or a transient 503) — VibraVid re-requests a fresh manifest/token and retries just the failed segments |
 | `token_refresh_backoff_seconds` | `4.0` | Base backoff between token-refresh rounds; actual wait is `backoff × round number`, capped at 20s |
