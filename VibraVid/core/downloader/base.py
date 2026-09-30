@@ -352,8 +352,9 @@ class BaseDownloader:
     def _check_download_status(self, status: dict) -> "DownloadResult | None":
         """Guard the raw download ``status``: return a terminal DownloadResult for
         a cancelled/empty run, or ``None`` when there is media to mux."""
-        if status.get("error") == "cancelled":
-            return self._fail("cancelled")
+        error = status.get("error")
+        if error:
+            return self._fail(str(error))
         if self._no_media_downloaded(status):
             logger.error("No media downloaded")
             return self._fail("No media downloaded")
