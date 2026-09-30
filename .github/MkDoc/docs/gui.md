@@ -47,6 +47,8 @@ directly.
 
 - Live status and progress polled from `api/get-downloads/`.
 - **Stop** a running download (`api/kill-download/`).
+- **Remove** one queued download before it starts (`api/remove-queued-download/`).
+- **Clear queued** removes every not-yet-started download while leaving active downloads running (`api/clear-queued-downloads/`).
 - **Stop and clear the queue** (`api/kill-and-clear-queue/`).
 - **Clear history** of completed/failed entries (`api/clear-history/`).
 
