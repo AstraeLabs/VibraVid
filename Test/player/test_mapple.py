@@ -602,4 +602,3 @@ def test_warm_session_does_not_retry_404_candidate(monkeypatch):
         "https://mapple.fun/watch/tv/1399/2/3",
         "https://mapple.fun/watch/tv/1399-2-3",
     ]
-
