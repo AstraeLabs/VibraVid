@@ -27,6 +27,7 @@ from ..util.formatting import format_size as _fmt_size
 from ..util.formatting import normalize_path_key
 from .constants import (
     _DECRYPT_ERROR_RATIO_LIMIT,
+    MAX_MISSING_SEGMENT_RATIO,
     MAX_TOKEN_REFRESH_ROUNDS,
     REQUEST_TIMEOUT,
     RETRY_COUNT,
@@ -50,6 +51,25 @@ from .sniff import (
 )
 from .streaming_mux import StreamingMuxMixin, _estimate_livemux_wait_seconds
 from .worker import WorkerMixin
+
+
+def _missing_segment_failure_message(
+    label: str,
+    stream_type: str,
+    failed_count: int,
+    total_count: int,
+) -> str | None:
+    if stream_type not in ("video", "audio") or total_count <= 0:
+        return None
+
+    ratio = failed_count / total_count
+    if ratio <= MAX_MISSING_SEGMENT_RATIO:
+        return None
+
+    return (
+        f"{label}: too many missing segments "
+        f"({failed_count}/{total_count}, {ratio:.1%} > {MAX_MISSING_SEGMENT_RATIO:.1%} limit)"
+    )
 
 
 class DecryptPipelineMixin(
@@ -435,6 +455,20 @@ class DecryptPipelineMixin(
 
                 with self._failed_segments_lock:
                     self._failed_segments.append((_plain_label, failed))
+
+                segment_error = _missing_segment_failure_message(
+                    _plain_label,
+                    getattr(stream, "type", ""),
+                    len(failed),
+                    total,
+                )
+                if segment_error:
+                    logger.error(segment_error)
+                    with self._failed_segments_lock:
+                        self.segment_failure_errors.append(segment_error)
+                    self._finish_bar_task(bar_manager, task_key, "Failed")
+                    self._record_track_done(task_key, None)
+                    return
 
         if ctx.decrypt_aborted_reason is not None:
             # A genuinely permanent condition (e.g. no content key for this

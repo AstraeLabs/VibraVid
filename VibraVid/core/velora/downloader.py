@@ -61,6 +61,10 @@ class MediaDownloader(
         manifest_refresh_fn=None,
         has_drm: bool = False,
         display_selected_only: bool = False,
+        use_curl_cffi_segments: bool | None = None,
+        curl_cffi_segment_browser: str | None = "chrome",
+        hls_playlist_retry_statuses: tuple[int, ...] | None = None,
+        hls_playlist_retry_attempts: int = 3,
     ) -> None:
         super().__init__(
             url=url,
@@ -79,6 +83,10 @@ class MediaDownloader(
         )
         self.max_segments = max_segments
         self.max_time = max_time
+        self.use_curl_cffi_segments = use_curl_cffi_segments
+        self.curl_cffi_segment_browser = curl_cffi_segment_browser
+        self.hls_playlist_retry_statuses = tuple(hls_playlist_retry_statuses or ())
+        self.hls_playlist_retry_attempts = max(1, int(hls_playlist_retry_attempts))
 
         # Cancellation
         self._stop_event: threading.Event = threading.Event()
@@ -92,6 +100,7 @@ class MediaDownloader(
         self._failed_segments: list = []
         self._failed_segments_lock = threading.Lock()
         self.missing_segments_count: int = 0
+        self.segment_failure_errors: list[str] = []
 
         # Decryption-failure accumulator: per-track records for streams that are still encrypted after decrypt
         self.decrypt_failures: list = []
@@ -369,6 +378,9 @@ class MediaDownloader(
             print_failed_segments_report(self._failed_segments)
             self._failed_segments.clear()
 
+        if self.segment_failure_errors:
+            return {"error": self.segment_failure_errors[0]}
+
         self.status = self._build_status(ext_subs, ext_auds)
 
         # A stop (Ctrl+C or a tracker-level request, e.g. a live source going
@@ -475,10 +487,15 @@ class MediaDownloader(
                 "verify_tls": VERIFY_TLS,
                 "http_version": http_version,
                 "headers": headers,
+                "curl_cffi_browser": self.curl_cffi_segment_browser,
                 "tasks": tasks,
             }
             known_total = int(getattr(stream, "estimated_size", 0) or 0) if stream else 0
-            use_curl_cffi = config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
+            use_curl_cffi = (
+                self.use_curl_cffi_segments
+                if self.use_curl_cffi_segments is not None
+                else config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
+            )
             backend = run_download_plan_curl_cffi if use_curl_cffi else run_download_plan
             results = backend(plan, progress_cb=progress_cb, event_cb=event_cb, stop_check=stop_check or self._stop_check, known_total=known_total)
             return [Path(item["path"]) for item in results if item.get("path")]

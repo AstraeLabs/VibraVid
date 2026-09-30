@@ -1,0 +1,134 @@
+# 29.09.26
+
+from VibraVid.services.mapple.client import get_player_url, player_is_available
+from VibraVid.services.mapple.scrapper import GetSerieInfo
+
+from .base import BaseStreamingAPI, Entries, Episode, Season
+
+
+class MappleAPI(BaseStreamingAPI):
+    def __init__(self):
+        super().__init__()
+        self.site_name = "mapple"
+        self._search_fn = None
+
+    def search(self, query: str) -> list[Entries]:
+        search_fn = self._get_search_fn()
+        database = search_fn(query, get_onlyDatabase=True)
+        results = []
+
+        if database and hasattr(database, "media_list"):
+            for element in database.media_list:
+                item_dict = (
+                    element.__dict__.copy()
+                    if hasattr(element, "__dict__")
+                    else {}
+                )
+                results.append(
+                    Entries(
+                        id=item_dict.get("id"),
+                        name=item_dict.get("name"),
+                        slug=item_dict.get("slug", ""),
+                        type=item_dict.get("type"),
+                        url=item_dict.get("url"),
+                        poster=item_dict.get("image"),
+                        year=item_dict.get("year"),
+                        tmdb_id=item_dict.get("tmdb_id") or item_dict.get("id"),
+                        raw_data=item_dict,
+                    )
+                )
+
+        return results
+
+    def get_player_url(
+        self,
+        media_item: Entries,
+        season: int | None = None,
+        episode: int | None = None,
+    ) -> str:
+        tmdb_id = int(media_item.tmdb_id or media_item.id)
+        media_type = "movie" if media_item.is_movie else "tv"
+        return get_player_url(tmdb_id, media_type, season, episode)
+
+    def player_is_available(
+        self,
+        media_item: Entries,
+        season: int | None = None,
+        episode: int | None = None,
+    ) -> bool:
+        tmdb_id = int(media_item.tmdb_id or media_item.id)
+        media_type = "movie" if media_item.is_movie else "tv"
+        return player_is_available(
+            tmdb_id,
+            media_type,
+            season,
+            episode,
+        )
+
+    def get_series_metadata(self, media_item: Entries) -> list[Season] | None:
+        if media_item.is_movie:
+            return None
+
+        tmdb_id = int(media_item.tmdb_id or media_item.id or 0)
+        scrape_serie = self.get_cached_scraper(media_item)
+
+        if not scrape_serie:
+            scrape_serie = GetSerieInfo(tmdb_id, media_item.name or "")
+            self.set_cached_scraper(media_item, scrape_serie)
+
+        if not scrape_serie.getNumberSeason():
+            return None
+
+        seasons = []
+
+        for season in scrape_serie.seasons_manager.seasons:
+            episodes_raw = scrape_serie.getEpisodeSeasons(season.number)
+            episodes = [
+                Episode(
+                    number=episode.number,
+                    name=episode.name,
+                    id=episode.id,
+                    duration=getattr(episode, "duration", None),
+                    image=getattr(episode, "image", None),
+                )
+                for episode in episodes_raw
+            ]
+
+            seasons.append(
+                Season(
+                    number=season.number,
+                    episodes=episodes,
+                    name=season.name,
+                )
+            )
+
+        return seasons or None
+
+    def start_download(
+        self,
+        media_item: Entries,
+        season: str | None = None,
+        episodes: str | None = None,
+    ) -> bool:
+        search_fn = self._get_search_fn()
+        selections = None
+
+        if season or episodes:
+            selections = {
+                "season": season,
+                "episode": episodes,
+            }
+
+        scrape_serie = self.get_cached_scraper(media_item)
+        direct_item = dict(
+            media_item.raw_data
+            or media_item.__dict__.copy()
+        )
+
+        return bool(
+            search_fn(
+                direct_item=direct_item,
+                selections=selections,
+                scrape_serie=scrape_serie,
+            )
+        )

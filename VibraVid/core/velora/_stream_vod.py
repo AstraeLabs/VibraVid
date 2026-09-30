@@ -68,6 +68,32 @@ def _frag_init_probe(dl_segs: list[dict], headers: dict) -> tuple[bool, str | No
 
 
 class VodStreamMixin:
+    def _get_hls_playlist(self, client, url: str):
+        retry_statuses = set(getattr(self, "hls_playlist_retry_statuses", ()) or ())
+        attempts = max(1, int(getattr(self, "hls_playlist_retry_attempts", 1) or 1))
+
+        for attempt in range(attempts):
+            try:
+                return get_with_retry(client, url)
+            except Exception as exc:
+                response = getattr(exc, "response", None)
+                status_code = getattr(response, "status_code", None)
+
+                if status_code not in retry_statuses or attempt + 1 >= attempts:
+                    raise
+
+                delay = min(0.5 * (attempt + 1), 2.0)
+                logger.warning(
+                    "HLS playlist returned HTTP %s, retrying in %.1fs (%s/%s)",
+                    status_code,
+                    delay,
+                    attempt + 1,
+                    attempts,
+                )
+                time.sleep(delay)
+
+        raise RuntimeError("HLS playlist retry loop exhausted")
+
     def _apply_max_time(self, dl_segs: list[dict]) -> list[dict]:
         start, end = self.max_time if isinstance(self.max_time, tuple) else (0.0, self.max_time)
         if (not start or start <= 0) and end is None:
@@ -498,7 +524,7 @@ class VodStreamMixin:
 
                 try:
                     with create_client(headers=all_headers, timeout=REQUEST_TIMEOUT, follow_redirects=True) as c:
-                        resp = get_with_retry(c, playlist_url)
+                        resp = self._get_hls_playlist(c, playlist_url)
                         first_content = resp.text
 
                     base_url = hls_base_url(playlist_url)
@@ -531,7 +557,7 @@ class VodStreamMixin:
         all_headers = self._build_headers()
         try:
             with create_client(headers=all_headers, timeout=REQUEST_TIMEOUT, follow_redirects=True) as c:
-                resp = get_with_retry(c, playlist_url)
+                resp = self._get_hls_playlist(c, playlist_url)
                 playlist_content = resp.text
         except Exception as exc:
             logger.error(f"Failed to fetch HLS variant playlist: {exc}")
