@@ -65,6 +65,7 @@ class HLS_Downloader(BaseDownloader):
         custom_filters: dict | None = None,
         display_selected_only: bool = False,
         use_curl_cffi_segments: bool | None = None,
+        curl_cffi_segment_browser: str | None = "chrome",
         hls_playlist_retry_statuses: tuple[int, ...] | None = None,
         hls_playlist_retry_attempts: int = 3,
     ):
@@ -91,6 +92,8 @@ class HLS_Downloader(BaseDownloader):
               to True regardless of this value if license_url/license_data/license_request_fn/key are provided.
             - use_curl_cffi_segments: Optional per-download override for the segment HTTP backend. None keeps the
               global DOWNLOAD.use_curl_cffi_segments setting, True forces curl_cffi, False forces native Velora.
+            - curl_cffi_segment_browser: Browser impersonation profile for curl_cffi segment requests. The default
+              is "chrome"; None disables browser impersonation for providers whose CDN rejects that fingerprint.
             - hls_playlist_retry_statuses: Optional HTTP status codes to retry when fetching HLS child playlists.
               None preserves the default behavior.
             - hls_playlist_retry_attempts: Total attempts for configured retryable HLS playlist statuses.
@@ -121,6 +124,7 @@ class HLS_Downloader(BaseDownloader):
         self.custom_filters = custom_filters or None
         self.display_selected_only = display_selected_only
         self.use_curl_cffi_segments = use_curl_cffi_segments
+        self.curl_cffi_segment_browser = curl_cffi_segment_browser
         self.hls_playlist_retry_statuses = tuple(hls_playlist_retry_statuses or ())
         self.hls_playlist_retry_attempts = max(1, int(hls_playlist_retry_attempts))
         self.chapters = chapters if chapters is not None else context_tracker.chapters
@@ -425,6 +429,7 @@ class HLS_Downloader(BaseDownloader):
             manifest_protocol="hls",
             has_drm=self.has_drm,
             use_curl_cffi_segments=self.use_curl_cffi_segments,
+            curl_cffi_segment_browser=self.curl_cffi_segment_browser,
             hls_playlist_retry_statuses=self.hls_playlist_retry_statuses,
             hls_playlist_retry_attempts=self.hls_playlist_retry_attempts,
         )
