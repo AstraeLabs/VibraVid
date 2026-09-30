@@ -303,6 +303,23 @@ mid.m3u8
     )
 
 
+def test_best_variant_url_ignores_average_bandwidth_prefix():
+    content = """#EXTM3U
+#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=900000,BANDWIDTH=1000000,RESOLUTION=640x360
+low.m3u8
+#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=3000000,BANDWIDTH=4000000,RESOLUTION=1920x1080
+high.m3u8
+"""
+
+    assert (
+        MappleResolver._best_variant_url(
+            "https://cdn.example/playlist/master.m3u8",
+            content,
+        )
+        == "https://cdn.example/playlist/high.m3u8"
+    )
+
+
 def test_manifest_probe_retries_transient_child_404(monkeypatch):
     class TransientVariantSession:
         def __init__(self):
