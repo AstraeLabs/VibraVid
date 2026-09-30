@@ -100,6 +100,7 @@ class MediaDownloader(
         self._failed_segments: list = []
         self._failed_segments_lock = threading.Lock()
         self.missing_segments_count: int = 0
+        self.segment_failure_errors: list[str] = []
 
         # Decryption-failure accumulator: per-track records for streams that are still encrypted after decrypt
         self.decrypt_failures: list = []
@@ -376,6 +377,9 @@ class MediaDownloader(
             self.missing_segments_count += sum(len(failed) for _, failed in self._failed_segments)
             print_failed_segments_report(self._failed_segments)
             self._failed_segments.clear()
+
+        if self.segment_failure_errors:
+            return {"error": self.segment_failure_errors[0]}
 
         self.status = self._build_status(ext_subs, ext_auds)
 
