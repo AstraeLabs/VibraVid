@@ -10,12 +10,12 @@ from VibraVid.core.ui.tracker import download_tracker
 
 from .._download_infra import (
     _cancel_scheduled_download,
+    _clear_queued_downloads,
     _enrich_active_downloads_with_series,
     _extract_series_base_title,
     _get_scheduled_downloads,
     _prune_scheduled_downloads,
     _remove_queued_download,
-    _clear_queued_downloads,
     _same_series,
     cancelled_scheduled_downloads,
     scheduled_downloads,
