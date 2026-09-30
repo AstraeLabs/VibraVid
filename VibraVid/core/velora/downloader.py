@@ -62,6 +62,7 @@ class MediaDownloader(
         has_drm: bool = False,
         display_selected_only: bool = False,
         use_curl_cffi_segments: bool | None = None,
+        curl_cffi_segment_browser: str | None = "chrome",
         hls_playlist_retry_statuses: tuple[int, ...] | None = None,
         hls_playlist_retry_attempts: int = 3,
     ) -> None:
@@ -83,6 +84,7 @@ class MediaDownloader(
         self.max_segments = max_segments
         self.max_time = max_time
         self.use_curl_cffi_segments = use_curl_cffi_segments
+        self.curl_cffi_segment_browser = curl_cffi_segment_browser
         self.hls_playlist_retry_statuses = tuple(hls_playlist_retry_statuses or ())
         self.hls_playlist_retry_attempts = max(1, int(hls_playlist_retry_attempts))
 
@@ -481,6 +483,7 @@ class MediaDownloader(
                 "verify_tls": VERIFY_TLS,
                 "http_version": http_version,
                 "headers": headers,
+                "curl_cffi_browser": self.curl_cffi_segment_browser,
                 "tasks": tasks,
             }
             known_total = int(getattr(stream, "estimated_size", 0) or 0) if stream else 0
