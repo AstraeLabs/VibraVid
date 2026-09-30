@@ -68,7 +68,7 @@ def _missing_segment_failure_message(
 
     return (
         f"{label}: too many missing segments "
-        f"({failed_count}/{total_count}, {ratio:.0%}; limit {MAX_MISSING_SEGMENT_RATIO:.0%})"
+        f"({failed_count}/{total_count}, {ratio:.1%} > {MAX_MISSING_SEGMENT_RATIO:.1%} limit)"
     )
 
 
