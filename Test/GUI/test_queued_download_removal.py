@@ -1,5 +1,21 @@
 import json
+import os
+import sys
+from pathlib import Path
 from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[2]
+GUI_DIR = ROOT / "GUI"
+for path in (ROOT, GUI_DIR):
+    value = str(path)
+    if value not in sys.path:
+        sys.path.insert(0, value)
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "webgui.settings")
+
+import django
+
+django.setup()
 
 from GUI.searchapp import _download_infra as infra
 from GUI.searchapp.views import dashboard
