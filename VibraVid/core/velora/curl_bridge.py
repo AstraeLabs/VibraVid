@@ -22,14 +22,33 @@ _GLOBAL_CONCURRENCY_LIMIT = max(1, config_manager.config.get_int("DOWNLOAD", "th
 _global_semaphore = threading.BoundedSemaphore(_GLOBAL_CONCURRENCY_LIMIT)
 
 
-def _get_thread_client(timeout: float, verify: bool, proxy_url: str | None):
+def _get_thread_client(
+    timeout: float,
+    verify: bool,
+    proxy_url: str | None,
+    browser: str | None = "chrome",
+):
+    client_key = (timeout, verify, proxy_url, browser)
     client = getattr(_thread_local, "client", None)
-    if client is not None:
+    if client is not None and getattr(_thread_local, "client_key", None) == client_key:
         return client
 
+    if client is not None:
+        try:
+            client.close()
+        except Exception:
+            pass
+
     proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
-    client = create_client(timeout=timeout, verify=verify, proxies=proxies, http2=False, browser="chrome")
+    client = create_client(
+        timeout=timeout,
+        verify=verify,
+        proxies=proxies,
+        http2=False,
+        browser=browser,
+    )
     _thread_local.client = client
+    _thread_local.client_key = client_key
     return client
 
 
@@ -47,8 +66,14 @@ def _fetch_one(task: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     timeout = float(plan.get("timeout_seconds") or 30.0)
     verify = bool(plan.get("verify_tls", True))
     proxy_url = plan.get("proxy_url")
+    browser = plan.get("curl_cffi_browser", "chrome")
 
-    client = _get_thread_client(timeout=timeout, verify=verify, proxy_url=proxy_url)
+    client = _get_thread_client(
+        timeout=timeout,
+        verify=verify,
+        proxy_url=proxy_url,
+        browser=browser,
+    )
 
     last_error: str | None = None
     for attempt in range(retry_count + 1):
