@@ -108,6 +108,42 @@ python manual.py -i streamingcommunity --search "interstellar" --use_proxy --pro
 python manual.py -i streamingcommunity --search "interstellar" --use_proxy --proxy-scope scrap
 ```
 
+## Progress Output
+
+By default the download shows live bars redrawn in place.
+
+```bash
+# One line per track every 5 seconds (and on every phase change / completion), e.g.
+#   Vid [H.264] 720p 2.4 Mbps  28%  290.2M / 1012.7M  65.27M/s  ETA 00:11
+python manual.py -i streamingcommunity --search "interstellar" --plain-progress
+
+# ...every 2 seconds
+python manual.py -i streamingcommunity --search "interstellar" --plain-progress --progress-interval 2
+
+# No progress output at all
+python manual.py -i streamingcommunity --search "interstellar" --no-progress
+```
+
+## Metadata Sidecars (`.nfo` + artwork)
+
+Write the files Jellyfin, Emby and Kodi use to identify a download (`<name>.nfo` plus `-poster.jpg` for a film or
+`-thumb.jpg` for an episode). Only written for a reliable match; off by default (`DOWNLOAD.write_sidecars`).
+See [Metadata Providers](configuration.md#metadata-providers-tmdb-imdb-tvdb).
+
+```bash
+# Enable for this run, with the default providers (TMDB, then IMDb)
+python manual.py -i streamingcommunity --search "interstellar" --sidecars
+
+# Only IMDb (free, no API key needed)
+python manual.py -i streamingcommunity --search "interstellar" --sidecars --metadata-provider imdb
+
+# TheTVDB first, TMDB as fallback (needs TVDB_API_KEY or Provider.tvdb in login.json)
+python manual.py -i streamingcommunity --search "interstellar" --sidecars --metadata-provider tvdb,tmdb
+
+# Disable for this run even if enabled in config.json
+python manual.py -i streamingcommunity --search "interstellar" --no-sidecars
+```
+
 ## Show Dependency Paths
 
 ```bash

@@ -107,6 +107,7 @@ def run_download_plan_curl_cffi(
     event_cb: Callable[[dict[str, Any]], None] | None = None,
     stop_check: Callable[[], bool] | None = None,
     known_total: int = 0,
+    known_exact: bool = True,
 ) -> list[dict[str, Any]]:
     """Run a Velora download plan using curl_cffi with concurrency, progress reporting, and retry/backoff."""
     tasks = plan.get("tasks") or []
@@ -123,7 +124,6 @@ def run_download_plan_curl_cffi(
     results: list[dict[str, Any]] = []
     done_count = 0
     total_bytes = 0
-    prev_estimated = 0
     speed_window: deque[tuple[float, int]] = deque()
     speed_window.append((time.monotonic(), 0))
     lock = threading.Lock()
@@ -165,8 +165,7 @@ def run_download_plan_curl_cffi(
                             logger.debug(f"progress_cb raised: {exc}")
 
                     if event_cb:
-                        estimated_total = resolve_display_total(total_bytes, done_count, total, known_total=known_total, prev_estimated=prev_estimated)
-                        prev_estimated = estimated_total
+                        estimated_total = resolve_display_total(total_bytes, done_count, total, known_total=known_total, known_exact=known_exact)
                         progress_event = dict(event)
                         progress_event["pct"] = int((done_count / total) * 100) if total else 100
                         progress_event["segments"] = f"{done_count}/{total}"

@@ -64,7 +64,6 @@ class _SegmentDownloadContext:
 
     # Progress reporting
     first_bytes_logged: bool = False
-    prev_estimated: int = 0
     last_total_bytes: int = 0
 
     # needs_* dispatch flags (computed once, read by the worker dispatch + finalize)

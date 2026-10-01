@@ -44,7 +44,7 @@ _PREFERRED_ORDER = [
 ]
 _OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music"}
 _SITE_CATEGORIES: dict[str, str] = {}
-_SITE_ALIASES = {"altadefinzione": "altadefinizione"}
+_SITE_ALIASES: dict[str, str] = {}
 
 
 def _disabled_sites() -> set:

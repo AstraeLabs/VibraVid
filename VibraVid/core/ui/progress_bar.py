@@ -71,7 +71,9 @@ class CompactTimeRemainingColumn(ProgressColumn):
                 return Text.from_markup(f"[green]{d}[/green]")
             return Text.from_markup("[dim]--:--[/dim]")
 
-        remaining = task.time_remaining
+        # Producers that know the byte total and speed send their own ETA ("eta" present, even if None),
+        # refreshed with every speed update; rich's estimate is based on the integer pct and goes stale.
+        remaining = task.fields["eta"] if "eta" in task.fields else task.time_remaining
         if remaining is None:
             return Text.from_markup("[cyan]--:--[/cyan]")
         return Text.from_markup(f"[cyan]{internet_manager.format_time(remaining)}[/cyan]")

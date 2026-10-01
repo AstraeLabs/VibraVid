@@ -212,6 +212,7 @@ def run_download_plan(
     stop_check: Callable[[], bool] | None = None,
     wait_timeout_seconds: float = DEFAULT_WAIT_TIMEOUT_SECONDS,
     known_total: int = 0,
+    known_exact: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Launch the Velora binary for *plan* and stream its events back to the caller.
@@ -220,7 +221,8 @@ def run_download_plan(
         - progress_cb: Called with ``(done_count, total, total_bytes, speed_bps)`` after each completed segment.
         - event_cb: Called with the raw (normalised) event dict for every ``completed``, ``retry``, ``error`` and ``cancelled`` event.
         - stop_check: Zero-argument callable; when it returns ``True`` the Velora process is terminated and the function returns immediately.
-        - known_total: Exact byte total (HTTP Content-Length or stream.estimated_size) for stable ``X/Y`` display.
+        - known_total: Byte total (HTTP Content-Length or stream.estimated_size) for stable ``X/Y`` display.
+        - known_exact: False when *known_total* is only a bitrate x duration estimate, so it gets corrected from the real bytes downloaded.
 
     Returns: List of ``{"path", "bytes", "task_key", "label", "display_label", "skipped"}`` dicts — one per successfully completed segment.
     """
@@ -245,7 +247,6 @@ def run_download_plan(
     done_count = 0
     total_bytes = 0
     started_at = time.monotonic()
-    prev_estimated = 0
     speed_window: deque[tuple[float, int]] = deque()
     speed_window.append((started_at, 0))
 
@@ -407,11 +408,10 @@ def run_download_plan(
                     resolve_display_total(
                         total_bytes, done_count, total,
                         known_total=known_total,
-                        prev_estimated=prev_estimated,
+                        known_exact=known_exact,
                     ),
                     display_bytes,
                 )
-                prev_estimated = estimated_total
                 progress_event["size"] = (
                     f"{format_size(display_bytes)}/{format_size(estimated_total)}"
                     if estimated_total
@@ -446,9 +446,8 @@ def run_download_plan(
                 estimated_total = resolve_display_total(
                     total_bytes, done_count, total,
                     known_total=known_total,
-                    prev_estimated=prev_estimated,
+                    known_exact=known_exact,
                 )
-                prev_estimated = estimated_total
                 progress_event.setdefault(
                     "size",
                     f"{format_size(total_bytes)}/{format_size(estimated_total)}"

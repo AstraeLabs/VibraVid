@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from VibraVid.core.manifest.stream import track_label
 
+from ..util.formatting import estimate_eta as _estimate_eta
 from ..util.formatting import fmt_dur as _fmt_dur
 from ..util.formatting import format_size as _fmt_size
 from ..util.formatting import format_speed as _fmt_speed
@@ -51,11 +52,11 @@ class ProgressMixin:
 
         known_total = int(getattr(ctx.stream, "estimated_size", 0) or 0)
         estimated_total = _resolve_display_total(
-            total_bytes, done, total_, known_total=known_total, prev_estimated=ctx.prev_estimated
+            total_bytes, done, total_, known_total=known_total,
+            known_exact=bool(getattr(ctx.stream, "estimated_size_exact", False)),
         )
-        ctx.prev_estimated = estimated_total
         if known_total > 0:
-            pct = min(100, int((total_bytes / known_total) * 100)) if known_total else 0
+            pct = min(100, int((total_bytes / estimated_total) * 100)) if estimated_total else 0
         else:
             pct = int((done / total_) * 100) if total_ else 0
 
@@ -84,6 +85,7 @@ class ProgressMixin:
                 "segments": f"{done}/{total_}",
                 "size": size_display,
                 "speed": speed_label if speed_label is not None else _fmt_speed(speed_bps),
+                "eta": None if speed_label is not None else _estimate_eta(estimated_total - total_bytes, speed_bps),
                 "duration": duration_display,
             }
         )

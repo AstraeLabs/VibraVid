@@ -9,6 +9,7 @@
         "disable_scraper_cache": false,
         "imp_service": ["default"],
         "installation": "",
+        "metadata_provider": "tmdb,imdb",
         "get_me": false
     },
     "OUTPUT": {
@@ -40,6 +41,7 @@
         "token_refresh_backoff_seconds": 4.0,
         "token_refresh_stall_rounds": 3,
         "embed_poster": false,
+        "write_sidecars": false,
         "cleanup_tmp_folder": true
     },
     "CODEC": {

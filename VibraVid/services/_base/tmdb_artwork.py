@@ -16,9 +16,10 @@ _TV_MATCH_SITES = {
     "appletv",
     "primevideo",
 }
+TRUSTED_TITLE_SIMILARITY = 0.92
 
 
-def _tv_matching_allowed(site_name: str | None) -> bool:
+def tv_matching_allowed(site_name: str | None = None) -> bool:
     """Whether TMDB series/episode matching is allowed for this site."""
     site_name = site_name or context_tracker.site_name
     return bool(site_name) and site_name.lower() in _TV_MATCH_SITES
@@ -27,6 +28,17 @@ def _tv_matching_allowed(site_name: str | None) -> bool:
 def embed_enabled() -> bool:
     """Whether resolved artwork (TMDB, or the site's own poster as fallback) should be written into the downloaded file."""
     return config_manager.config.get_bool("DOWNLOAD", "embed_poster", default=True)
+
+
+def sidecars_enabled() -> bool:
+    """Whether a .nfo + image should be written next to each downloaded file (opt-in)."""
+    return config_manager.config.get_bool("DOWNLOAD", "write_sidecars", default=False)
+
+
+def year_of(value) -> int | None:
+    """First 4-digit year found in *value* ("2019", "2019-11-01", 2019, "2019-2021"), else None."""
+    head = str(value or "").split("-")[0].strip()
+    return int(head) if head.isdigit() and len(head) == 4 else None
 
 
 def _resolve_tmdb_id(
@@ -53,6 +65,57 @@ def _resolve_tmdb_id(
     return None
 
 
+def is_trusted_match(
+    media_type: str, tmdb_id, site_tmdb_id=None, name: str | None = None, slug: str | None = None, year=None
+) -> bool:
+    """Whether the given tmdb_id is a trusted match for the given name+year (or site_tmdb_id)."""
+    if not tmdb_id:
+        return False
+    
+    if site_tmdb_id:
+        return True
+
+    wanted_year = year_of(year)
+    slug = (tmdb_client._slugify(name) if name else None) or slug
+    if wanted_year is None or not slug:
+        return False
+
+    details = tmdb_client._make_request(f"{media_type}/{tmdb_id}", {"language": "it"})
+    if not details:
+        return False
+
+    if media_type == "movie":
+        titles = (details.get("title"), details.get("original_title"))
+        found_year = year_of(details.get("release_date"))
+    else:
+        titles = (details.get("name"), details.get("original_name"))
+        found_year = year_of(details.get("first_air_date"))
+
+    if found_year is None or abs(found_year - wanted_year) > 1:
+        return False
+    return any(t and tmdb_client._slugs_match(tmdb_client._slugify(t), slug, TRUSTED_TITLE_SIMILARITY) for t in titles)
+
+
+def resolve_tmdb_id_near_year(
+    media_type: str, tmdb_id=None, name: str | None = None, slug: str | None = None, year=None
+) -> int | None:
+    """Resolve a raw TMDB id, trying the given year and +/- 1 year if no tmdb_id is known."""
+    if tmdb_id:
+        return _resolve_tmdb_id(media_type, tmdb_id, name, slug, year)
+    if media_type == "tv" and not tv_matching_allowed(None):
+        return None
+
+    wanted = year_of(year)
+    if wanted is None:
+        return _resolve_tmdb_id(media_type, None, name, slug, None)
+
+    for candidate in (wanted, wanted - 1, wanted + 1):
+        found = _resolve_tmdb_id(media_type, None, name, slug, candidate)
+        if found:
+            return found
+    return None
+
+
 def resolve_movie_poster_url(
     tmdb_id=None, name: str | None = None, slug: str | None = None, year=None
 ) -> str | None:
@@ -70,7 +133,7 @@ def resolve_series_tmdb_id(
             return int(tmdb_id)
         except (TypeError, ValueError):
             pass
-    if not _tv_matching_allowed(site_name):
+    if not tv_matching_allowed(site_name):
         return None
     return _resolve_tmdb_id("tv", tmdb_id, name, slug, year)
 

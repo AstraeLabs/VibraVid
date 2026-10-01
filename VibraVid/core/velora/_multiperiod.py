@@ -15,6 +15,9 @@ from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
 
 from .util.formatting import (
+    estimate_eta as _estimate_eta,
+)
+from .util.formatting import (
     format_size as _fmt_size,
 )
 from .util.formatting import (
@@ -268,18 +271,17 @@ class MultiPeriodMixin:
             _elapsed += period_durations.get(per, 0.0)
 
         total = len(dl_segs)
-        _prev_estimated = [0]
 
         def _progress(
             done: int, total_: int, total_bytes: int, speed_bps: float, speed_label: str | None = None
         ) -> None:
             known_total = int(getattr(stream, "estimated_size", 0) or 0)
             estimated_total = _resolve_display_total(
-                total_bytes, done, total_, known_total=known_total, prev_estimated=_prev_estimated[0]
+                total_bytes, done, total_, known_total=known_total,
+                known_exact=bool(getattr(stream, "estimated_size_exact", False)),
             )
-            _prev_estimated[0] = estimated_total
             if known_total > 0:
-                pct = min(100, int((total_bytes / known_total) * 100)) if total_bytes else 0
+                pct = min(100, int((total_bytes / estimated_total) * 100)) if total_bytes and estimated_total else 0
             else:
                 pct = int((done / total_) * 100) if total_ else 0
             size_display = (
@@ -294,6 +296,7 @@ class MultiPeriodMixin:
                     "segments": f"{done}/{total_}",
                     "size": size_display,
                     "speed": speed_label if speed_label is not None else _fmt_speed(speed_bps),
+                    "eta": None if speed_label is not None else _estimate_eta(estimated_total - total_bytes, speed_bps),
                 }
             )
 

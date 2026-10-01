@@ -58,6 +58,65 @@ removed in a future release** — a warning is logged the first time it's used. 
 for existing configs carried over from an older version; migrate to the `TMDB_API_KEY`
 environment variable above.
 
+## Metadata Providers (TMDB, IMDb, TVDB)
+
+With `write_sidecars` enabled ([DOWNLOAD](#download)) VibraVid writes, next to every downloaded file, the
+files that **Jellyfin, Emby and Kodi** read to identify it without guessing from the filename:
+
+| Media | Files |
+|-------|-------|
+| Film | `<name>.nfo`, `<name>-poster.jpg`, `<name>-fanart.jpg` |
+| Episode | `<name>.nfo` and `<name>-thumb.jpg` (the episode still) |
+| Series | `tvshow.nfo`, `poster.jpg`, `fanart.jpg` and `season01-poster.jpg` in the show's folder (the parent of the season folder). Written **once**, filled in as missing, never overwritten: later episodes only add what is missing |
+
+Plex ignores all of these. The format is the Kodi one (Jellyfin, Emby and Nova Video Player read it too). Each file
+carries everything the matching provider has; what it lacks is simply left out:
+
+| Provider | Film | Episode | Series |
+|----------|------|---------|--------|
+| **TMDB** | title, original title, year, premiere date, rating + vote count, tagline, plot, runtime, age rating (IT, else US), genres, keywords, countries, studios, collection (name + overview), directors, writers, 15 actors with role and photo, YouTube trailer, poster, fanart | title, air date, plot, runtime, rating + votes, directors, writers, guest stars, still | title, original title, year, status, rating + votes, plot, age rating, runtime, genres, networks, 15 actors, poster, fanart, one poster per season |
+| **IMDb** | same, except there is no fanart (and the trailer is an IMDb page) | same, from the episode's own IMDb record | same, except no fanart and no season posters |
+| **TVDB** | same, without rating and vote count (TVDB's `score` is a popularity number) | title, air date, plot, runtime, still (TVDB has no episode crew or rating) | no rating; poster, fanart, cast, networks, age rating, status |
+
+### Choosing the provider
+
+`metadata_provider` (in [DEFAULT](#default)) is one name or an ordered list; the first provider with a reliable match is used.
+Providers that are unavailable (no key) are skipped.
+
+| Provider | Key | Language | Notes |
+|----------|-----|----------|-------|
+| `tmdb` | `TMDB_API_KEY` (see [above](#tmdb-api-key)) | Italian | Best matching (searches Italian titles) and the only one that remaps anime absolute numbering |
+| `imdb` | none (free) | English | Public GraphQL endpoint; searches by English title, so Italian titles are found only when the site supplies a TMDB id **and** a TMDB key is set |
+| `tvdb` | `TVDB_API_KEY` | Italian when TVDB has a translation | Requires a [TheTVDB](https://thetvdb.com/api-information) API key |
+
+```bash
+python manual.py ... --metadata-provider tmdb,imdb   # default: TMDB, then IMDb as free fallback
+python manual.py ... --metadata-provider imdb        # no API key needed at all
+python manual.py ... --metadata-provider tvdb,tmdb
+```
+
+### Setting the TVDB key
+
+Either (the environment variable wins):
+
+```bash
+export TVDB_API_KEY=your_key_here          # PowerShell: $env:TVDB_API_KEY = "your_key_here"
+```
+
+or in `Conf/login.json`:
+
+```json
+{
+  "Provider": {
+    "tvdb": "your_key_here"
+  }
+}
+```
+
+Unlike the TMDB entry above, `Provider.tvdb` in `login.json` is a supported location. Docker/NAS: set
+`TVDB_API_KEY` in your `.env` file (see `.env.example`). `login.json` can hold secrets: do not commit your
+own copy.
+
 ## DEFAULT
 
 ```json
@@ -72,6 +131,7 @@ environment variable above.
     "disable_scraper_cache": false,
     "imp_service": ["default"],
     "installation": "",
+    "metadata_provider": "tmdb,imdb",
     "get_me": false
   }
 }
@@ -88,6 +148,7 @@ environment variable above.
 | `disable_scraper_cache` | `false` | GUI only: the Django backend caches an already-instantiated site scraper per title for 15 minutes so repeat requests (e.g. opening the same series-detail page) don't re-scrape. |
 | `imp_service` | `["default"]` | Service source paths to load site modules from. `"default"` loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have `__init__.py` defining `indice` and `_useFor`. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name. |
 | `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup. `""` (base): FFmpeg, Velora, flux. `"yt"`: base + yt-dlp, deno. `"full"`: base + dovi_tool, mkvtoolnix, yt-dlp, deno |
+| `metadata_provider` | `tmdb,imdb` | Provider(s) the sidecars are built from, tried in order: `tmdb`, `imdb` (free, no key), `tvdb` (needs `TVDB_API_KEY`). CLI: `--metadata-provider` |
 | `get_me` | `false` | Resolve and print the account name in the login banner (e.g. `Login - Type: Account / User: name`) for services that support it.
 
 **Custom `imp_service` example (local folder):**
@@ -256,6 +317,7 @@ S%(season:02d)/     ->  season folder   S01/
     "token_refresh_backoff_seconds": 4.0,
     "token_refresh_stall_rounds": 3,
     "embed_poster": false,
+    "write_sidecars": false,
     "cleanup_tmp_folder": true
   }
 }
@@ -273,6 +335,7 @@ S%(season:02d)/     ->  season folder   S01/
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 closed captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download |
 | `cleanup_tmp_folder` | `true` | Remove temporary files after download |
 | `embed_poster` | `false` | Embed a poster/still into the downloaded file: the matching TMDB artwork if found, otherwise the site's own poster/still as a fallback |
+| `write_sidecars` | `false` | Write a Kodi/Jellyfin/Emby `<name>.nfo` plus `<name>-poster.jpg` (films) / `<name>-thumb.jpg` (episodes) next to each downloaded file, only when the metadata match is reliable. Plex ignores these files. See [Metadata Providers](#metadata-providers-tmdb-imdb-tvdb). CLI: `--sidecars` / `--no-sidecars` |
 
 
 ### Segment Throttling, Live Streams & Token Refresh

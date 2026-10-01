@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+_NOMINAL_FULL_TRUST_AT = 0.10
+
 
 def normalize_path_key(path_value: str) -> str:
     """
@@ -46,28 +48,43 @@ def resolve_display_total(
     done_segs: int,
     total_segs: int,
     known_total: int = 0,
-    prev_estimated: int = 0,
+    known_exact: bool = True,
 ) -> int:
-    """Resolve the stable total to show as ``downloaded/total``."""
+    """
+    Resolve the total to show as ``downloaded/total``.
+
+    ``known_exact`` False means *known_total* is only an estimate (bitrate x duration or a size probe;
+    HLS/DASH/ISM manifests carry no per-segment sizes): the declared bandwidth is a peak, so a VBR
+    stream is far smaller. That total is blended with the extrapolation of the bytes actually
+    downloaded. With no known total the extrapolation is used directly. Neither is ever pinned: the
+    total follows the real data and may be revised downward.
+    """
     try:
         known = int(known_total or 0)
     except (TypeError, ValueError):
         known = 0
     try:
-        prev = int(prev_estimated or 0)
-    except (TypeError, ValueError):
-        prev = 0
-    try:
         done_bytes = int(completed_bytes or 0)
     except (TypeError, ValueError):
         done_bytes = 0
 
-    base = known if known > 0 else estimate_total_size(done_bytes, done_segs, total_segs)
-    if base < done_bytes:
-        base = done_bytes
-    if prev > base:
-        base = prev
-    return base
+    observed = estimate_total_size(done_bytes, done_segs, total_segs)
+    if known > 0 and not known_exact and done_segs > 0 and total_segs > 0:
+        weight = min(1.0, (done_segs / total_segs) / _NOMINAL_FULL_TRUST_AT)
+        base = int(known * (1 - weight) + observed * weight)
+    else:
+        base = known if known > 0 else observed
+
+    return max(base, done_bytes)
+
+
+def estimate_eta(remaining_bytes: int, speed_bps: float) -> float | None:
+    """Seconds left at the current *speed_bps*: ``None`` while the speed is unknown, ``0`` when nothing remains."""
+    if remaining_bytes <= 0:
+        return 0.0
+    if speed_bps <= 0:
+        return None
+    return remaining_bytes / speed_bps
 
 
 def fmt_dur(seconds: float) -> str:
