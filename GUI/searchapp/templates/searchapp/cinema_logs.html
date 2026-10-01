@@ -12,16 +12,22 @@
 
 	<div class="cn-duo">
 		<div class="cn-box">
-			<h3>App logs <span class="cn-sp"></span><span class="cn-st is-done" id="cn-logs-count">0</span></h3>
+			<h3>App logs <span class="cn-sp"></span><span class="cn-st is-done" id="cn-logs-count">0</span>
+                <button type="button" class="cn-mini" data-clear-logs="logs" hidden>Clear App logs</button>
+            </h3>
 			<div class="cn-lines" id="cn-logs-list-logs" style="gap:2px;max-height:380px;overflow-y:auto"></div>
 		</div>
 
 		<div class="cn-box">
-			<h3>ARR logs <span class="cn-sp"></span><span class="cn-st is-done" id="cn-logs-arr-count">0</span></h3>
+			<h3>ARR logs <span class="cn-sp"></span><span class="cn-st is-done" id="cn-logs-arr-count">0</span>
+                <button type="button" class="cn-mini" data-clear-logs="arr" hidden>Clear ARR logs</button>
+            </h3>
 			<div class="cn-lines" id="cn-logs-list-arr" style="gap:2px;max-height:380px;overflow-y:auto"></div>
 		</div>
 	</div>
 
+	<form id="cn-logs-csrf" hidden>{% csrf_token %}</form>
+    <p id="cn-logs-feedback" role="status"></p>
 	<div class="cn-box" style="margin-top:20px">
 		<h3 id="cn-logs-current">Select a log file</h3>
 		<pre class="cn-area" id="cn-logs-content" style="max-height:460px;overflow:auto;white-space:pre-wrap"></pre>
@@ -43,6 +49,30 @@
 
 	var logsCurrentTitle = el("cn-logs-current");
 	var logsContent = el("cn-logs-content");
+    var selectedCategory = null;
+    var contentGeneration = 0;
+    document.querySelectorAll("[data-clear-logs]").forEach(function (button) {
+        button.addEventListener("click", async function () {
+            var category = button.dataset.clearLogs;
+            button.disabled = true;
+            try {
+                var data = new FormData(el("cn-logs-csrf"));
+                data.set("category", category);
+                var response = await fetch("{% url 'logs_clear' %}", {method: "POST", body: data});
+                var result = await response.json();
+                if (selectedCategory === category) {
+                    contentGeneration++;
+                    logsContent.textContent = "";
+                    logsCurrentTitle.textContent = "Select a log file";
+                }
+                el("cn-logs-feedback").textContent = response.ok ? "Logs cleared. Active logs may receive new entries." :
+                    result.error || "Some logs could not be cleared: " + (result.failed || []).join(", ");
+                loadLogsList();
+            } catch (_) {
+                el("cn-logs-feedback").textContent = "Could not clear logs. Please retry.";
+            } finally { button.disabled = false; }
+        });
+    });
 
 	function fmtSize(bytes) {
 		if (bytes < 1024) return bytes + " B";
@@ -92,6 +122,8 @@
 			.then(function (data) {
 				var appFiles = data.logs || [];
 				var arrFiles = data.arr || [];
+                document.querySelector('[data-clear-logs="logs"]').hidden = !appFiles.length;
+                document.querySelector('[data-clear-logs="arr"]').hidden = !arrFiles.length;
 				el("cn-logs-count").textContent = appFiles.length;
 				el("cn-logs-arr-count").textContent = arrFiles.length;
 				renderLogList("cn-logs-list-logs", "logs", appFiles);
@@ -103,10 +135,13 @@
 	}
 
 	function loadLogContent(category, name) {
+        selectedCategory = category;
+        var generation = ++contentGeneration;
 		logsCurrentTitle.textContent = "Loading " + name + "…";
 		fetch(URL_LOGS_CONTENT + "?category=" + encodeURIComponent(category) + "&name=" + encodeURIComponent(name))
 			.then(function (r) { return r.json(); })
 			.then(function (data) {
+				if (generation !== contentGeneration) return;
 				logsCurrentTitle.textContent = name;
 				if (data.error) {
 					logsContent.textContent = "Error: " + data.error;
@@ -116,6 +151,7 @@
 				logsContent.scrollTop = logsContent.scrollHeight;
 			})
 			.catch(function (err) {
+				if (generation !== contentGeneration) return;
 				logsCurrentTitle.textContent = name;
 				logsContent.textContent = "Network error: " + err.message;
 			});

@@ -49,6 +49,7 @@
 <section class="cn-strip">
 	<div class="cn-strip-hd">
 		<h2>Now</h2><span class="cn-n" id="cn-n-active">0</span>
+		<button class="cn-cta is-ghost" type="button" id="cn-stop-all" hidden>Stop all downloads</button>
 	</div>
 	<div class="cn-lines" id="cn-reel-active"></div>
 	<p class="cn-empty" id="cn-empty-active">No downloads running.</p>
@@ -97,6 +98,7 @@
 <section class="cn-strip">
 	<div class="cn-strip-hd">
 		<h2>Recent results</h2><span class="cn-n" id="cn-n-hist">0</span>
+		<button class="cn-cta is-ghost" type="button" id="cn-clear-history" hidden>Clear history</button>
 	</div>
 	<div class="cn-reel" id="cn-reel-hist"></div>
 	<p class="cn-empty" id="cn-empty-hist">No completed downloads yet.</p>
@@ -109,11 +111,13 @@
 <script>
 (function () {
 	"use strict";
-	var URL_DOWNLOADS    = "{% url 'get_downloads_json' %}?history=20";
-	var URL_KILL         = "{% url 'kill_download' %}";
+	var URL_DOWNLOADS = "{% url 'get_downloads_json' %}?history=20";
+	var URL_KILL      = "{% url 'kill_download' %}";
+	var URL_STOP_ALL = "{% url 'stop_all_downloads' %}";
+	var URL_CLEAR_HISTORY = "{% url 'clear_download_history' %}";
+	var URL_POSTERS   = "{% url 'resolve_tmdb_posters' %}";
 	var URL_REMOVE_QUEUE = "{% url 'remove_queued_download' %}";
 	var URL_CLEAR_QUEUE  = "{% url 'clear_queued_downloads' %}";
-	var URL_POSTERS      = "{% url 'resolve_tmdb_posters' %}";
 	var CSRF          = "{{ csrf_token }}";
 	var esc = CN.esc, titleize = CN.titleize, duotone = CN.duotone, pct = CN.pct;
 	var posterCache = {};
@@ -173,6 +177,14 @@
 		return sec + "s";
 	}
 
+    var pendingStops = {};
+    function isStopping(item) {
+        return pendingStops[item.id] || String(item.status || "").indexOf("cancelling") === 0;
+    }
+    function stopLabel(item) {
+        return {episode: "Stop episode", season: "Stop season", seasons: "Stop seasons"}[item.stop_scope] || "Stop";
+    }
+
 	function activeRowInner(item, downloadId) {
 		var key = item.series_name || item.title || item.name;
 		var d = duotone(key);
@@ -181,10 +193,10 @@
 			? '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()">'
 			: "";
 		var elapsed = elapsedText(item.start_time);
-		var facts = [item.site, item.quality, elapsed && (elapsed + " elapsed")].filter(Boolean).join(" · ");
+		var facts = [item.site, elapsed && (elapsed + " elapsed")].filter(Boolean).join(" · ");
 		var tasks = item.tasks || {};
 		var taskNames = Object.keys(tasks);
-		var streams = taskNames.length > 1
+		var streams = taskNames.length > 0
 			? taskNames.map(function (k) {
 				var raw = tasks[k].display_label || tasks[k].label || k.replace(/_/g, " ");
 				// Strip only known Rich style tags (color/bold), never bracketed content
@@ -208,7 +220,7 @@
 			'</span>' +
 			'<span class="cn-r">' + (item.size ? esc(item.size) + ' · ' : '') + esc(item.speed || '') + ' · ' + item.pctText + '%</span>' +
 			'<button class="cn-cta is-ghost" type="button" data-stop="' + esc(downloadId) + '" ' +
-				'style="padding:8px 16px;font-size:13px">Stop</button>';
+				'style="padding:8px 16px;font-size:13px"' + (isStopping(item) ? ' disabled' : '') + '>' + (isStopping(item) ? 'Stopping...' : stopLabel(item)) + '</button>';
 	}
 
 	function activeRow(item, downloadId) {
@@ -354,6 +366,8 @@
 
 		var d = active[0];
 		heroId = d.id;
+		stop.textContent = isStopping(d) ? "Stopping..." : stopLabel(d);
+		stop.disabled = !!isStopping(d);
 		var p = pct(d.progress);
 
 		kick.innerHTML =
@@ -362,7 +376,7 @@
 			(d.is_anime ? " · anime" : "") + "</span>";
 
 		document.getElementById("cn-hero-title").innerHTML =
-			esc(titleize(d.title)) + '<em>' + esc(d.quality || d.type || "") + "</em>";
+			esc(titleize(d.title));
 		document.getElementById("cn-hero-line").textContent = d.path || "";
 
 		document.getElementById("cn-hero-pct").innerHTML = p.toFixed(0) + "<span>%</span>";
@@ -371,7 +385,6 @@
 
 		var facts = [];
 		if (d.speed) facts.push("<span><b>" + esc(d.speed) + "</b></span>");
-		if (d.quality) facts.push("<span>quality <b>" + esc(d.quality) + "</b></span>");
 		if (d.language) facts.push("<span>audio <b>" + esc(d.language) + "</b></span>");
 		document.getElementById("cn-hero-facts").innerHTML = facts.join("");
 
@@ -383,25 +396,52 @@
 		stop.hidden = false;
 	}
 
-	document.getElementById("cn-hero-stop").addEventListener("click", function () {
-		if (!heroId) return;
-		fetch(URL_KILL, {
-			method: "POST",
-			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
-			body: JSON.stringify({ download_id: heroId })
-		}).then(refresh).catch(function () { /* il giro successivo riallinea */ });
-	});
+    function requestStop(downloadId, button) {
+        if (!downloadId || pendingStops[downloadId]) return;
+        pendingStops[downloadId] = true;
+        button.disabled = true;
+        button.textContent = "Stopping...";
+        fetch(URL_KILL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+            body: JSON.stringify({ download_id: downloadId })
+        }).then(function (response) {
+            if (!response.ok) throw new Error("Stop failed (HTTP " + response.status + "). Please retry.");
+            return response.json();
+        }).then(function (result) {
+            if (result.status !== "success") throw new Error(result.message || "Stop failed. Please retry.");
+            return refresh();
+        }).catch(function (error) {
+            delete pendingStops[downloadId];
+            button.disabled = false;
+            button.textContent = "Retry stop";
+            window.alert(error.message);
+        });
+    }
 
-	document.getElementById("cn-reel-active").addEventListener("click", function (e) {
-		var btn = e.target.closest("[data-stop]");
-		if (!btn) return;
-		btn.disabled = true;
-		fetch(URL_KILL, {
-			method: "POST",
-			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
-			body: JSON.stringify({ download_id: btn.dataset.stop })
-		}).then(refresh).catch(function () { btn.disabled = false; });
-	});
+    document.getElementById("cn-hero-stop").addEventListener("click", function () {
+        requestStop(heroId, this);
+    });
+    document.getElementById("cn-reel-active").addEventListener("click", function (e) {
+        var button = e.target.closest("[data-stop]");
+        if (button) requestStop(button.dataset.stop, button);
+    });
+
+    function bindAction(id, url) {
+        document.getElementById(id).addEventListener("click", function () {
+            var button = this;
+            button.disabled = true;
+            fetch(url, { method: "POST", headers: { "X-CSRFToken": CSRF } })
+                .then(function (response) {
+                    if (!response.ok) throw new Error("Action failed. Please retry.");
+                    return refresh();
+                })
+                .catch(function (error) { window.alert(error.message); })
+                .finally(function () { button.disabled = false; });
+        });
+    }
+    bindAction("cn-stop-all", URL_STOP_ALL);
+    bindAction("cn-clear-history", URL_CLEAR_HISTORY);
 
 	function queuePost(url, payload) {
 		return fetch(url, {
@@ -451,6 +491,8 @@
 				clearQueue.hidden = queue.length === 0;
 				clearQueue.disabled = queue.length === 0;
 
+				document.getElementById("cn-stop-all").hidden = active.length === 0;
+				document.getElementById("cn-clear-history").hidden = hist.length === 0;
 				renderHero(active);
 
 				fill("cn-reel-active", "cn-empty-active", "cn-n-active", active.map(function (d, i) {
@@ -460,12 +502,25 @@
 					var downloadId = d.id || tileId(d, "a", i);
 					return {
 						id: tileId(d, "a", i),
-						sig: status + "|" + p.toFixed(0) + "|" + (d.speed || "") + "|" + elapsedText(d.start_time),
+						sig: status + "|" + !!isStopping(d) + "|" + stopLabel(d) + "|" + (d.quality || "") + "|" + p.toFixed(0) + "|" + (d.speed || "") + "|" + elapsedText(d.start_time) + "|" + JSON.stringify(d.tasks || {}),
 						html: function () {
 							return activeRow(d, downloadId);
 						},
 						patch: function (node) {
-							node.innerHTML = activeRowInner(d, downloadId);
+                            // Keep the button attached: replacing it during a polling
+                            // update can swallow a click between pointer down and up.
+                            var holder = document.createElement("div");
+                            holder.innerHTML = activeRowInner(d, downloadId);
+                            [".cn-thumb", ".cn-grow", ".cn-r"].forEach(function (selector) {
+                                var current = node.querySelector(selector);
+                                var next = holder.querySelector(selector);
+                                if (current && next) current.innerHTML = next.innerHTML;
+                            });
+                            var button = node.querySelector("[data-stop]");
+                            if (button) {
+                                button.disabled = !!isStopping(d);
+                                button.textContent = isStopping(d) ? "Stopping..." : stopLabel(d);
+                            }
 							if (d.path) node.title = d.path;
 						}
 					};
@@ -473,9 +528,11 @@
 
 				fill("cn-reel-queue", "cn-empty-queue", "cn-n-queue", queue.map(function (d, i) {
 					var place = "#" + (i + 1);
+					var queuedId = d.parent_id || d.id;
+					var removable = !active.some(function (item) { return item.id === queuedId; });
 					return {
 						id: tileId(d, "q", i),
-						sig: place,
+						sig: place + "|" + removable,
 						html: function () {
 							return tile(d, {
 								flag: '<span class="cn-flag cn-st is-wait">' + place + "</span>",
@@ -485,12 +542,16 @@
 								sub: d.site,
 								action: d.id
 									? '<button class="cn-cta is-ghost" type="button" data-remove-queued="' +
-										esc(d.id) + '" style="margin-top:8px;padding:7px 12px;font-size:12px">Remove</button>'
+										esc(queuedId) + '" ' + (removable ? '' : 'disabled ') + 'style="margin-top:8px;padding:7px 12px;font-size:12px">' + (d.parent_id ? 'Remove season' : 'Remove') + '</button>'
 									: ""
 							});
 						},
 						// quando la coda avanza cambia solo il numero d'ordine
-						patch: function (node) { setText(node, ".cn-flag", place); }
+						patch: function (node) {
+                            setText(node, ".cn-flag", place);
+                            var removeButton = node.querySelector("[data-remove-queued]");
+                            if (removeButton) removeButton.disabled = !removable;
+                        }
 					};
 				}));
 
@@ -498,7 +559,7 @@
 					var e = outcome(d);
 					var sub = e.note ? (d.site ? d.site + " · " + e.note : e.note) : d.site;
 					return {
-						id: tileId(d, "h", i),
+						id: tileId(d, "h", i) + ":" + (d.start_time || i),
 						sig: e.label + "|" + sub,
 						html: function () {
 							return tile(d, {

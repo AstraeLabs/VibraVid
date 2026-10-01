@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import subprocess
 import sys
 
 # Fix PYTHONPATH
@@ -12,7 +13,12 @@ if parent_dir not in sys.path:
 def main():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "webgui.settings")
 
-    if "RUN_MAIN" not in os.environ:
+    is_server = len(sys.argv) > 1 and sys.argv[1] == "runserver"
+    if is_server and os.environ.get("RUN_MAIN") != "true":
+        # Apply schema updates before importing the GUI or starting its workers.
+        subprocess.run([sys.executable, __file__, "migrate", "--noinput"], check=True)
+
+    if is_server and "RUN_MAIN" not in os.environ:
         print("Running pre-run hooks...")
         from VibraVid.cli.run import execute_hooks
 

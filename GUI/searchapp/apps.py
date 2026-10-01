@@ -14,6 +14,10 @@ class SearchappConfig(AppConfig):
     name = "searchapp"
 
     def ready(self) -> None:
+        if len(sys.argv) > 1 and sys.argv[1] in {
+            "migrate", "makemigrations", "showmigrations", "sqlmigrate", "check", "test",
+        }:
+            return
         autoreload_active = "runserver" in sys.argv and "--noreload" not in sys.argv
         if autoreload_active and os.environ.get("RUN_MAIN") != "true":
             return

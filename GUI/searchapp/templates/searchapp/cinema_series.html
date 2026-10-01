@@ -31,7 +31,10 @@
 			</p>
 		{% endif %}
 
-		<div class="cn-acts">
+        {% if not series.is_album %}
+        <div id="cn-series-quality">{% include "searchapp/quality_picker.html" %}</div>
+        {% endif %}
+		<div class="cn-acts cn-series-actions">
 			<form method="post" style="display:inline">
 				{% csrf_token %}
 				<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
@@ -47,7 +50,7 @@
 				{% csrf_token %}
 				<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
 				<input type="hidden" name="item_payload" value="{{ series.item_payload }}">
-				<button class="cn-cta is-ghost cn-round" type="submit" title="Watch" aria-label="Watch">＋</button>
+				<button class="cn-cta is-ghost" type="submit" title="Add and monitor">Watchlist</button>
 			</form>
 		</div>
 	</div>
@@ -236,7 +239,7 @@
 			if (!chosen.length) return;
 			if (!confirm("Download seasons " + chosen.join(", ") + "?")) return;
 			el("cn-seasons-input").value = chosen.join(",");
-			el("cn-seasons-form").submit();
+			el("cn-seasons-form").requestSubmit();
 		});
 	}
 

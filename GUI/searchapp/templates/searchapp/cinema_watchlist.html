@@ -7,8 +7,7 @@
 
 	<div class="cn-page-hd">
 		<h1 class="cn-blast">Watchlist</h1>
-		<p>Shows ARROWAR keeps an eye on by itself. When a new episode airs it lands in the queue
-		   without you having to do anything.</p>
+		<p>Monitor movies, new episodes and new seasons. Download when your desired quality becomes available.</p>
 	</div>
 
 	<div class="cn-slab">
@@ -21,12 +20,21 @@
 		<div class="cn-big">
 			<span class="cn-v">{{ interval_minutes }}<span style="font-size:.45em"> min</span></span>
 			<span class="cn-k">Between checks</span>
+			<form action="{% url 'set_watchlist_polling_interval' %}" method="post" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                {% csrf_token %}
+                <select name="poll_interval" class="cn-mini" aria-label="Time between watchlist checks">
+                    {% for option in interval_options %}
+                    <option value="{{ option.seconds }}" {% if option.minutes == interval_minutes %}selected{% endif %}>{{ option.minutes }} min</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="cn-mini">Save interval</button>
+            </form>
 		</div>
 		<span style="margin-left:auto;display:flex;gap:11px;flex-wrap:wrap">
 			<a class="cn-cta is-ghost" href="{% url 'search_page' %}">Add from search</a>
 			<form action="{% url 'run_watchlist_auto_now' %}" method="post" style="display:inline">
 				{% csrf_token %}
-				<button class="cn-cta" type="submit">Check now</button>
+				<button class="cn-cta" id="cn-watch-check" type="submit" {% if scanning %}disabled{% endif %}>{% if scanning %}Checking…{% else %}Check now{% endif %}</button>
 			</form>
 		</span>
 	</div>
@@ -72,24 +80,29 @@
 						<span class="cn-st is-wait">Up to date</span>
 					{% endif %}
 
-					{% if not item.is_movie %}
-						<form action="{% url 'update_watchlist_auto' item.id %}" method="post"
-						      class="js-auto-watchlist" style="flex:0 0 auto">
-							{% csrf_token %}
-							<input type="hidden" name="auto_enabled" value="on" class="js-auto-flag"
-							       {% if not item.auto %}disabled{% endif %}>
-							<select name="auto_season" class="cn-mini js-auto-season"
-							        style="padding:6px 10px;flex:0 0 auto" title="Auto-download this season's new episodes"
-							        {% if not item.season_numbers %}disabled{% endif %}>
-								<option value="">Not automatic</option>
-								{% for season in item.season_numbers %}
-									<option value="{{ season }}" {% if item.auto_season == season %}selected{% endif %}>
-										Auto · S{{ season }}
-									</option>
-								{% endfor %}
-							</select>
-						</form>
-					{% endif %}
+                    <form action="{% url 'update_watchlist_auto' item.id %}" method="post" class="cn-watch-settings" data-item-id="{{ item.id }}">
+                        {% csrf_token %}
+                        <input type="hidden" name="source_alias" value="{{ item.site }}">
+                        <input type="hidden" name="item_payload" value="{{ item.item_payload }}">
+                        <label><input type="checkbox" name="auto_enabled" {% if item.auto %}checked{% endif %}> Automatic</label>
+                        {% if not item.is_movie %}
+                        <select name="auto_season" class="cn-mini" aria-label="Seasons to monitor">
+                            <option value="all" {% if item.auto_all_seasons %}selected{% endif %}>All seasons, including new ones</option>
+                            {% for season in item.season_numbers %}
+                            <option value="{{ season }}" {% if not item.auto_all_seasons and item.auto_season == season %}selected{% endif %}>Season {{ season }}</option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                        <select name="quality" class="cn-mini" aria-label="Desired video quality">
+                            <option value="">Use config</option>
+                            {% for quality in quality_targets %}
+                            <option value="{{ quality }}" {% if item.quality == quality %}selected{% endif %}>{{ quality }}</option>
+                            {% endfor %}
+                        </select>
+                        <button class="cn-mini" type="submit">Save</button>
+                        <button class="cn-mini js-check-qualities" type="button">Check available qualities</button>
+                        <span class="cn-quality-result" role="status">{{ item.auto_status }}</span>
+                    </form>
 
 					<form action="{% url 'remove_from_watchlist' item.id %}" method="post" style="display:inline">
 						{% csrf_token %}
@@ -101,7 +114,7 @@
 		</div>
 	{% else %}
 		<p class="cn-empty" style="padding-left:0">
-			No shows being watched. Search for one and add it from the results page.
+			No movies or shows being watched. Add one from search results.
 		</p>
 	{% endif %}
 </div>
@@ -109,15 +122,36 @@
 
 {% block scripts %}
 <script>
-	// Single control: picking a season enables auto-download for it in one step;
-	// picking "Not automatic" disables it. No separate toggle to fight with the select.
-	document.querySelectorAll('.js-auto-watchlist').forEach(function (form) {
-		var select = form.querySelector('.js-auto-season');
-		var flag = form.querySelector('.js-auto-flag');
-		select.addEventListener('change', function () {
-			flag.disabled = !select.value;
-			if (form.requestSubmit) form.requestSubmit(); else form.submit();
-		});
-	});
+(function () {
+    const button = document.getElementById("cn-watch-check");
+    document.querySelectorAll(".cn-watch-settings").forEach(form => {
+        form.addEventListener("change", () => {
+            form.dataset.settingsDirty = "1";
+            form.querySelector(".cn-quality-result").textContent = "Settings changed. Click Save to apply, then Check now.";
+        });
+    });
+    async function refreshScan() {
+        try {
+            const response = await fetch("{% url 'watchlist_status' %}", {signal: AbortSignal.timeout(10000)});
+            if (!response.ok) return;
+            const state = await response.json();
+            button.disabled = state.scanning;
+            button.textContent = state.scanning ? "Checking…" : "Check now";
+            for (const item of state.items || []) {
+                const form = document.querySelector('.cn-watch-settings[data-item-id="' + item.id + '"]');
+                if (form && !form.dataset.settingsDirty && !form.contains(document.activeElement) && form.dataset.lastStatus !== item.auto_status) {
+                    form.querySelector(".cn-quality-result").textContent = item.auto_status;
+                    form.dataset.lastStatus = item.auto_status;
+                }
+            }
+        } catch (_) {
+            button.disabled = false;
+            button.textContent = "Check now";
+        } finally {
+            window.setTimeout(refreshScan, 3000);
+        }
+    }
+    refreshScan();
+})();
 </script>
 {% endblock %}
