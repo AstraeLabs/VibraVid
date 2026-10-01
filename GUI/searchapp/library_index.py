@@ -1,8 +1,10 @@
 # 27.07.26
 
+import json
 import logging
 import os
 import re
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -57,22 +59,75 @@ def _series_dir(series_name: str) -> Path | None:
     return fallback
 
 
+def _video_files(directory: Path):
+    """Ignore downloader scratch trees, including legacy non-hidden ones."""
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [name for name in dirs if not name.startswith(".")
+                   and not name.lower().endswith(("_temp", ".tmp", ".part"))]
+        for name in files:
+            path = Path(root) / name
+            if (not name.startswith(".") and path.suffix.lower() in VIDEO_EXTS
+                    and not path.stem.lower().endswith((".part", ".temp", ".tmp"))
+                    and path.is_file() and path.stat().st_size > 0):
+                yield path
+
+
+def completed_episodes(series_name: str, quality: str = "") -> frozenset:
+    """Inspect final local videos only; never contact a provider."""
+    from VibraVid.core.ui.tracker import download_tracker
+    from VibraVid.core.utils.resolution import classify_resolution
+    from VibraVid.setup.system import get_ffprobe_path
+
+    directory = _series_dir(series_name)
+    if directory is None:
+        return frozenset()
+    active_paths = {os.path.normcase(os.path.abspath(d["path"]))
+                    for d in download_tracker.get_active_downloads() if d.get("path")}
+    completed = set()
+    for path in _video_files(directory):
+        parsed = _parse(path.stem)
+        if not parsed or os.path.normcase(str(path.resolve())) in active_paths:
+            continue
+        # A sibling scratch directory can belong to an interrupted/in-progress mux.
+        scratch_prefixes = (path.stem + "_", "." + path.stem + "_")
+        if any(p.is_dir() and p.name.startswith(scratch_prefixes) and p.name.endswith("_temp")
+               for p in path.parent.iterdir()):
+            continue
+        try:
+            before = path.stat()
+            result = subprocess.run(
+                [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height:format=duration", "-of", "json", str(path)],
+                capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
+            )
+            if result.returncode:
+                continue
+            info = json.loads(result.stdout)
+            video = next(iter(info.get("streams", [])), {})
+            actual = classify_resolution(video.get("width", 0), video.get("height", 0))
+            after = path.stat()
+            if (actual and float(info.get("format", {}).get("duration") or 0) > 0
+                    and (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns)
+                    and (not quality or actual == quality)):
+                completed.add(parsed[:2])
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            logger.debug("Cannot confirm completed video %s", path, exc_info=True)
+    return frozenset(completed)
+
+
 def _scan(series_dir: Path) -> frozenset:
     """Return a set of (season, episode) tuples for all episodes found in the series directory."""
     found: set[tuple[int, int]] = set()
 
-    for root, _dirs, files in os.walk(series_dir):
-        season_hint = _season_dir_num(Path(root).name)
-        for filename in files:
-            if Path(filename).suffix.lower() not in VIDEO_EXTS:
-                continue
-            parsed = _parse(Path(filename).stem)
-            if not parsed:
-                continue
-            season, episode, _title = parsed
-            if season_hint is not None and season != season_hint:
-                season = season_hint
-            found.add((season, episode))
+    for path in _video_files(series_dir):
+        season_hint = _season_dir_num(path.parent.name)
+        parsed = _parse(path.stem)
+        if not parsed:
+            continue
+        season, episode, _title = parsed
+        if season_hint is not None and season != season_hint:
+            season = season_hint
+        found.add((season, episode))
 
     return frozenset(found)
 

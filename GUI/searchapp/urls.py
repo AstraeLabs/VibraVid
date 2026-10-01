@@ -50,6 +50,7 @@ urlpatterns = [
     path("logs/", views.cinema_logs, name="logs_page"),
     path("api/logs/list/", views.logs_list, name="logs_list"),
     path("api/logs/content/", views.logs_content, name="logs_content"),
+    path("api/logs/clear/", views.logs_clear, name="logs_clear"),
 
     # ARR Integration
     path("api/arr/webhook/seerr/", views.seerr_webhook, name="seerr_webhook"),

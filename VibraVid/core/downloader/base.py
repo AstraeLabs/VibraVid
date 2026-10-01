@@ -168,7 +168,7 @@ class BaseDownloader:
         like '<name> [1080p].mkv' (the quality suffix is only added after muxing,
         so the plain stripped path may not match an already-downloaded episode)."""
 
-        if os.path.exists(self.output_path):
+        if os.path.isfile(self.output_path):
             return True
 
         directory = os.path.dirname(self.output_path) or "."

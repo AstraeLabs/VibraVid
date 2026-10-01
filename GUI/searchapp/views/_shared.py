@@ -348,19 +348,13 @@ def _run_download_in_thread(
                 error_msg = final_state.get("error") or final_state.get("status") or "download_failed"
                 raise RuntimeError(error_msg)
 
-            logger.info("[_task] Download completed successfully")
-            forget(name)
-
-            # Clear the scheduled placeholder and guarantee a terminal history entry
-            _remove_scheduled_download(download_id)
-            already_in_history = any(
-                item.get("id") == download_id
-                for item in download_tracker.get_history()
-            )
-            if download_id not in download_tracker.downloads and not already_in_history:
-                download_tracker.start_download(download_id, title, site, media_type)
-                download_tracker.complete_download(download_id, success=True)
-            return bool(final_state and final_state.get("status") == "completed")
+            # A provider returning without an error is not proof of a download.
+            # Local files are handled by the watchlist before scheduling a job.
+            completed = bool(final_state and final_state.get("status") == "completed")
+            if completed:
+                forget(name)
+                return True
+            return False
         except Exception as e:
             error_msg = str(e) or "Unknown error"
             logger.exception("[_task] Download task failed: %s", error_msg)

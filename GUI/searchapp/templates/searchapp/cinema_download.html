@@ -528,9 +528,11 @@
 
 				fill("cn-reel-queue", "cn-empty-queue", "cn-n-queue", queue.map(function (d, i) {
 					var place = "#" + (i + 1);
+					var queuedId = d.parent_id || d.id;
+					var removable = !active.some(function (item) { return item.id === queuedId; });
 					return {
 						id: tileId(d, "q", i),
-						sig: place,
+						sig: place + "|" + removable,
 						html: function () {
 							return tile(d, {
 								flag: '<span class="cn-flag cn-st is-wait">' + place + "</span>",
@@ -540,12 +542,16 @@
 								sub: d.site,
 								action: d.id
 									? '<button class="cn-cta is-ghost" type="button" data-remove-queued="' +
-										esc(d.id) + '" style="margin-top:8px;padding:7px 12px;font-size:12px">Remove</button>'
+										esc(queuedId) + '" ' + (removable ? '' : 'disabled ') + 'style="margin-top:8px;padding:7px 12px;font-size:12px">' + (d.parent_id ? 'Remove season' : 'Remove') + '</button>'
 									: ""
 							});
 						},
 						// quando la coda avanza cambia solo il numero d'ordine
-						patch: function (node) { setText(node, ".cn-flag", place); }
+						patch: function (node) {
+                            setText(node, ".cn-flag", place);
+                            var removeButton = node.querySelector("[data-remove-queued]");
+                            if (removeButton) removeButton.disabled = !removable;
+                        }
 					};
 				}));
 

@@ -88,7 +88,7 @@ def cinema_search(request: HttpRequest) -> HttpResponse:
 
 def cinema_watchlist(request: HttpRequest) -> HttpResponse:
     """Watchlist: grid of watchlist items with status and actions."""
-    from ..watchlist_auto import _get_interval_seconds
+    from ..watchlist_auto import WATCHLIST_INTERVALS, _get_interval_seconds, watchlist_scan_running
 
     items = _watchlist_tiles()
     interval = _get_interval_seconds()
@@ -99,11 +99,13 @@ def cinema_watchlist(request: HttpRequest) -> HttpResponse:
 
     return render(request, "searchapp/cinema_watchlist.html", {
         "nav_active": "watchlist",
+        "scanning": watchlist_scan_running(),
         "quality_targets": sorted(targets, key=lambda q: int(q[:-1]), reverse=True),
         "items": items,
         "new_count": sum(1 for i in items if i["is_new"]),
         "auto_count": sum(1 for i in items if i["auto"]),
         "interval_minutes": int(interval // 60) if interval else 0,
+        "interval_options": [{"seconds": m * 60, "minutes": m} for m in WATCHLIST_INTERVALS],
     })
 
 

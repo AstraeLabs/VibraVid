@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import threading
-import time
 
 from django.db import close_old_connections
 from django.utils import timezone
@@ -20,17 +19,29 @@ DEFAULT_INTERVAL_SECONDS = 14400
 
 _loop_started = False
 _loop_lock = threading.Lock()
+_interval_changed = threading.Event()
+WATCHLIST_INTERVALS = (15, 30, 60, 120, 240, 360, 720, 1440)
 
 
 def _get_interval_seconds() -> int:
-    raw = os.environ.get("WATCHLIST_AUTO_INTERVAL_SECONDS", "")
+    from VibraVid.utils import config_manager
+    raw = os.environ.get("WATCHLIST_AUTO_INTERVAL_SECONDS") or config_manager.config.get(
+        "DEFAULT", "watchlist_interval_seconds", default=DEFAULT_INTERVAL_SECONDS)
     try:
         value = int(raw)
         if value > 0:
-            return value
+            return max(900, value)
     except Exception:
         pass
     return DEFAULT_INTERVAL_SECONDS
+
+
+def set_interval_seconds(value: int) -> None:
+    from VibraVid.utils import config_manager
+    config_manager.config.set_key("DEFAULT", "watchlist_interval_seconds", value)
+    config_manager.save_config()
+    os.environ["WATCHLIST_AUTO_INTERVAL_SECONDS"] = str(value)
+    _interval_changed.set()
 
 
 def _get_season_episode_count(seasons, season_number: int) -> int | None:
@@ -79,7 +90,7 @@ def _record_result(future, item_id, key, reservation, quality):
 def _process_item(item: WatchlistItem, force: bool = False) -> None:
     """Recheck every unfinished video, including older releases awaiting quality.
 
-    `force` requests a check now; it never re-downloads a completed target.
+    `force` requests a check now; local files still determine completed targets.
     """
     try:
         from .views import _run_download_in_thread
@@ -91,6 +102,31 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
         if media.is_movie or item.is_movie:
             videos = [(None, None)]
         else:
+            from .library_index import completed_episodes
+
+            # Mark local final files before any per-episode provider requests.
+            local = completed_episodes(media.name, quality)
+            local_keys = {f"{s}:{e}:{quality or 'config'}": quality or "config"
+                          for s, e in local if item.auto_all_seasons or s == item.auto_season}
+            with _completion_lock:
+                current = WatchlistItem.objects.filter(pk=item.pk).first()
+                if current is None:
+                    return
+                completed = dict(current.auto_completed or {})
+                # Only reconcile the scanned quality/scope. Preserve completions
+                # recorded by a running download after this scan's snapshot.
+                for key in item.auto_completed or {}:
+                    parts = key.split(":")
+                    if (len(parts) == 3 and parts[2] == (quality or "config")
+                            and (item.auto_all_seasons or parts[0] == str(item.auto_season))
+                            and key not in local_keys):
+                        completed.pop(key, None)
+                completed.update(local_keys)
+                WatchlistItem.objects.filter(pk=item.pk).update(auto_completed=completed)
+                if local_keys:
+                    WatchlistItem.objects.filter(pk=item.pk, auto_enabled=True, preferred_quality=quality).update(
+                        auto_status="Local episodes verified; monitoring for new content")
+                item.auto_completed = completed
             # Don't let the metadata cache hide a newly published season/episode.
             api._scraper_cache.pop(api._get_cache_key(media), None)
             seasons = api.get_series_metadata(media) or []
@@ -124,8 +160,12 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
                         continue
                     available = None
                 if available is not None and (not available or (quality and quality not in available)):
-                    WatchlistItem.objects.filter(pk=item.pk).update(
-                        auto_status=f"Waiting for {quality or 'video availability'}")
+                    target = f"S{int(season):02d}E{int(episode):02d}: " if season is not None else ""
+                    found = ", ".join(available) if available else "no video available"
+                    WatchlistItem.objects.filter(pk=item.pk, auto_enabled=True, preferred_quality=quality,
+                                                 auto_season=item.auto_season,
+                                                 auto_all_seasons=item.auto_all_seasons).update(
+                        auto_status=f"{target}Waiting for {quality or 'video availability'} (found: {found})")
                     continue
                 # A user can pause/change the watchlist while the provider is responding.
                 current = WatchlistItem.objects.filter(pk=item.pk, auto_enabled=True,
@@ -158,8 +198,8 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
         WatchlistItem.objects.filter(pk=item.pk).update(auto_status="Check failed; will retry")
 
 
-def _scan_watchlist(force=False):
-    if not _scan_lock.acquire(blocking=False):
+def _scan_watchlist(force=False, *, _lock_held=False):
+    if not _lock_held and not _scan_lock.acquire(blocking=False):
         return
     try:
         close_old_connections()
@@ -176,11 +216,31 @@ def _auto_loop(interval_seconds: int) -> None:
             _scan_watchlist()
         except Exception:
             logger.exception("Watchlist scan failed")
-        time.sleep(_get_interval_seconds())
+        while True:
+            _interval_changed.clear()
+            if not _interval_changed.wait(_get_interval_seconds()):
+                break
 
 
 def run_watchlist_auto_once(force: bool = True) -> None:
     _scan_watchlist(force=force)
+
+
+def watchlist_scan_running() -> bool:
+    return _scan_lock.locked()
+
+
+def start_watchlist_scan() -> bool:
+    """Reserve the scan before reporting its start to the GUI."""
+    if not _scan_lock.acquire(blocking=False):
+        return False
+    try:
+        threading.Thread(target=_scan_watchlist, kwargs={"force": True, "_lock_held": True},
+                         daemon=True, name="WatchlistManualScan").start()
+    except Exception:
+        _scan_lock.release()
+        raise
+    return True
 
 
 def start_watchlist_auto_loop() -> None:

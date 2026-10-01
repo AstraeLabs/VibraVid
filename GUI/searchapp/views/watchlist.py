@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import threading
 
 from django.contrib import messages
@@ -18,19 +17,25 @@ logger = logging.getLogger(__name__)
 
 @require_http_methods(["POST"])
 def set_watchlist_polling_interval(request: HttpRequest) -> HttpResponse:
-    """Update the watchlist auto-check interval for this process."""
+    """Save the interval and reschedule the automatic check."""
+    from ..watchlist_auto import WATCHLIST_INTERVALS, set_interval_seconds
     raw = request.POST.get("poll_interval", "")
     try:
         value = int(raw)
     except (ValueError, TypeError):
         value = None
 
-    allowed = {300, 900, 1800, 3600, 21600, 43200, 86400}
+    allowed = {minutes * 60 for minutes in WATCHLIST_INTERVALS}
     if value not in allowed:
         messages.error(request, "Invalid interval.")
         return redirect("watchlist")
 
-    os.environ["WATCHLIST_AUTO_INTERVAL_SECONDS"] = str(value)
+    try:
+        set_interval_seconds(value)
+    except OSError:
+        logger.exception("Could not save watchlist interval")
+        messages.error(request, "Could not save the check interval. Please retry.")
+        return redirect("watchlist")
     messages.success(request, "Check interval updated.")
     return redirect("watchlist")
 
@@ -55,6 +60,12 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
         is_movie = _to_bool(item_payload.get("is_movie")) or str(item_payload.get("type", "")).lower() in {"film", "movie", "ova"}
         from VibraVid.core.utils.quality import normalize_quality
         quality = normalize_quality(request.POST.get("quality"))
+        scope = request.POST.get("auto_season", "all")
+        auto_season = 1
+        if not is_movie and scope != "all":
+            auto_season = int(scope)
+            if auto_season < 0:
+                raise ValueError("Invalid season")
 
         # Check if already in watchlist
         existing = WatchlistItem.objects.filter(name=name, source_alias=source_alias).first()
@@ -69,7 +80,8 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
                 is_movie=is_movie,
                 preferred_quality=quality,
                 auto_enabled=request.POST.get("auto_enabled") == "on",
-                auto_all_seasons=not is_movie and request.POST.get("auto_enabled") == "on",
+                auto_all_seasons=not is_movie and scope == "all" and request.POST.get("auto_enabled") == "on",
+                auto_season=auto_season,
                 poster_url=poster,
                 tmdb_id=tmdb_id,
                 num_seasons=0,
@@ -81,6 +93,7 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
                 _update_single_item(item)
 
             threading.Thread(target=_bg_update, daemon=True).start()
+            messages.success(request, f"'{name}' added to the watchlist.")
 
     except Exception as e:
         messages.error(request, f"Error adding to watchlist: {e}")
@@ -90,7 +103,9 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
         from django.urls import reverse
         return redirect(f"{reverse('search')}?site={search_site}&query={search_query}")
 
-    return redirect(request.META.get('HTTP_REFERER', 'search_home'))
+    # Series details may have been opened by POST: redirecting to their bare
+    # Referer loses the payload and produces a misleading "Missing parameters".
+    return redirect("watchlist")
 
 
 @require_http_methods(["POST"])
@@ -176,21 +191,25 @@ def update_all_watchlist(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["POST"])
 def run_watchlist_auto_now(request: HttpRequest) -> HttpResponse:
     """Trigger the auto-download scan immediately."""
-    from ..watchlist_auto import run_watchlist_auto_once
+    from ..watchlist_auto import start_watchlist_scan
 
-    threading.Thread(target=run_watchlist_auto_once, daemon=True).start()
-    messages.info(request, "Auto-download started immediately in background.")
+    if start_watchlist_scan():
+        messages.info(request, "Watchlist check started. Downloads will be queued when the requested quality is available.")
+    else:
+        messages.info(request, "A watchlist check is already running. Please wait for it to finish.")
     return redirect("watchlist")
 
 
 def watchlist_status(request: HttpRequest) -> JsonResponse:
     """API endpoint to check if any watchlist item was updated recently."""
+    from ..watchlist_auto import watchlist_scan_running
+
     last_update = WatchlistItem.objects.order_by('-last_checked_at').first()
-    if last_update:
-        return JsonResponse({
-            "last_checked": last_update.last_checked_at.timestamp(),
-            "items_count": WatchlistItem.objects.count()
-        })
-    return JsonResponse({"last_checked": 0, "items_count": 0})
+    return JsonResponse({
+        "last_checked": last_update.last_checked_at.timestamp() if last_update else 0,
+        "items_count": WatchlistItem.objects.count(),
+        "scanning": watchlist_scan_running(),
+        "items": list(WatchlistItem.objects.values("id", "auto_status")),
+    })
 
 __all__ = ['set_watchlist_polling_interval', 'add_to_watchlist', 'remove_from_watchlist', 'clear_watchlist', 'update_watchlist_auto', 'update_watchlist_item', 'update_all_watchlist', 'run_watchlist_auto_now', 'watchlist_status']

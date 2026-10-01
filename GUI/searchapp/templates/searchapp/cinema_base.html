@@ -162,6 +162,9 @@
                 data-quality-url="{% url 'available_qualities' %}"
                 data-download-url="{% url 'start_download' %}"
                 data-watchlist-url="{% url 'add_to_watchlist' %}"></script>
+        <script src="{% static 'searchapp/watchlist_picker.js' %}"
+                data-watchlist-url="{% url 'add_to_watchlist' %}"
+                data-metadata-url="{% url 'series_metadata' %}"></script>
 		{% block scripts %}{% endblock %}
 	</body>
 </html>
