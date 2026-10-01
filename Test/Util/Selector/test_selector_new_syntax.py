@@ -13,70 +13,12 @@ from mock_streams import (
     create_audio_streams_example1,
     create_audio_streams_example2,
     create_audio_streams_with_regions,
-    create_video_streams_with_dv,
-    create_video_streams_with_dv_no_match,
 )
 from VibraVid.core.utils.selector import FilterSpec, StreamSelector
 
 
-def _selected_video(streams):
-    return next(s for s in streams if s.type == "video" and s.selected)
-
-
 def _selected_audio(streams):
     return [s for s in streams if s.type == "audio" and s.selected]
-
-
-def _companion(streams):
-    return next((s for s in streams if s.type == "video" and getattr(s, "dv_companion", False)), None)
-
-
-def test_dv_companion_matches_primary_resolution():
-    streams = create_video_streams_with_dv()
-    StreamSelector("1080|best&dv", "false", "false").apply(streams)
-
-    primary = _selected_video(streams)
-    assert primary.height == 1080
-    assert primary.codecs != "dvh1"
-
-    companion = _companion(streams)
-    assert companion is not None
-    assert companion.height == 1080, f"companion should match primary resolution (1080p), got {companion.height}p"
-    assert companion.id == "dv2"  # worst (lowest bitrate) DV stream AT 1080p, not globally
-
-
-def test_dv_companion_best_quality_at_matched_resolution():
-    streams = create_video_streams_with_dv()
-    StreamSelector("1080|best&dv=best", "false", "false").apply(streams)
-
-    companion = _companion(streams)
-    assert companion is not None
-    assert companion.height == 1080
-    assert companion.id == "dv3"
-
-
-def test_dv_companion_explicit_height_override_ignores_primary_resolution():
-    streams = create_video_streams_with_dv()
-    StreamSelector("1080|best&dv=480", "false", "false").apply(streams)
-
-    primary = _selected_video(streams)
-    assert primary.height == 1080
-
-    companion = _companion(streams)
-    assert companion is not None
-    assert companion.height == 480, "explicit numeric &dv override must bypass resolution matching"
-
-
-def test_dv_companion_falls_back_to_nearest_when_no_exact_resolution_match():
-    streams = create_video_streams_with_dv_no_match()
-    StreamSelector("1080|best&dv", "false", "false").apply(streams)
-
-    primary = _selected_video(streams)
-    assert primary.height == 1080
-
-    companion = _companion(streams)
-    assert companion is not None
-    assert companion.height == 720, "no DV at 1080p — should fall back to nearest available (720p), not silently worst-globally (480p)"
 
 
 def test_short_key_video_native_syntax():

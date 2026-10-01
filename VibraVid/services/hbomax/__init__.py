@@ -1,4 +1,5 @@
-# 22.12.25
+# 22.08.26
+# By @sync-luca98
 
 import re
 from datetime import datetime
@@ -14,7 +15,7 @@ from VibraVid.utils.http_client import create_client
 from .client import get_client
 from .downloader import download_film, download_live, download_series
 
-indice = 18
+indice = 15
 _useFor = "Film_Serie"
 msg = Prompt()
 console = Console()
@@ -33,7 +34,9 @@ def register_cli_args(parser) -> list:
     """
     group = parser.add_argument_group("HBO Max options (--site 10)")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="HBO Max title URL (show or movie).")
-    return ["url"]
+    group.add_argument("--probe-max", dest="probe", action="store_true", help="Debug: report the tallest rendition each manifest offers and compare CDM declarations.")
+    group.add_argument("--save-mpd", dest="save_mpd", action="store_true", help="Debug: persist the raw MPD to .cache/logs/hbomax_mpd/ for offline inspection.")
+    return ["url", "probe", "save_mpd"]
 
 
 def _resolve_url_to_item(url: str):

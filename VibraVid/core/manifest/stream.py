@@ -345,6 +345,13 @@ class Segment:
     encrypted: bool = False  # True when this segment's Period is DRM-protected
     inline_data: bytes | None = None  # segment bytes carried by the manifest itself
 
+    def range_size(self) -> int:
+        """Byte length of ``byte_range`` ("a-b", inclusive), 0 when absent or open-ended."""
+        start, sep, end = self.byte_range.partition("-")
+        if not sep or not start.isdigit() or not end.isdigit():
+            return 0
+        return max(0, int(end) - int(start) + 1)
+
     def __repr__(self) -> str:
         dur_s = f", {self.duration:.3f}s" if self.duration else ""
         return f"Segment({self.number}, {self.seg_type}{dur_s})"
@@ -416,6 +423,7 @@ class Stream:
     # ── Size estimation ───────────────────────────────────────────────────────
     # Populated by compute_estimated_size(); do not set manually.
     estimated_size: int = 0  # bytes; total stream size estimate
+    estimated_size_exact: bool = False  # True when estimated_size is a real byte total (manifest byte ranges / sizes), False when derived from the nominal bitrate
 
     def add_segment(self, seg: Segment) -> None:
         self.segments.append(seg)
@@ -432,13 +440,18 @@ class Stream:
         3. Fallback: ``(avg_bitrate or bitrate or bitrate_override) × duration``
            using the stream-level duration.
 
-        The result is stored in ``self.estimated_size`` and also returned.
+        The result is stored in ``self.estimated_size`` and also returned;
+        ``self.estimated_size_exact`` tells whether it is a real byte total
+        (every media segment has a known size) or a bitrate-derived guess.
         """
-        # 1. Real sizes from already-downloaded segments
+        # 1. Real sizes from the manifest (byte ranges) or already-downloaded segments
         real_total = sum(s.size for s in self.segments if s.size)
         if real_total:
             self.estimated_size = real_total
+            self.estimated_size_exact = all(s.size for s in self.segments if s.seg_type == "media")
             return self.estimated_size
+
+        self.estimated_size_exact = False
 
         # 2. Per-segment estimates (set by parser from per-segment duration × bitrate)
         seg_est_total = sum(s.estimated_size for s in self.segments if s.estimated_size)

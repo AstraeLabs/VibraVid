@@ -14,3 +14,4 @@ pyplayready
 pycryptodomex
 mutagen
 textual
+Pillow

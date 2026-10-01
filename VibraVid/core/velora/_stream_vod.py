@@ -5,6 +5,7 @@ import os
 import struct
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -18,7 +19,7 @@ from VibraVid.utils.os import os_manager
 
 from .util._dash import build_dash_ranged_segments, build_dash_sidx_segments
 from .util._hls import hls_base_url, parse_hls_variant_playlist
-from .util._stream_helpers import detect_seg_ext, is_valid_frag_init, repair_init_segment, safe_name
+from .util._stream_helpers import detect_seg_ext, is_valid_frag_init, parse_range_header, repair_init_segment, safe_name
 from .util.formatting import format_size
 
 logger = logging.getLogger("manual")
@@ -68,6 +69,11 @@ def _frag_init_probe(dl_segs: list[dict], headers: dict) -> tuple[bool, str | No
 
 
 class VodStreamMixin:
+    _SIZE_PROBE_SAMPLES = 16
+    _SIZE_PROBE_WORKERS = 4  # CDNs answer 503 to a burst of concurrent HEADs
+    _SIZE_PROBE_TIMEOUT = 5
+    _SIZE_PROBE_BUDGET = 10.0
+    
     def _apply_max_time(self, dl_segs: list[dict]) -> list[dict]:
         start, end = self.max_time if isinstance(self.max_time, tuple) else (0.0, self.max_time)
         if (not start or start <= 0) and end is None:
@@ -113,6 +119,81 @@ class VodStreamMixin:
             logger.info(f"max_time: no sidx, using manifest average {avg:.3f}s/seg")
             for seg in media:
                 seg["duration"] = avg
+
+    @staticmethod
+    def _ranged_total(dl_segs: list[dict]) -> int:
+        """Exact byte total of a plan whose every media segment carries a ``Range`` (DASH SegmentList, HLS ``#EXT-X-BYTERANGE``, split single file), else 0."""
+        total = 0
+        for seg in dl_segs:
+            rng = parse_range_header((seg.get("headers") or {}).get("Range"))
+            if rng is not None:
+                total += rng[1] - rng[0] + 1
+            elif seg.get("seg_type") != "init":
+                return 0
+        return total
+
+    def _sync_estimated_size(self, stream, dl_segs: list[dict], headers: dict) -> None:
+        """Re-derive the expected download size from the segments actually planned, i.e. after ``--max-segments`` / ``--max-time`` trimming. Not done per ``_run_dl`` call: that also runs for retries, resumes and live batches that only cover part of the stream."""
+        ranged_total = self._ranged_total(dl_segs)
+        if ranged_total:
+            stream.estimated_size, stream.estimated_size_exact = ranged_total, True
+            return
+        if stream.estimated_size_exact and len(dl_segs) != len(stream.segments):
+            stream.estimated_size_exact = False
+        if stream.estimated_size_exact:
+            return
+
+        probed = self._probe_planned_size(dl_segs, headers)
+        if probed:
+            logger.info(f"size probe | id={stream.id!r} | type={stream.type} | ~{format_size(probed)} (declared bandwidth: ~{format_size(stream.estimated_size)})")
+            stream.estimated_size = probed
+
+    def _probe_segment_size(self, url: str, headers: dict) -> int:
+        """Byte length of one segment: HEAD ``Content-Length``, else the ``Content-Range`` total of a 1-byte ranged GET. 0 when unknown."""
+        try:
+            with create_client(headers=headers, timeout=self._SIZE_PROBE_TIMEOUT, follow_redirects=True) as c:
+                r = c.head(url)
+                if r.status_code in (429, 503):  # throttled: one retry after a short pause
+                    time.sleep(0.5)
+                    r = c.head(url)
+                if r.status_code < 400:
+                    length = (r.headers.get("content-length") or "").strip()
+                    if length.isdigit() and int(length) > 0:
+                        return int(length)
+                r = c.get(url, headers={**headers, "Range": "bytes=0-0"})
+                if r.status_code == 206:
+                    total = (r.headers.get("content-range") or "").rpartition("/")[2].strip()
+                    if total.isdigit():
+                        return int(total)
+        except Exception as exc:
+            logger.debug(f"size probe failed for {url}: {exc}")
+        return 0
+
+    def _probe_planned_size(self, dl_segs: list[dict], headers: dict) -> int:
+        """Estimate the total size of a plan whose media segments are not all ranged, by probing a few of them and extrapolating."""
+        media = [s for s in dl_segs if s.get("seg_type") != "init"]
+        k = self._SIZE_PROBE_SAMPLES
+        if len(media) < 3 * k or self._stop_check():
+            return 0
+
+        picks = [media[int((j + 0.5) * len(media) / k)] for j in range(k)]
+        pool = ThreadPoolExecutor(max_workers=self._SIZE_PROBE_WORKERS)
+        try:
+            futures = [pool.submit(self._probe_segment_size, seg["url"], headers) for seg in picks]
+            wait(futures, timeout=self._SIZE_PROBE_BUDGET)
+            sizes = [f.result() if f.done() and not f.cancelled() else 0 for f in futures]
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        measured = [(size, seg.get("duration", 0.0)) for size, seg in zip(sizes, picks, strict=True) if size > 0]
+        if len(measured) < k // 2:
+            return 0
+
+        total_dur = sum(s.get("duration", 0.0) for s in media)
+        sampled_dur = sum(dur for _, dur in measured)
+        if total_dur > 0 and sampled_dur > 0 and all(dur > 0 for _, dur in measured):
+            return int(sum(size for size, _ in measured) / sampled_dur * total_dur)
+        return int(sum(size for size, _ in measured) / len(measured) * len(media))
 
     def _segment_durations_from_sidx(self, dl_segs: list[dict], headers: dict) -> list[float] | None:
         """Exact per-segment durations from the file's ``sidx`` (segment index) box."""
@@ -555,7 +636,7 @@ class VodStreamMixin:
             size = stream.compute_estimated_size()
             if size:
                 resolved_parts.append(f"~{format_size(size)}")
-        
+
         if stream.drm and stream.drm.is_encrypted():
             kid_disp = stream.drm.get_kid_display()
             if kid_disp:
@@ -594,6 +675,7 @@ class VodStreamMixin:
             logger.debug(f"Limiting HLS download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
 
         dl_segs = self._apply_max_time(dl_segs)
+        self._sync_estimated_size(stream, dl_segs, all_headers)
 
         def _refresh_hls_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
             logger.info(f"HLS token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")
@@ -756,6 +838,7 @@ class VodStreamMixin:
             logger.debug(f"Limiting DASH download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
 
         dl_segs = self._apply_max_time(dl_segs)
+        self._sync_estimated_size(stream, dl_segs, all_headers)
 
         def _refresh_dash_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
             logger.info(f"DASH token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")
@@ -878,6 +961,7 @@ class VodStreamMixin:
             logger.debug(f"Limiting ISM download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
 
         dl_segs = self._apply_max_time(dl_segs)
+        self._sync_estimated_size(stream, dl_segs, all_headers)
 
         def _refresh_ism_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
             logger.info(f"ISM token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")

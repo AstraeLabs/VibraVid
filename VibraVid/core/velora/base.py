@@ -67,6 +67,7 @@ class BaseMediaDownloader:
         manifest_protocol: str | None = None,
         manifest_refresh_fn=None,
         has_drm: bool = False,
+        display_selected_only: bool = False,
     ) -> None:
         self.url = url
         self.output_dir = Path(output_dir)
@@ -101,7 +102,7 @@ class BaseMediaDownloader:
         self.external_other_tracks: list = []
         self.other_tracks: list = []
         self.custom_filters: dict | None = None
-        self.display_selected_only: bool = False
+        self.display_selected_only = display_selected_only
         self.license_url: str | None = None
         self.drm_type: str | None = None
 
@@ -279,7 +280,7 @@ class BaseMediaDownloader:
 
         quality = str(getattr(companion, "dv_companion_quality", "") or "worst").strip() or "worst"
         self.other_tracks = [*self.other_tracks, {"type": "video:dv", "url": self.url, "quality": quality}]
-        logger.info("&dv: companion DV registrato come other_track (quality=%r, id=%s)", quality, companion.id)
+        logger.info("hybrid: companion DV registrato come other_track (quality=%r, id=%s)", quality, companion.id)
 
     def _streams_for_display(self) -> list[Stream]:
         """Return the list of streams to display in the table, filtered by self.display_selected_only if set."""
@@ -319,6 +320,8 @@ class BaseMediaDownloader:
             strict_no_match=context_tracker.skip_no_match,
             dv_auto=_pref("dv_auto", True, section="CODEC"),
             mux_dtsx=_pref("mux_dtsx", False, section="CODEC"),
+            drop_clear_av=bool(f.get("drop_clear_av", False)),
+            dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
         )
         selectable = self.streams
         if requested_quality:

@@ -26,6 +26,8 @@ __all__ = [
     "_add_scheduled_download",
     "_remove_scheduled_download",
     "_cancel_scheduled_download",
+    "_remove_queued_download",
+    "_clear_queued_downloads",
     "_is_scheduled_cancelled",
     "_extract_series_base_title",
     "_same_series",
@@ -103,6 +105,37 @@ def _cancel_scheduled_download(download_id: str) -> None:
     with scheduled_downloads_lock:
         cancelled_scheduled_downloads.add(download_id)
         scheduled_downloads.pop(download_id, None)
+
+
+def _remove_queued_download(download_id: str, active_ids: set[str] | None = None) -> bool:
+    """Cancel one scheduled download only if it has not started."""
+    active_ids = active_ids or set()
+    if not download_id or download_id in active_ids:
+        return False
+
+    with scheduled_downloads_lock:
+        if download_id not in scheduled_downloads:
+            return False
+        cancelled_scheduled_downloads.add(download_id)
+        scheduled_downloads.pop(download_id, None)
+        return True
+
+
+def _clear_queued_downloads(active_ids: set[str] | None = None) -> list[str]:
+    """Cancel all scheduled downloads that have not started."""
+    active_ids = active_ids or set()
+
+    with scheduled_downloads_lock:
+        queued_ids = [
+            download_id
+            for download_id in scheduled_downloads
+            if download_id not in active_ids
+        ]
+        for download_id in queued_ids:
+            cancelled_scheduled_downloads.add(download_id)
+            scheduled_downloads.pop(download_id, None)
+
+    return queued_ids
 
 
 def _is_scheduled_cancelled(download_id: str) -> bool:

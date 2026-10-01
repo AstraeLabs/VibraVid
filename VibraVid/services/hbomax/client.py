@@ -1,12 +1,15 @@
-# 05.09.26
+# 22.08.26
+# By @sync-luca98
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
 from rich.console import Console
 
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base.login_status import ACCOUNT, print_login
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
@@ -19,6 +22,21 @@ _API_ROOT = "https://default.any-any.prd.api.hbomax.com"
 _BOOTSTRAP_URL = f"{_API_ROOT}/session-context/headwaiter/v1/bootstrap"
 _PLAYBACK_URL = "https://default.any-any.prd.api.hbomax.com/any/playback/v1/playbackInfo"
 _PLAYREADY_SOAP_ACTION = "http://schemas.microsoft.com/DRM/2007/03/protocols/AcquireLicense"
+_UHD_HEIGHT = 2160
+_HEIGHT_ATTR = re.compile(rb'height="(\d+)"')
+_PROBE_CHUNK = 3 * 1024 * 1024
+_MINIMAL_HEADERS = {
+    "x-device-info": "hboMax/hboMax (hboMax/hboMax; hboMax/hboMax; hboMax/hboMax)",
+    "x-disco-client": "hboMax:hboMax:hboMax:hboMax",
+    "x-disco-params": "hboMax=hboMax",
+}
+
+def _probe_enabled() -> bool:
+    return bool((context_tracker.site_options or {}).get("probe"))
+
+
+def _manifest_name(url: str) -> str:
+    return url.split("?", 1)[0].rsplit("/", 1)[-1]
 
 
 def _login_cookies() -> dict[str, str]:
@@ -55,6 +73,7 @@ class Max:
         self.access_token = self.cookies.get("st")
         self.base_url: str | None = None
         self.headers: dict[str, str] = {}
+        self._manifest_probe_cache: dict[str, bool] = {}
         self.session_id = _session_id(self.cookies.get("session"), self.device_id)
 
         self.base_headers = {
@@ -81,7 +100,6 @@ class Max:
         message = "HBO Max token missing or expired. Copy a fresh token from the browser"
         logger.error(message)
         console.print(f"[red]{message}[/red]")
-        raise SystemExit(1)
 
     def _authenticate(self) -> None:
         """Authenticate with the configured ``st`` cookie and bootstrap routing."""
@@ -198,16 +216,15 @@ class Max:
             "consumptionType": "streaming",
             "deviceInfo": {
                 "deviceId": self.device_id,
-                "browser": {"name": "chrome", "version": "113.0.0.0"},
-                "make": "Microsoft",
-                "model": "XBOX-Unknown",
-                "os": {"name": "Windows", "version": "113.0.0.0"},
-                "platform": "XBOX",
-                "deviceType": "xbox",
+                "make": "Samsung",
+                "model": "Samsung-UHD-TV",
+                "os": {"name": "Tizen", "version": "124.0.0.0"},
+                "platform": "SAMSUNGTV",
+                "deviceType": "tv",
                 "player": {
-                    "mediaEngine": {"name": "GLUON_BROWSER", "version": "1.20.1"},
+                    "mediaEngine": {"name": "BEAM", "version": "4.0.0.118"},
                     "playerView": {"height": 2160, "width": 3840},
-                    "sdk": {"name": "Beam Player Console", "version": "1.0.2.4"},
+                    "sdk": {"name": "beam", "version": "4.0.0.118"},
                 },
             },
             "editId": edit_id,
@@ -226,9 +243,52 @@ class Max:
                 details = response.json()
             except ValueError:
                 details = response.text[:500]
-            logger.error("Max playbackInfo failed: status=%s error=%s", response.status_code, details)
+            logger.error(f"Max playbackInfo failed: status={response.status_code} error={details}")
         response.raise_for_status()
         return response.json()
+
+    def _playback_info_minimal(self, edit_id: str, cdms: list[dict]) -> dict:
+        """Second playbackInfo probe using rosso's deliberately thin device declaration."""
+        payload = {
+            "appBundle": "",
+            "applicationSessionId": "",
+            "consumptionType": "streaming",
+            "playbackSessionId": "",
+            "deviceInfo": {
+                "player": {
+                    "mediaEngine": {"name": "", "version": ""},
+                    "playerView": {"height": 0, "width": 0},
+                    "sdk": {"name": "", "version": ""},
+                },
+            },
+            "editId": edit_id,
+            "capabilities": {
+                "contentProtection": {"contentDecryptionModules": cdms},
+                "manifests": {"formats": {"dash": {}}},
+            },
+            "gdpr": False,
+            "firstPlay": False,
+            "userPreferences": {},
+        }
+        headers = dict(self.headers)
+        headers.update(_MINIMAL_HEADERS)
+        with create_client(headers=headers, cookies=self.cookies) as client:
+            response = client.post(_PLAYBACK_URL, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def _compare_declarations(self, edit_id: str, cdms: list[dict], full: dict) -> None:
+        """Measure the ladder for the full and the thin device declaration side by side."""
+        for label, data in (("full", full), ("minimal", None)):
+            if data is None:
+                try:
+                    data = self._playback_info_minimal(edit_id, cdms)
+                except Exception as exc:
+                    logger.warning(f"Max minimal declaration probe failed: {exc}")
+                    return
+            for url in self._manifest_candidates(data):
+                height = self._probe_manifest(url)
+                logger.info(f"Max ladder [{label}] {_manifest_name(url)}: {height or 'unknown'}")
 
     def _license_headers(self, drm_type: str | None) -> dict[str, str]:
         """Headers needed by downloader DRM requests, including configured cookies."""
@@ -244,13 +304,86 @@ class Max:
         drm = data.get("drm") or (data.get("fallback") or {}).get("drm") or {}
         return drm.get("schemes") or {}
 
-    @staticmethod
-    def _manifest_url(data: dict) -> str | None:
+    @classmethod
+    def _manifest_candidates(cls, data: dict) -> list[str]:
+        """Manifest URLs in priority order, already rewritten to the akm CDN."""
         fallback = (data.get("fallback") or {}).get("manifest") or {}
-        manifest = (data.get("manifest") or {}).get("url") or fallback.get("url")
-        if not manifest:
+        ordered: list[str] = []
+        for url in (fallback.get("url"), (data.get("manifest") or {}).get("url")):
+            if not url:
+                continue
+            cleaned = url.replace("_fallback", "").replace("fly", "akm").replace("gcp", "akm")
+            if cleaned not in ordered:
+                ordered.append(cleaned)
+        return ordered
+
+    @classmethod
+    def _manifest_url(cls, data: dict) -> str | None:
+        candidates = cls._manifest_candidates(data)
+        return candidates[0] if candidates else None
+
+    def _serves_manifest(self, url: str) -> bool:
+        """Confirm a candidate URL actually answers with a DASH manifest."""
+        if url in self._manifest_probe_cache:
+            return self._manifest_probe_cache[url]
+        try:
+            with create_client(headers=self.headers, cookies=self.cookies) as client:
+                response = client.get(url, stream=True)
+                ok = response.ok
+                head = next(response.iter_content(chunk_size=256), b"") if ok else b""
+        except Exception as exc:
+            logger.debug(f"Max manifest probe failed for {url}: {exc}")
+            ok, head = False, b""
+        result = bool(ok and b"<" in head)
+        self._manifest_probe_cache[url] = result
+        return result
+
+    def _resolve_manifest(self, candidates: list[str]) -> str | None:
+        """Pick the first candidate that serves a manifest, preferring the uncapped one."""
+        for candidate in candidates:
+            if self._serves_manifest(candidate):
+                if candidate != candidates[0]:
+                    logger.warning(f"Max uncapped manifest unavailable, falling back to the capped URL: {candidate}")
+                return candidate
+        return candidates[0] if candidates else None
+
+    def _probe_manifest(self, url: str) -> int | None:
+        """Best-effort read of the tallest rendition advertised by a DASH manifest."""
+        try:
+            with create_client(headers=self.headers, cookies=self.cookies) as client:
+                response = client.get(url, stream=True)
+                if not response.ok:
+                    logger.warning(f"Max probe: {url} -> HTTP {response.status_code}")
+                    return None
+                buffer = bytearray()
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    buffer.extend(chunk)
+                    if len(buffer) >= _PROBE_CHUNK:
+                        break
+        except Exception as exc:
+            logger.warning(f"Max probe failed for {url}: {exc}")
             return None
-        return manifest.replace("_fallback", "").replace("fly", "akm").replace("gcp", "akm")
+
+        heights = [int(value) for value in _HEIGHT_ATTR.findall(bytes(buffer))]
+        return max(heights) if heights else None
+
+    def _report_uhd(self, edit_id: str, candidates: list[str], chosen: str | None) -> None:
+        """Log the resolution ladder behind every candidate manifest URL."""
+        best = 0
+        for url in candidates:
+            height = self._probe_manifest(url)
+            mark = " <- in use" if url == chosen else ""
+            if height is None:
+                logger.info(f"Max probe {_manifest_name(url)}: ladder unknown{mark}")
+            else:
+                best = max(best, height)
+                level = "UHD" if height >= _UHD_HEIGHT else "no UHD"
+                logger.info(f"Max probe {_manifest_name(url)}: tallest {height}p {level}{mark}")
+
+        if best >= _UHD_HEIGHT:
+            logger.info(f"Max editId={edit_id}: best ladder {best}p UHD, using {_manifest_name(chosen or '')}")
+        else:
+            logger.warning(f"Max editId={edit_id}: no candidate advertised {_UHD_HEIGHT}p, best was {best}p")
 
     def get_playback_info(self, edit_id: str) -> dict[str, Any]:
         """Return the DASH manifest and DRM license for ``edit_id``."""
@@ -258,6 +391,19 @@ class Max:
             edit_id, [{"drmKeySystem": "playready", "maxSecurityLevel": "SL3000"}]
         )
         schemes = self._drm_schemes(data)
+
+        if "playready" not in schemes:
+            playready_cdms = [{"drmKeySystem": "playready", "maxSecurityLevel": "SL3000"}]
+            try:
+                minimal = self._playback_info_minimal(edit_id, playready_cdms)
+            except Exception as exc:
+                logger.warning(f"Max minimal-declaration PlayReady retry failed: {exc}")
+                minimal = None
+            
+            if minimal is not None and "playready" in self._drm_schemes(minimal):
+                logger.info("Max PlayReady scheme obtained via the minimal device declaration")
+                data = minimal
+                schemes = self._drm_schemes(minimal)
 
         if "playready" not in schemes:
             data = self._playback_info_request(
@@ -271,8 +417,19 @@ class Max:
 
         drm_type = "playready" if "playready" in schemes else "widevine" if "widevine" in schemes else None
         license_url = (schemes.get(drm_type) or {}).get("licenseUrl") if drm_type else None
+        candidates = self._manifest_candidates(data)
+        manifest = self._resolve_manifest(candidates)
+        if _probe_enabled():
+            self._report_uhd(edit_id, candidates, manifest)
+            cdms = (
+                [{"drmKeySystem": "playready", "maxSecurityLevel": "SL3000"}]
+                if drm_type == "playready"
+                else [{"drmKeySystem": "widevine", "maxSecurityLevel": "l3"}, {"drmKeySystem": "clearkey"}]
+            )
+            self._compare_declarations(edit_id, cdms, data)
+        
         return {
-            "manifest": self._manifest_url(data),
+            "manifest": manifest,
             "license": license_url,
             "type": "dash",
             "license_headers": self._license_headers(drm_type),

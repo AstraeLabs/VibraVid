@@ -1,3 +1,6 @@
+# 22.08.26
+# By @sync-luca98
+
 import re
 import sys
 import unicodedata
@@ -14,7 +17,7 @@ from VibraVid.utils.http_client import create_client, get_userAgent
 
 from .downloader import download_film
 
-indice = 20
+indice = 17
 _useFor = "Film_Serie"
 console = Console()
 entries_manager = EntriesManager()

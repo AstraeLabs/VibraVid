@@ -1117,14 +1117,14 @@ class DashParser:
                 # honour it, otherwise the whole multi-rep init file is fetched and
                 # the wrong (first/lowest) moov ends up describing the track.
                 init_range = init_el.get("range", "")
-                stream.add_segment(
-                    Segment(
-                        self._inherit_query(urljoin(base_url, src), self._mpd_query_suffix),
-                        0,
-                        "init",
-                        byte_range=init_range,
-                    )
+                init_seg = Segment(
+                    self._inherit_query(urljoin(base_url, src), self._mpd_query_suffix),
+                    0,
+                    "init",
+                    byte_range=init_range,
                 )
+                init_seg.size = init_seg.range_size()
+                stream.add_segment(init_seg)
             else:
                 init_range = init_el.get("range", "")
                 if init_range:
@@ -1138,15 +1138,17 @@ class DashParser:
                         and int(parts[1]) + 1 < first_media_start
                     ):
                         init_range = f"{parts[0]}-{first_media_start - 1}"
-                    stream.add_segment(
-                        Segment(
-                            self._inherit_query(base_url.rstrip("/"), self._mpd_query_suffix),
-                            0,
-                            "init",
-                            byte_range=init_range,
-                        )
+                    init_seg = Segment(
+                        self._inherit_query(base_url.rstrip("/"), self._mpd_query_suffix),
+                        0,
+                        "init",
+                        byte_range=init_range,
                     )
+                    init_seg.size = init_seg.range_size()
+                    stream.add_segment(init_seg)
 
+        # Each mediaRange is the segment's exact byte length, so the stream's
+        # real (VBR) total is known up front instead of bandwidth x duration.
         for idx, seg_el in enumerate(seg_urls, start=1):
             media_url = seg_el.get("media", "")
             media_range = seg_el.get("mediaRange", "")
@@ -1159,23 +1161,23 @@ class DashParser:
                 # the per-segment range entirely, which downstream treats as
                 # one giant single-file resource -- the whole thing gets
                 # fetched instead of each small ranged slice.
-                stream.add_segment(
-                    Segment(
-                        self._inherit_query(fast_urljoin_auto(base_url, media_url), self._mpd_query_suffix),
-                        idx,
-                        "media",
-                        byte_range=media_range,
-                    )
+                seg = Segment(
+                    self._inherit_query(fast_urljoin_auto(base_url, media_url), self._mpd_query_suffix),
+                    idx,
+                    "media",
+                    byte_range=media_range,
                 )
+                seg.size = seg.range_size()
+                stream.add_segment(seg)
             elif media_range:
-                stream.add_segment(
-                    Segment(
-                        self._inherit_query(base_url.rstrip("/"), self._mpd_query_suffix),
-                        idx,
-                        "media",
-                        byte_range=media_range,
-                    )
+                seg = Segment(
+                    self._inherit_query(base_url.rstrip("/"), self._mpd_query_suffix),
+                    idx,
+                    "media",
+                    byte_range=media_range,
                 )
+                seg.size = seg.range_size()
+                stream.add_segment(seg)
 
     @staticmethod
     def _parse_iso_duration(s: str) -> float:

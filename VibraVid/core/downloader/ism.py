@@ -55,6 +55,7 @@ class ISM_Downloader(BaseDownloader):
         chapters: list | None = None,
         poster_url: str | None = None,
         sanitize_path: bool = True,
+        display_selected_only: bool = False,
     ):
         """
         Parameters:
@@ -73,6 +74,7 @@ class ISM_Downloader(BaseDownloader):
             - max_time: Maximum content duration to download, e.g. "01:00:00" or 3600 seconds. Default: None (all).
             - chapters: Chapter markers to inject into the muxed output, e.g. [{"name": str, "seconds": int}]. Default: context_tracker.chapters.
             - poster_url: Poster/still image URL to embed in the muxed output. Default: context_tracker.poster_url.
+            - display_selected_only: Show only the selected tracks in the stream table, so the table previews exactly what will be downloaded. Default: False.
         """
         self.ism_url = self._resolve_url(str(ism_url).strip()) if ism_url else None
         self.ism_content = ism_content
@@ -92,6 +94,7 @@ class ISM_Downloader(BaseDownloader):
         )
         self.max_time = _parse_max_time(max_time if max_time is not None else context_tracker.max_time)
         self.other_tracks = other_tracks or []
+        self.display_selected_only = display_selected_only
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
@@ -116,7 +119,7 @@ class ISM_Downloader(BaseDownloader):
         seen: dict[str, set] = {DRMType.WIDEVINE: set(), DRMType.PLAYREADY: set()}
 
         for s in streams:
-            if not getattr(s, "selected", False):
+            if not (getattr(s, "selected", False) or getattr(s, "dv_companion", False)):
                 continue
 
             drm = getattr(s, "drm", None)
@@ -268,6 +271,7 @@ class ISM_Downloader(BaseDownloader):
             manifest_protocol="ism",
         )
         self.media_downloader.other_tracks = self.other_tracks
+        self.media_downloader.display_selected_only = self.display_selected_only
 
         # Inject external subtitles that were passed via other_tracks
         _, _, other_subtitles = split_other_tracks(self.other_tracks)

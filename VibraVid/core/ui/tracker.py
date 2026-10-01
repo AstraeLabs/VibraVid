@@ -732,8 +732,39 @@ class ContextTracker:
         self.local.series_tmdb_id = value
 
     @property
+    def sidecar_provider(self):
+        return getattr(self.local, "sidecar_provider", None)
+
+    @sidecar_provider.setter
+    def sidecar_provider(self, value):
+        self.local.sidecar_provider = value
+
+    @property
+    def sidecar_id(self):
+        return getattr(self.local, "sidecar_id", None)
+
+    @sidecar_id.setter
+    def sidecar_id(self, value):
+        self.local.sidecar_id = value
+
+    @property
+    def sidecar_media_type(self):
+        return getattr(self.local, "sidecar_media_type", None)
+
+    @sidecar_media_type.setter
+    def sidecar_media_type(self, value):
+        self.local.sidecar_media_type = value
+
+    @property
+    def sidecar_verify(self) -> bool:
+        return bool(getattr(self.local, "sidecar_verify", False))
+
+    @sidecar_verify.setter
+    def sidecar_verify(self, value):
+        self.local.sidecar_verify = bool(value)
+
+    @property
     def should_print(self) -> bool:
-        """Returns False when console output should be suppressed (parallel CLI or GUI)."""
         return not self.is_gui and not self.is_parallel_cli
 
     @property
@@ -749,7 +780,6 @@ class ContextTracker:
         return getattr(self.local, "download_ok_count", 0)
 
     def reset_download_result(self) -> None:
-        """Clear the per-download outcome before a new (GUI) download starts."""
         self.local.download_errors = []
         self.local.download_ok_count = 0
 

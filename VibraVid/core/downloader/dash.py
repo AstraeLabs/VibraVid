@@ -172,6 +172,7 @@ class DASH_Downloader(BaseDownloader):
         chapters: list | None = None,
         poster_url: str | None = None,
         sanitize_path: bool = True,
+        display_selected_only: bool = False,
     ):
         """
         Parameters:
@@ -191,6 +192,7 @@ class DASH_Downloader(BaseDownloader):
             - max_time: Maximum content duration to download, e.g. "01:00:00" or 3600 seconds. Default: None (all).
             - chapters: Chapter markers to inject into the muxed output, e.g. [{"name": str, "seconds": int}]. Default: context_tracker.chapters.
             - poster_url: Poster/still image URL to embed in the muxed output. Default: context_tracker.poster_url.
+            - display_selected_only: Show only the selected tracks in the stream table
         """
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
@@ -245,6 +247,7 @@ class DASH_Downloader(BaseDownloader):
         self.media_downloader = None
         self.custom_filters: dict | None = None
         self.display_min_video_height: int | None = None
+        self.display_selected_only = display_selected_only
         self.display_only_drm_video = False
         self.display_only_drm_audio = False
         self._probe = DRMProbe()
@@ -271,7 +274,7 @@ class DASH_Downloader(BaseDownloader):
         for s in streams:
             drm = getattr(s, "drm", None)
             is_encrypted = drm and drm.is_encrypted()
-            is_selected = getattr(s, "selected", False)
+            is_selected = getattr(s, "selected", False) or getattr(s, "dv_companion", False)
 
             # If check_selected=True, require selected=True AND encrypted
             # If check_selected=False, just require encrypted (for fallback from MPD)
@@ -728,7 +731,7 @@ class DASH_Downloader(BaseDownloader):
             console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
             return DownloadResult(self.output_path, False, None)
 
-        # StreamSelector marks the DV companion with dv_companion=True when &dv is in the filter
+        # StreamSelector marks the DV companion with dv_companion=True (select_video="hybrid" or CODEC.dv_auto)
         _dv_companion_stream = next(
             (s for s in streams if getattr(s, "dv_companion", False)),
             None,
@@ -737,7 +740,7 @@ class DASH_Downloader(BaseDownloader):
             dv_quality = getattr(_dv_companion_stream, "dv_companion_quality", "worst") or "worst"
             self._merge_other_tracks.append({"type": "video:dv", "url": self.mpd_url, "quality": dv_quality})
             self.media_downloader.other_tracks = list(self._merge_other_tracks)
-            logger.info(f"&dv: DV companion found, added to other_tracks (quality={dv_quality!r})")
+            logger.info(f"hybrid: DV companion found, added to other_tracks (quality={dv_quality!r})")
 
         # Show table: temporarily mark DV companion as selected so it appears highlighted
         if context_tracker.should_print and not context_tracker.hide_manifest_info and streams:
@@ -778,6 +781,11 @@ class DASH_Downloader(BaseDownloader):
                     if getattr(stream, "type", "") != "audio"
                     or bool(getattr(stream, "drm", None) and stream.drm.is_encrypted())
                 ]
+
+            if self.display_selected_only:
+                selected = [stream for stream in display_streams if getattr(stream, "selected", False)]
+                if selected:
+                    display_streams = selected
 
             console.print(build_table(display_streams))
             if _dv_companion_stream is not None and _was_selected is not None:

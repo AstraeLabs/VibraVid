@@ -19,6 +19,7 @@ from VibraVid.cli.command.global_search import global_search as call_global_sear
 from VibraVid.cli.command.limits import add_limit_arguments, apply_limits
 from VibraVid.cli.command.queue import add_queue_arguments, handle_queue_dispatch
 from VibraVid.core.downloader.base import get_written_track_files
+from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import load_search_functions
 from VibraVid.services._base.site_extra_args import resolve_persisted_site_options
@@ -189,6 +190,12 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--livemux", dest="force_livemux", action="store_true", help="Force-enable the streaming-mux fast path for this run even if the current service does not opt in via _live_mux = True. Off by default")
     dl_opts.add_argument("--no-concurrent", dest="no_concurrent", action="store_true", help="Download video, audio and subtitles sequentially instead of simultaneously for this run. Concurrent download is on by default")
     dl_opts.add_argument("--log-decryptor-output", dest="log_decryptor_output", action="store_const", const=True, default=None, help="Write flux's own stdout+stderr lines to the log file as they run, tagged with the engine name (e.g. [FLUX]) instead of [INFO]")
+    dl_opts.add_argument("--sidecars", dest="write_sidecars", action="store_const", const=True, default=None, help="Write a Kodi/Jellyfin/Emby <name>.nfo plus a poster (films) or thumb (episodes) next to each downloaded file, only for a reliable metadata match (overrides DOWNLOAD.write_sidecars)")
+    dl_opts.add_argument("--no-sidecars", dest="write_sidecars", action="store_const", const=False, help="Do not write .nfo/image sidecar files for this run")
+    dl_opts.add_argument("--metadata-provider", dest="metadata_provider", type=str, metavar="PROVIDERS", help="Metadata source(s) for the sidecars, tried in order: tmdb, imdb, tvdb (e.g. tmdb,imdb or tvdb). IMDb needs no key; TVDB needs TVDB_API_KEY")
+    dl_opts.add_argument("--plain-progress", dest="progress_mode", action="store_const", const="lines", help="Print one plain line per track every few seconds instead of live bars redrawn in place (readable in logs, pipes and terminals that garble the bars)")
+    dl_opts.add_argument("--no-progress", dest="progress_mode", action="store_const", const="none", help="Print no download progress at all (bars or lines)")
+    dl_opts.add_argument("--progress-interval", dest="progress_interval", type=float, metavar="SECONDS", help="Seconds between lines with --plain-progress (default 5)")
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
 
@@ -283,6 +290,8 @@ def apply_config_updates(args):
         "subtitle": "DOWNLOAD.select_subtitle",
         "use_proxy": "REQUESTS.use_proxy",
         "use_curl_cffi": "DOWNLOAD.use_curl_cffi_segments",
+        "write_sidecars": "DOWNLOAD.write_sidecars",
+        "metadata_provider": "DEFAULT.metadata_provider",
         "proxy_scope": "REQUESTS.proxy_scope",
         "extension": "PROCESS.extension",
         "close_console": "DEFAULT.close_console",
@@ -637,6 +646,7 @@ def main():
         apply_limits(args)
         context_tracker.bypass_vault_cache = getattr(args, "bypass_vault_cache", None)
         context_tracker.http_version = getattr(args, "http_version", None)
+        DownloadBarManager.configure(getattr(args, "progress_mode", None), getattr(args, "progress_interval", None))
         context_tracker.skip_decrypt = bool(getattr(args, "skip_decrypt", False))
         context_tracker.no_livemux = bool(getattr(args, "no_livemux", False))
         context_tracker.force_livemux = bool(getattr(args, "force_livemux", False))

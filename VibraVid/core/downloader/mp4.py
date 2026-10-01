@@ -19,6 +19,7 @@ from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.utils.codec import format_bitrate, format_disposition_flags
+from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.utils import config_manager, internet_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.http_client import create_client, get_userAgent
@@ -109,6 +110,7 @@ class MP4FileDownloader:
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
+        self._sidecar_target = Sidecars.snapshot()
 
         # Merge explicit args with context-level defaults
         self.download_id = download_id or context_tracker.download_id or str(uuid.uuid4())
@@ -695,6 +697,9 @@ class MP4FileDownloader:
 
         # Resolve media tokens (quality/codec/language) by probing the finished file.
         self._resolve_media_tokens()
+
+        # Kodi/Jellyfin .nfo + image next to the final file (opt-in, trusted TMDB match only).
+        Sidecars.write_for(self.path, self._sidecar_target)
 
         # Vault upload - must run before complete_download()
         upload_after(self.path)

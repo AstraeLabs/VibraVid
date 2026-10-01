@@ -13,7 +13,7 @@ from .client import CrunchyrollClient
 from .downloader import download_film, download_series
 from .scrapper import GetSerieInfo
 
-indice = 6
+indice = 5
 _useFor = "Anime"
 msg = Prompt()
 console = Console()

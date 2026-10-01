@@ -1,4 +1,5 @@
-# 22.12.25
+# 22.08.26
+# By @sync-luca98
 
 import logging
 import threading
@@ -36,7 +37,7 @@ def _edit_id(video: dict, client, *, allow_video_id: bool = True) -> str | None:
                 if candidate.get("id"):
                     return candidate["id"]
         except Exception:
-            logger.debug("Could not resolve active edit for Max video %s", video_id, exc_info=True)
+            logger.debug(f"Could not resolve active edit for Max video {video_id}", exc_info=True)
 
     return video_id if allow_video_id else None
 

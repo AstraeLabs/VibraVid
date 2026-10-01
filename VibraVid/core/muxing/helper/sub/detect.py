@@ -165,7 +165,7 @@ def fix_subtitle_extension(subtitle_path: str) -> str:
         if os.path.exists(new_path):
             os.remove(new_path)
         os.rename(subtitle_path, new_path)
-        console.print(f"[yellow]    - [cyan]Detected [red]{current_ext} [cyan]but it is [red]{detected_format}[cyan], renamed: [green]{os.path.basename(new_path)}")
+        logger.info(f"Renamed subtitle file from {subtitle_path} to {new_path}")
         return_path = new_path
 
     except Exception as e:

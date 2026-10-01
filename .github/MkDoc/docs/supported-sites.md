@@ -12,7 +12,6 @@ GUI site pickers. Select a service by name or by index:
 | --- | --- | --- | --- | --- | --- | --- |
 | `streamingcommunity` | 0 | Movies & Series | Global | HLS | - | 
 | `animeunity` | 1 | Anime | Global | HLS | - | - |
-| `altadefinizione` | 2 | Movies & Series | Global | HLS | - | - |
 | `mediasetinfinity` | 3 | Movies & Series | IT, ES | DASH | Widevine |
 | `raiplay` | 4 | Movies & Series | IT | DASH / HLS | Widevine | - |
 | `animeworld` | 5 | Anime | Global | - | - | - |
@@ -25,8 +24,6 @@ GUI site pickers. Select a service by name or by index:
 | `nove` | 12 | Series | IT | HLS | - | - |
 | `foodnetwork` | 13 | Series | IT | HLS | - | - |
 | `homegardentv` | 14 | Series | IT | HLS | - | - |
-| `cinezo` | 15 | Movies & Series | Global | HLS | - | - |
-| `eurostreaming` | 16 | Series | Global | HLS | - | - |
 | `plutotv` | 17 | Series | IT | DASH / HLS | PlayReady |
 | `monochrome` | 18 | Music | Global | - | - | - |
 

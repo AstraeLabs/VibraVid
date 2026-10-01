@@ -9,7 +9,7 @@ from rich.prompt import Prompt
 
 from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.services._base import Entries, EntriesManager, tmdb_artwork
+from VibraVid.services._base import Entries, EntriesManager, metadata, tmdb_artwork
 from VibraVid.services._base.site_costant import site_constants
 from VibraVid.utils import TVShowManager
 
@@ -33,6 +33,20 @@ column_to_hide = [
     "Duration",
     "Tmdb_id"
 ]
+
+
+def _set_sidecar_target(media_type: str, select_title) -> None:
+    """Record on the context which provider match the downloaders may write .nfo/thumb sidecars from (nothing unless enabled and reliable)."""
+    context_tracker.sidecar_provider = None
+    context_tracker.sidecar_id = None
+    context_tracker.sidecar_media_type = media_type
+    context_tracker.sidecar_verify = False
+    if not tmdb_artwork.sidecars_enabled():
+        return
+
+    target = metadata.find_sidecar_target(media_type, select_title)
+    if target:
+        context_tracker.sidecar_provider, context_tracker.sidecar_id, context_tracker.sidecar_verify = target
 
 
 def _apply_year_filter(media_search_manager: EntriesManager, year_filter: str) -> int:
@@ -272,6 +286,7 @@ def base_process_search_result(
             slug=getattr(select_title, "slug", None),
             year=getattr(select_title, "year", None),
         )
+        _set_sidecar_target("tv", select_title)
 
         result = download_series_func(select_title, season_selection, episode_selection, scrape_serie)
         _handle_download_result(result)
@@ -297,6 +312,7 @@ def base_process_search_result(
             slug=getattr(select_title, "slug", None),
             year=getattr(select_title, "year", None),
         )
+        _set_sidecar_target("movie", select_title)
 
         logger.info(f"Initiating download for film: {select_title}")
         film_result = download_film_func(select_title)

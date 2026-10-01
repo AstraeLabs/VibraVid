@@ -62,6 +62,8 @@ class HLS_Downloader(BaseDownloader):
         hls_key: bytes | None = None,
         hls_iv: bytes | None = None,
         has_drm: bool = False,
+        custom_filters: dict | None = None,
+        display_selected_only: bool = False,
     ):
         """
         Parameters:
@@ -108,6 +110,8 @@ class HLS_Downloader(BaseDownloader):
         )
         self.max_time = _parse_max_time(max_time if max_time is not None else context_tracker.max_time)
         self.other_tracks = other_tracks or []
+        self.custom_filters = custom_filters or None
+        self.display_selected_only = display_selected_only
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
@@ -152,7 +156,7 @@ class HLS_Downloader(BaseDownloader):
         kid_labels: dict[str, list] = {}
 
         for s in streams:
-            if not getattr(s, "selected", False):
+            if not (getattr(s, "selected", False) or getattr(s, "dv_companion", False)):
                 continue
 
             drm = getattr(s, "drm", None)
@@ -411,6 +415,8 @@ class HLS_Downloader(BaseDownloader):
             has_drm=self.has_drm,
         )
         self.media_downloader.other_tracks = self.other_tracks
+        self.media_downloader.custom_filters = self.custom_filters
+        self.media_downloader.display_selected_only = self.display_selected_only
         self.media_downloader.hls_enc_override = self.hls_enc_override
         other_videos, other_audios, other_subtitles = split_other_tracks(self.other_tracks)
 

@@ -70,7 +70,6 @@ def _run_flux_dump(file_path: str) -> dict | None:
         return None
 
     try:
-        logger.info(f"Running flux cmd: {flux_path} -d -j {file_path}")
         result = subprocess.run(
             [flux_path, "-d", "-j", file_path],
             capture_output=True,

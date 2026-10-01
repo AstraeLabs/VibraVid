@@ -49,7 +49,7 @@ def test_provider_false_result_is_terminal_failure(monkeypatch):
     )
 
     future = _shared._run_download_in_thread(
-        "altadefinizione",
+        "streamingcommunity",
         {
             "name": "Cime tempestose",
             "type": "film",
@@ -60,11 +60,11 @@ def test_provider_false_result_is_terminal_failure(monkeypatch):
     try:
         future.result()
     except RuntimeError as exc:
-        assert str(exc) == "altadefinizione reported that the download did not complete successfully"
+        assert str(exc) == "streamingcommunity reported that the download did not complete successfully"
     else:
         raise AssertionError("provider False result must fail the GUI download task")
 
     assert len(failures) == 1
-    assert failures[0]["site"] == "altadefinizione"
+    assert failures[0]["site"] == "streamingcommunity"
     assert failures[0]["title"] == "Cime tempestose"
-    assert failures[0]["error"] == "altadefinizione reported that the download did not complete successfully"
+    assert failures[0]["error"] == "streamingcommunity reported that the download did not complete successfully"

@@ -118,7 +118,7 @@ async def search_flow_defects(app, pilot):
     assert isinstance(app.screen, SearchScreen)
     found = list(layout_defects(app))
 
-    app.screen._apply_results(fake_results(), {"altadefinizione": "timeout"}, None)
+    app.screen._apply_results(fake_results(), {"raiplay": "timeout"}, None)
     await pilot.pause()
     found += layout_defects(app)
 

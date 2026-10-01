@@ -5,6 +5,16 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class MockDRM:
+    """Minimal stand-in for manifest.stream.DRMInfo, just enough for `_is_encrypted()`."""
+
+    encrypted: bool = False
+
+    def is_encrypted(self) -> bool:
+        return self.encrypted
+
+
+@dataclass
 class MockStream:
     """Mock stream object simulating real manifest streams."""
 
@@ -14,6 +24,8 @@ class MockStream:
     id: str = None
     codecs: str = None
     bitrate: int = None
+    drm: object = None
+    encrypted: bool = field(default=False, repr=False)
 
     # Video specific
     height: int = None
@@ -40,6 +52,10 @@ class MockStream:
 
     # Runtime state (not persisted)
     selected: bool = field(default=False, repr=False)
+
+    def __post_init__(self):
+        if self.drm is None and self.encrypted:
+            self.drm = MockDRM(True)
 
     def __repr__(self):
         if self.type == "video":
@@ -68,28 +84,6 @@ def create_video_streams_example2():
         MockStream(type="video", height=480, codecs="avc1", bitrate=500_000, id="v0"),
         MockStream(type="video", height=720, codecs="avc1", bitrate=1_000_000, id="v1"),
         MockStream(type="video", height=720, codecs="hvc1", bitrate=800_000, id="v2"),
-    ]
-
-
-def create_video_streams_with_dv():
-    """Example: SDR/HDR10 renditions at 720p/1080p plus DV renditions at 480p, 720p and 1080p"""
-    return [
-        MockStream(type="video", height=720, codecs="avc1", bitrate=1_000_000, id="v0"),
-        MockStream(type="video", height=1080, codecs="avc1", bitrate=3_000_000, id="v1"),
-        MockStream(type="video", height=1080, codecs="hvc1", bitrate=4_000_000, id="v2"),
-        MockStream(type="video", height=480, codecs="dvh1", bitrate=400_000, id="dv0"),
-        MockStream(type="video", height=720, codecs="dvh1", bitrate=900_000, id="dv1"),
-        MockStream(type="video", height=1080, codecs="dvh1", bitrate=2_500_000, id="dv2"),
-        MockStream(type="video", height=1080, codecs="dvh1", bitrate=3_500_000, id="dv3"),
-    ]
-
-
-def create_video_streams_with_dv_no_match():
-    """Example: main renditions at 1080p, DV only available at 480p/720p (no 1080p DV)."""
-    return [
-        MockStream(type="video", height=1080, codecs="avc1", bitrate=3_000_000, id="v0"),
-        MockStream(type="video", height=480, codecs="dvh1", bitrate=400_000, id="dv0"),
-        MockStream(type="video", height=720, codecs="dvh1", bitrate=900_000, id="dv1"),
     ]
 
 

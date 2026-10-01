@@ -25,6 +25,7 @@ from VibraVid.core.muxing.helper.audio import audio_ext_for_codec
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.muxing.helper.video.hybrid import download_other_tracks
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
@@ -136,6 +137,7 @@ class BaseDownloader:
 
         self.download_id = context_tracker.download_id or str(uuid.uuid4())
         self.site_name = context_tracker.site_name
+        self._sidecar_target = Sidecars.snapshot()
 
         self._error = None
         self.last_merge_result = None
@@ -875,6 +877,8 @@ class BaseDownloader:
         self._move_copied_subtitles()
         self._move_copied_audios()
         verified_ok = self._verify_output()
+        if verified_ok:
+            Sidecars.write_for(self.output_path, getattr(self, "_sidecar_target", None))
 
         if self.output_path and os.path.exists(self.output_path):
             title, media_type, site, _ = self._resolve_track_info()
