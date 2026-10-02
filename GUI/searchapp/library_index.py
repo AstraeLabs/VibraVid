@@ -72,11 +72,43 @@ def _video_files(directory: Path):
                 yield path
 
 
+# (path, size, mtime_ns) -> confirmed resolution label. A file is re-probed only
+# when it changes, so periodic watchlist scans don't spawn ffprobe per episode.
+_probe_cache: dict[tuple, str] = {}
+
+
+def _probed_quality(path: Path, before: os.stat_result) -> str:
+    """Resolution label of a fully written video, or '' when it can't be confirmed."""
+    from VibraVid.core.utils.resolution import classify_resolution
+    from VibraVid.setup.system import get_ffprobe_path
+
+    signature = (str(path), before.st_size, before.st_mtime_ns)
+    if signature in _probe_cache:
+        return _probe_cache[signature]
+    try:
+        result = subprocess.run(
+            [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height:format=duration", "-of", "json", str(path)],
+            capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
+        )
+        if result.returncode:
+            return ""
+        info = json.loads(result.stdout)
+        video = next(iter(info.get("streams", [])), {})
+        actual = classify_resolution(video.get("width", 0), video.get("height", 0))
+        after = path.stat()
+        if (actual and float(info.get("format", {}).get("duration") or 0) > 0
+                and (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns)):
+            _probe_cache[signature] = actual
+            return actual
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        logger.debug("Cannot confirm completed video %s", path, exc_info=True)
+    return ""
+
+
 def completed_episodes(series_name: str, quality: str = "") -> frozenset:
     """Inspect final local videos only; never contact a provider."""
     from VibraVid.core.ui.tracker import download_tracker
-    from VibraVid.core.utils.resolution import classify_resolution
-    from VibraVid.setup.system import get_ffprobe_path
 
     directory = _series_dir(series_name)
     if directory is None:
@@ -94,24 +126,11 @@ def completed_episodes(series_name: str, quality: str = "") -> frozenset:
                for p in path.parent.iterdir()):
             continue
         try:
-            before = path.stat()
-            result = subprocess.run(
-                [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
-                 "-show_entries", "stream=width,height:format=duration", "-of", "json", str(path)],
-                capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
-            )
-            if result.returncode:
-                continue
-            info = json.loads(result.stdout)
-            video = next(iter(info.get("streams", [])), {})
-            actual = classify_resolution(video.get("width", 0), video.get("height", 0))
-            after = path.stat()
-            if (actual and float(info.get("format", {}).get("duration") or 0) > 0
-                    and (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns)
-                    and (not quality or actual == quality)):
-                completed.add(parsed[:2])
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            logger.debug("Cannot confirm completed video %s", path, exc_info=True)
+            actual = _probed_quality(path, path.stat())
+        except OSError:
+            continue
+        if actual and (not quality or actual == quality):
+            completed.add(parsed[:2])
     return frozenset(completed)
 
 

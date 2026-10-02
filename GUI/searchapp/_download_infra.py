@@ -33,7 +33,6 @@ __all__ = [
     "_same_series",
     "_get_scheduled_downloads",
     "_enrich_active_downloads_with_series",
-    "_prune_scheduled_downloads",
     "shutdown_downloads",
     "_submit_download_task",
     "signal_handler",
@@ -222,15 +221,6 @@ def _enrich_active_downloads_with_series(active_downloads: list[dict[str, Any]])
         enriched.append(row)
 
     return enriched
-
-
-def _prune_scheduled_downloads(_active_downloads: list[dict[str, Any]], history: list[dict[str, Any]]) -> None:
-    """Jobs are removed by their worker, never by age or episode history.
-
-    A queued season can legitimately wait more than six hours, and all its
-    episodes share the job ID. Neither condition means the job has finished.
-    """
-    return
 
 
 def shutdown_downloads():

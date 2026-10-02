@@ -156,6 +156,11 @@ class BaseStreamingAPI(ABC):
         """Return only provider-confirmed resolutions for this exact video."""
         raise NotImplementedError("This provider does not expose video quality discovery yet")
 
+    @property
+    def supports_quality_discovery(self) -> bool:
+        """True when the provider overrides get_available_qualities (can honor a chosen quality)."""
+        return type(self).get_available_qualities is not BaseStreamingAPI.get_available_qualities
+
     @abstractmethod
     def start_download(self, media_item: Entries, season: str | None = None, episodes: str | None = None) -> bool:
         """

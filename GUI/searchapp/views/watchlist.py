@@ -9,10 +9,19 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.views.decorators.http import require_http_methods
 
+from ..api import get_api
 from ..models import WatchlistItem
 from ._shared import _to_bool, _update_single_item
 
 logger = logging.getLogger(__name__)
+
+
+def _usable_quality(request: HttpRequest, source_alias: str, quality: str) -> str:
+    """Drop a quality the provider can't discover or honor, telling the user why."""
+    if quality and not get_api(source_alias).supports_quality_discovery:
+        messages.warning(request, f"{source_alias} can't pick a video quality yet: the configured quality will be used.")
+        return ""
+    return quality
 
 
 @require_http_methods(["POST"])
@@ -59,7 +68,7 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
         tmdb_id = item_payload.get("tmdb_id")
         is_movie = _to_bool(item_payload.get("is_movie")) or str(item_payload.get("type", "")).lower() in {"film", "movie", "ova"}
         from VibraVid.core.utils.quality import normalize_quality
-        quality = normalize_quality(request.POST.get("quality"))
+        quality = _usable_quality(request, source_alias, normalize_quality(request.POST.get("quality")))
         scope = request.POST.get("auto_season", "all")
         auto_season = 1
         if not is_movie and scope != "all":
@@ -141,7 +150,7 @@ def update_watchlist_auto(request: HttpRequest, item_id: int) -> HttpResponse:
 
     from VibraVid.core.utils.quality import normalize_quality
     try:
-        quality = normalize_quality(request.POST.get("quality"))
+        quality = _usable_quality(request, item.source_alias, normalize_quality(request.POST.get("quality")))
         scope = request.POST.get("auto_season", "")
         auto_enabled = request.POST.get("auto_enabled") == "on"
         all_seasons = scope == "all" and not item.is_movie

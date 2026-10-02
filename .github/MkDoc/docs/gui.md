@@ -69,9 +69,14 @@ directly.
 - **Run now** (`watchlist/auto-run/`) triggers an immediate check instead of waiting for the
   next cycle.
 - **Polling interval** (`watchlist/auto-interval/`) — how often the auto-loop checks for new
-  episodes. Default is **4 hours** (14400 s); selectable values are 5 min, 15 min, 30 min,
-  1 h, 6 h, 12 h, and 24 h. The interval can also be set with the
-  `WATCHLIST_AUTO_INTERVAL_SECONDS` environment variable.
+  episodes. Default is **4 hours** (14400 s); selectable values are 15 min, 30 min, 1 h, 2 h,
+  4 h, 6 h, 12 h, and 24 h (the minimum is 15 min). A value chosen in the GUI is saved as
+  `DEFAULT.watchlist_interval_seconds` in `Conf/config.json` and takes precedence over the
+  `WATCHLIST_AUTO_INTERVAL_SECONDS` environment variable, which only sets the initial default.
+- **Preferred quality** (up to 1080p) per item: the watchlist waits until the provider
+  confirms that resolution for each episode, and only treats an episode as done when a local
+  file of that quality exists. Quality discovery is currently available for StreamingCommunity
+  only; other providers use the configured quality.
 
 ![Watchlist](assets/gui/watchlist.png)
 

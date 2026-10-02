@@ -25,8 +25,10 @@ WATCHLIST_INTERVALS = (15, 30, 60, 120, 240, 360, 720, 1440)
 
 def _get_interval_seconds() -> int:
     from VibraVid.utils import config_manager
-    raw = os.environ.get("WATCHLIST_AUTO_INTERVAL_SECONDS") or config_manager.config.get(
-        "DEFAULT", "watchlist_interval_seconds", default=DEFAULT_INTERVAL_SECONDS)
+    # Saved from the GUI > WATCHLIST_AUTO_INTERVAL_SECONDS (e.g. docker-compose) > default,
+    # so a choice made in the GUI survives a restart even when the env var is set.
+    raw = (config_manager.config.get("DEFAULT", "watchlist_interval_seconds", default=None)
+           or os.environ.get("WATCHLIST_AUTO_INTERVAL_SECONDS"))
     try:
         value = int(raw)
         if value > 0:
@@ -40,7 +42,6 @@ def set_interval_seconds(value: int) -> None:
     from VibraVid.utils import config_manager
     config_manager.config.set_key("DEFAULT", "watchlist_interval_seconds", value)
     config_manager.save_config()
-    os.environ["WATCHLIST_AUTO_INTERVAL_SECONDS"] = str(value)
     _interval_changed.set()
 
 
@@ -132,11 +133,15 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
             seasons = api.get_series_metadata(media) or []
             videos = [(s.number, ep.number) for s in seasons
                       if item.auto_all_seasons or s.number == item.auto_season for ep in s.episodes]
-            WatchlistItem.objects.filter(pk=item.pk).update(
-                num_seasons=len(seasons), last_season_episodes=seasons[-1].episode_count if seasons else 0,
-                has_new_seasons=len(seasons) > item.num_seasons,
-                has_new_episodes=bool(seasons and seasons[-1].episode_count > item.last_season_episodes),
-            )
+            fields = {"num_seasons": len(seasons),
+                      "last_season_episodes": seasons[-1].episode_count if seasons else 0}
+            # Same rule as _update_single_item: flags are only raised here and stay set
+            # until the user clears them; the first fill (0 seasons) is not "new".
+            if item.num_seasons and len(seasons) > item.num_seasons:
+                fields["has_new_seasons"] = True
+            if item.num_seasons and seasons and seasons[-1].episode_count > item.last_season_episodes:
+                fields["has_new_episodes"] = True
+            WatchlistItem.objects.filter(pk=item.pk).update(**fields)
         videos = list(dict.fromkeys(videos))
         now = timezone.now()
         WatchlistItem.objects.filter(pk=item.pk).update(auto_last_checked_at=now, last_checked_at=now)

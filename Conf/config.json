@@ -10,8 +10,7 @@
         "imp_service": ["default"],
         "installation": "",
         "metadata_provider": "tmdb,imdb",
-        "get_me": false,
-        "watchlist_interval_seconds": 1800
+        "get_me": false
     },
     "OUTPUT": {
         "root_path": "Video",

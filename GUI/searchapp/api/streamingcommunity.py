@@ -149,9 +149,14 @@ class StreamingCommunityAPI(BaseStreamingAPI):
         base = f"{self.base_url.rstrip('/')}/{language}"
         video_id = media_item.id
         if not media_item.is_movie:
-            scraper = GetSerieInfo(base, media_item.id, media_item.slug, media_item.year,
-                                   language, series_display_name=media_item.name,
-                                   languages=_effective_languages())
+            # Reuse the metadata scraper: season/episode lists are cached on it, so a
+            # whole-season quality check scrapes the title once, not once per episode.
+            scraper = self.get_cached_scraper(media_item)
+            if not scraper:
+                scraper = GetSerieInfo(base, media_item.id, media_item.slug, media_item.year,
+                                       language, series_display_name=media_item.name,
+                                       languages=_effective_languages())
+                self.set_cached_scraper(media_item, scraper)
             scraper.getNumberSeason()
             episodes = scraper.getEpisodeSeasons(int(season)) or []
             selected = next((ep for index, ep in enumerate(episodes, 1)

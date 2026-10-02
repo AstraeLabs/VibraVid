@@ -14,7 +14,6 @@ from .._download_infra import (
     _enrich_active_downloads_with_series,
     _extract_series_base_title,
     _get_scheduled_downloads,
-    _prune_scheduled_downloads,
     _remove_queued_download,
     _same_series,
     cancelled_scheduled_downloads,
@@ -30,7 +29,6 @@ def get_downloads_json(request: HttpRequest) -> JsonResponse:
     """API endpoint to get real-time download progress."""
     active_downloads = _enrich_active_downloads_with_series(download_tracker.get_active_downloads())
     history = download_tracker.get_history()
-    _prune_scheduled_downloads(active_downloads, history)
     active_ids = {d.get("id") for d in active_downloads if d.get("id")}
     scheduled = _get_scheduled_downloads(exclude_ids=active_ids)
 
@@ -53,7 +51,6 @@ def get_downloads_summary(request: HttpRequest) -> JsonResponse:
     (counts + current item), meant for external dashboards (e.g. Homepage)."""
     active_downloads = _enrich_active_downloads_with_series(download_tracker.get_active_downloads())
     history = download_tracker.get_history()
-    _prune_scheduled_downloads(active_downloads, history)
     active_ids = {d.get("id") for d in active_downloads if d.get("id")}
     scheduled = _get_scheduled_downloads(exclude_ids=active_ids)
 
