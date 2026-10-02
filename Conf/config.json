@@ -9,8 +9,7 @@
         "disable_scraper_cache": false,
         "imp_service": ["default"],
         "installation": "",
-        "metadata_provider": "tmdb,imdb",
-        "get_me": false
+        "metadata_provider": "tmdb,imdb"
     },
     "OUTPUT": {
         "root_path": "Video",
@@ -99,7 +98,7 @@
         "enabled": false,
         "download_italian_anime_default": true,
         "anime_id_crosswalk_enabled": true,
-        "provider_fallback": ["streamingcommunity","animeunity","guardaserie","discoveryplus","discovery","dmax","nove","realtime","mediasetinfinity","raiplay","homegardentv","foodnetwork","animeworld","crunchyroll","primevideo","tubitv","mostraguarda"],
+        "provider_fallback": ["streamingcommunity","animeunity","discoveryplus","discovery","dmax","nove","realtime","mediasetinfinity","raiplay","homegardentv","foodnetwork","animeworld","crunchyroll","primevideo","tubitv"],
         "path_mapping": {},
         "enable_polling": false,
         "enable_seerr_webhook": false,

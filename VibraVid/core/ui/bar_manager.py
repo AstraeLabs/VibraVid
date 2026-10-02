@@ -122,7 +122,12 @@ class DownloadBarManager:
         return label if label.startswith("[") else f"[cyan]{label}"
 
     def add_prebuilt_tasks(self, prebuilt_tasks):
-        """Pre-crates tasks to maintain order."""
+        """Pre-create selected tracks in both CLI and GUI before progress arrives."""
+        if not self.progress:
+            for task_key, task_label in prebuilt_tasks:
+                if task_key not in self.tasks:
+                    self.handle_progress_line({"task_key": task_key, "label": task_label, "pct": 0})
+            return
         if self.progress:
             for task_key, task_label in prebuilt_tasks:
                 if task_key not in self.tasks:

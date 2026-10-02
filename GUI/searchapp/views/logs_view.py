@@ -66,4 +66,40 @@ def logs_content(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"name": name, "lines": content_lines[-lines:]})
 
 
-__all__ = ["logs_list", "logs_content"]
+@require_http_methods(["POST"])
+def logs_clear(request: HttpRequest) -> JsonResponse:
+    """Clear only log files in the requested category, preserving active writers."""
+    directory = _log_dirs().get(request.POST.get("category", ""))
+    if directory is None:
+        return JsonResponse({"error": "Invalid category"}, status=400)
+    active = set()
+    for log in [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]:
+        if isinstance(log, logging.Logger):
+            for handler in log.handlers:
+                if isinstance(handler, logging.FileHandler):
+                    active.add(Path(handler.baseFilename).resolve())
+    cleared = 0
+    failed = []
+    for path in directory.glob("*.log"):
+        if path.is_symlink() or not path.is_file() or path.resolve().parent != directory.resolve():
+            continue
+        try:
+            if path.resolve() in active:
+                with path.open("wb"):
+                    pass
+            else:
+                try:
+                    path.unlink()
+                except PermissionError:
+                    # Windows may keep a log open in another worker process.
+                    with path.open("wb"):
+                        pass
+            cleared += 1
+        except FileNotFoundError:
+            continue
+        except OSError:
+            failed.append(path.name)
+    return JsonResponse({"cleared": cleared, "failed": failed}, status=500 if failed else 200)
+
+
+__all__ = ["logs_list", "logs_content", "logs_clear"]

@@ -14,6 +14,10 @@ class WatchlistItem(models.Model):
     num_seasons = models.IntegerField(default=0)
     last_season_episodes = models.IntegerField(default=0)
 
+    preferred_quality = models.CharField(max_length=5, blank=True, default="")
+    auto_all_seasons = models.BooleanField(default=False)
+    auto_completed = models.JSONField(default=dict, blank=True)
+    auto_status = models.CharField(max_length=255, blank=True, default="")
     auto_enabled = models.BooleanField(default=False)
     auto_season = models.IntegerField(null=True, blank=True)
     auto_last_episode_count = models.IntegerField(default=0)

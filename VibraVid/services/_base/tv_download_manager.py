@@ -206,7 +206,7 @@ def process_episode_download(
                 context_tracker.series_tmdb_id, index_season_selected, i_episode
             )
 
-            if is_cached():
+            if not context_tracker.video_quality and is_cached():
                 console.print(f"[dim]Skipping episode {i_episode} of season {index_season_selected} — already in cache.")
                 continue
 
@@ -302,7 +302,7 @@ def process_episode_download(
                 context_tracker.series_tmdb_id, index_season_selected, i_episode
             )
 
-            if is_cached():
+            if not context_tracker.video_quality and is_cached():
                 console.print(f"[dim]Skipping episode {i_episode} of season {index_season_selected} — already in cache.")
                 continue
 

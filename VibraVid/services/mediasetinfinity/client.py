@@ -79,8 +79,6 @@ class MediasetAPI:
             self.adminBeToken = self.generate_betoken()
             self.account_id = _decode_jwt_payload(self.adminBeToken).get("oid")
 
-        # Passed as a value, not a resolver: this name is decoded from the token with no network
-        # call, so it must not be gated behind DEFAULT.get_me like the ones that cost a request.
         print_login(
             ANONYMOUS if self.is_anonymous else ACCOUNT,
             user="" if self.is_anonymous else self._account_name(),

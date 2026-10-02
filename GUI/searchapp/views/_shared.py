@@ -8,6 +8,8 @@ import os
 import shutil
 import threading
 import time
+import uuid
+from collections.abc import Callable
 from typing import Any
 
 from django.contrib import messages
@@ -223,8 +225,19 @@ def _log_gui_equivalent_command(site: str, item_payload: dict[str, Any], season:
         pass
 
 
-def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str = None, episodes: str = None, media_type: str = "Film", output_path: str = None, audio_format: str = None, poster: str = None) -> "concurrent.futures.Future":
-    """Run download in background thread. Returns a Future for callers that need to wait"""
+def _run_download_in_thread(
+    site: str, item_payload: dict[str, Any], season: str = None, episodes: str = None,
+    media_type: str = "Film", output_path: str = None, audio_format: str = None,
+    poster: str = None, _submit: bool = True, _metadata: list | None = None,
+    _batch_id: str | None = None, quality: str | None = None,
+) -> concurrent.futures.Future | Callable[[], bool]:
+    """Register a job, then submit it or return its worker for a sequential batch."""
+    from VibraVid.core.utils.quality import normalize_quality
+    quality = normalize_quality(quality) or None
+    if quality and not get_api(site).supports_quality_discovery:
+        logger.warning("%s cannot honor a chosen quality; ignoring %s", site, quality)
+        quality = None
+    
     name = item_payload.get('name', 'Unknown')
     if season and episodes:
         title = f"{name} - S{season} E{episodes}"
@@ -234,18 +247,54 @@ def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str
         title = name
 
     poster = poster or item_payload.get('poster')
-    download_id = f"{site}_{int(time.time())}_{hash(title) % 10000}"
-    _add_scheduled_download(download_id, title, site, media_type, season, episodes, poster=poster)
+    download_id = f"{site}_{uuid.uuid4().hex}"
+    planned_episodes = None
+    if season and str(season).isdigit() and episodes:
+        try:
+            metadata = _metadata
+            if metadata is None:
+                api = get_api(site)
+                media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
+                metadata = api.get_series_metadata(media_item) or []
+            selected = next((s for s in metadata if str(s.number) == str(season)), None)
+            count = selected.episode_count if selected else 0
+            if count:
+                planned = set()
+                for part in str(episodes).split(","):
+                    part = part.strip()
+                    if part == "*":
+                        planned.update(range(1, count + 1))
+                    elif "-" in part:
+                        first, last = part.split("-", 1)
+                        planned.update(range(int(first), int(last) + 1 if last.isdigit() else count + 1))
+                    else:
+                        planned.add(int(part))
+                planned_episodes = sorted(n for n in planned if 1 <= n <= count)
+        except Exception:
+            logger.warning("Could not expand queued episodes for %s", title, exc_info=True)
+    stop_scope = "download"
+    if str(media_type).lower() in {"serie", "tv", "series", "anime"}:
+        stop_scope = "episode" if str(episodes or "").strip().isdigit() else "season"
+    if _batch_id:
+        stop_scope = "seasons"
+    _add_scheduled_download(download_id, title, site, media_type, season, episodes,
+                            poster=poster, planned_episodes=planned_episodes,
+                            stop_scope=stop_scope, batch_id=_batch_id)
 
     def _task():
+        if _is_scheduled_cancelled(download_id):
+            _remove_scheduled_download(download_id)
+            download_tracker.clear_stop_request(download_id)
+            return False
         _acquire_download_slot()
         try:
             if _is_scheduled_cancelled(download_id):
                 logger.info("[_task] Download cancelled before start")
                 _remove_scheduled_download(download_id)
-                return
+                return False
 
             # Set context for downloaders in this thread
+            context_tracker.video_quality = quality
             context_tracker.download_id = download_id
             context_tracker.site_name = site
             context_tracker.media_type = media_type
@@ -287,6 +336,11 @@ def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str
                     episodes=episodes,
                 )
 
+            if _is_scheduled_cancelled(download_id):
+                # Keep the cancellation marker until the provider's episode loop exits.
+                download_tracker.complete_download(download_id, success=False, error="cancelled")
+                return False
+
             if provider_result is False:
                 raise RuntimeError(f"{site} reported that the download did not complete successfully")
 
@@ -298,24 +352,24 @@ def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str
                 error_msg = final_state.get("error") or final_state.get("status") or "download_failed"
                 raise RuntimeError(error_msg)
 
-            logger.info("[_task] Download completed successfully")
-            forget(name)
-
-            # Clear the scheduled placeholder and guarantee a terminal history entry
-            _remove_scheduled_download(download_id)
-            already_in_history = any(
-                item.get("id") == download_id
-                for item in download_tracker.get_history()
-            )
-            if download_id not in download_tracker.downloads and not already_in_history:
-                download_tracker.start_download(download_id, title, site, media_type)
-                download_tracker.complete_download(download_id, success=True)
+            # A provider returning without an error is not proof of a download.
+            # Local files are handled by the watchlist before scheduling a job.
+            completed = bool(final_state and final_state.get("status") == "completed")
+            if completed:
+                forget(name)
+                return True
+            return False
         except Exception as e:
             error_msg = str(e) or "Unknown error"
             logger.exception("[_task] Download task failed: %s", error_msg)
             _mark_task_failed(download_id, title, site, media_type, error_msg)
             raise
         finally:
+            _remove_scheduled_download(download_id)
+            download_tracker.clear_stop_request(download_id)
+            context_tracker.video_quality = None
+            context_tracker.download_id = None
+            context_tracker.poster_url = None
             context_tracker.output_path = None
             context_tracker.season = 0
             context_tracker.episode = 0
@@ -325,7 +379,7 @@ def _run_download_in_thread(site: str, item_payload: dict[str, Any], season: str
             context_tracker.site_options = None
             _release_download_slot()
 
-    return _submit_download_task(_task)
+    return _submit_download_task(_task) if _submit else _task
 
 
 def _handle_series_download(request: HttpRequest) -> HttpResponse:
@@ -335,6 +389,12 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
     download_type = request.POST.get("download_type")
     season_number = request.POST.get("season_number")
     selected_episodes = request.POST.get("selected_episodes", "")
+    from VibraVid.core.utils.quality import normalize_quality
+    try:
+        quality = normalize_quality(request.POST.get("quality")) or None
+    except ValueError:
+        messages.error(request, "Invalid quality selection.")
+        return redirect("search_home")
 
     if not all([source_alias, item_payload_raw]):
         messages.error(request, "Missing base parameters for the download.")
@@ -346,157 +406,56 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Error parsing the data.")
         return redirect("search_home")
 
-    name = item_payload.get("name")
     media_type = (item_payload.get("type") or "tv").lower()
 
-    # --- FULL SERIES DOWNLOAD (sequential, all seasons one after another) ---
-    if download_type == "full_series":
-        def _download_entire_series_task():
+    if download_type in {"full_series", "selected_seasons"}:
+        if download_type == "full_series":
             try:
                 api = get_api(source_alias)
-                entries_fields = {k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__}
-                media_item = Entries(**entries_fields)
-                seasons = api.get_series_metadata(media_item)
+                media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
+                metadata = api.get_series_metadata(media_item) or []
+                seasons = [str(s.number) for s in metadata]
+            except Exception:
+                logger.exception("Could not plan full series download")
+                messages.error(request, "Unable to load seasons for this series.")
+                return redirect("search_home")
+        else:
+            metadata = None
+            seasons = list(dict.fromkeys(s.strip() for s in request.POST.get("selected_seasons", "").split(",") if s.strip()))
+        if not seasons:
+            messages.error(request, "No season selected.")
+            return redirect("search_home")
+        if metadata is None:
+            try:
+                api = get_api(source_alias)
+                media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
+                metadata = api.get_series_metadata(media_item) or []
+            except Exception:
+                logger.warning("Could not expand selected seasons", exc_info=True)
+                metadata = []
+        # Register every season before submitting the sequential worker so jobs
+        # waiting for executor capacity are already visible and cancellable.
+        batch_id = uuid.uuid4().hex if len(seasons) > 1 else None
+        tasks = [_run_download_in_thread(source_alias, item_payload, season=s,
+                                        episodes="*", media_type=media_type, _submit=False, _metadata=metadata, _batch_id=batch_id, quality=quality)
+                 for s in seasons]
 
-                if not seasons:
-                    return
+        def _download_seasons():
+            for task in tasks:
+                try:
+                    task()
+                except Exception:
+                    logger.exception("Season download failed")
 
-                planned_seasons = []
-                for season in seasons:
-                    season_num = str(season.number)
-                    season_title = f"{name} - S{season_num}"
-                    planned_id = f"{source_alias}_{int(time.time())}_{hash(season_title + str(season_num)) % 10000}_{season_num}"
-                    planned_seasons.append((planned_id, season_num))
-                    _add_scheduled_download(
-                        planned_id,
-                        season_title,
-                        source_alias,
-                        media_type,
-                        season=season_num,
-                        episodes="*",
-                    )
-
-                for download_id, season_num in planned_seasons:
-                    if _is_scheduled_cancelled(download_id):
-                        _remove_scheduled_download(download_id)
-                        continue
-
-                    _acquire_download_slot()
-                    try:
-                        if _is_scheduled_cancelled(download_id):
-                            _remove_scheduled_download(download_id)
-                            continue
-
-                        context_tracker.download_id = download_id
-                        context_tracker.site_name = source_alias
-                        context_tracker.media_type = media_type
-                        context_tracker.fallback_poster_url = item_payload.get("poster")
-                        context_tracker.series_tmdb_id = _known_series_tmdb_id(item_payload.get("tmdb_id"))
-                        context_tracker.is_gui = True
-                        context_tracker.is_cancelled_callback = _is_scheduled_cancelled
-                        context_tracker.site_options = _resolve_persisted_site_options(source_alias)
-                        _log_gui_equivalent_command(source_alias, item_payload, season_num, "*")
-
-                        api.start_download(media_item, season=season_num, episodes="*")
-                    except Exception as e:
-                        error_msg = str(e) or "Unknown error"
-                        logger.exception("[_task] Download season %s: %s", season_num, e)
-                        _mark_task_failed(
-                            download_id, f"{name} - S{season_num}", source_alias, media_type, error_msg
-                        )
-                    finally:
-                        context_tracker.site_options = None
-                        _release_download_slot()
-
-            except Exception as e:
-                logger.exception("[_task] Full series download task: %s", e)
-
-        _submit_download_task(_download_entire_series_task)
-
+        _submit_download_task(_download_seasons)
         return redirect("download_dashboard")
 
-    # --- FULL SEASON DOWNLOAD ---
     elif download_type == "full_season":
         if not season_number:
             messages.error(request, "Missing season number.")
             return redirect("search_home")
-
-        _run_download_in_thread(
-            site=source_alias,
-            item_payload=item_payload,
-            season=season_number,
-            episodes="*",
-            media_type=media_type,
-        )
-
-        return redirect("download_dashboard")
-
-    # --- SELECTED SEASONS DOWNLOAD ---
-    elif download_type == "selected_seasons":
-        selected_seasons_raw = request.POST.get("selected_seasons", "")
-        if not selected_seasons_raw:
-            messages.error(request, "No season selected.")
-            return redirect("search_home")
-
-        selected_seasons = [s.strip() for s in selected_seasons_raw.split(",") if s.strip()]
-
-        def _download_selected_seasons_task():
-            try:
-                api = get_api(source_alias)
-                entries_fields = {k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__}
-                media_item = Entries(**entries_fields)
-
-                planned_seasons = []
-                for season_num in selected_seasons:
-                    season_title = f"{name} - S{season_num}"
-                    planned_id = f"{source_alias}_{int(time.time())}_{hash(season_title + str(season_num)) % 10000}_{season_num}"
-                    planned_seasons.append((planned_id, season_num))
-                    _add_scheduled_download(
-                        planned_id,
-                        season_title,
-                        source_alias,
-                        media_type,
-                        season=season_num,
-                        episodes="*",
-                    )
-
-                for download_id, season_num in planned_seasons:
-                    if _is_scheduled_cancelled(download_id):
-                        _remove_scheduled_download(download_id)
-                        continue
-
-                    _acquire_download_slot()
-                    try:
-                        if _is_scheduled_cancelled(download_id):
-                            _remove_scheduled_download(download_id)
-                            continue
-
-                        context_tracker.download_id = download_id
-                        context_tracker.site_name = source_alias
-                        context_tracker.media_type = media_type
-                        context_tracker.fallback_poster_url = item_payload.get("poster")
-                        context_tracker.series_tmdb_id = _known_series_tmdb_id(item_payload.get("tmdb_id"))
-                        context_tracker.is_gui = True
-                        context_tracker.is_cancelled_callback = _is_scheduled_cancelled
-                        context_tracker.site_options = _resolve_persisted_site_options(source_alias)
-                        _log_gui_equivalent_command(source_alias, item_payload, season_num, "*")
-
-                        api.start_download(media_item, season=season_num, episodes="*")
-                    except Exception as e:
-                        error_msg = str(e) or "Unknown error"
-                        logger.exception("[_task] Download season %s: %s", season_num, e)
-                        _mark_task_failed(
-                            download_id, f"{name} - S{season_num}", source_alias, media_type, error_msg
-                        )
-                    finally:
-                        context_tracker.site_options = None
-                        _release_download_slot()
-
-            except Exception as e:
-                logger.exception("[_task] Selected seasons download task: %s", e)
-
-        _submit_download_task(_download_selected_seasons_task)
-
+        _run_download_in_thread(source_alias, item_payload, season=season_number,
+                                episodes="*", media_type=media_type, quality=quality)
         return redirect("download_dashboard")
 
     else:
@@ -520,7 +479,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             item_payload=item_payload,
             season=season_number,
             episodes=episode_param,
-            media_type=media_type,
+            media_type=media_type, quality=quality,
         )
         logger.debug("Download thread started for S%s E%s", season_number, episode_param)
 
@@ -589,7 +548,8 @@ def _update_single_item(item: WatchlistItem) -> bool:
                 changed = True
 
         item.last_checked_at = timezone.now()
-        item.save()
+        item.save(update_fields=["num_seasons", "last_season_episodes", "has_new_seasons",
+                                 "has_new_episodes", "last_checked_at"])
         return changed
     except Exception as e:
         logger.exception("Error updating %s: %s", item.name, e)

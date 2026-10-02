@@ -9,6 +9,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import (
     Button,
@@ -302,27 +303,35 @@ class TitleDetailScreen(Screen):
         self.app.call_from_thread(self._apply_seasons, seasons or [])
 
     def _seasons_failed(self, message: str) -> None:
-        self.query_one("#seasons-loading", LoadingIndicator).display = False
-        self.query_one("#dsl-preview", Static).update(f"[red]{t('could_not_load_seasons', message=message)}[/red]")
+        # The worker can finish after the user left this screen, while its widgets are being removed.
+        try:
+            self.query_one("#seasons-loading", LoadingIndicator).display = False
+            self.query_one("#dsl-preview", Static).update(f"[red]{t('could_not_load_seasons', message=message)}[/red]")
+        except NoMatches:
+            logger.debug("Season loading failed after the detail screen was closed: %s", message)
 
     def _apply_seasons(self, seasons: list) -> None:
-        self.query_one("#seasons-loading", LoadingIndicator).display = False
-        self._seasons = list(seasons)
-        season_list = self.query_one("#seasons", ListView)
-        season_list.clear()
-        if not self._seasons:
-            self.query_one("#dsl-preview", Static).update(t("no_season_data"))
-            return
+        # The worker can finish after the user left this screen, while its widgets are being removed.
+        try:
+            self.query_one("#seasons-loading", LoadingIndicator).display = False
+            self._seasons = list(seasons)
+            season_list = self.query_one("#seasons", ListView)
+            season_list.clear()
+            if not self._seasons:
+                self.query_one("#dsl-preview", Static).update(t("no_season_data"))
+                return
 
-        for season in self._seasons:
-            count = len(getattr(season, "episodes", []) or [])
-            label = f"S{season.number}  ·  {count} ep"
-            item = ListItem(Static(label))
-            item.season_payload = season
-            season_list.append(item)
-        season_list.index = 0
-        self._show_season(self._seasons[0])
-        season_list.focus()
+            for season in self._seasons:
+                count = len(getattr(season, "episodes", []) or [])
+                label = f"S{season.number}  ·  {count} ep"
+                item = ListItem(Static(label))
+                item.season_payload = season
+                season_list.append(item)
+            season_list.index = 0
+            self._show_season(self._seasons[0])
+            season_list.focus()
+        except NoMatches:
+            logger.debug("Seasons loaded after the detail screen was closed")
 
     def _show_season(self, season) -> None:
         self._current_season = season.number

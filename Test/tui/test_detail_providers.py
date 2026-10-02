@@ -1,5 +1,6 @@
 import pytest
 from textual.app import App
+from VibraVid.tui import bridge
 from VibraVid.tui.screens.detail import TitleDetailScreen
 
 
@@ -29,7 +30,7 @@ def test_detail_screen_single_provider_fallback():
 
 
 @pytest.mark.anyio
-async def test_detail_screen_providers_ui():
+async def test_detail_screen_providers_ui(monkeypatch):
     item1 = MockItem("Test Series")
     item2 = MockItem("Test Series")
     providers = [("site1", item1), ("site2", item2)]
@@ -38,8 +39,14 @@ async def test_detail_screen_providers_ui():
         def compose(self):
             yield TitleDetailScreen(site="site1", item=item1, providers=providers)
 
+    # No real provider lookup: the season worker would otherwise call get_api("site1") and report its
+    # failure back at an arbitrary moment, possibly while the app is already shutting down.
+    monkeypatch.setattr(bridge, "get_seasons", lambda site, item: [])
+
     app = TestApp()
     async with app.run_test() as pilot:
         screen = app.screen
         providers_list = screen.query_one("#providers")
         assert len(providers_list.children) == 2
+        await app.workers.wait_for_complete()
+        await pilot.pause()

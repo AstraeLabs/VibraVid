@@ -11,6 +11,7 @@ urlpatterns = [
     path("search/", views.search, name="search"),
     path("api/resolve-tmdb-posters/", views.resolve_tmdb_posters, name="resolve_tmdb_posters"),
     path("download/", views.start_download, name="start_download"),
+    path("api/available-qualities/", views.available_qualities, name="available_qualities"),
     path("series-metadata/", views.series_metadata, name="series_metadata"),
     path("series-detail/", views.series_detail, name="series_detail"),
 
@@ -22,6 +23,7 @@ urlpatterns = [
     path("api/remove-queued-download/", views.remove_queued_download, name="remove_queued_download"),
     path("api/clear-queued-downloads/", views.clear_queued_downloads, name="clear_queued_downloads"),
     path("api/kill-and-clear-queue/", views.kill_and_clear_queue, name="kill_and_clear_queue"),
+    path("api/stop-all-downloads/", views.stop_all_downloads, name="stop_all_downloads"),
     path("api/clear-history/", views.clear_download_history, name="clear_download_history"),
 
     # Watchlist
@@ -48,6 +50,7 @@ urlpatterns = [
     path("logs/", views.cinema_logs, name="logs_page"),
     path("api/logs/list/", views.logs_list, name="logs_list"),
     path("api/logs/content/", views.logs_content, name="logs_content"),
+    path("api/logs/clear/", views.logs_clear, name="logs_clear"),
 
     # ARR Integration
     path("api/arr/webhook/seerr/", views.seerr_webhook, name="seerr_webhook"),

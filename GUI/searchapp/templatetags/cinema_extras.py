@@ -9,19 +9,20 @@ _PROVIDER_LABELS = {
     "annasarchive": "Anna's Archive",
     "appletv": "Apple TV",
     "discoveryplus": "Discovery+",
+    "disney": "Disney+",
     "dmax": "DMAX",
     "foodnetwork": "Food Network",
+    "hbomax": "HBO Max",
     "homegardentv": "Home & Garden TV",
+    "la7": "La7",
     "libgen": "Library Genesis",
     "mediasetinfinity": "Mediaset Infinity",
     "mostraguarda": "MostraGuarda",
-    "myanonamouse": "MyAnonaMouse",
     "primevideo": "Prime Video",
     "raiplay": "RaiPlay",
     "realtime": "Real Time",
     "streamingcommunity": "StreamingCommunity",
-    "tubitv": "Tubi TV",
-    "zlibrary": "Z-Library",
+    "tubitv": "Tubi TV"
 }
 
 

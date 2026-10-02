@@ -15,6 +15,9 @@ _TV_MATCH_SITES = {
     "crunchyroll",
     "appletv",
     "primevideo",
+    "disney",
+    "hbomax",
+    "paramountplus",
 }
 TRUSTED_TITLE_SIMILARITY = 0.92
 

@@ -14,7 +14,6 @@ from .._download_infra import (
     _enrich_active_downloads_with_series,
     _extract_series_base_title,
     _get_scheduled_downloads,
-    _prune_scheduled_downloads,
     _remove_queued_download,
     _same_series,
     cancelled_scheduled_downloads,
@@ -30,7 +29,6 @@ def get_downloads_json(request: HttpRequest) -> JsonResponse:
     """API endpoint to get real-time download progress."""
     active_downloads = _enrich_active_downloads_with_series(download_tracker.get_active_downloads())
     history = download_tracker.get_history()
-    _prune_scheduled_downloads(active_downloads, history)
     active_ids = {d.get("id") for d in active_downloads if d.get("id")}
     scheduled = _get_scheduled_downloads(exclude_ids=active_ids)
 
@@ -53,7 +51,6 @@ def get_downloads_summary(request: HttpRequest) -> JsonResponse:
     (counts + current item), meant for external dashboards (e.g. Homepage)."""
     active_downloads = _enrich_active_downloads_with_series(download_tracker.get_active_downloads())
     history = download_tracker.get_history()
-    _prune_scheduled_downloads(active_downloads, history)
     active_ids = {d.get("id") for d in active_downloads if d.get("id")}
     scheduled = _get_scheduled_downloads(exclude_ids=active_ids)
 
@@ -86,13 +83,38 @@ def kill_download(request: HttpRequest) -> JsonResponse:
             data = json.loads(request.body)
             download_id = data.get("download_id")
             if download_id:
-                download_tracker.request_stop(download_id)
+                with scheduled_downloads_lock:
+                    batch_id = scheduled_downloads.get(download_id, {}).get("batch_id")
+                    target_ids = {download_id}
+                    if batch_id:
+                        target_ids.update(
+                            job_id for job_id, info in scheduled_downloads.items()
+                            if info.get("batch_id") == batch_id
+                        )
+                    cancelled_scheduled_downloads.update(target_ids)
+                    for job_id in target_ids:
+                        scheduled_downloads.pop(job_id, None)
+                for job_id in target_ids:
+                    download_tracker.request_stop(job_id)
                 return JsonResponse({"status": "success"})
 
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
     return JsonResponse({"status": "error", "message": "Method not allowed", "status_code": 405}, status=405)
+
+
+def stop_all_downloads(request: HttpRequest) -> JsonResponse:
+    """Cancel queued jobs before stopping their active episode."""
+    if request.method != "POST":
+        return JsonResponse({"status": "error", "message": "Method not allowed"}, status=405)
+    with scheduled_downloads_lock:
+        cancelled_scheduled_downloads.update(scheduled_downloads)
+        scheduled_downloads.clear()
+    for item in download_tracker.get_active_downloads():
+        _cancel_scheduled_download(item["id"])
+        download_tracker.request_stop(item["id"])
+    return JsonResponse({"status": "success"})
 
 
 def remove_queued_download(request: HttpRequest) -> JsonResponse:
@@ -249,4 +271,5 @@ __all__ = [
     'clear_queued_downloads',
     'kill_and_clear_queue',
     'clear_download_history',
+    'stop_all_downloads',
 ]

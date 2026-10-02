@@ -131,8 +131,7 @@ own copy.
     "disable_scraper_cache": false,
     "imp_service": ["default"],
     "installation": "",
-    "metadata_provider": "tmdb,imdb",
-    "get_me": false
+    "metadata_provider": "tmdb,imdb"
   }
 }
 ```
@@ -149,7 +148,6 @@ own copy.
 | `imp_service` | `["default"]` | Service source paths to load site modules from. `"default"` loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have `__init__.py` defining `indice` and `_useFor`. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name. |
 | `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup. `""` (base): FFmpeg, Velora, flux. `"yt"`: base + yt-dlp, deno. `"full"`: base + dovi_tool, mkvtoolnix, yt-dlp, deno |
 | `metadata_provider` | `tmdb,imdb` | Provider(s) the sidecars are built from, tried in order: `tmdb`, `imdb` (free, no key), `tvdb` (needs `TVDB_API_KEY`). CLI: `--metadata-provider` |
-| `get_me` | `false` | Resolve and print the account name in the login banner (e.g. `Login - Type: Account / User: name`) for services that support it.
 
 **Custom `imp_service` example (local folder):**
 ```json

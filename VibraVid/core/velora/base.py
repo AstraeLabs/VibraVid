@@ -191,7 +191,7 @@ class BaseMediaDownloader:
 
         self.streams = [s for s in parser.parse_streams() if s.type != "image"]
 
-        if auto_select:
+        if auto_select or context_tracker.video_quality:
             self._apply_selection()
         else:
             selector = InteractiveStreamSelector(self.streams, window_size=15)
@@ -299,7 +299,8 @@ class BaseMediaDownloader:
 
     def _apply_selection(self) -> None:
         f = self.custom_filters or {}
-        v_cfg = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
+        requested_quality = context_tracker.video_quality
+        v_cfg = "best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
         a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
         s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
@@ -315,14 +316,25 @@ class BaseMediaDownloader:
             prefer_hdr10=_pref("prefer_hdr10"),
             prefer_drm=_pref("prefer_drm"),
             require_drm=_pref("require_drm"),
-            minimum_video_height=int(f.get("minimum_video_height") or config_manager.config.get("DOWNLOAD", "minimum_video_height", default=0) or 0),
+            minimum_video_height=0 if requested_quality else int(f.get("minimum_video_height") or config_manager.config.get("DOWNLOAD", "minimum_video_height", default=0) or 0),
             strict_no_match=context_tracker.skip_no_match,
             dv_auto=_pref("dv_auto", True, section="CODEC"),
             mux_dtsx=_pref("mux_dtsx", False, section="CODEC"),
             drop_clear_av=bool(f.get("drop_clear_av", False)),
             dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
         )
-        self._sv, self._sa, self._ss = selector.apply(self.streams)
+        selectable = self.streams
+        if requested_quality:
+            from VibraVid.core.utils.quality import stream_quality
+            for stream in self.streams:
+                if stream.type == "video":
+                    stream.selected = False
+            selectable = [s for s in self.streams if s.type != "video" or stream_quality(s) == requested_quality]
+            if not any(s.type == "video" for s in selectable):
+                raise ValueError(f"Requested quality {requested_quality} is not available for this video")
+        self._sv, self._sa, self._ss = selector.apply(selectable)
+        if requested_quality and not any(s.type == "video" and s.selected for s in selectable):
+            raise ValueError(f"No video track matches requested quality {requested_quality}")
         self.no_match_skip = selector.no_match
 
     def _effective_filter(self, track_type: str) -> str:
@@ -443,6 +455,9 @@ class BaseMediaDownloader:
             if v.bitrate:
                 parts.append(f"[blue]{v.bitrate_display}[/blue]")
 
+            if self.download_id:
+                quality = classify_resolution(v.width, v.height) if v.width and v.height else v.resolution
+                download_tracker.update_metadata(self.download_id, quality=quality)
             self._video_label = " ".join(parts)
             codec_key = re.sub(r"[^a-z0-9]+", "", codec.lower()) if codec else ""
             self._video_task_key = f"vid_{res}_{codec_key}" if codec_key else f"vid_{res}"

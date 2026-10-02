@@ -247,21 +247,8 @@ class CrunchyrollClient:
         self._set_expires_at(expires_in=expires_in)
         self._save_token_cache()
 
-        print_login(ACCOUNT if self.etp_rt else ANONYMOUS, resolver=self._account_name)
+        print_login(ACCOUNT if self.etp_rt else ANONYMOUS)
         return True
-
-    def _account_name(self) -> str:
-        """Account name behind the etp_rt cookie, via Crunchyroll's own profile endpoint."""
-        # Deliberately not routed through request(): that retries via start() on a 401, which would
-        # re-enter the very call this runs from and print the banner twice.
-        response = self.session.get(
-            f"{self.api_base_url}/accounts/v1/me/profile",
-            headers=self._get_headers(),
-            cookies=self._get_cookies(),
-        )
-        response.raise_for_status()
-        profile = response.json()
-        return profile.get("email") or profile.get("username") or profile.get("profile_name") or ""
 
     def _refresh(self) -> None:
         """Refresh access token - single attempt."""
