@@ -1,0 +1,1574 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="DRM HLS/DASH downloader documentation">
+      
+      
+      
+      
+        <link rel="prev" href="../login/">
+      
+      
+        <link rel="next" href="../vault/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Adding a Service - VibraVid</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#adding-a-new-service" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VibraVid" class="md-header__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VibraVid
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Adding a Service
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VibraVid" class="md-nav__button md-logo" aria-label="VibraVid" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VibraVid
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AstraeLabs/VibraVid" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    VibraVid
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-sites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported Sites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web GUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telegram Bot
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARR Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../login/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Login
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Service
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#directory-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#registration-auto-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registration (auto-discovery)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Registration (auto-discovery)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loading-services-from-a-remote-repository" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading services from a remote repository
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli-options-url-etc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI options (--url, etc.)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authentication-clientpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication (client.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#metadata-scrapperpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metadata (scrapper.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-the-download-downloaderpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building the download (downloader.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gui-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GUI adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-optional-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced / optional features
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced / optional features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#licensedrm-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        License/DRM patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-filter-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom filter override
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-downloads-albums-season-packs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch downloads (albums, season packs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#live-status-line-long-runninglive-downloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live status line (long-running/live downloads)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-manifest-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom manifest format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search-backed-by-tmdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search backed by TMDB
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#music-services-lyrics-tagging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Music services (lyrics &amp; tagging)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#directory-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#registration-auto-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registration (auto-discovery)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Registration (auto-discovery)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loading-services-from-a-remote-repository" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading services from a remote repository
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli-options-url-etc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI options (--url, etc.)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authentication-clientpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication (client.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#metadata-scrapperpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metadata (scrapper.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-the-download-downloaderpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building the download (downloader.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gui-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GUI adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-optional-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced / optional features
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced / optional features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#licensedrm-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        License/DRM patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-filter-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom filter override
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-downloads-albums-season-packs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch downloads (albums, season packs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#live-status-line-long-runninglive-downloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live status line (long-running/live downloads)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-manifest-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom manifest format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search-backed-by-tmdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search backed by TMDB
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#music-services-lyrics-tagging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Music services (lyrics &amp; tagging)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="adding-a-new-service">Adding a New Service</h1>
+<h2 id="core-flow">Core flow</h2>
+<p>Everything in this section applies to every service, regardless of site or media type.</p>
+<h3 id="directory-layout">Directory layout</h3>
+<div class="highlight"><pre><span></span><code>VibraVid/services/&lt;name&gt;/
+├── __init__.py     # CLI entry point: search(), title_search(), --url resolution
+├── client.py       # auth + low-level HTTP
+├── scrapper.py     # metadata fetching (title/season/episode info)
+└── downloader.py   # builds DASH_Downloader / HLS_Downloader and starts it
+</code></pre></div>
+<p>This split isn't enforced by the loader — only <code>__init__.py</code> with a <code>search()</code> function is
+required</p>
+<h3 id="registration-auto-discovery">Registration (auto-discovery)</h3>
+<p><code>VibraVid/services/_base/site_loader.py</code> scans <code>VibraVid/services/*/​__init__.py</code> at startup.
+Two module-level names are <strong>required</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">indice</span> <span class="o">=</span> <span class="mi">900</span>          <span class="c1"># sort position in the CLI/GUI site list — pick a free number, the</span>
+                       <span class="c1"># loader renumbers everything to consecutive indices on the next run</span>
+<span class="n">_useFor</span> <span class="o">=</span> <span class="s2">"Film_Serie"</span>  <span class="c1"># one of: Anime, Film_Serie, Serie, Song, Tor</span>
+</code></pre></div>
+<p>A module that defines <code>_hide = True</code> is loaded but excluded from CLI/GUI/ARR listings —
+useful while a service is still being built.</p>
+<h4 id="loading-services-from-a-remote-repository">Loading services from a remote repository</h4>
+<p><code>imp_service</code> (in <code>Conf/config.json</code>, <code>DEFAULT.imp_service</code>) doesn't only accept local folder
+paths — an entry can also be an <strong>http(s) URL to a GitHub or Gitea repository</strong> laid out the
+same way as <code>VibraVid/services/</code> (one subfolder per service, each with its own <code>__init__.py</code>
+defining <code>indice</code>/<code>_useFor</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"imp_service"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"default"</span><span class="p">,</span><span class="w"> </span><span class="s2">"https://git.example.com/me/my-vibravid-sites"</span><span class="p">]</span>
+</code></pre></div>
+<p>For a private repo, put credentials in the URL userinfo —
+<code>https://user:token@host/owner/repo</code> — and pin a branch/tag with a <code>#ref</code> suffix
+(<code>.../owner/repo#dev</code>); otherwise the repo's default branch is used.</p>
+<h3 id="cli-options-url-etc">CLI options (<code>--url</code>, etc.)</h3>
+<p>Expose a <code>register_cli_args(parser) -&gt; list[str]</code> function; the CLI calls it to add
+site-specific flags and stores their values in <code>context_tracker.site_options</code>, keyed by
+argparse <code>dest</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">register_cli_args</span><span class="p">(</span><span class="n">parser</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+    <span class="n">group</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_argument_group</span><span class="p">(</span><span class="s2">"MyService options (-i &lt;n&gt;)"</span><span class="p">)</span>
+    <span class="n">group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--url"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"url"</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Direct title URL."</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span><span class="s2">"url"</span><span class="p">]</span>
+</code></pre></div>
+<p>Read it back in <code>search()</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">string_to_search</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">get_onlyDatabase</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">direct_item</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">selections</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scrape_serie</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">direct_item</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">get_onlyDatabase</span><span class="p">:</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="p">(</span><span class="n">context_tracker</span><span class="o">.</span><span class="n">site_options</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">url</span><span class="p">:</span>
+            <span class="n">direct_item</span> <span class="o">=</span> <span class="n">_resolve_url_to_item</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">base_search</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">direct_item</span><span class="o">=</span><span class="n">direct_item</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p><code>base_search</code>/<code>base_process_search_result</code> (in <code>VibraVid/services/_base/site_search_manager.py</code>)
+handle the rest — season/episode selection, table display, and dispatch to your
+<code>download_film</code>/<code>download_series</code> functions. Reuse them rather than reimplementing the flow.</p>
+<h3 id="authentication-clientpy">Authentication (<code>client.py</code>)</h3>
+<p>There is no fixed auth pattern — services in this codebase use credential logins, static
+tokens, and captured session cookies, sometimes more than one at once for different parts of
+the same site. What generalizes:</p>
+<ul>
+<li><strong>Cache the session on disk</strong> if login has any real cost (rate limits, a multi-step
+  handshake). Use <code>VibraVid.utils.disk_cache</code> (<code>load</code>/<code>save</code>/<code>is_fresh</code>) keyed by service name,
+  with an <code>expiry</code> timestamp. Skipping this
+  means every CLI invocation re-authenticates, and some backends will start throttling or
+  blocking logins after a handful of runs in quick succession.</li>
+<li><strong>A fresh HTTP client per request drops cookies set by a previous response.</strong> If auth relies
+  on a session cookie, capture it after login (<code>dict(http_client.cookies)</code>) and pass it
+  explicitly (<code>cookies=...</code>) into every subsequent <code>create_client(...)</code> call — don't assume a
+  cookie jar persists across separate <code>create_client</code> context managers.</li>
+<li><strong>A "web session" and an "app/API session" can be two unrelated login systems</strong> even on the
+  same domain. If an endpoint keeps returning empty/short-form data despite a valid-looking
+  session, check whether it actually belongs to a different auth path than the one you're
+  authenticating against — don't assume all endpoints on one domain share one cookie.</li>
+<li>For IP/region detection, reuse <code>VibraVid.utils.http_client.get_my_location()</code> (already
+  cached to <code>.cache/ip.json</code>) instead of adding another geolocation call.</li>
+</ul>
+<h3 id="metadata-scrapperpy">Metadata (<code>scrapper.py</code>)</h3>
+<p>Populate <code>VibraVid.services._base.object.Episode</code>/<code>Season</code> (CLI path) or the GUI's
+<code>Entries</code>/<code>Episode</code>/<code>Season</code> dataclasses (<code>GUI/searchapp/api/base.py</code>) with what the site
+actually gives you — don't leave <code>image</code>/<code>slug</code>/<code>year</code> empty if the raw API response already
+has them:</p>
+<ul>
+<li><strong><code>image</code> on both search results and episodes</strong> — the GUI's series "hero" background and
+  episode thumbnails fall back to whatever <code>Entries.poster</code>/<code>Episode.image</code> are set to; an
+  empty field there is a visible regression, not a cosmetic one.</li>
+<li><strong><code>slug</code> must be a real, human-readable title slug — never an opaque content ID.</strong> Several
+  downstream lookups (TMDB year/poster resolution in particular) use <code>slug</code> as a search key;
+  passing a content ID through as <code>slug</code> makes every such lookup silently miss.</li>
+<li><strong>Prefer the site's own release date/year field over a TMDB guess.</strong> TMDB slug/name lookup
+  is a <em>fallback</em> for when the site doesn't already carry the year — check the raw metadata
+  response for the real field first.</li>
+<li><strong>If you genuinely can't determine the year, set it to the literal string <code>"9999"</code></strong> rather
+  than leaving it blank — that's the sentinel <code>EntriesManager.add()</code> checks for to trigger the
+  TMDB slug/name year lookup described above (falling back to the current year if no TMDB key is
+  configured or the lookup fails); an empty year skips this fallback entirely (see
+  <code>VibraVid/services/_base/object.py</code>).</li>
+<li><strong>If your service is for TV/series content, add its module name to <code>_TV_MATCH_SITES</code></strong> in
+  <code>VibraVid/services/_base/tmdb_artwork.py</code> — TMDB series/episode matching (artwork, season
+  names) is gated by this allowlist, so without it <code>resolve_series_tmdb_id()</code> silently returns
+  <code>None</code> for your service even with a valid TMDB key configured. Movie matching has no such
+  allowlist.</li>
+</ul>
+<h3 id="building-the-download-downloaderpy">Building the download (<code>downloader.py</code>)</h3>
+<ul>
+<li>If a license/session token is obtainable <strong>up front</strong> (before the manifest is even parsed),
+  prefer passing <code>license_url</code> + <code>license_headers</code> to <code>DASH_Downloader</code>/<code>HLS_Downloader</code> over a
+  per-challenge <code>license_request_fn</code> callback. The CDM pipeline
+  (<code>VibraVid/core/drm/widevine.py</code> / <code>playready.py</code>) already does a plain POST with your headers
+  — a callback is only needed when the license request itself requires per-challenge
+  server-side computation that can't be front-loaded.</li>
+<li><strong>Always pass a real, non-empty <code>license_url</code>, even when a callback does the actual license
+  HTTP request itself.</strong> The vault key-storage step keys stored keys by <code>license_url</code> — leaving
+  it <code>None</code>/unset (which becomes an empty string downstream) makes that save call fail with an
+  HTTP 400, silently losing the key for future reuse even though the download itself succeeds.</li>
+<li>If the service exposes a quality ceiling gated by DRM scheme (e.g. one scheme tops out well
+  below the other), pick <code>drm_preference</code> from the user's configured target quality rather than
+  hardcoding one scheme.</li>
+</ul>
+<p>For anything beyond this base case — non-standard license flows, forcing a track, chapters, a
+live status line, a custom manifest format, or a music/audio service — see
+<a href="#advanced--optional-features">Advanced / optional features</a> below.</p>
+<h3 id="gui-adapter">GUI adapter</h3>
+<p>Add <code>GUI/searchapp/api/&lt;name&gt;.py</code> subclassing <code>GenericStreamingAPI</code> (<code>GUI/searchapp/api/generic.py</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">VibraVid.services.</span><span class="o">&lt;</span><span class="n">name</span><span class="o">&gt;.</span><span class="n">scrapper</span> <span class="kn">import</span><span class="w"> </span><span class="nn">GetSerieInfo</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Entries</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.generic</span><span class="w"> </span><span class="kn">import</span> <span class="n">GenericStreamingAPI</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyService</span><span class="p">(</span><span class="n">GenericStreamingAPI</span><span class="p">):</span>
+    <span class="n">site_name</span> <span class="o">=</span> <span class="s2">"&lt;name&gt;"</span>
+    <span class="n">log_label</span> <span class="o">=</span> <span class="s2">"MyService"</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_build_scraper</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">media_item</span><span class="p">:</span> <span class="n">Entries</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">GetSerieInfo</span><span class="p">(</span><span class="n">media_item</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+</code></pre></div>
+<p>This is auto-discovered the same way as the CLI module (<code>GUI/searchapp/api/__init__.py</code> scans
+the package directory) — no separate registration step, and no logo/icon asset to add anywhere:
+the GUI has no per-site static image requirement. <code>GenericStreamingAPI.search()</code> and
+<code>get_series_metadata()</code> already call your CLI-side <code>search()</code>/scrapper for you; only override
+<code>_build_entry</code>/<code>_map_episode</code> if the default field mapping doesn't fit.</p>
+<p>If you want your service to show up in a specific position in the GUI site list instead of just
+being appended after the known ones, add its module name to <code>_PREFERRED_ORDER</code> in
+<code>GUI/searchapp/api/__init__.py</code> — this is purely cosmetic ordering, not required for the service
+to work. The category shown for it (Film_Serie/Anime/Serie/Song/Tor) comes straight from the
+<code>_useFor</code> you already set in the CLI module's <code>__init__.py</code> — nothing extra to set on the GUI
+side for that.</p>
+<h2 id="advanced-optional-features">Advanced / optional features</h2>
+<p>None of this is needed for a basic service. Jump to whichever subsection matches something your
+site actually requires.</p>
+<h3 id="licensedrm-patterns">License/DRM patterns</h3>
+<p>Beyond the base <code>license_url</code>/<code>license_headers</code>/<code>license_request_fn</code> case described in
+<a href="#building-the-download-downloaderpy">Building the download</a>:</p>
+<p><strong>Dynamic query string.</strong> If your license endpoint needs a computed query string on top of the
+base URL, build <code>license_url</code> as an f-string with the params baked in rather than trying to
+express them as <code>license_headers</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">license_url</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="sa">f</span><span class="s2">"https://license.example.com/widevine"</span>
+    <span class="sa">f</span><span class="s2">"?AccountId=</span><span class="si">{</span><span class="n">account_id</span><span class="si">}</span><span class="s2">&amp;ContentId=</span><span class="si">{</span><span class="n">content_id</span><span class="si">}</span><span class="s2">&amp;SubContentType=Default"</span>
+<span class="p">)</span>
+<span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span><span class="n">mpd_url</span><span class="p">,</span> <span class="n">license_url</span><span class="o">=</span><span class="n">license_url</span><span class="p">,</span> <span class="n">license_headers</span><span class="o">=</span><span class="p">{</span><span class="s2">"Authorization"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s2">"</span><span class="p">})</span>
+</code></pre></div>
+<p><strong>Multiple outputs.</strong> If resolving the license needs more than one piece of data (the URL itself
+plus separate params and/or headers that must travel together), have your resolver return them
+as a tuple and unpack it in <code>downloader.py</code> rather than forcing everything into one string:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">generate_license_url</span><span class="p">(</span><span class="n">tracking_info</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+    <span class="n">license_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"https://license.example.com/</span><span class="si">{</span><span class="n">tracking_info</span><span class="p">[</span><span class="s1">'asset_id'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+    <span class="n">license_params</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"sessionId"</span><span class="p">:</span> <span class="n">tracking_info</span><span class="p">[</span><span class="s2">"session_id"</span><span class="p">]}</span>
+    <span class="n">license_headers</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"X-Auth-Token"</span><span class="p">:</span> <span class="n">tracking_info</span><span class="p">[</span><span class="s2">"token"</span><span class="p">]}</span>
+    <span class="k">return</span> <span class="n">license_url</span><span class="p">,</span> <span class="n">license_params</span><span class="p">,</span> <span class="n">license_headers</span>
+
+<span class="n">license_url</span><span class="p">,</span> <span class="n">license_params</span><span class="p">,</span> <span class="n">license_headers</span> <span class="o">=</span> <span class="n">generate_license_url</span><span class="p">(</span><span class="n">tracking_info</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">license_params</span><span class="p">:</span>
+    <span class="n">license_url</span> <span class="o">+=</span> <span class="s2">"?"</span> <span class="o">+</span> <span class="n">urlencode</span><span class="p">(</span><span class="n">license_params</span><span class="p">)</span>
+<span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span><span class="n">mpd_url</span><span class="p">,</span> <span class="n">license_url</span><span class="o">=</span><span class="n">license_url</span><span class="p">,</span> <span class="n">license_headers</span><span class="o">=</span><span class="n">license_headers</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Stateful exchange.</strong> If the license server requires a lease that must be renewed/retried
+rather than a one-shot POST, build a closure capturing whatever per-title state it needs and
+pass that closure as <code>license_request_fn</code> instead of a static <code>license_url</code>/<code>license_headers</code>
+pair:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_make_license_request_fn</span><span class="p">(</span><span class="n">asset_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">session_token</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_request</span><span class="p">(</span><span class="n">challenge</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">,</span> <span class="n">headers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+        <span class="n">resp</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"https://license.example.com/lease/</span><span class="si">{</span><span class="n">asset_id</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+            <span class="n">content</span><span class="o">=</span><span class="n">challenge</span><span class="p">,</span>
+            <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">headers</span><span class="p">,</span> <span class="s2">"X-Session-Token"</span><span class="p">:</span> <span class="n">session_token</span><span class="p">},</span>
+        <span class="p">)</span>
+        <span class="n">resp</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">resp</span><span class="o">.</span><span class="n">content</span>
+    <span class="k">return</span> <span class="n">_request</span>
+
+<span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span>
+    <span class="n">mpd_url</span><span class="p">,</span>
+    <span class="n">license_url</span><span class="o">=</span><span class="sa">f</span><span class="s2">"https://license.example.com/lease/</span><span class="si">{</span><span class="n">asset_id</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>  <span class="c1"># still required, see note above</span>
+    <span class="n">license_request_fn</span><span class="o">=</span><span class="n">_make_license_request_fn</span><span class="p">(</span><span class="n">asset_id</span><span class="p">,</span> <span class="n">session_token</span><span class="p">),</span>
+<span class="p">)</span>
+</code></pre></div>
+<p><strong>Direct DRM manager access.</strong> If none of the above fit and you truly need to resolve keys
+yourself outside the downloader's own DRM flow, call the DRM manager directly instead of routing
+through <code>license_url</code>/<code>license_request_fn</code> — but treat this as a last resort, not the default:
+prefer the generic downloader-driven flow whenever the site's license endpoint behaves like a
+normal POST.</p>
+<div class="highlight"><pre><span></span><code><span class="n">keys</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">drm_manager</span><span class="o">.</span><span class="n">get_wv_keys</span><span class="p">(</span><span class="n">pssh</span><span class="p">,</span> <span class="n">license_url</span><span class="p">,</span> <span class="n">license_certificate</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="custom-filter-override">Custom filter override</h3>
+<p>If you need to force a specific track (e.g. a given audio language) beyond what the standard
+config-driven filters already select, set <code>custom_filters</code> directly on the downloader instance
+after constructing it, rather than adding a new constructor argument:</p>
+<div class="highlight"><pre><span></span><code><span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="n">dl</span><span class="o">.</span><span class="n">custom_filters</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"audio"</span><span class="p">:</span> <span class="n">config_manager</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"DOWNLOAD"</span><span class="p">,</span> <span class="s2">"select_audio"</span><span class="p">)}</span>
+<span class="n">dl</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="batch-downloads-albums-season-packs">Batch downloads (albums, season packs)</h3>
+<p>If your service downloads multiple items in one run (an album, a season pack) and you don't want
+one failed item to abort the whole batch, catch the per-item error yourself and report it via
+<code>context_tracker.report_download_error(message)</code> / <code>report_download_success()</code>
+(<code>VibraVid/core/ui/tracker.py</code>) instead of letting the exception propagate — this lets the
+GUI/CLI show a partial-success summary at the end rather than failing the entire run on one bad
+track:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">VibraVid.core.ui.tracker</span><span class="w"> </span><span class="kn">import</span> <span class="n">context_tracker</span>
+
+<span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">items_to_download</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">download_track</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Track '</span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">' failed: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="n">context_tracker</span><span class="o">.</span><span class="n">report_download_error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="k">continue</span>
+    <span class="n">context_tracker</span><span class="o">.</span><span class="n">report_download_success</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="chapters">Chapters</h3>
+<p>If the site exposes chapter/scene markers, pass them as <code>chapters=</code> to <code>DASH_Downloader</code>/
+<code>HLS_Downloader</code> so they land in the muxed output — don't leave this out just because the base
+flow doesn't require it. Each chapter is a <code>{"name": str, "seconds": int}</code> dict.</p>
+<p><strong>Markers known up front</strong>: compute the chapter list (name + start-time pairs) before starting
+the download and pass it once:</p>
+<div class="highlight"><pre><span></span><code><span class="n">chapters</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Intro"</span><span class="p">,</span> <span class="s2">"seconds"</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+    <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Main content"</span><span class="p">,</span> <span class="s2">"seconds"</span><span class="p">:</span> <span class="mi">45</span><span class="p">},</span>
+    <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Credits"</span><span class="p">,</span> <span class="s2">"seconds"</span><span class="p">:</span> <span class="mi">1620</span><span class="p">},</span>
+<span class="p">]</span>
+<span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span><span class="n">mpd_url</span><span class="p">,</span> <span class="n">chapters</span><span class="o">=</span><span class="n">chapters</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Markers that arrive during a live/long-running download</strong>: pass a single mutable list into
+the downloader up front, then keep appending to that <em>same list object</em> from a background
+polling thread as new markers show up — the downloader only reads the list once, at final mux
+time, so anything appended before then is picked up automatically:</p>
+<div class="highlight"><pre><span></span><code><span class="n">chapters</span><span class="p">:</span> <span class="nb">list</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span><span class="n">mpd_url</span><span class="p">,</span> <span class="n">chapters</span><span class="o">=</span><span class="n">chapters</span><span class="p">)</span>
+<span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">_watch_and_append</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">chapters</span><span class="p">,</span> <span class="n">record_start</span><span class="p">),</span> <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+<span class="n">dl</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_watch_and_append</span><span class="p">(</span><span class="n">chapters</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">record_start</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">last_seen</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">while</span> <span class="ow">not</span> <span class="n">stop_flag</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">POLL_INTERVAL</span><span class="p">):</span>
+        <span class="n">marker</span> <span class="o">=</span> <span class="n">poll_current_marker</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">marker</span> <span class="ow">and</span> <span class="n">marker</span> <span class="o">!=</span> <span class="n">last_seen</span><span class="p">:</span>
+            <span class="n">last_seen</span> <span class="o">=</span> <span class="n">marker</span>
+            <span class="n">chapters</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">"name"</span><span class="p">:</span> <span class="n">marker</span><span class="p">,</span> <span class="s2">"seconds"</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">record_start</span><span class="p">)})</span>
+</code></pre></div>
+<h3 id="live-status-line-long-runninglive-downloads">Live status line (long-running/live downloads)</h3>
+<p>If your download can run for a long time (in particular, live recordings) and you want to
+surface a status that changes over time — connection state, a counter, anything worth showing
+above the progress bars — use the shared status-line mechanism instead of printing ad-hoc lines
+that would scroll past the bars:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">VibraVid.core.ui.bar_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_bar_manager</span>
+
+<span class="n">bar_manager</span> <span class="o">=</span> <span class="n">get_bar_manager</span><span class="p">(</span><span class="n">download_id</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">bar_manager</span><span class="p">:</span>
+    <span class="n">bar_manager</span><span class="o">.</span><span class="n">set_status_text</span><span class="p">(</span><span class="s2">"[cyan]your rich-markup status text"</span><span class="p">)</span>
+</code></pre></div>
+<p>Call <code>set_status_text</code> again whenever the state changes — there's no polling interval built in,
+the caller decides when and how often to update it. The text also lands in the log file
+automatically (tagged <code>[msg_room]</code>), so don't add your own <code>logger.info</code> call for the same
+status text.</p>
+<h3 id="custom-manifest-format">Custom manifest format</h3>
+<p>If the site doesn't expose a standard DASH/HLS manifest — only raw per-track data you'd have to
+assemble yourself — don't write a bespoke downloader from scratch. Build a <code>vibravid_manifest</code>
+JSON structure from the resolved track data (<code>VibraVid/core/manifest/custom.py</code> parses it) and
+hand that to the existing downloader machinery instead:</p>
+<div class="highlight"><pre><span></span><code><span class="n">manifest</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"vibravid_manifest"</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="s2">"base_url"</span><span class="p">:</span> <span class="s2">"https://cdn.example.com/movie/"</span><span class="p">,</span>
+    <span class="s2">"duration"</span><span class="p">:</span> <span class="mi">5400</span><span class="p">,</span>
+    <span class="s2">"tracks"</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">{</span>
+            <span class="s2">"type"</span><span class="p">:</span> <span class="s2">"video"</span><span class="p">,</span> <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"v0"</span><span class="p">,</span> <span class="s2">"codecs"</span><span class="p">:</span> <span class="s2">"avc1.640028"</span><span class="p">,</span>
+            <span class="s2">"bitrate"</span><span class="p">:</span> <span class="mi">5000000</span><span class="p">,</span> <span class="s2">"width"</span><span class="p">:</span> <span class="mi">1920</span><span class="p">,</span> <span class="s2">"height"</span><span class="p">:</span> <span class="mi">1080</span><span class="p">,</span> <span class="s2">"fps"</span><span class="p">:</span> <span class="s2">"24"</span><span class="p">,</span>
+            <span class="s2">"init"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"url"</span><span class="p">:</span> <span class="s2">"init_video.mp4"</span><span class="p">},</span>
+            <span class="s2">"segments"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"url"</span><span class="p">:</span> <span class="s2">"seg_video_1.m4s"</span><span class="p">},</span> <span class="p">{</span><span class="s2">"url"</span><span class="p">:</span> <span class="s2">"seg_video_2.m4s"</span><span class="p">}],</span>
+        <span class="p">},</span>
+        <span class="p">{</span>
+            <span class="s2">"type"</span><span class="p">:</span> <span class="s2">"audio"</span><span class="p">,</span> <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"a0"</span><span class="p">,</span> <span class="s2">"codecs"</span><span class="p">:</span> <span class="s2">"mp4a.40.2"</span><span class="p">,</span>
+            <span class="s2">"bitrate"</span><span class="p">:</span> <span class="mi">128000</span><span class="p">,</span> <span class="s2">"language"</span><span class="p">:</span> <span class="s2">"en"</span><span class="p">,</span> <span class="s2">"channels"</span><span class="p">:</span> <span class="s2">"2"</span><span class="p">,</span>
+            <span class="s2">"init"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"url"</span><span class="p">:</span> <span class="s2">"init_audio.mp4"</span><span class="p">},</span>
+            <span class="s2">"segments"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"url"</span><span class="p">:</span> <span class="s2">"seg_audio_1.m4s"</span><span class="p">},</span> <span class="p">{</span><span class="s2">"url"</span><span class="p">:</span> <span class="s2">"seg_audio_2.m4s"</span><span class="p">}],</span>
+        <span class="p">},</span>
+    <span class="p">],</span>
+<span class="p">}</span>
+<span class="n">dl</span> <span class="o">=</span> <span class="n">DASH_Downloader</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">manifest</span><span class="p">))</span>
+</code></pre></div>
+<h3 id="search-backed-by-tmdb">Search backed by TMDB</h3>
+<p>If the site itself has no usable search endpoint (or its search results are too sparse to build
+a good listing/season-episode structure from), you don't have to scrape one — use TMDB directly
+as the search backend instead. Note this needs a configured TMDB API key; without one this kind
+of service silently returns zero results, so don't choose this pattern as a silent fallback the
+user has no way to notice is broken.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">VibraVid.provider.tmdb</span><span class="w"> </span><span class="kn">import</span> <span class="n">tmdb</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Entries</span><span class="p">]:</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">movie</span> <span class="ow">in</span> <span class="n">tmdb</span><span class="o">.</span><span class="n">search_movies</span><span class="p">(</span><span class="n">query</span><span class="p">):</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Entries</span><span class="p">(</span>
+            <span class="nb">id</span><span class="o">=</span><span class="n">movie</span><span class="p">[</span><span class="s2">"id"</span><span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="n">movie</span><span class="p">[</span><span class="s2">"title"</span><span class="p">],</span> <span class="n">slug</span><span class="o">=</span><span class="n">movie</span><span class="p">[</span><span class="s2">"title"</span><span class="p">],</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s2">"movie"</span><span class="p">,</span> <span class="n">year</span><span class="o">=</span><span class="n">movie</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"release_date"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)[:</span><span class="mi">4</span><span class="p">],</span>
+            <span class="n">image</span><span class="o">=</span><span class="sa">f</span><span class="s2">"https://image.tmdb.org/t/p/w500</span><span class="si">{</span><span class="n">movie</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'poster_path'</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span> <span class="k">if</span> <span class="n">movie</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"poster_path"</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="p">))</span>
+    <span class="k">for</span> <span class="n">show</span> <span class="ow">in</span> <span class="n">tmdb</span><span class="o">.</span><span class="n">search_series</span><span class="p">(</span><span class="n">query</span><span class="p">):</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Entries</span><span class="p">(</span>
+            <span class="nb">id</span><span class="o">=</span><span class="n">show</span><span class="p">[</span><span class="s2">"id"</span><span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="n">show</span><span class="p">[</span><span class="s2">"name"</span><span class="p">],</span> <span class="n">slug</span><span class="o">=</span><span class="n">show</span><span class="p">[</span><span class="s2">"name"</span><span class="p">],</span>
+            <span class="nb">type</span><span class="o">=</span><span class="s2">"tv"</span><span class="p">,</span> <span class="n">year</span><span class="o">=</span><span class="n">show</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"first_air_date"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)[:</span><span class="mi">4</span><span class="p">],</span>
+        <span class="p">))</span>
+    <span class="k">return</span> <span class="n">results</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">GetSerieInfo</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tmdb_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tmdb_id</span> <span class="o">=</span> <span class="n">tmdb_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">seasons_manager</span> <span class="o">=</span> <span class="n">SeasonManager</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">details</span> <span class="o">=</span> <span class="n">tmdb</span><span class="o">.</span><span class="n">_make_request</span><span class="p">(</span><span class="sa">f</span><span class="s2">"tv/</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">tmdb_id</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">raw_season</span> <span class="ow">in</span> <span class="n">details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"seasons"</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">seasons_manager</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">Season</span><span class="p">(</span><span class="n">number</span><span class="o">=</span><span class="n">raw_season</span><span class="p">[</span><span class="s2">"season_number"</span><span class="p">],</span> <span class="n">tmdb_id</span><span class="o">=</span><span class="n">raw_season</span><span class="p">[</span><span class="s2">"id"</span><span class="p">]))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">getEpisodeSeasons</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">season_number</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Episode</span><span class="p">]:</span>
+        <span class="n">season</span> <span class="o">=</span> <span class="n">tmdb</span><span class="o">.</span><span class="n">_make_request</span><span class="p">(</span><span class="sa">f</span><span class="s2">"tv/</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">tmdb_id</span><span class="si">}</span><span class="s2">/season/</span><span class="si">{</span><span class="n">season_number</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">Episode</span><span class="p">(</span><span class="n">number</span><span class="o">=</span><span class="n">e</span><span class="p">[</span><span class="s2">"episode_number"</span><span class="p">],</span> <span class="n">name</span><span class="o">=</span><span class="n">e</span><span class="p">[</span><span class="s2">"name"</span><span class="p">])</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">season</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"episodes"</span><span class="p">,</span> <span class="p">[])]</span>
+</code></pre></div>
+<p>Only the final step — resolving a chosen TMDB result back to a real playable item/URL on the
+site — stays site-specific and isn't shown here.</p>
+<h3 id="music-services-lyrics-tagging">Music services (lyrics &amp; tagging)</h3>
+<p>If the service is audio-only (music, not film/series), the final processing step isn't video
+muxing — it's <code>VibraVid.core.muxing.helper.audio.process_song(...)</code>. Route the downloaded file
+through that instead of reimplementing audio post-processing.</p>
+<ul>
+<li><strong>Lyrics</strong>: call <code>VibraVid.provider.musiclyric.get_lyrics(title, artist, album,
+  duration_seconds)</code> rather than writing your own lyrics fetch — it already handles a
+  multi-provider fallback chain and converts synced lyrics from TTML into LRC when that's the
+  format returned.</li>
+<li><strong>Tagging</strong>: populate <code>track_number</code>, <code>cover_url</code>, <code>album_artist</code>, and <code>lyrics</code> when the site
+  exposes them and pass them into <code>process_song(...)</code> — same principle as <code>image</code>/<code>slug</code>/<code>year</code>
+  above: don't leave a field empty just because the base flow doesn't require it.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="n">lyrics_result</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">lyrics_result</span> <span class="o">=</span> <span class="n">get_lyrics</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="n">title</span><span class="p">,</span> <span class="n">artist</span><span class="o">=</span><span class="n">artist</span><span class="p">,</span> <span class="n">album</span><span class="o">=</span><span class="n">album</span><span class="p">,</span> <span class="n">duration_seconds</span><span class="o">=</span><span class="n">duration</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"lyrics lookup crashed for </span><span class="si">{</span><span class="n">title</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span>
+
+<span class="n">final_path</span> <span class="o">=</span> <span class="n">process_song</span><span class="p">(</span>
+    <span class="n">file_path</span><span class="o">=</span><span class="n">downloaded_path</span><span class="p">,</span>
+    <span class="n">title</span><span class="o">=</span><span class="n">title</span><span class="p">,</span>
+    <span class="n">artist</span><span class="o">=</span><span class="n">artist</span><span class="p">,</span>
+    <span class="n">album</span><span class="o">=</span><span class="n">album</span><span class="p">,</span>
+    <span class="n">track_number</span><span class="o">=</span><span class="n">track_number</span><span class="p">,</span>
+    <span class="n">cover_url</span><span class="o">=</span><span class="n">cover_url</span><span class="p">,</span>
+    <span class="n">album_artist</span><span class="o">=</span><span class="n">album_artist</span><span class="p">,</span>
+    <span class="n">lyrics</span><span class="o">=</span><span class="p">(</span><span class="n">lyrics_result</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"lyrics"</span><span class="p">),</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>Note: TMDB poster/still art embedding into the final file is separate and needs no extra work
+here — it's zero-touch as long as <code>image</code>/<code>slug</code>/<code>year</code> are populated per the
+<a href="#metadata-scrapperpy">Metadata</a> section above.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.indexes", "navigation.expand", "navigation.top", "search.suggest", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
