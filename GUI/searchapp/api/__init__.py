@@ -29,8 +29,13 @@ _PREFERRED_ORDER = [
     "animeworld",
     "crunchyroll",
     "primevideo",
+    "disney",
+    "hbomax",
+    "paramountplus",
+    "appletv",
     "mediasetinfinity",
     "raiplay",
+    "la7",
     "discoveryplus",
     "discovery",
     "dmax",
@@ -42,7 +47,7 @@ _PREFERRED_ORDER = [
     "plutotv",
     "amazon_music",
 ]
-_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music"}
+_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax"}
 _SITE_CATEGORIES: dict[str, str] = {}
 _SITE_ALIASES: dict[str, str] = {}
 
@@ -198,7 +203,7 @@ def get_api(site: str) -> BaseStreamingAPI:
     Get API instance for specified site.
 
     Args:
-        site: Site identifier (e.g., 'streamingcommunity', 'animeunity', 'mostraguarda')
+        site: Site identifier (e.g., 'streamingcommunity', 'animeunity', 'raiplay')
 
     Returns:
         API instance

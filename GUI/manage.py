@@ -15,10 +15,7 @@ def main():
 
     is_server = len(sys.argv) > 1 and sys.argv[1] in {"runserver", "runserver_plus"}
     if is_server and os.environ.get("RUN_MAIN") != "true":
-        # Apply schema updates before importing the GUI or starting its workers.
-        # The child must not re-run the pre-run hooks that this process runs below.
-        subprocess.run([sys.executable, __file__, "migrate", "--noinput"], check=True,
-                       env={**os.environ, "VIBRAVID_SKIP_PRE_RUN_HOOKS": "1"})
+        subprocess.run([sys.executable, __file__, "migrate", "--noinput"], check=True, env={**os.environ, "VIBRAVID_SKIP_PRE_RUN_HOOKS": "1"})
 
     if "RUN_MAIN" not in os.environ and "VIBRAVID_SKIP_PRE_RUN_HOOKS" not in os.environ:
         print("Running pre-run hooks...")

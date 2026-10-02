@@ -25,10 +25,8 @@ WATCHLIST_INTERVALS = (15, 30, 60, 120, 240, 360, 720, 1440)
 
 def _get_interval_seconds() -> int:
     from VibraVid.utils import config_manager
-    # Saved from the GUI > WATCHLIST_AUTO_INTERVAL_SECONDS (e.g. docker-compose) > default,
-    # so a choice made in the GUI survives a restart even when the env var is set.
-    raw = (config_manager.config.get("DEFAULT", "watchlist_interval_seconds", default=None)
-           or os.environ.get("WATCHLIST_AUTO_INTERVAL_SECONDS"))
+    raw = (config_manager.config.get("DEFAULT", "watchlist_interval_seconds", default=None) or os.environ.get("WATCHLIST_AUTO_INTERVAL_SECONDS"))
+    
     try:
         value = int(raw)
         if value > 0:
@@ -131,29 +129,35 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
             # Don't let the metadata cache hide a newly published season/episode.
             api._scraper_cache.pop(api._get_cache_key(media), None)
             seasons = api.get_series_metadata(media) or []
-            videos = [(s.number, ep.number) for s in seasons
-                      if item.auto_all_seasons or s.number == item.auto_season for ep in s.episodes]
-            fields = {"num_seasons": len(seasons),
-                      "last_season_episodes": seasons[-1].episode_count if seasons else 0}
+            videos = [(s.number, ep.number) for s in seasons if item.auto_all_seasons or s.number == item.auto_season for ep in s.episodes]
+            fields = {"num_seasons": len(seasons), "last_season_episodes": seasons[-1].episode_count if seasons else 0}
+            
             # Same rule as _update_single_item: flags are only raised here and stay set
             # until the user clears them; the first fill (0 seasons) is not "new".
             if item.num_seasons and len(seasons) > item.num_seasons:
                 fields["has_new_seasons"] = True
+            
             if item.num_seasons and seasons and seasons[-1].episode_count > item.last_season_episodes:
                 fields["has_new_episodes"] = True
+            
             WatchlistItem.objects.filter(pk=item.pk).update(**fields)
+        
         videos = list(dict.fromkeys(videos))
         now = timezone.now()
         WatchlistItem.objects.filter(pk=item.pk).update(auto_last_checked_at=now, last_checked_at=now)
+        
         for season, episode in videos:
             key = f"{season}:{episode}:{quality or 'config'}"
             reservation = (item.pk, key)
             if key in (item.auto_completed or {}):
                 continue
+
             with _pending_lock:
                 if reservation in _pending_downloads:
                     continue
+                
                 _pending_downloads.add(reservation)
+            
             handed_off = False
             try:
                 try:
@@ -164,6 +168,7 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
                             auto_status="Provider does not expose quality availability yet")
                         continue
                     available = None
+
                 if available is not None and (not available or (quality and quality not in available)):
                     target = f"S{int(season):02d}E{int(episode):02d}: " if season is not None else ""
                     found = ", ".join(available) if available else "no video available"
@@ -172,14 +177,18 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
                                                  auto_all_seasons=item.auto_all_seasons).update(
                         auto_status=f"{target}Waiting for {quality or 'video availability'} (found: {found})")
                     continue
+                
                 # A user can pause/change the watchlist while the provider is responding.
                 current = WatchlistItem.objects.filter(pk=item.pk, auto_enabled=True,
                     preferred_quality=quality, auto_season=item.auto_season,
                     auto_all_seasons=item.auto_all_seasons).first()
+                
                 if current is None:
                     return
+                
                 if key in (current.auto_completed or {}):
                     continue
+                
                 future = _run_download_in_thread(
                     item.source_alias, payload,
                     season=str(season) if season is not None else None,
@@ -188,8 +197,7 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
                     _metadata=seasons,
                 )
                 WatchlistItem.objects.filter(pk=item.pk).update(auto_status="Queued / downloading")
-                future.add_done_callback(lambda result, pk=item.pk, k=key, r=reservation, q=quality:
-                                         _record_result(result, pk, k, r, q))
+                future.add_done_callback(lambda result, pk=item.pk, k=key, r=reservation, q=quality: _record_result(result, pk, k, r, q))
                 handed_off = True
             except Exception as exc:
                 logger.warning("Quality check failed for %s S%s E%s: %s", item.name, season, episode, exc)

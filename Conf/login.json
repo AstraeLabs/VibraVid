@@ -23,6 +23,7 @@
     "paramountplus": {
     },
     "disney": {
-        "token": ""
+        "token": "",
+        "refresh_token": ""
     }
 }

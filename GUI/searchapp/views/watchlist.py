@@ -157,15 +157,18 @@ def update_watchlist_auto(request: HttpRequest, item_id: int) -> HttpResponse:
         season = int(scope) if scope and scope != "all" and not item.is_movie else None
         if auto_enabled and not item.is_movie and not (all_seasons or season is not None):
             raise ValueError("Select a season or all seasons.")
+        
     except (ValueError, TypeError) as exc:
         messages.error(request, str(exc))
         return redirect("watchlist")
+    
     item.preferred_quality = quality
     item.auto_enabled = auto_enabled
     item.auto_season = season if auto_enabled else None
     item.auto_all_seasons = all_seasons if auto_enabled else False
     item.auto_status = "Waiting for next check" if auto_enabled else "Paused"
     item.save(update_fields=["preferred_quality", "auto_enabled", "auto_season", "auto_all_seasons", "auto_status"])
+    
     messages.success(request, "Watchlist quality and monitoring updated.")
     return redirect("watchlist")
 

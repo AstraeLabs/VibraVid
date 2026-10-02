@@ -63,8 +63,6 @@ class DownloadTracker(metaclass=SingletonMeta):
 
     def _history_file_path(self) -> str:
         from VibraVid.utils import config_manager
-        # The GUI only uses this file as an outage fallback for its database; keeping it
-        # apart from the CLI's history.json stops CLI downloads leaking into the GUI.
         name = "history_gui.json" if self._django_enabled() else "history.json"
         return os.path.join(config_manager.base_path, ".cache", name)
 

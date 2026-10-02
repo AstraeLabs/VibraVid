@@ -1,3 +1,22 @@
+## CookieInspector: what the buttons do
+
+Most services below need data copied from your logged-in browser session. The
+[CookieInspector] extension (from DISCORD) does it in a few clicks. Open the service's site,
+log in, click the extension icon, then use:
+
+| Button | What it reads | Used for |
+|--------|---------------|----------|
+| **GET COOKIES** | The cookies of the current site | Crunchyroll, Discovery+, HBO Max, Prime Video, Apple TV |
+| **GET STORAGE** | Everything in the page's `localStorage` | Anything else you need to look up by hand |
+| **GET TOKEN** | Only `access_token` / `refresh_token`, found inside the page's `localStorage` | Disney+ |
+
+- The **filter** box keeps only the keys (or values) containing your text, e.g. `st`, and **COPY JSON**
+  copies exactly what is shown.
+- **COPY JSON** puts the JSON on a single line, so it can be pasted straight into `Conf/login.json`
+  without breaking it.
+
+---
+
 ## Crunchyroll: Get Cookies via Extension
 
 ### Prerequisites
@@ -37,13 +56,50 @@
 ### Steps
 
 1. **Open** [Discovery+](https://play.discoveryplus.com/) and **log in**.
-2. **Open Developer Tools** (<kbd>F12</kbd>).
-3. Navigate to the **Application** tab → **Cookies**.
-4. **Search for** `st` cookie.
-5. **Copy the value** of the `st` token.
+2. **Click** the CookieInspector extension icon, then **GET COOKIES**.
+3. **Click** "Copy JSON" and add it to `Conf/login.json` (only the `st` cookie is used):
+   ```json
+   "discoveryplus": <paste_copied_json_here>
+   ```
+
+Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application** tab → **Cookies**, search for
+the `st` cookie and copy its value into `"discoveryplus": {"st": "<value>"}`.
 
 ### Screenshot Reference
 ![st location](assets/login/discoveryplus_eu_st.png)
+
+---
+
+## HBO Max
+
+### Steps
+
+1. **Open** [HBO Max](https://play.hbomax.com/) and **log in**.
+2. **Click** the CookieInspector extension icon, then **GET COOKIES**.
+3. **Click** "Copy JSON" and add it to `Conf/login.json` (only the `st` and `session` cookies are used):
+   ```json
+   "hbomax": <paste_copied_json_here>
+   ```
+
+Without the extension, copy the `st` cookie value by hand as shown for Discovery+ and write it to
+`"hbomax": {"st": "<value>"}`.
+
+---
+
+## Disney+
+
+### Steps
+
+1. **Open** [Disney+](https://www.disneyplus.com/) and **log in**.
+2. **Click** the CookieInspector extension icon, then **GET TOKEN**. It reads the session out of the
+   page's storage and shows only `access_token` and `refresh_token`.
+3. **Click** "Copy JSON" and add it to `Conf/login.json`:
+   ```json
+   "disney": <paste_copied_json_here>
+   ```
+
+Disney+ accepts `access_token` or `token` for the session token, and uses `refresh_token` to renew it. After the
+first run the renewed values are saved back to the same `disney` section.
 
 ---
 

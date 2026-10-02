@@ -11,7 +11,7 @@ from VibraVid.utils.http_client import create_client
 from .client import get_api, hub_search
 from .downloader import download_film, download_series
 
-indice = 16
+indice = 15
 _useFor = "Serie"
 _region = ["IT"]
 msg = Prompt()

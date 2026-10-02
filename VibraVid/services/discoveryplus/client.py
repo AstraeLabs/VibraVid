@@ -74,20 +74,7 @@ class DiscoveryPlus:
         # Final headers for all subsequent requests
         self.headers = self.base_headers.copy()
         self.headers["Authorization"] = f"Bearer {self.access_token}"
-
-        # Announced only now: the resolver needs base_url and headers, which the bootstrap above builds.
-        print_login(ACCOUNT if self.cookies.get("st") else ANONYMOUS, resolver=self._account_name)
-
-    def _account_name(self) -> str:
-        """Account name behind the ST token, via the tenant's own /users/me."""
-        with create_client(headers=self.headers, cookies=self.cookies) as client:
-            response = client.get(f"{self.base_url}/users/me")
-        response.raise_for_status()
-        attributes = (response.json().get("data") or {}).get("attributes") or {}
-        # `username` is the login email; firstName/lastName are the display name when it is set.
-        return attributes.get("username") or " ".join(
-            part for part in (attributes.get("firstName"), attributes.get("lastName")) if part
-        )
+        print_login(ACCOUNT if self.cookies.get("st") else ANONYMOUS)
 
     def _playback_info_request(self, edit_id: str, cdms: list[dict]) -> dict:
         """One playbackInfo call, requesting only the given DRM system(s)."""

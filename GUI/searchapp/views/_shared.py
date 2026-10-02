@@ -237,6 +237,7 @@ def _run_download_in_thread(
     if quality and not get_api(site).supports_quality_discovery:
         logger.warning("%s cannot honor a chosen quality; ignoring %s", site, quality)
         quality = None
+    
     name = item_payload.get('name', 'Unknown')
     if season and episodes:
         title = f"{name} - S{season} E{episodes}"

@@ -21,6 +21,7 @@ _TRAILING_NUM = re.compile(r"[\s\-_]+\d{1,2}$")
 
 _cache: dict[str, tuple[float, frozenset]] = {}
 _cache_lock = threading.Lock()
+_probe_cache: dict[tuple, str] = {}
 
 
 def _norm(name: str) -> str:
@@ -72,11 +73,6 @@ def _video_files(directory: Path):
                 yield path
 
 
-# (path, size, mtime_ns) -> confirmed resolution label. A file is re-probed only
-# when it changes, so periodic watchlist scans don't spawn ffprobe per episode.
-_probe_cache: dict[tuple, str] = {}
-
-
 def _probed_quality(path: Path, before: os.stat_result) -> str:
     """Resolution label of a fully written video, or '' when it can't be confirmed."""
     from VibraVid.core.utils.resolution import classify_resolution
@@ -85,6 +81,7 @@ def _probed_quality(path: Path, before: os.stat_result) -> str:
     signature = (str(path), before.st_size, before.st_mtime_ns)
     if signature in _probe_cache:
         return _probe_cache[signature]
+    
     try:
         result = subprocess.run(
             [get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
@@ -93,10 +90,12 @@ def _probed_quality(path: Path, before: os.stat_result) -> str:
         )
         if result.returncode:
             return ""
+        
         info = json.loads(result.stdout)
         video = next(iter(info.get("streams", [])), {})
         actual = classify_resolution(video.get("width", 0), video.get("height", 0))
         after = path.stat()
+        
         if (actual and float(info.get("format", {}).get("duration") or 0) > 0
                 and (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns)):
             _probe_cache[signature] = actual

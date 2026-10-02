@@ -209,8 +209,7 @@ Recommended full configuration (covers general content, anime, and niche service
     "animeworld",
     "crunchyroll",
     "primevideo",
-    "tubitv",
-    "mostraguarda"
+    "tubitv"
 ]
 ```
 
