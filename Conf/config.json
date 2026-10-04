@@ -27,7 +27,7 @@
         "auto_select": true,
         "use_curl_cffi_segments": false,
         "delay_after_download": 0,
-        "thread_count": 5,
+        "thread_count": 10,
         "max_speed_mbps": 0,
         "segment_delay_seconds": 0,
         "segment_delay_jitter_seconds": 0,
