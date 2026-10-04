@@ -6,7 +6,8 @@ import logging
 import os
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.db import close_old_connections
 from django.utils import timezone
@@ -175,7 +176,9 @@ def _normalize_external_id(value) -> str | None:
     if value in (None, "") or isinstance(value, bool):
         return None
     value = str(value).strip()
-    return value or None
+
+    # Sonarr/Radarr use 0 for "no id"; it is never a real TMDB/TVDB/IMDB id.
+    return value if value and value != "0" else None
 
 
 def _series_tmdb_id(series: dict, fallback_tmdb_id=None) -> str | None:
@@ -417,6 +420,23 @@ def _skip_unmonitored_movie(radarr, item: dict, context: str) -> bool:
     _skip_pending_queue(item, "Radarr movie is unmonitored")
     logger.info(f"{context} Movie '{item.get('title')}' is unmonitored in Radarr, skipping")
     return True
+
+
+def _episode_has_aired(episode: dict) -> bool:
+    """True when Sonarr gives the episode an air date that is not in the future."""
+    air_date = episode.get("airDateUtc")
+    if not air_date:
+        return False
+    
+    try:
+        aired_at = datetime.fromisoformat(str(air_date).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    
+    if aired_at.tzinfo is None:
+        aired_at = aired_at.replace(tzinfo=dt_timezone.utc)
+    
+    return aired_at <= timezone.now()
 
 
 def _skip_unmonitored_episode(sonarr, item: dict, season: dict, episode: dict, context: str) -> bool:
@@ -720,6 +740,9 @@ def trigger_webhook_sync(event_data: dict) -> int:
         # Seerr/Overseerr payload format
         media_type = media.get("media_type", "").lower()  # "movie" or "tv"
         tmdb_id = media.get("tmdbId")
+        # Seerr sends the TVDB id too: use it, TMDB often has no TVDB link for the show and
+        # Sonarr may have no TMDB id for it.
+        tvdb_id = _normalize_external_id(media.get("tvdbId"))
         media_title = media.get("title", "")
         logger.info("[trigger_webhook_sync] Detected Seerr payload format")
     elif series:
@@ -947,8 +970,8 @@ def trigger_webhook_sync(event_data: dict) -> int:
             logger.error(f"[trigger_webhook_sync] Failed to get episodes: {exc}", exc_info=True)
             return trigger_polling_sync(full_resync=True)
 
-        # Filter: monitored episodes without files
-        missing_eps = [e for e in episodes if e.get("monitored") and not e.get("hasFile")]
+        # Filter: monitored, already aired episodes without files
+        missing_eps = [e for e in episodes if e.get("monitored") and not e.get("hasFile") and _episode_has_aired(e)]
 
         if not missing_eps:
             logger.info(f"[trigger_webhook_sync] Series '{matched['title']}' has no monitored episodes without files")
@@ -1109,8 +1132,8 @@ def trigger_sonarr_webhook_sync(event_data: dict) -> int:
             logger.error(f"[Sonarr WH] Failed to get episodes for series {series_id}: {exc}", exc_info=True)
             return trigger_polling_sync(full_resync=True)
 
-        # Filter: monitored episodes without files
-        missing_eps = [e for e in episodes if e.get("monitored") and not e.get("hasFile")]
+        # Filter: monitored, already aired episodes without files
+        missing_eps = [e for e in episodes if e.get("monitored") and not e.get("hasFile") and _episode_has_aired(e)]
 
         if not missing_eps:
             logger.info(f"[Sonarr WH] Series '{serie['title']}' has no monitored episodes without files")

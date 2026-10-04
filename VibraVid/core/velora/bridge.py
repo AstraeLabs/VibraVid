@@ -1,5 +1,6 @@
 # 01.04.26
 
+import functools
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ _EVENT_CB_LOCK = threading.Lock()
 _PROGRESS_CB_LOCK = threading.Lock()
 DEFAULT_WAIT_TIMEOUT_SECONDS = 900.0
 SPEED_WINDOW_SECONDS = 3.0
+MAX_SPEED_MIN_VERSION = (2, 2, 0)
 
 
 def _safe_event_cb(event_cb: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
@@ -195,6 +197,19 @@ def _format_bridge_event(event: dict[str, Any]) -> str:
         return f"CANCELLED {label} | {event.get('message', 'Cancellation requested')}"
 
     return f"{event_name.upper() or 'EVENT'} {label} | {event}"
+
+
+
+@functools.lru_cache(maxsize=1)
+def velora_supports_max_speed() -> bool:
+    """Whether the installed Velora binary understands the plan's `max_speed_bytes_per_sec` (>= 2.2.0)."""
+    try:
+        out = subprocess.run([get_velora_path(), "--version"], capture_output=True, text=True, timeout=5)
+        version = json.loads((out.stdout or out.stderr).strip().splitlines()[0]).get("version", "")
+        return tuple(int(part) for part in version.split(".")[:3]) >= MAX_SPEED_MIN_VERSION
+    except Exception as exc:
+        logger.debug(f"Could not determine the Velora version: {exc}")
+        return False
 
 
 def _normalize_event_task_key(event: dict[str, Any]) -> dict[str, Any]:

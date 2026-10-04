@@ -255,6 +255,16 @@ Without `path_mapping`, VibraVid reports `/media/Media/Film/my-movie` to Radarr.
 
 Each key is a prefix as seen by VibraVid; the value is the equivalent prefix inside the Radarr/Sonarr container. Entries are checked in order and the first matching prefix is replaced. Leave `path_mapping` as `{}` when both services share the same filesystem view.
 
+## Season mapping (Sonarr → provider)
+
+Sonarr and the provider sometimes number the same series differently (e.g. Sonarr `S17`, provider `S14`). VibraVid fixes this automatically, with no configuration, when a `TMDB_API_KEY` is set:
+
+- **Missing TMDB id**: if Sonarr has none, VibraVid finds it on TMDB by matching the season's air dates with Sonarr's.
+- **Conflicting ids**: if Sonarr's TMDB id and the one behind its TVDB id differ, the one that airs the same episodes on the same days is used. If neither or both do, the download is refused.
+- **Season not on the provider**: the TMDB episode titles are matched with the provider's seasons to find the right season and episode (Sonarr `S17E02` → provider `S14E02`).
+
+The file is downloaded with the provider's numbering, renamed to Sonarr's (`S17E02`) and imported into the right episode. If the provider has no such season and the match is not clear, the episode is skipped (`season_not_available`) instead of downloading a different season. Anime providers are excluded: they have one entry per season.
+
 ## Sonarr workflow
 
 For series, VibraVid ARR can:
@@ -292,6 +302,12 @@ so the final file on disk always follows **your** naming configuration in Sonarr
     Enable "Rename Episodes" / "Rename Movies" in Sonarr/Radarr if you want clean, consistent
     filenames. VibraVid logs a one-time warning per ARR sync when it detects this setting is
     off.
+
+    To enable it, open Sonarr/Radarr -> **Settings -> Media Management**, turn on **Rename
+    Episodes** (Sonarr) or **Rename Movies** (Radarr) in the naming section, then **Save**.
+    Renaming only works if Sonarr/Radarr can write to the media folder: run VibraVid with the
+    same `PUID`/`PGID` as Sonarr/Radarr, otherwise the rename fails with `Permission denied`
+    and the raw filename stays.
 
 ## Recommended setup
 

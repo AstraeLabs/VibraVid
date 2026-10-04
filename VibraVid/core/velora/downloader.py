@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
-from VibraVid.core.velora.bridge import run_download_plan
+from VibraVid.core.velora.bridge import run_download_plan, velora_supports_max_speed
 from VibraVid.core.velora.curl_bridge import run_download_plan_curl_cffi
 from VibraVid.core.velora.subtitle import download_external_tracks_with_progress
 from VibraVid.setup import get_flux_path
@@ -44,6 +44,8 @@ SEGMENT_DELAY_JITTER_SECONDS = max(0.0, config_manager.config.get_float("DOWNLOA
 class MediaDownloader(
     LiveDownloadMixin, VodStreamMixin, MultiPeriodMixin, DecryptPipelineMixin, IsmPostprocMixin, BaseMediaDownloader
 ):
+    _max_speed_warned = False  # warn once per process when --max-speed can't be honoured
+
     def __init__(
         self,
         url: str,
@@ -477,12 +479,22 @@ class MediaDownloader(
                 "headers": headers,
                 "tasks": tasks,
             }
+            use_curl_cffi = config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
+            max_speed_bps = int(config_manager.config.get_float("DOWNLOAD", "max_speed_mbps", default=0.0) * 1_000_000)
+            if max_speed_bps > 0:
+                
+                # Older Velora builds reject plan fields they don't know, so only send it to one that supports it
+                if use_curl_cffi or velora_supports_max_speed():
+                    plan["max_speed_bytes_per_sec"] = max_speed_bps
+                elif not MediaDownloader._max_speed_warned:
+                    MediaDownloader._max_speed_warned = True
+                    console.print("[yellow]--max-speed ignored: the installed Velora is older than 2.2.0 (update it with --binary-update). Downloading without a speed limit.")
+            
             if stream is not None and not stream.estimated_size:
                 stream.compute_estimated_size()
             
             known_total = int(getattr(stream, "estimated_size", 0) or 0) if stream else 0
             known_exact = bool(getattr(stream, "estimated_size_exact", False)) if stream else True
-            use_curl_cffi = config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
             backend = run_download_plan_curl_cffi if use_curl_cffi else run_download_plan
             results = backend(plan, progress_cb=progress_cb, event_cb=event_cb, stop_check=stop_check or self._stop_check, known_total=known_total, known_exact=known_exact)
             return [Path(item["path"]) for item in results if item.get("path")]

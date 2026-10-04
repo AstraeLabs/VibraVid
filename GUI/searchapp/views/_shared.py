@@ -256,7 +256,12 @@ def _run_download_in_thread(
                 api = get_api(site)
                 media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
                 metadata = api.get_series_metadata(media_item) or []
-            selected = next((s for s in metadata if str(s.number) == str(season)), None)
+            
+            # Same reading as the downloader: a 1-based position in the list first, then a season number.
+            position = int(season)
+            selected = metadata[position - 1] if 1 <= position <= len(metadata) else next(
+                (s for s in metadata if str(s.number) == str(season)), None
+            )
             count = selected.episode_count if selected else 0
             if count:
                 planned = set()

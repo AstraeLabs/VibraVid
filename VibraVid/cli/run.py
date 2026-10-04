@@ -185,6 +185,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--close-console", dest="close_console", type=str, choices=["true", "false"],metavar="true|false", help="Exit after last download (overrides config)")
     dl_opts.add_argument("--no-vault-cache", dest="bypass_vault_cache", action="store_const", const=True, default=None, help="Bypass DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)")
     dl_opts.add_argument("--http-version", dest="http_version", choices=["1.1", "2", "3"], default=None, help="HTTP version Velora uses for segment downloads (default: 1.1 — safest for ~99%% of CDNs). Use 2 for CDNs with aggressive anti-bot fingerprinting that block HTTP/1.1-only ALPN (e.g. phncdn/Pornhub)")
+    dl_opts.add_argument("--max-speed", dest="max_speed_mbps", type=float, metavar="MB/s", default=None, help="Cap the segment download rate in MB/s (0 = unlimited). Applies to each stream (video/audio) separately. Useful for CDNs that throttle clients exceeding a speed threshold")
     dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
     dl_opts.add_argument("--no-livemux", dest="no_livemux", action="store_true", help="Disable the streaming-mux fast path for this run and always fall back to the normal post-download join_media() pass. Fast path is on by default")
     dl_opts.add_argument("--livemux", dest="force_livemux", action="store_true", help="Force-enable the streaming-mux fast path for this run even if the current service does not opt in via _live_mux = True. Off by default")
@@ -290,6 +291,7 @@ def apply_config_updates(args):
         "subtitle": "DOWNLOAD.select_subtitle",
         "use_proxy": "REQUESTS.use_proxy",
         "use_curl_cffi": "DOWNLOAD.use_curl_cffi_segments",
+        "max_speed_mbps": "DOWNLOAD.max_speed_mbps",
         "write_sidecars": "DOWNLOAD.write_sidecars",
         "metadata_provider": "DEFAULT.metadata_provider",
         "proxy_scope": "REQUESTS.proxy_scope",

@@ -21,6 +21,11 @@ _ARR_SEARCH_TIMEOUT = 45
 
 class ArrDownloaderService:
     """Downloads media by invoking VibraVid's native streaming API pipeline."""
+    _ORIGINAL_LANGUAGE_CODES = {
+        "italian": "it", "english": "en", "french": "fr", "german": "de", "spanish": "es", "portuguese": "pt", "japanese": "ja", "korean": "ko", "chinese": "zh", "russian": "ru",
+    }
+    _GENERIC_EPISODE_NAME = re.compile(r"^(episodio|episode|ep|puntata)?\s*\d*$")
+
 
     def __init__(self, sonarr: SonarrClient, radarr: RadarrClient):
         self.sonarr = sonarr
@@ -29,6 +34,10 @@ class ArrDownloaderService:
         self.download_timeout = self._load_download_timeout()
         self._sonarr_season_format: str | None = None
         self._provider_tmdb_cache: dict[tuple, str] = {}
+        self._provider_season_cache: dict[tuple, dict[int, dict[int, str]] | None] = {}
+        self._provider_season_order: dict[tuple, list[str]] = {}
+        self._tmdb_season_names_cache: dict[tuple, dict[int, str]] = {}
+        self._air_date_tmdb_cache: dict[tuple, int | None] = {}
         self._sonarr_rename_checked = False
         self._radarr_rename_checked = False
 
@@ -43,7 +52,6 @@ class ArrDownloaderService:
             return 7200
 
     # ── public ───────────────────────────────────────────
-
     def download(self, item: dict) -> bool:
         """Dispatch a single missing item (serie or movie) to VibraVid's pipeline."""
         content_type = item.get("content_type")
@@ -56,7 +64,6 @@ class ArrDownloaderService:
             return False
 
     # ── serie ────────────────────────────────────────────
-
     def _process_serie(self, serie: dict) -> bool:
         from searchapp.views import _run_download_in_thread
 
@@ -68,6 +75,11 @@ class ArrDownloaderService:
         any_success = False
 
         tmdb_id = self._resolve_request_tmdb_id(serie, "tv")
+        if not tmdb_id and self.last_error != "external_id_conflict" and serie.get("seasons"):
+            tmdb_id = self._resolve_tmdb_id_by_air_dates(serie, serie["seasons"][0]["number"])
+            if tmdb_id:
+                serie["tmdbId"] = tmdb_id
+        
         if self._strict_tmdb_matching_enabled() and not tmdb_id:
             logger.error(f"[_process_serie] '{title}' has no resolvable TMDB id; refusing title/year matching")
             self.last_error = self.last_error or "tmdb_id_missing"
@@ -122,9 +134,30 @@ class ArrDownloaderService:
                 # "Part 2", ...) need the absolute Sonarr episode number translated
                 # into that entry's own local numbering (see _disambiguate_split_cour).
                 provider_episode = item_payload.pop("_provider_local_episode", None)
-                download_episode = provider_episode if provider_episode is not None else ep_num
+                provider_season, mapped_episode, mapped = season_num, ep_num, False
+                if not mapped and provider_episode is None:
+                    # No explicit mapping: only when the provider has no such season at all,
+                    # look the episode up by its TMDB title in the provider's other seasons.
+                    auto = self._auto_map_by_episode_names(provider, item_payload, tmdb_id, season_num, ep_num)
+                    if auto:
+                        provider_season, mapped_episode = auto
+                        mapped = True
+                    elif self._provider_lacks_season(provider, item_payload, season_num):
+                        # Providers silently fall back to another season when the requested one
+                        # does not exist: importing that file would attach the wrong episode.
+                        logger.error(
+                            f"✖️ '{provider}' has no season {season_num} of '{title}' "
+                            f"and no match by episode titles: skipping S{season_num}E{ep_num}"
+                        )
+                        self.last_error = "season_not_available"
+                        continue
+
+                download_episode = provider_episode if provider_episode is not None else mapped_episode
                 if provider_episode is not None:
                     logger.info(f"[S{season_num}E{ep_num}] split-cour: downloading as local episode {provider_episode}")
+                
+                if mapped:
+                    logger.info(f"[auto_map] Sonarr S{season_num}E{ep_num} -> provider '{provider}' S{provider_season}E{download_episode}")
 
                 # Use Sonarr's path for the series, fallback to OUTPUT config root
                 series_root = serie.get("path", "")
@@ -146,10 +179,11 @@ class ArrDownloaderService:
                     logger.info(f"[S{season_num}E{ep_num}] Download folder (VibraVid path): '{download_folder}'")
 
                 # Download directly to VibraVid's equivalent path
+                download_started = time.time()
                 future = _run_download_in_thread(
                     site=provider,
                     item_payload=item_payload,
-                    season=str(season_num),
+                    season=self._provider_season_selector(provider, item_payload, provider_season),
                     episodes=str(download_episode),
                     media_type="Serie",
                     output_path=download_folder,
@@ -159,6 +193,20 @@ class ArrDownloaderService:
                 try:
                     future.result(timeout=self.download_timeout)  # wait for download to actually finish
                     time.sleep(2)
+
+                    # The file is named after the provider's numbering (e.g. S14E02) but lives in
+                    # Sonarr's season folder: renumber it, otherwise Sonarr's parser would import it
+                    # as the wrong episode (the provider's S14E02 also exists in Sonarr).
+                    renumbered = True
+                    if mapped:
+                        renumbered = bool(
+                            self._renumber_downloaded_files(
+                                download_folder,
+                                download_started,
+                                (provider_season, download_episode),
+                                (season_num, ep_num),
+                            )
+                        )
 
                     # Get series root path for rescan
                     series_root = serie.get("path", "")
@@ -175,13 +223,17 @@ class ArrDownloaderService:
                         continue
 
                     # A plain rescan is enough whenever the file name parses (i.e. carries SxxExx).
-                    try:
-                        self.sonarr.command_rescan_series(serie["id"])
-                        logger.info(f"Rescan issued for S{season_num}E{ep_num}")
-                    except Exception as scan_exc:
-                        logger.warning(f"Rescan failed: {scan_exc}")
+                    # A mapped file that could not be renumbered must not be rescanned: Sonarr would
+                    # parse the provider's numbering and attach it to the wrong episode.
+                    imported = False
+                    if renumbered:
+                        try:
+                            self.sonarr.command_rescan_series(serie["id"])
+                            logger.info(f"Rescan issued for S{season_num}E{ep_num}")
+                        except Exception as scan_exc:
+                            logger.warning(f"Rescan failed: {scan_exc}")
 
-                    imported = self._wait_episode_has_file(ep_id, attempts=6)
+                        imported = self._wait_episode_has_file(ep_id, attempts=6)
 
                     # VibraVid names its output after the scraped title, which frequently has no
                     # SxxExx marker, so Sonarr's parser rejects it. Import explicitly by
@@ -197,7 +249,9 @@ class ArrDownloaderService:
                         if fallback_folder and fallback_folder != target_folder:
                             scan_folders.append(self._translate_path(fallback_folder))
                         logger.warning(f"S{season_num}E{ep_num} not imported by rescan, falling back to manual import from {scan_folders}")
-                        imported = self._confirm_episode_import(serie["id"], ep_id, scan_folders=scan_folders)
+                        imported = self._confirm_episode_import(
+                            serie["id"], ep_id, scan_folders=scan_folders, force_episode=mapped
+                        )
 
                     if not imported:
                         logger.error(f"S{season_num}E{ep_num} import not confirmed in Sonarr")
@@ -222,7 +276,6 @@ class ArrDownloaderService:
         return any_success
 
     # ── movie ────────────────────────────────────────────
-
     def _process_movie(self, movie: dict) -> bool:
         from searchapp.views import _run_download_in_thread
 
@@ -344,7 +397,6 @@ class ArrDownloaderService:
             return False
 
     # ── helpers ──────────────────────────────────────────
-
     def _is_radarr_movie_still_monitored(self, movie_id: int | None) -> bool:
         """Read Radarr live state before starting a movie download."""
         if not self.radarr or not movie_id:
@@ -403,6 +455,267 @@ class ArrDownloaderService:
         if reverse:
             logger.info(f"[path_map] No reverse mapping matched '{path}', leaving it unchanged")
         return path
+
+    # ── TMDB id from air dates (only when Sonarr/TVDB/IMDb give no TMDB id) ──
+    @staticmethod
+    def _air_dates_match(sonarr_dates: dict[int, str], tmdb_dates: dict[int, str]) -> bool:
+        """True when TMDB's season airs the same episodes on the same days (+/- 1 day) as Sonarr's."""
+        overlap = [n for n in sonarr_dates if n in tmdb_dates]
+        if len(overlap) < min(2, len(sonarr_dates)) or not overlap:
+            return False
+        try:
+            return all(
+                abs((datetime.date.fromisoformat(sonarr_dates[n][:10]) - datetime.date.fromisoformat(tmdb_dates[n][:10])).days) <= 1
+                for n in overlap
+            )
+        except ValueError:
+            return False
+
+    def _sonarr_air_dates(self, series_id: int, season_num: int) -> dict[int, str]:
+        return {
+            int(e["episodeNumber"]): e["airDate"]
+            for e in self.sonarr.get_episodes_for_series(series_id)
+            if e.get("seasonNumber") == season_num and e.get("airDate")
+        }
+
+    def _tmdb_air_dates(self, tmdb, tmdb_id: int, season_num: int) -> dict[int, str]:
+        details = tmdb._make_request(f"tv/{tmdb_id}/season/{season_num}", {"language": "it"})
+        return {int(e["episode_number"]): e["air_date"] for e in details.get("episodes", []) if e.get("air_date")}
+
+    def _resolve_identity_conflict(self, serie: dict, candidates: list[int]) -> int | None:
+        """Sonarr's tmdbId and the TMDB id behind its tvdbId disagree: keep the one that really airs
+        Sonarr's episodes on the same days, if exactly one does."""
+        tmdb = self._tmdb_client()
+        series_id = serie.get("id")
+        season_num = next((s["number"] for s in serie.get("seasons", []) if s.get("episodes")), None)
+        if not tmdb or not tmdb.api_key or not series_id or season_num is None or not self.sonarr:
+            return None
+        try:
+            sonarr_dates = self._sonarr_air_dates(series_id, season_num)
+            accepted = []
+            for candidate in candidates:
+                try:
+                    if self._air_dates_match(sonarr_dates, self._tmdb_air_dates(tmdb, candidate, season_num)):
+                        accepted.append(candidate)
+                except Exception:
+                    continue  # candidate has no such season
+        except Exception as exc:
+            logger.warning(f"[tmdb_dates] Could not check the identity of '{serie.get('title')}': {exc}")
+            return None
+        if len(accepted) != 1:
+            return None
+        
+        logger.info(f"[tmdb_dates] '{serie.get('title')}': Sonarr ids conflict {candidates}; TMDB tv/{accepted[0]} season {season_num} is the one airing the same episodes on the same days")
+        return accepted[0]
+
+    def _resolve_tmdb_id_by_air_dates(self, serie: dict, season_num: int) -> int | None:
+        """Find the TMDB id of a Sonarr series that has none, proving it with air dates."""
+        tmdb = self._tmdb_client()
+        series_id = serie.get("id")
+        if not tmdb or not tmdb.api_key or not series_id or not self.sonarr:
+            return None
+        cache_key = (series_id, season_num)
+        if cache_key in self._air_date_tmdb_cache:
+            return self._air_date_tmdb_cache[cache_key]
+
+        resolved = None
+        try:
+            sonarr_dates = self._sonarr_air_dates(series_id, season_num)
+            if sonarr_dates:
+                params = {
+                    "air_date.gte": min(sonarr_dates.values())[:10],
+                    "air_date.lte": min(sonarr_dates.values())[:10],
+                    "include_null_first_air_dates": "false",
+                    "language": "it",
+                }
+                language_name = str((self.sonarr.get_series_by_id(series_id).get("originalLanguage") or {}).get("name", "")).lower()
+                if language_name in self._ORIGINAL_LANGUAGE_CODES:
+                    params["with_original_language"] = self._ORIGINAL_LANGUAGE_CODES[language_name]
+
+                candidates = []
+                for page in (1, 2, 3):
+                    data = tmdb._make_request("discover/tv", {**params, "page": page})
+                    candidates.extend(r["id"] for r in data.get("results", []))
+                    if page >= int(data.get("total_pages", 1)):
+                        break
+
+                accepted = []
+                for candidate in candidates:
+                    try:
+                        tmdb_dates = self._tmdb_air_dates(tmdb, candidate, season_num)
+                    except Exception:
+                        continue  # candidate has no such season
+                    if self._air_dates_match(sonarr_dates, tmdb_dates):
+                        accepted.append(int(candidate))
+
+                if len(accepted) == 1:
+                    resolved = accepted[0]
+
+                elif accepted:
+                    logger.warning(f"[tmdb_dates] Ambiguous TMDB ids {accepted} for '{serie.get('title')}' S{season_num}")
+        except Exception as exc:
+            logger.warning(f"[tmdb_dates] Could not resolve TMDB id for '{serie.get('title')}': {exc}")
+
+        if resolved:
+            logger.info(f"[tmdb_dates] '{serie.get('title')}' has no TMDB id in Sonarr; TMDB tv/{resolved} season {season_num} fails the same episodes on the same days")
+        self._air_date_tmdb_cache[cache_key] = resolved
+        return resolved
+
+    @classmethod
+    def _comparable_name(cls, name: str | None) -> str:
+        """Normalized episode title, or '' for empty/generic names ("Episodio 3", "TBA")."""
+        normalized = cls._normalize_title(name or "")
+        if not normalized or normalized == "tba" or cls._GENERIC_EPISODE_NAME.match(normalized):
+            return ""
+        return normalized
+
+    @classmethod
+    def _match_episode_by_names(
+        cls, provider_seasons: dict[int, dict[int, str]], tmdb_names: dict[int, str], ep_num: int
+    ) -> tuple[int, int] | None:
+        """Find the provider (season, episode) of TMDB episode ``ep_num`` by comparing titles."""
+        tmdb_norm = {n: cls._comparable_name(name) for n, name in tmdb_names.items()}
+        scores: list[tuple[int, int, int]] = []  # (score, season, offset)
+        for season, episodes in provider_seasons.items():
+            provider_norm = {n: cls._comparable_name(name) for n, name in episodes.items()}
+            span = max([*tmdb_norm, *provider_norm, 1])
+            for offset in range(-span, span + 1):
+                score = sum(
+                    1 for n, name in tmdb_norm.items() if name and provider_norm.get(n + offset) == name
+                )
+                if score:
+                    scores.append((score, season, offset))
+        
+        if not scores:
+            return None
+        
+        scores.sort(reverse=True)
+        best_score, best_season, best_offset = scores[0]
+        if best_score < 2 or any(s == best_score for s, _, _ in scores[1:]):
+            return None
+        
+        target = ep_num + best_offset
+        if target not in provider_seasons[best_season]:
+            return None
+        
+        return best_season, target
+
+    def _provider_season_names(self, provider: str, item_payload: dict) -> dict[int, dict[int, str]] | None:
+        """{season: {episode: title}} as exposed by the provider, or None if unavailable."""
+        key = (provider, str(item_payload.get("id") or item_payload.get("url") or item_payload.get("name")))
+        if key in self._provider_season_cache:
+            return self._provider_season_cache[key]
+        
+        seasons = None
+        try:
+            from searchapp.api import get_api
+            from searchapp.api.base import Entries
+
+            media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
+            metadata = get_api(provider).get_series_metadata(media_item) or []
+            self._provider_season_order[key] = [str(s.number) for s in metadata]
+            seasons = {
+                int(s.number): {int(e.number): e.name for e in (s.episodes or [])}
+                for s in metadata
+                if str(s.number).isdigit()
+            } or None
+        except Exception as exc:
+            logger.debug(f"[auto_map] Could not read '{provider}' season metadata: {exc}")
+        self._provider_season_cache[key] = seasons
+        return seasons
+
+    def _provider_season_selector(self, provider: str, item_payload: dict, season_num: int) -> str:
+        """Season value to hand to the downloader for the provider's season ``season_num``."""
+        if provider in {"animeunity", "animeworld"}:
+            return str(season_num)
+        
+        self._provider_season_names(provider, item_payload)
+        key = (provider, str(item_payload.get("id") or item_payload.get("url") or item_payload.get("name")))
+        order = self._provider_season_order.get(key) or []
+        wanted = str(season_num)
+
+        if wanted not in order:
+            return wanted
+        
+        position = order.index(wanted) + 1
+        if position != season_num:
+            logger.info(f"[auto_map] '{provider}' lists season {season_num} at position {position}: selecting it by position")
+
+        return str(position)
+
+    def _tmdb_season_names(self, tmdb_id: int, season_num: int) -> dict[int, str]:
+        key = (int(tmdb_id), season_num)
+        if key not in self._tmdb_season_names_cache:
+            names: dict[int, str] = {}
+            tmdb = self._tmdb_client()
+            if tmdb and tmdb.api_key:
+                try:
+                    details = tmdb._make_request(f"tv/{tmdb_id}/season/{season_num}", {"language": "it"})
+                    names = {int(e["episode_number"]): e.get("name") or "" for e in details.get("episodes", [])}
+                except Exception as exc:
+                    logger.debug(f"[auto_map] TMDB season {season_num} of tv/{tmdb_id} unavailable: {exc}")
+            self._tmdb_season_names_cache[key] = names
+        return self._tmdb_season_names_cache[key]
+
+    def _provider_lacks_season(self, provider: str, item_payload: dict, season_num: int) -> bool:
+        """True when the provider lists its seasons and ``season_num`` is not among them."""
+        if provider in {"animeunity", "animeworld"}:
+            return False
+        provider_seasons = self._provider_season_names(provider, item_payload)
+        return bool(provider_seasons) and season_num not in provider_seasons
+
+    def _auto_map_by_episode_names(
+        self, provider: str, item_payload: dict, tmdb_id: int | None, season_num: int, ep_num: int
+    ) -> tuple[int, int] | None:
+        """Resolve the provider (season, episode) when the provider has no season ``season_num``"""
+        if not tmdb_id:
+            return None
+        
+        provider_seasons = self._provider_season_names(provider, item_payload)
+        if not provider_seasons or season_num in provider_seasons:
+            return None
+        
+        tmdb_names = self._tmdb_season_names(tmdb_id, season_num)
+        if ep_num not in tmdb_names:
+            return None
+        
+        match = self._match_episode_by_names(provider_seasons, tmdb_names, ep_num)
+        if match:
+            logger.info(f"[auto_map] '{provider}' has no season {season_num}; TMDB S{season_num}E{ep_num} '{tmdb_names[ep_num]}' -> provider S{match[0]}E{match[1]} (season matched by episode titles)")
+        else:
+            logger.warning(f"[auto_map] '{provider}' has no season {season_num} and no unambiguous title match for S{season_num}E{ep_num}")
+        
+        return match
+
+    @staticmethod
+    def _renumber_downloaded_files(
+        folder: str, since: float, provider_numbering: tuple[int, int], sonarr_numbering: tuple[int, int]
+    ) -> int:
+        """Rename files written after ``since`` from the provider's SxxExx to Sonarr's."""
+        provider_season, provider_ep = provider_numbering
+        sonarr_season, sonarr_ep = sonarr_numbering
+        marker = re.compile(rf"(?<![A-Za-z0-9])S0*{provider_season}E0*{provider_ep}(?![0-9])", re.IGNORECASE)
+        replacement = f"S{sonarr_season:02d}E{sonarr_ep:02d}"
+        renamed = 0
+
+        try:
+            for entry in pathlib.Path(folder).iterdir():
+                if not entry.is_file() or entry.stat().st_mtime < since - 2 or not marker.search(entry.name):
+                    continue
+
+                target = entry.with_name(marker.sub(replacement, entry.name, count=1))
+                if target.exists():
+                    logger.warning(f"[auto_map] Cannot rename '{entry.name}': '{target.name}' already exists")
+                    continue
+
+                entry.rename(target)
+                logger.info(f"[auto_map] Renamed '{entry.name}' -> '{target.name}'")
+                renamed += 1
+        except OSError as exc:
+            logger.warning(f"[auto_map] Could not renumber files in '{folder}': {exc}")
+        if not renamed:
+            logger.warning(f"[auto_map] No downloaded file in '{folder}' carried S{provider_season}E{provider_ep}")
+        return renamed
 
     @staticmethod
     def _tmdb_client():
@@ -476,10 +789,15 @@ class ArrDownloaderService:
                     else:
                         normalized_tvdb_tmdb = self._normalize_tmdb_id(resolved_from_tvdb)
                         if normalized_tvdb_tmdb and normalized_tvdb_tmdb != direct:
-                            logger.error(
-                                f"[tmdb_request] Conflicting Sonarr identity for '{item.get('title')}': "
-                                f"tmdbId={direct}, but tvdbId={tvdb_id} maps to TMDB tv/{normalized_tvdb_tmdb}"
+                            winner = self._resolve_identity_conflict(
+                                item, [int(direct), int(normalized_tvdb_tmdb)]
                             )
+
+                            if winner:
+                                item["tmdbId"] = winner
+                                return winner
+                            
+                            logger.error(f"[tmdb_request] Conflicting Sonarr identity for '{item.get('title')}': tmdbId={direct}, but tvdbId={tvdb_id} maps to TMDB tv/{normalized_tvdb_tmdb}")
                             self.last_error = "external_id_conflict"
                             return None
 
@@ -627,6 +945,14 @@ class ArrDownloaderService:
         if len(sw) <= 2:
             return ratio == 1.0
         return ratio >= 0.5
+
+    @classmethod
+    def _titles_plausible(cls, title: str, result_name: str) -> bool:
+        """`_titles_are_compatible`, plus exact equality for titles without any word over 3 letters."""
+        normalized = cls._normalize_title(title)
+        return bool(normalized) and (
+            normalized == cls._normalize_title(result_name) or cls._titles_are_compatible(title, result_name)
+        )
 
     @staticmethod
     def _normalize_title(title: str) -> str:
@@ -911,26 +1237,29 @@ class ArrDownloaderService:
 
                     result_tmdb = self._resolve_provider_tmdb_id(api, r, provider, media_type)
                     if not result_tmdb:
+                        # The request's own id is only lent to this result, so it proves nothing
+                        # about identity: the title has to vouch for it.
+                        if not self._titles_plausible(title, r_name):
+                            logger.warning(
+                                f"[title_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id "
+                                f"and the title is too different from '{title}'"
+                            )
+                            continue
+
                         result_tmdb = self._resolve_provider_tmdb_id_via_request_external_id(
                             r, media_type, imdb_id=imdb_id, tvdb_id=tvdb_id
                         )
+
                     if not result_tmdb:
-                        logger.warning(
-                            f"[tmdb_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id"
-                        )
+                        logger.warning(f"[tmdb_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id")
                         continue
+
                     if result_tmdb != expected_tmdb_str:
-                        logger.warning(
-                            f"[tmdb_check] SKIP '{r_name}' ({r_year}) — "
-                            f"{media_type} tmdb_id mismatch: got={result_tmdb} expected={expected_tmdb_str}"
-                        )
+                        logger.warning(f"[tmdb_check] SKIP '{r_name}' ({r_year}) — {media_type} tmdb_id mismatch: got={result_tmdb} expected={expected_tmdb_str}")
                         continue
 
                     best = r
-                    logger.info(
-                        f"[tmdb_check] MATCH '{r_name}' ({r_year}) — "
-                        f"identity=({media_type}, {result_tmdb})"
-                    )
+                    logger.info(f"[tmdb_check] MATCH '{r_name}' ({r_year}) — identity=({media_type}, {result_tmdb})")
                     break
             else:
                 # Legacy matching is intentionally retained only when no TMDB
@@ -940,6 +1269,7 @@ class ArrDownloaderService:
                         season_int = int(season_number)
                     except (TypeError, ValueError):
                         season_int = 0
+                    
                     if season_int > 1:
                         expected_season_title = self._normalize_title(f"{title} {season_int}")
                         best = next(
@@ -954,10 +1284,7 @@ class ArrDownloaderService:
                         if best:
                             logger.info(f"[search] ACCEPT '{best.name}' — season-specific anime match for S{season_int}")
                         else:
-                            logger.warning(
-                                f"[search] No season-specific anime result for S{season_int} on '{provider}', "
-                                "rejecting generic results"
-                            )
+                            logger.warning(f"[search] No season-specific anime result for S{season_int} on '{provider}', rejecting generic results")
                             return None
 
                 for r in results:
@@ -1356,7 +1683,12 @@ class ArrDownloaderService:
         return ""
 
     def _confirm_episode_import(
-        self, series_id: int, episode_id: int, scan_folders: list | None = None, season_folder: str | None = None
+        self,
+        series_id: int,
+        episode_id: int,
+        scan_folders: list | None = None,
+        season_folder: str | None = None,
+        force_episode: bool = False,
     ) -> bool:
         """Try to import episode files from each candidate folder into Sonarr."""
         # Back-compat: accept the old season_folder kwarg
@@ -1376,7 +1708,7 @@ class ArrDownloaderService:
 
                     # Sonarr cannot infer the episode from a name without SxxExx: bind it
                     # to the episode we just downloaded.
-                    episodes = [ep for ep in item.get("episodes", []) if ep.get("id")]
+                    episodes = [] if force_episode else [ep for ep in item.get("episodes", []) if ep.get("id")]
                     if not episodes:
                         episodes = [{"id": episode_id}]
 

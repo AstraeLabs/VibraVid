@@ -303,6 +303,7 @@ S%(season:02d)/     ->  season folder   S01/
     "use_curl_cffi_segments": false,
     "delay_after_download": 0,
     "thread_count": 5,
+    "max_speed_mbps": 0,
     "segment_delay_seconds": 0,
     "segment_delay_jitter_seconds": 0,
     "subtitle_resolve_workers": 4,
@@ -329,6 +330,7 @@ S%(season:02d)/     ->  season folder   S01/
 | `delay_after_download` | `0` | Delay (seconds) applied after each movie or episode download |
 | `skip_download` | `false` | Skip the download step and process existing files |
 | `thread_count` | `5` | Number of concurrent segment requests for a single stream |
+| `max_speed_mbps` | `0` | Cap on the segment download rate in MB/s, applied to each stream (video/audio) separately; `0` = unlimited. Overridable per run with `--max-speed`. |
 | `subtitle_resolve_workers` | `4` | Number of HLS subtitle renditions resolved/downloaded concurrently. `1` restores the original strictly-sequential behaviour |
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 closed captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download |
 | `cleanup_tmp_folder` | `true` | Remove temporary files after download |

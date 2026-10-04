@@ -17,8 +17,8 @@ import django
 
 django.setup()
 
-from GUI.searchapp import _download_infra as infra
-from GUI.searchapp.views import dashboard
+from searchapp import _download_infra as infra
+from searchapp.views import dashboard
 
 
 def _reset_queue_state():

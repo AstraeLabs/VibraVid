@@ -1,4 +1,37 @@
-from GUI.searchapp.views import _shared
+# ruff: noqa: E402
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GUI_DIR = ROOT / "GUI"
+for path in (ROOT, GUI_DIR):
+    value = str(path)
+    if value not in sys.path:
+        sys.path.insert(0, value)
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "webgui.settings")
+
+import django
+
+django.setup()
+
+import pytest
+
+from searchapp.views import _shared
+from VibraVid.core.ui.tracker import ContextTracker, context_tracker
+
+
+@pytest.fixture(autouse=True)
+def _restore_context_tracker():
+    """Running a GUI download flips process-wide GUI mode on; don't leak it into other tests."""
+    saved_global = ContextTracker._global_is_gui
+    saved_local = dict(context_tracker.local.__dict__)
+    yield
+    ContextTracker._global_is_gui = saved_global
+    context_tracker.local.__dict__.clear()
+    context_tracker.local.__dict__.update(saved_local)
 
 
 class _FailedProvider:

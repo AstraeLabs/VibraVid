@@ -22,6 +22,21 @@ _GLOBAL_CONCURRENCY_LIMIT = max(1, config_manager.config.get_int("DOWNLOAD", "th
 _global_semaphore = threading.BoundedSemaphore(_GLOBAL_CONCURRENCY_LIMIT)
 
 
+class _RateLimiter:
+    def __init__(self, bytes_per_sec: int):
+        self._bytes_per_sec = float(bytes_per_sec)
+        self._next_free = time.monotonic()
+        self._lock = threading.Lock()
+
+    def throttle(self, nbytes: int) -> None:
+        with self._lock:
+            now = time.monotonic()
+            start = max(self._next_free, now)
+            self._next_free = start + nbytes / self._bytes_per_sec
+        if start > now:
+            time.sleep(start - now)
+
+
 def _get_thread_client(timeout: float, verify: bool, proxy_url: str | None):
     client = getattr(_thread_local, "client", None)
     if client is not None:
@@ -33,7 +48,7 @@ def _get_thread_client(timeout: float, verify: bool, proxy_url: str | None):
     return client
 
 
-def _fetch_one(task: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+def _fetch_one(task: dict[str, Any], plan: dict[str, Any], limiter: _RateLimiter | None = None) -> dict[str, Any]:
     """Fetch a single segment with retry/backoff, mirroring the Velora plan's retry fields."""
     url = task.get("url", "")
     path = task.get("path", "")
@@ -66,6 +81,8 @@ def _fetch_one(task: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
                                 continue
                             f.write(chunk)
                             written += len(chunk)
+                            if limiter:
+                                limiter.throttle(len(chunk))
                 finally:
                     response.close()
 
@@ -116,6 +133,8 @@ def run_download_plan_curl_cffi(
         return []
 
     concurrency = max(1, int(plan.get("concurrency") or 1))
+    max_speed = int(plan.get("max_speed_bytes_per_sec") or 0)
+    limiter = _RateLimiter(max_speed) if max_speed > 0 else None
 
     parent_dirs = {Path(task["path"]).parent for task in tasks if task.get("path")}
     for parent_dir in parent_dirs:
@@ -132,7 +151,7 @@ def run_download_plan_curl_cffi(
 
     executor = ThreadPoolExecutor(max_workers=min(concurrency, total))
     try:
-        futures = {executor.submit(_fetch_one, task, plan): task for task in tasks}
+        futures = {executor.submit(_fetch_one, task, plan, limiter): task for task in tasks}
 
         for future in as_completed(futures):
             if stop_check and stop_check():

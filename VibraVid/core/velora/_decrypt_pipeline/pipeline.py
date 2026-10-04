@@ -289,6 +289,7 @@ class DecryptPipelineMixin(
                     "headers": all_headers,
                     "retry_count": RETRY_COUNT,
                     "timeout_seconds": float(REQUEST_TIMEOUT),
+                    "max_speed_bytes_per_sec": int(config_manager.config.get_float("DOWNLOAD", "max_speed_mbps", default=0.0) * 1_000_000),
                 }
 
                 logger.warning(f"{len(fallback_tasks)} segment(s) exhausted the primary backend's retries -- falling back to curl_cffi for up to {RETRY_COUNT} more attempt(s) each")
