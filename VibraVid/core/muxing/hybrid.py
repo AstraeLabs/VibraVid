@@ -128,6 +128,13 @@ def probe_media_file(file_path: str) -> dict[str, Any]:
     except Exception as exc:
         logger.debug(f"Hybrid stream probe failed for {file_obj}: {exc}")
         return probe
+    finally:
+        try:
+            import signal as _signal
+
+            _signal.set_wakeup_fd(-1)
+        except Exception:
+            pass
 
     video_stream = next((item for item in stream_info if item.type.lower() == "video"), None)
     if video_stream:

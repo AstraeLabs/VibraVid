@@ -36,6 +36,7 @@ SKIP_DOWNLOAD = config_manager.config.get_bool("DOWNLOAD", "skip_download")
 DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
 SPEED_WINDOW_SECONDS = 1.0
 LIVE_DECRYPT_MIN_SIZE = 25 * 1024 * 1024
+RETRY_COUNT = config_manager.config.get_int("REQUESTS", "max_retry")
 
 
 class MP4FileDownloader:
@@ -122,6 +123,7 @@ class MP4FileDownloader:
         self._total: int | None = None
         self._downloaded: int = 0
         self._incomplete_err: Any = False
+        self._retryable_error: bool = False
         self._speed_window: deque[tuple[float, int]] = deque()
 
         # Live fMP4 decrypt (see util._live_frag_mp4): decrypts fragment-by-fragment
@@ -218,7 +220,7 @@ class MP4FileDownloader:
 
         download_tracker.start_download(
             self.download_id,
-            os.path.basename(self.path),
+            context_tracker.title or os.path.basename(self.path),
             self.site_name or "Unknown",
             self.media_type,
             path=os.path.abspath(self.path),
@@ -460,31 +462,63 @@ class MP4FileDownloader:
         logger.info(f"Probe: encrypted ({scheme or 'unknown'}, DRM=[{drm_label}]) — no manual key, none in vault.")
 
     def _stream_to_disk(self, client, headers: dict, bar_mgr: DownloadBarManager) -> None:
-        response = client.get(self.url, stream=True)
-        try:
-            response.raise_for_status()
-            self._total = self._parse_content_length(response)
-            self._downloaded = 0
-            self._incomplete_err = False
-            self._probe_buf = bytearray()
+        """Stream the file to disk, with resume support and retry on transient errors."""
+        attempt = 0
+        while True:
+            resume_from = self._downloaded
+            req_headers = {"Range": f"bytes={resume_from}-"} if resume_from else None
+            mode = "ab" if resume_from else "wb"
 
-            if self._total is None:
-                logger.error("No Content-Length — streaming until connection closes.")
+            response = client.get(self.url, headers=req_headers, stream=True)
+            try:
+                if resume_from and response.status_code == 200:
+                    # Server ignored the Range request -- the only safe option is a full restart.
+                    logger.warning("Resume request was not honoured (got 200, not 206) — restarting the download from byte 0.")
+                    resume_from = 0
+                    self._downloaded = 0
+                    mode = "wb"
 
-            live_worth_it = self._total is None or self._total >= LIVE_DECRYPT_MIN_SIZE
-            with open(self._temp_path, "wb") as fh:
-                # In-flight fragment decrypt is automatic: wire it whenever we have
-                # keys and the stream is worth it; LiveFragMp4Decryptor inspects
-                # the box structure and self-abandons (feed() -> False) for
-                # anything that isn't a real self-initializing fMP4, letting the
-                # post-download decrypt pass take over. `skip_post_decrypt` is the
-                # debug override that disables every decrypt path.
-                if live_worth_it and PostDownloadDecryptor.has_keys(self.key) and not context_tracker.skip_decrypt:
-                    out_dir = Path(self._temp_path).resolve().parent
-                    self._live_frag = LiveFragMp4Decryptor(fh, self.key, out_dir, on_chunk=self._on_clear_chunk)
-                self._write_chunks(fh, response, bar_mgr, time.time(), bar_mgr)
-        finally:
-            response.close()
+                response.raise_for_status()
+
+                if resume_from == 0:
+                    self._total = self._parse_content_length(response)
+                    if self._total is None:
+                        logger.error("No Content-Length — streaming until connection closes.")
+
+                self._incomplete_err = False
+                self._retryable_error = False
+                self._probe_buf = bytearray()
+
+                live_worth_it = self._total is None or self._total >= LIVE_DECRYPT_MIN_SIZE
+                use_live_frag = (
+                    resume_from == 0
+                    and live_worth_it
+                    and PostDownloadDecryptor.has_keys(self.key)
+                    and not context_tracker.skip_decrypt
+                )
+                with open(self._temp_path, mode) as fh:
+                    # In-flight fragment decrypt is automatic
+                    if use_live_frag:
+                        out_dir = Path(self._temp_path).resolve().parent
+                        self._live_frag = LiveFragMp4Decryptor(fh, self.key, out_dir, on_chunk=self._on_clear_chunk)
+                    self._write_chunks(fh, response, bar_mgr, time.time(), bar_mgr)
+            finally:
+                response.close()
+
+            if not self._retryable_error:
+                return
+
+            # A connection error while live fMP4 decrypt was engaged isn't safe to resume mid-stream
+            if self._live_frag is not None or attempt >= RETRY_COUNT:
+                self._interrupt.kill_download = True
+                return
+
+            attempt += 1
+            backoff = min(2.0 * attempt, 10.0)
+            downloaded_str = internet_manager.format_file_size(self._downloaded)
+            logger.warning(f"Connection error — retrying download {attempt}/{RETRY_COUNT} in {backoff:.0f}s, resuming from {downloaded_str}")
+            console.print(f"[yellow]Connection error — retrying ({attempt}/{RETRY_COUNT}), resuming from {downloaded_str}...")
+            time.sleep(backoff)
 
     @staticmethod
     def _parse_content_length(response) -> int | None:
@@ -543,8 +577,8 @@ class MP4FileDownloader:
 
         except Exception as exc:
             self._incomplete_err = True
-            self._interrupt.kill_download = True
-            console.print(f"\n[red]Download error: {exc}. Saving partial download.")
+            self._retryable_error = True
+            console.print(f"\n[red]Download error: {exc}.")
 
         finally:
             if self._live_frag is not None:
@@ -619,7 +653,8 @@ class MP4FileDownloader:
 
         # Explicitly cancelled
         if self._incomplete_err == "cancelled":
-            self._complete_tracking(success=False, error="cancelled")
+            gui = bool(context_tracker.is_gui)
+            self._complete_tracking(success=False, error="Stopped by user" if gui else "cancelled")
             return None, True, "cancelled"
 
         # Explicit threshold stop requested by user/config
@@ -691,8 +726,12 @@ class MP4FileDownloader:
         # Kodi/Jellyfin .nfo + image next to the final file (opt-in, trusted TMDB match only).
         Sidecars.write_for(self.path, self._sidecar_target)
 
-        # GUI completion
-        self._complete_tracking(success=True, path=os.path.abspath(self.path))
+        # GUI completion: a partial file must never report Done in the GUI.
+        if self._incomplete_err and context_tracker.is_gui:
+            err = self._incomplete_err if isinstance(self._incomplete_err, str) else "Download incomplete"
+            self._complete_tracking(success=False, path=os.path.abspath(self.path), error=err)
+        else:
+            self._complete_tracking(success=True, path=os.path.abspath(self.path))
 
         # Analytics (fire-and-forget)
         claudio_vault.track_download_async(

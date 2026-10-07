@@ -25,10 +25,6 @@
 			Nothing running<em id="cn-hero-sub">Queue is empty</em>
 		</h1>
 
-		<p class="cn-hero-line" id="cn-hero-line">
-			When a download starts you'll find it here, with real-time progress.
-		</p>
-
 		<div class="cn-hero-prog" id="cn-hero-prog" hidden>
 			<div class="cn-hero-fig">
 				<span class="cn-pct" id="cn-hero-pct">0<span>%</span></span>
@@ -343,6 +339,17 @@
 		probe.src = url;
 	}
 
+	function stripMediaExt(name) {
+		return String(name || "").replace(/\.(mkv|mp4|m4v|m4a|avi|ts|m2ts|webm|mov|mp3|aac|flac|ogg|srt|vtt|ass)$/i, "");
+	}
+	function heroTitle(d) {
+		var base = d.series_name || stripMediaExt(d.title) || d.title || "";
+		var s = parseInt(d.season, 10), e = parseInt(d.episode, 10);
+		var suffix = "";
+		if (s > 0 && e > 0 && !/S\d+\s*E\d+/i.test(base)) suffix = " S" + s + " E" + e;
+		else if (s > 0 && !/S\d+/i.test(base)) suffix = " S" + s;
+		return esc(titleize(base)) + esc(suffix);
+	}
 	function renderHero(active) {
 		var prog = document.getElementById("cn-hero-prog");
 		var stop = document.getElementById("cn-hero-stop");
@@ -353,8 +360,6 @@
 			heroId = null;
 			document.getElementById("cn-hero-title").innerHTML =
 				'Nothing running<em id="cn-hero-sub">Queue is empty</em>';
-			document.getElementById("cn-hero-line").textContent =
-				"When a download starts you'll find it here, with real-time progress.";
 			kick.innerHTML = '<span class="cn-st is-wait">Idle</span>';
 			prog.hidden = true;
 			stop.hidden = true;
@@ -375,9 +380,7 @@
 			'<span class="cn-tag" style="color:var(--cn-mute)">' + esc(d.site) +
 			(d.is_anime ? " · anime" : "") + "</span>";
 
-		document.getElementById("cn-hero-title").innerHTML =
-			esc(titleize(d.title));
-		document.getElementById("cn-hero-line").textContent = d.path || "";
+		document.getElementById("cn-hero-title").innerHTML = heroTitle(d);
 
 		document.getElementById("cn-hero-pct").innerHTML = p.toFixed(0) + "<span>%</span>";
 		document.getElementById("cn-hero-of").textContent = d.size || "";

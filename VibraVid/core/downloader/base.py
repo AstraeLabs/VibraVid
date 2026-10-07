@@ -50,6 +50,10 @@ MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg")
 _written_track_files: list[str] = []
 
 
+class DownloadCancelled(RuntimeError):
+    """User-initiated abort (Ctrl+C): unwinds straight to the CLI for a clean exit with no traceback."""
+
+
 class DownloadResult(NamedTuple):
     """Outcome of a downloader ``start()``."""
     path: str | None
@@ -401,18 +405,50 @@ class BaseDownloader:
         except Exception:
             pass
 
+    def _gui_aborted(self) -> bool:
+        """True when the GUI stop button was pressed for this download."""
+        return bool(context_tracker.is_gui and self.download_id and download_tracker.is_stopped(self.download_id))
+
+    def _gui_failed_segments(self) -> int:
+        """Number of segments that failed to download (GUI only, else 0)."""
+        if not context_tracker.is_gui:
+            return 0
+        
+        md = getattr(self, "media_downloader", None)
+        try:
+            return int(getattr(md, "had_failed_segments", 0) or 0)
+        except Exception:
+            return 0
+
     def _check_download_status(self, status: dict) -> "DownloadResult | None":
         """Guard the raw download ``status``: return a terminal DownloadResult for
         a cancelled/empty run, or ``None`` when there is media to mux."""
+        if self._gui_aborted():
+            return self._fail("Stopped by user")
+        
         if status.get("error") == "cancelled":
             return self._fail("cancelled")
+        
         if self._no_media_downloaded(status):
             logger.error("No media downloaded")
             return self._fail("No media downloaded")
+        
+        if self._gui_failed_segments():
+            n = self._gui_failed_segments()
+            logger.error(f"{n} segment(s) failed to download")
+            return self._fail(f"{n} segment(s) failed to download")
         return None
 
     def _merge_and_finalize(self, status: dict) -> "DownloadResult":
         """Mux the downloaded tracks, move to the final path and return the result."""
+        if self._gui_aborted():
+            return self._fail("Stopped by user")
+        
+        if self._gui_failed_segments():
+            n = self._gui_failed_segments()
+            logger.error(f"{n} segment(s) failed to download")
+            return self._fail(f"{n} segment(s) failed to download")
+        
         if self.download_id:
             download_tracker.update_status(self.download_id, "Muxing ...")
 
@@ -420,6 +456,7 @@ class BaseDownloader:
         if not final_file:
             if self.download_id and download_tracker.is_stopped(self.download_id):
                 return self._fail("cancelled")
+            
             merge_error = self.error or "Merge failed"
             logger.error(merge_error)
             return self._fail(merge_error)

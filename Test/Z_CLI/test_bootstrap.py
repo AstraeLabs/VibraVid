@@ -67,6 +67,21 @@ def test_keyboard_interrupt_ends_the_run_cleanly_with_exit_130(calls, capsys):
     assert "Interrupted." in out.out and "Traceback" not in out.err
 
 
+def test_user_cancelled_download_ends_the_run_cleanly_with_exit_130(calls, capsys):
+    from VibraVid.core.downloader.base import DownloadCancelled
+
+    def cancelled():
+        raise DownloadCancelled("Download cancelled by user.")
+
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap.run_guarded(cancelled)
+
+    assert excinfo.value.code == 130
+    assert "pause" not in calls
+    out = capsys.readouterr()
+    assert "cancelled" in out.out.lower() and "Traceback" not in out.err
+
+
 def _fake_module(monkeypatch, name, **attrs):
     module = types.ModuleType(name)
     for key, value in attrs.items():

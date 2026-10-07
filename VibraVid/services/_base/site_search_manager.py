@@ -7,7 +7,7 @@ from typing import Any
 from rich.console import Console
 from rich.prompt import Prompt
 
-from VibraVid.core.downloader.base import DownloadResult
+from VibraVid.core.downloader.base import DownloadCancelled, DownloadResult
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import Entries, EntriesManager, metadata, tmdb_artwork
 from VibraVid.services._base.site_costant import site_constants
@@ -107,9 +107,16 @@ def _handle_download_result(result: Any) -> None:
     """Print a download error message when a downloader returns one."""
     if result is None:
         return
+    
     err = DownloadResult.from_raw(result).error
-    if err:
-        console.print(f"[red]{err}")
+    if not err:
+        return
+    
+    if str(err).strip().lower() == "cancelled":
+        console.print("[yellow]Download cancelled by user.")
+        raise DownloadCancelled("Download cancelled by user.")
+    
+    console.print(f"[red]{err}")
 
 
 def _parse_index_selection(cmd_insert: str, max_count: int) -> list[int]:

@@ -4,20 +4,36 @@ import logging
 import re
 import time
 
+from rich.console import Console
+
 from VibraVid.player.vixcloud import VideoSource
 from VibraVid.services._base import site_constants
 from VibraVid.utils.http_client import create_client, get_userAgent
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 EMBED_HOST = "https://embed.vidrift.net"
 _PRIMARY_PROVIDER = "moviebox"
 _REMAINING_PROVIDERS = ["vaplayer", "vidlove", "vidrock", "castle"]
 _FALLBACK_PROVIDERS = [_PRIMARY_PROVIDER, *_REMAINING_PROVIDERS]
 _PROVIDER_RETRY_DELAY = 1.0
+_MIN_PREFERRED_HEIGHT = 1080
+_PROVIDER_KIND = {
+    "bingr": "embed",
+    "moviebox": "direct",
+    "vaplayer": "embed",
+    "vidlove": "embed",
+    "vidrock": "embed",
+    "castle": "embed",
+    "evion": "embed",
+    "selfhost": "direct",
+}
+
 BINGR_API = "https://api.bingr.one"
 VIXSRC_API = "https://vixsrc.to"
 _AUDIO_LANG_RE = re.compile(r'#EXT-X-MEDIA:TYPE=AUDIO[^\n]*LANGUAGE="([a-z]{3})"[^\n]*URI="([^"]+)"')
+_RESOLUTION_RE = re.compile(r"RESOLUTION=\d+x(\d+)")
 
 
 def base_url() -> str:
@@ -75,6 +91,31 @@ def _embed_headers() -> dict:
     }
 
 
+def _try_server(name: str) -> None:
+    kind = _PROVIDER_KIND.get(name, "embed")
+    console.print(f"[dim]Try server: {name} ({kind})[/dim]")
+
+
+def _manifest_text(url: str) -> str:
+    """Fetch an HLS manifest's raw text, or "" on any failure."""
+    try:
+        with create_client(headers={"user-agent": get_userAgent()}, timeout=8) as client:
+            response = client.get(url)
+        return response.text if response.ok else ""
+    except Exception as e:
+        logger.debug(f"[7Movies] Could not fetch manifest {url}: {e}")
+        return ""
+
+
+def _manifest_max_height(text: str) -> int:
+    heights = [int(h) for h in _RESOLUTION_RE.findall(text)]
+    return max(heights) if heights else 0
+
+
+def _manifest_has_italian(text: str) -> bool:
+    return any(lang == "ita" for lang, _ in _AUDIO_LANG_RE.findall(text))
+
+
 def _boot(tmdb_id: int, media_type: str, season: int | None, episode: int | None) -> dict:
     """Boot the 7Movies embed API to get a playback token and meta data for a movie or episode."""
     token = _get_playback_token(tmdb_id, media_type, season, episode)
@@ -92,27 +133,42 @@ def _boot(tmdb_id: int, media_type: str, season: int | None, episode: int | None
 
 def _fetch_provider_stream(
     token: str, tmdb_id: int, media_type: str, season: int | None, episode: int | None, provider: str
-) -> tuple[str, str] | None:
-    """Fetch a playable stream (url, type) from a specific provider."""
+) -> list[dict]:
+    """Fetch playable candidates from a specific provider: [{"url","type","height","has_ita"}, ...]."""
     path = _source_path(tmdb_id, media_type, season, episode)
     params = {"token": token, "provider": provider}
 
     with create_client(headers=_embed_headers()) as client:
         response = client.get(f"{EMBED_HOST}/api/source/{path}", params=params)
     if not response.ok:
-        return None
+        return []
 
     try:
         data = response.json()
     except ValueError:
-        return None
+        return []
 
-    for stream in data.get("streams") or []:
+    streams = data.get("streams") or []
+    usable = [
+        s for s in streams
+        if (s.get("name") or "").strip().lower().endswith("original") or "italian" in (s.get("name") or "").lower()
+    ] or streams
+
+    candidates = []
+    for stream in usable:
         url = stream.get("url") or stream.get("proxyUrl")
-        if url:
-            url = _abs_embed_url(url)
-            return url, _infer_type(url, stream.get("type"))
-    return None
+        if not url:
+            continue
+        url = _abs_embed_url(url)
+        rungs = stream.get("rungs") or []
+        height = max((r.get("height", 0) for r in rungs), default=0)
+        candidates.append({
+            "url": url,
+            "type": _infer_type(url, stream.get("type")),
+            "height": height,
+            "has_ita": "italian" in (stream.get("name") or "").lower(),
+        })
+    return candidates
 
 
 def _fetch_bingr_stream(tmdb_id: int, media_type: str, season: int | None, episode: int | None) -> tuple[str, str] | None:
@@ -139,28 +195,52 @@ def _fetch_bingr_stream(tmdb_id: int, media_type: str, season: int | None, episo
 
 
 def _resolve_stream(token: str, tmdb_id: int, media_type: str, season, episode, meta: dict) -> tuple[str, str] | None:
-    """Resolve a playable stream (url, type) from the embed API, trying bingr first, then the primary provider,"""
-    result = _fetch_bingr_stream(tmdb_id, media_type, season, episode)
-    if result:
-        return result
+    """Resolve a playable stream (url, type)."""
+    pool: list[dict] = []
 
-    result = _fetch_provider_stream(token, tmdb_id, media_type, season, episode, _PRIMARY_PROVIDER)
-    if result:
-        return result
+    if media_type == "tv":
+        _try_server("bingr")
+    bingr_result = _fetch_bingr_stream(tmdb_id, media_type, season, episode)
+    if bingr_result:
+        bingr_url, bingr_type = bingr_result
+        text = _manifest_text(bingr_url) if bingr_type == "hls" else ""
+        pool.append({
+            "url": bingr_url, "type": bingr_type,
+            "height": _manifest_max_height(text), "has_ita": _manifest_has_italian(text),
+        })
+
+    _try_server("moviebox")
+    moviebox_candidates = _fetch_provider_stream(token, tmdb_id, media_type, season, episode, _PRIMARY_PROVIDER)
+    pool.extend(moviebox_candidates)
+
+    tier1 = [c for c in pool if c["height"] >= _MIN_PREFERRED_HEIGHT and c["has_ita"]]
+    tier2 = [c for c in pool if c["height"] >= _MIN_PREFERRED_HEIGHT]
+    best = max(tier1, key=lambda c: c["height"]) if tier1 else (max(tier2, key=lambda c: c["height"]) if tier2 else None)
+    if best:
+        return best["url"], best["type"]
+
+    # Nothing reached 1080p: same fallback order/behaviour as before.
+    if bingr_result:
+        return bingr_result
+    if moviebox_candidates:
+        return moviebox_candidates[0]["url"], moviebox_candidates[0]["type"]
 
     evion_url = meta.get("evionUrl")
     if evion_url:
+        _try_server("evion")
         return evion_url, _infer_type(evion_url)
 
     for i, provider in enumerate(_REMAINING_PROVIDERS):
         if i > 0:
             time.sleep(_PROVIDER_RETRY_DELAY)
-        result = _fetch_provider_stream(token, tmdb_id, media_type, season, episode, provider)
-        if result:
-            return result
+        _try_server(provider)
+        candidates = _fetch_provider_stream(token, tmdb_id, media_type, season, episode, provider)
+        if candidates:
+            return candidates[0]["url"], candidates[0]["type"]
 
     selfhost_url = meta.get("selfhostUrl")
     if selfhost_url:
+        _try_server("selfhost")
         return _abs_embed_url(selfhost_url), _infer_type(selfhost_url, meta.get("selfhostKind"))
 
     return None
@@ -195,15 +275,10 @@ def _fetch_vixsrc_italian_audio(tmdb_id: int, media_type: str, season: int | Non
     return None
 
 
-def _italian_audio_track(tmdb_id: int, media_type: str, season, episode, manifest_url: str) -> dict | None:
-    """Return a dict with the Italian audio track from vixsrc.to if the stream's own manifest has none, else None."""
-    try:
-        with create_client(headers={"user-agent": get_userAgent()}, timeout=8) as client:
-            response = client.get(manifest_url)
-        if response.ok and any(lang == "ita" for lang, _ in _AUDIO_LANG_RE.findall(response.text)):
-            return None
-    except Exception as e:
-        logger.debug(f"[7Movies] Could not inspect manifest for an existing Italian audio track: {e}")
+def _italian_audio_track(tmdb_id: int, media_type: str, season, episode, manifest_url: str | None) -> dict | None:
+    """Return a dict with the Italian audio track from vixsrc.to if the resolved stream doesn't already
+    carry one, else None. manifest_url is None for a direct mp4 (no manifest to inspect -- always try vixsrc)."""
+    if manifest_url and _manifest_has_italian(_manifest_text(manifest_url)):
         return None
 
     audio_url = _fetch_vixsrc_italian_audio(tmdb_id, media_type, season, episode)
@@ -233,9 +308,10 @@ def get_stream(tmdb_id: int, media_type: str, season: int | None = None, episode
     stream_headers = {"user-agent": get_userAgent(), "referer": f"{EMBED_HOST}/embed2/play"}
 
     extra_tracks = []
-    if stream_type == "hls":
-        italian_track = _italian_audio_track(tmdb_id, media_type, season, episode, stream_url)
-        if italian_track:
-            extra_tracks.append(italian_track)
+    italian_track = _italian_audio_track(
+        tmdb_id, media_type, season, episode, stream_url if stream_type == "hls" else None
+    )
+    if italian_track:
+        extra_tracks.append(italian_track)
 
     return stream_url, stream_headers, stream_type, extra_tracks

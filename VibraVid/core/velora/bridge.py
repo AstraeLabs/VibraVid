@@ -476,10 +476,12 @@ def run_download_plan(
             _safe_event_cb(event_cb, event)
 
         if process is not None:
+            stopped = bool(stop_check and stop_check())
+            wait_timeout = 5.0 if stopped else max(wait_timeout_seconds, 1.0)
             try:
-                return_code = process.wait(timeout=max(wait_timeout_seconds, 1.0))
+                return_code = process.wait(timeout=wait_timeout)
             except subprocess.TimeoutExpired:
-                logger.error(f"Velora wait timeout ({wait_timeout_seconds:.1f}s), terminating process tree")
+                logger.error(f"Velora wait timeout ({wait_timeout:.1f}s), terminating process tree")
                 _terminate_process_tree(process, graceful_timeout=2.0)
                 return_code = process.returncode
             if return_code not in (0, None):
@@ -508,15 +510,15 @@ def run_download_plan(
         # Join reader thread with longer timeout
         if reader_thread and reader_thread.is_alive():
             logger.debug("Waiting for reader thread...")
-            reader_thread.join(timeout=5.0)
+            reader_thread.join(timeout=2.0)
             if reader_thread.is_alive():
-                logger.warning("Reader thread didn't finish in 5s")
+                logger.warning("Reader thread didn't finish in 2s")
 
         # Join stop-watcher thread with longer timeout
         if stop_thread and stop_thread.is_alive():
             logger.debug("Waiting for stop-watcher thread...")
-            stop_thread.join(timeout=5.0)
+            stop_thread.join(timeout=2.0)
             if stop_thread.is_alive():
-                logger.warning("Stop-watcher thread didn't finish in 5s")
+                logger.warning("Stop-watcher thread didn't finish in 2s")
             if stop_thread.is_alive():
                 logger.warning("Stop-watcher thread did not finish within timeout — may be dangling")

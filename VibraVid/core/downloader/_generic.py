@@ -4,7 +4,9 @@ import copy
 import logging
 import os
 import re
+import signal
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -65,6 +67,9 @@ EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
 _MEDIA_TYPES = ("video", "audio", "subtitle")
 _DIRECT_MEDIA_EXTS = (".mp4", ".m4v", ".m4a", ".mp3", ".aac", ".wav")
 _LIVEMUX_WAIT_SECONDS = 1800.0
+_INTERRUPT_WINDOW_SECONDS = 10.0
+_GRACEFUL_JOIN_SECONDS = 15.0
+_GRACEFUL_MUX_WAIT_SECONDS = 60.0
 
 
 def _track_signature(s) -> tuple:
@@ -174,8 +179,145 @@ class Generic_Downloader(BaseDownloader):
         self._direct_streaming_mux_result: str | None = None
         self._pipe_mux_result: str | None = None
 
+        # Ctrl+C state
+        self._graceful_stop = threading.Event()
+        self._force_quit = threading.Event()
+        self._interrupt_lock = threading.Lock()
+        self._interrupt_count = 0
+        self._interrupt_handled = 0
+        self._last_interrupt_time = 0.0
+        self._prev_sigint = None
+        self._prev_sigbreak = None
+        self._interrupt_installed = False
+        self._active_pipe_muxer: NamedPipeMuxer | None = None
+        self._active_direct_relay: ChunkRelay | None = None
+
         logger.info(f"Initialized GENERIC_Downloader with {len(self.sources)} source(s), max_segments={self.max_segments}")
         super().__init__(output_path, "_generic_temp")
+
+    def _install_interrupt_handler(self) -> None:
+        """Catch SIGINT/SIGBREAK in the main thread so the 1st Ctrl+C always prints feedback and stops gracefully."""
+        self._graceful_stop.clear()
+        self._force_quit.clear()
+        with self._interrupt_lock:
+            self._interrupt_count = 0
+            self._interrupt_handled = 0
+            self._last_interrupt_time = 0.0
+        try:
+            if threading.current_thread() is not threading.main_thread():
+                return
+            self._prev_sigint = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, self._on_signal)
+            if os.name == "nt" and hasattr(signal, "SIGBREAK"):
+                try:
+                    self._prev_sigbreak = signal.getsignal(signal.SIGBREAK)
+                    signal.signal(signal.SIGBREAK, self._on_signal)
+                except Exception:
+                    self._prev_sigbreak = None
+            self._interrupt_installed = True
+        except Exception as exc:
+            logger.debug(f"Could not install interrupt handler (non-fatal): {exc}")
+
+    def _restore_interrupt_handler(self) -> None:
+        if not self._interrupt_installed:
+            return
+        try:
+            if self._prev_sigint is not None:
+                signal.signal(signal.SIGINT, self._prev_sigint)
+            if self._prev_sigbreak is not None and os.name == "nt" and hasattr(signal, "SIGBREAK"):
+                signal.signal(signal.SIGBREAK, self._prev_sigbreak)
+        except Exception:
+            pass
+        finally:
+            self._interrupt_installed = False
+
+    def _on_signal(self, signum, frame) -> None:
+        """Flags-only: never block, print, or touch pipe handles here."""
+        now = time.monotonic()
+        with self._interrupt_lock:
+            if now - self._last_interrupt_time > _INTERRUPT_WINDOW_SECONDS:
+                self._interrupt_count = 0
+            self._interrupt_count += 1
+            self._last_interrupt_time = now
+            count = self._interrupt_count
+
+        # Event.set() is the only operation here: lock-free and safe.
+        self._graceful_stop.set()
+        if count >= 2:
+            self._force_quit.set()
+            # Back to default so any further press kills the process immediately.
+            try:
+                signal.signal(signum, signal.SIG_DFL)
+            except Exception:
+                pass
+            self._interrupt_installed = False
+
+    @staticmethod
+    def _announce(text: str, bar_manager=None) -> None:
+        """Show an interrupt notice above the progress bars when Live is active, else plain print."""
+        if bar_manager is not None:
+            try:
+                bar_manager.set_status_text(text)
+                return
+            except Exception:
+                pass
+        console.print(f"\n{text}\n")
+
+    def _drain_interrupt_flags(self, bar_manager=None) -> None:
+        """Run the stop/abort side effects for pressed Ctrl+C, once per press, in normal (non-signal) context."""
+        with self._interrupt_lock:
+            count = self._interrupt_count
+            handled = getattr(self, "_interrupt_handled", 0)
+            if count <= handled:
+                return
+            self._interrupt_handled = count
+
+        if count <= 1:
+            self._announce("[yellow]Ctrl+C pressed: finishing the current segment and merging what was downloaded... (press again within 10s to kill everything)", bar_manager)
+            logger.warning("Interrupt 1/2 — graceful stop, merging partials")
+            self._stop_all()
+            if self._active_pipe_muxer is not None:
+                try:
+                    self._active_pipe_muxer.abort()
+                except Exception:
+                    pass
+            if self._active_direct_relay is not None:
+                try:
+                    self._active_direct_relay.close()
+                except Exception:
+                    pass
+        else:
+            self._announce("[red]Ctrl+C pressed again: force kill, skipping merge.", bar_manager)
+            logger.warning("Interrupt 2/2 — force quit, skipping merge")
+            self._abort_all()
+
+    def _abort_all(self) -> None:
+        """Hard stop: like _stop_all but also flags every MediaDownloader to skip its merge pass."""
+        if self.download_id:
+            download_tracker.request_stop(self.download_id)
+        for md, _ in self._active:
+            try:
+                md._stop_event.set()
+            except Exception:
+                pass
+            try:
+                md._abort_event.set()
+            except Exception:
+                pass
+            try:
+                md._cancel_all_loops()
+            except Exception:
+                pass
+        if self._active_pipe_muxer is not None:
+            try:
+                self._active_pipe_muxer.abort()
+            except Exception:
+                pass
+        if self._active_direct_relay is not None:
+            try:
+                self._active_direct_relay.close()
+            except Exception:
+                pass
 
     def _fetch_manifest_content(self, url: str, headers: dict[str, str]) -> str | None:
         """Fetch raw manifest text (needed only when a source forces a protocol, because the type auto-detection keys off the URL extension)."""
@@ -336,6 +478,7 @@ class Generic_Downloader(BaseDownloader):
         kind = role.split(":")[0]
         ext = os.path.splitext(url.split("?")[0])[1] or ".mp4"
         out_path = os.path.join(entry["out_dir"], f"{self.filename_base}{ext}")
+        logger.info(f"Direct source '{label}' ({kind}) download starting -> {url}")
 
         try:
             path, need_stop, error = MP4_Downloader(
@@ -566,8 +709,9 @@ class Generic_Downloader(BaseDownloader):
         relay, mux_thread = (
             self._launch_streaming_mux_direct(video_entry) if video_entry is not None else (None, None)
         )
+        self._active_direct_relay = relay
 
-        stop_event = threading.Event()
+        stop_event = self._graceful_stop
         results: dict[int, tuple[bool, bool]] = {}
 
         def _run(i: int, entry: dict[str, Any], bm: DownloadBarManager) -> None:
@@ -586,20 +730,30 @@ class Generic_Downloader(BaseDownloader):
                     t.start()
 
                 join_interruptible(threads, stop_event)
+                self._drain_interrupt_flags(bm)
                 bm.finish_all_tasks()
         except KeyboardInterrupt:
+            console.print("\n[yellow]Ctrl+C pressed: finishing the current segment and merging what was downloaded... (press again within 10s to kill everything)\n")
             logger.warning("KeyboardInterrupt — stopping all direct-media sources")
-            stop_event.set()
+            self._stop_all()
             if relay is not None:
                 relay.close()
-            join_interruptible(threads, threading.Event(), hard_timeout=15.0)
+
+            join_interruptible(threads, threading.Event(), hard_timeout=_GRACEFUL_JOIN_SECONDS)
+            if self._force_quit.is_set():
+                return False
+            return True
+        finally:
+            self._active_direct_relay = None
+
+        if self._force_quit.is_set():
             return False
 
         if mux_thread is not None:
-            # All direct sources are done, so the mux worker's own waits resolve almost
-            # immediately from here -- this just waits for it to finish writing the
-            # muxed file (or aborting) before _collect_status()/_merge_files() run.
-            mux_thread.join(timeout=_LIVEMUX_WAIT_SECONDS)
+            if self._graceful_stop.is_set():
+                mux_thread.join(timeout=_GRACEFUL_MUX_WAIT_SECONDS)
+            else:
+                mux_thread.join(timeout=_LIVEMUX_WAIT_SECONDS)
 
         if any(need_stop for _ok, need_stop in results.values()):
             return False
@@ -1111,12 +1265,41 @@ class Generic_Downloader(BaseDownloader):
             required_kids=set(pssh_by_kid.keys()),
         )
 
+    def _gui_cancel_error(self) -> str | None:
+        """``"Stopped by user"`` when the GUI stop button aborted this download, else None.
+
+        Missing data must never report Done in the GUI, while the CLI keeps
+        merging partials on graceful Ctrl+C.
+        """
+        if context_tracker.is_gui and self.download_id and download_tracker.is_stopped(self.download_id):
+            return "Stopped by user"
+        return None
+
+    def _generic_failed_segments(self) -> int:
+        """Number of segments that failed to download across manifest sources (GUI only, else 0)."""
+        if not context_tracker.is_gui:
+            return 0
+        total = 0
+        for md, _ in self._active:
+            try:
+                total += sum(len(failed) for _, failed in (md._failed_segments or []))
+            except Exception:
+                continue
+        return total
+
     def _stop_all(self) -> None:
+        self._graceful_stop.set()
         if self.download_id:
             download_tracker.request_stop(self.download_id)
         for md, _ in self._active:
-            md._stop_event.set()
-            md._cancel_all_loops()
+            try:
+                md._stop_event.set()
+            except Exception:
+                pass
+            try:
+                md._cancel_all_loops()
+            except Exception:
+                pass
 
     def _manifest_streaming_mux_eligible(self) -> bool:
         """True if conditions are met to attempt multi-manifest named-pipe live mux."""
@@ -1169,24 +1352,45 @@ class Generic_Downloader(BaseDownloader):
             logger.warning(f"streaming_mux[pipes]: setup error ({exc!r}) — falling back to normal mux", exc_info=True)
             return None
 
+    @staticmethod
+    def _wait_track_or_abort(md, task_key: str, timeout: float) -> bool:
+        """Wait for a track-done event in short slices so a muxer abort (Ctrl+C) wakes us promptly."""
+        import time as _time
+
+        deadline = _time.monotonic() + max(0.0, timeout)
+        event = md._track_done_event(task_key)
+        while not event.is_set():
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                return False
+            event.wait(timeout=min(0.5, remaining))
+        return True
+
     def _start_pipe_ffmpeg_when_audio_ready(self, muxer: "NamedPipeMuxer") -> None:
+        def _aborted() -> bool:
+            return bool(getattr(muxer, "_failed", None) is not None and muxer._failed.is_set())
+
         audio_paths: list[str] = []
         for md, task_key in muxer.audio_watch:  # type: ignore[attr-defined]
-            if not md._track_done_event(task_key).wait(timeout=1800.0):
+            if _aborted():
+                return
+            if not self._wait_track_or_abort(md, task_key, 1800.0) or _aborted():
                 logger.warning(f"streaming_mux[pipes]: audio {task_key!r} timed out — falling back to normal mux")
                 muxer.abort()
                 return
-            
+
             path = md._get_track_result(task_key)
             if path is None:
                 logger.warning(f"streaming_mux[pipes]: audio {task_key!r} failed — falling back to normal mux")
                 muxer.abort()
                 return
-            
+
             audio_paths.append(str(path))
         sub_paths: list[tuple[int, str]] = []
         for idx, (md, task_key) in enumerate(muxer.sub_watch):  # type: ignore[attr-defined]
-            if not md._track_done_event(task_key).wait(timeout=1800.0):
+            if _aborted():
+                return
+            if not self._wait_track_or_abort(md, task_key, 1800.0) or _aborted():
                 logger.warning(f"streaming_mux[pipes]: subtitle {task_key!r} timed out — leaving it out of live mux")
                 continue
 
@@ -1285,11 +1489,16 @@ class Generic_Downloader(BaseDownloader):
         return muxer
 
     def _run_downloads(self) -> bool:
-        """Download every selected stream of every source concurrently on ONE shared progress bar. Returns False if cancelled (Ctrl+C)."""
+        """Download every selected stream of every source concurrently on ONE shared progress bar.
+
+        Returns True to proceed to the merge (also after a 1st Ctrl+C, so partials get muxed),
+        False only on hard kill (2nd Ctrl+C) or an external stop with nothing to merge.
+        """
         self._preresolve_manifest_keys()
         pipe_muxer: NamedPipeMuxer | None = (
             self._launch_streaming_mux_manifest() if self._manifest_streaming_mux_eligible() else None
         )
+        self._active_pipe_muxer = pipe_muxer
 
         if pipe_muxer is not None:
             threading.Thread(
@@ -1349,7 +1558,7 @@ class Generic_Downloader(BaseDownloader):
                 logger.error(f"Stream download error ({stream.type}/{getattr(stream, 'language', '')}): {exc}", exc_info=True)
 
         bar = DownloadBarManager(self.download_id)
-        stop_event = threading.Event()
+        stop_event = self._graceful_stop
         threads: list[threading.Thread] = []
         try:
             with bar as bm:
@@ -1364,16 +1573,33 @@ class Generic_Downloader(BaseDownloader):
                             t.start()
 
                 join_interruptible(threads, stop_event)
+                self._drain_interrupt_flags(bm)
                 bm.finish_all_tasks()
 
         except KeyboardInterrupt:
+            console.print("\n[yellow]Ctrl+C pressed: finishing the current segment and merging what was downloaded... (press again within 10s to kill everything)\n")
             logger.warning("KeyboardInterrupt — stopping all hybrid sources")
             self._stop_all()
-            stop_event.set()
             if pipe_muxer is not None:
                 pipe_muxer.abort()
-            join_interruptible(threads, threading.Event(), hard_timeout=15.0)
+            join_interruptible(threads, threading.Event(), hard_timeout=_GRACEFUL_JOIN_SECONDS)
+            if self._force_quit.is_set():
+                return False
+            return True
+        finally:
+            self._active_pipe_muxer = None
+
+        if self._force_quit.is_set():
+            if pipe_muxer is not None:
+                pipe_muxer.abort()
             return False
+
+        if self._graceful_stop.is_set():
+            # 1st Ctrl+C via the signal handler: stop downloads, drop the
+            # live fast-path, and let the caller merge the partials.
+            if pipe_muxer is not None:
+                pipe_muxer.abort()
+            return True
 
         if any(md._stop_check() for md, _ in self._active):
             if pipe_muxer is not None:
@@ -1383,7 +1609,7 @@ class Generic_Downloader(BaseDownloader):
         if pipe_muxer is not None:
             for i in range(len(pipe_muxer.pipe_paths)):
                 pipe_muxer.close_writer(i)
-                
+
             mux_result = pipe_muxer.finish()
             if mux_result.ok:
                 self._pipe_mux_result = os_manager.get_sanitize_path(self.output_path)
@@ -1392,6 +1618,107 @@ class Generic_Downloader(BaseDownloader):
                 logger.warning(f"streaming_mux[pipes]: ffmpeg failed ({mux_result.error}) — falling back to normal mux")
                 if mux_result.stderr_tail:
                     logger.warning(f"streaming_mux[pipes]: stderr tail:\n{mux_result.stderr_tail[-500:]}")
+
+        return True
+
+    def _download_mixed_sources(self) -> bool:
+        """Download all selected streams of all sources concurrently, then merge them into a single output file."""
+        self._preresolve_direct_source_keys()
+        self._preresolve_manifest_keys()
+
+        for md, source in self._active:
+            md.set_key(self._pooled_keys)
+            sel = [s for s in md.streams if s.selected and not s.is_external and s.type in _MEDIA_TYPES]
+
+            def _is_encrypted(s) -> bool:
+                drm = getattr(s, "drm", None)
+                try:
+                    return bool(drm and drm.is_encrypted())
+                except Exception:
+                    return False
+
+            encrypted_sel = [s for s in sel if _is_encrypted(s)]
+            label = source.get("label") or (str(source.get("url") or "?")[:60])
+
+            if encrypted_sel and not self._pooled_keys and not source.get("license_url"):
+                kinds = ", ".join(sorted({s.type for s in encrypted_sel}))
+                console.print(
+                    f"[bold red][!] WARNING[/bold red] Source '[yellow]{label}[/yellow]': "
+                    f"{len(encrypted_sel)} encrypted track(s) ([cyan]{kinds}[/cyan]) but no "
+                    f"[bold]key[/bold]/[bold]license_url[/bold] provided - these tracks will stay encrypted."
+                )
+                logger.error(f"Generic source '{label}': encrypted {kinds} stream(s) without key/license — will remain encrypted")
+            elif encrypted_sel and self._pooled_keys and not source.get("license_url"):
+                provided_kids = {kid.lower() for kid, _ in KeysManager.normalize(self._pooled_keys)}
+                for s in encrypted_sel:
+                    track_kids = {k.lower() for k in (s.drm.get_all_kids() if s.drm else [])}
+                    if track_kids and provided_kids.isdisjoint(track_kids):
+                        track_label = f"{s.type} {s.resolution or s.language or ''}".strip()
+                        console.print(f"[bold red][!] WARNING[/bold red] Source '[yellow]{label}[/yellow]': track [yellow]{track_label}[/yellow] needs KID(s) [magenta]{', '.join(track_kids)}[/magenta] ")
+                        logger.error(f"Generic source '{label}': track {track_label} KID(s) {track_kids} not covered by provided keys")
+
+            md._session_live_decrypt = (
+                bool(sel)
+                and not context_tracker.skip_decrypt
+                and all(getattr(s, "supports_live_decryption", False) for s in sel)
+            )
+            md._prepare_labels()
+
+        def _safe_download(md, stream, bm) -> None:
+            label = getattr(stream, "_src_label", "") or stream.type
+            logger.info(f"Manifest source '{label}' ({stream.type}) download starting")
+            try:
+                md._download_stream(stream, bm)
+            except Exception as exc:
+                logger.error(f"Stream download error ({stream.type}/{getattr(stream, 'language', '')}): {exc}", exc_info=True)
+
+        direct_results: dict[int, tuple[bool, bool]] = {}
+
+        def _run_direct(i: int, entry: dict[str, Any], bm: DownloadBarManager) -> None:
+            ok, need_stop = self._download_one_direct_source(entry, bm, None)
+            direct_results[i] = (ok, need_stop)
+            self._mark_track_done(entry["label"], entry.get("result", {}).get("path") if ok else None)
+
+        bar = DownloadBarManager(self.download_id)
+        stop_event = self._graceful_stop
+        threads: list[threading.Thread] = []
+        try:
+            with bar as bm:
+                for md, _ in self._active:
+                    bm.add_prebuilt_tasks(md._get_prebuilt_tasks())
+
+                for i, entry in enumerate(self._direct_sources):
+                    t = threading.Thread(target=_run_direct, args=(i, entry, bm), daemon=True)
+                    threads.append(t)
+                    t.start()
+
+                for md, _ in self._active:
+                    for s in md.streams:
+                        if s.selected and not s.is_external and s.type in _MEDIA_TYPES:
+                            t = threading.Thread(target=_safe_download, args=(md, s, bm), daemon=True)
+                            threads.append(t)
+                            t.start()
+
+                join_interruptible(threads, stop_event)
+                self._drain_interrupt_flags(bm)
+                bm.finish_all_tasks()
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Ctrl+C pressed: finishing the current segment and merging what was downloaded... (press again within 10s to kill everything)\n")
+            logger.warning("KeyboardInterrupt — stopping all mixed sources")
+            self._stop_all()
+            join_interruptible(threads, threading.Event(), hard_timeout=_GRACEFUL_JOIN_SECONDS)
+            if self._force_quit.is_set():
+                return False
+            return True
+
+        if self._force_quit.is_set():
+            return False
+
+        if any(need_stop for _ok, need_stop in direct_results.values()):
+            return False
+
+        if any(md._stop_check() for md, _ in self._active):
+            return False
 
         return True
 
@@ -1494,13 +1821,21 @@ class Generic_Downloader(BaseDownloader):
         return status
 
     def start(self) -> DownloadResult:
+        self._install_interrupt_handler()
         try:
             return self._start()
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupt received — stopping all sources...")
             logger.warning("KeyboardInterrupt during hybrid pipeline")
             self._stop_all()
+            if self._force_quit.is_set():
+                return self._fail("cancelled")
+            
+            # 1st press during merge: fall through to partial merge below
+            # is handled by _start()'s own except; here just cancel.
             return self._fail("cancelled")
+        finally:
+            self._restore_interrupt_handler()
 
     def _start(self) -> DownloadResult:
         if self.file_already_exists:
@@ -1548,17 +1883,34 @@ class Generic_Downloader(BaseDownloader):
         if self.download_id:
             download_tracker.update_status(self.download_id, "Downloading ...")
 
-        if self._direct_sources and not self._download_direct_sources():
-            return self._fail("cancelled")
+        if self._direct_sources and self._active:
+            if not self._download_mixed_sources():
+                return self._fail("cancelled")
+        else:
+            if self._direct_sources and not self._download_direct_sources():
+                return self._fail("cancelled")
 
-        if not self._run_downloads():
-            return self._fail("cancelled")
+            if not self._run_downloads():
+                return self._fail("cancelled")
 
-        # ── 5) Mux
+        # ── 5) Mux (skipped only on 2nd Ctrl+C / hard kill)
+        self._drain_interrupt_flags()
+        if self._force_quit.is_set():
+            return self._fail("cancelled")
+        
+        gui_err = self._gui_cancel_error()
+        if gui_err:
+            return self._fail(gui_err)
+
         status = self._collect_status()
         if self._no_media_downloaded(status):
             logger.error("No media downloaded")
             return self._fail("No media downloaded")
+        
+        if context_tracker.is_gui and self._generic_failed_segments():
+            n = self._generic_failed_segments()
+            logger.error(f"{n} segment(s) failed to download")
+            return self._fail(f"{n} segment(s) failed to download")
 
         if self.download_id:
             download_tracker.update_status(self.download_id, "Muxing ...")
@@ -1569,7 +1921,14 @@ class Generic_Downloader(BaseDownloader):
             streaming_mux_chapters_injected=False,
         )
 
-        final_file = self._merge_files(status)
+        try:
+            final_file = self._merge_files(status)
+        except KeyboardInterrupt:
+            logger.warning("KeyboardInterrupt during merge — aborting without output")
+            self._abort_all()
+            return self._fail("cancelled")
+        if self._force_quit.is_set():
+            return self._fail("cancelled")
         if not final_file:
             return self._fail(self.error or "Merge failed")
 

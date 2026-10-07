@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import signal
 import threading
 import time
 from collections.abc import Callable
@@ -96,6 +97,7 @@ class MediaDownloader(
         # Failed-segment accumulator
         self._failed_segments: list = []
         self._failed_segments_lock = threading.Lock()
+        self.had_failed_segments: int = 0
 
         # Decryption-failure accumulator: per-track records for streams that are still encrypted after decrypt
         self.decrypt_failures: list = []
@@ -249,6 +251,10 @@ class MediaDownloader(
 
                 ext_loop = asyncio.new_event_loop()
                 self._register_loop(ext_loop)
+                try:
+                    signal.set_wakeup_fd(-1)
+                except Exception:
+                    pass
                 _parent_http_version = context_tracker.http_version
 
                 def _run_externals() -> None:
@@ -378,6 +384,8 @@ class MediaDownloader(
 
         if self._failed_segments:
             print_failed_segments_report(self._failed_segments)
+            with self._failed_segments_lock:
+                self.had_failed_segments = sum(len(failed) for _, failed in self._failed_segments)
             self._failed_segments.clear()
 
         self.status = self._build_status(ext_subs, ext_auds)

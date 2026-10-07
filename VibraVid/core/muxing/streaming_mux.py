@@ -145,6 +145,38 @@ class StreamingMuxFeeder:
     def failed(self) -> bool:
         return self._failed.is_set()
 
+    @staticmethod
+    def _join_slice(thread: threading.Thread, timeout: float, poll: float = 0.25) -> bool:
+        """Join in short slices so Ctrl+C stays deliverable; True when finished in time."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            if not thread.is_alive():
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            thread.join(timeout=min(poll, max(0.05, deadline - time.monotonic())))
+
+    def _wait_proc_interruptible(self, timeout: float) -> int | None:
+        """Wait on ffmpeg in 0.5s slices so abort()/Ctrl+C takes effect promptly."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        assert self._proc is not None
+        while True:
+            if self._failed.is_set() and self._proc.poll() is not None:
+                return self._proc.returncode
+            try:
+                return self._proc.wait(timeout=min(0.5, max(0.05, deadline - time.monotonic())))
+            except subprocess.TimeoutExpired:
+                if self._failed.is_set() or time.monotonic() >= deadline:
+                    try:
+                        self._proc.kill()
+                    except OSError:
+                        pass
+                    try:
+                        return self._proc.wait(timeout=10)
+                    except Exception:
+                        return self._proc.returncode
+                continue
+
     def feed(self, data: bytes) -> bool:
         """Queue *data* for ffmpeg's stdin. Returns False if the session has already failed."""
         if self._failed.is_set():
@@ -160,19 +192,17 @@ class StreamingMuxFeeder:
         if self._proc is None:
             return StreamingMuxResult(ok=False, returncode=None, error="never started")
 
-        self._feed_queue.put(_SENTINEL)
-        if self._feeder_thread:
-            self._feeder_thread.join(timeout=self._write_timeout)
-
         try:
-            returncode = self._proc.wait(timeout=self._write_timeout)
-        except subprocess.TimeoutExpired:
-            self._proc.kill()
-            self._proc.wait(timeout=10)
-            returncode = self._proc.returncode
+            self._feed_queue.put(_SENTINEL, timeout=5.0)
+        except queue.Full:
+            self._mark_failed("feed queue full on finish — ffmpeg stalled")
+        if self._feeder_thread:
+            self._join_slice(self._feeder_thread, timeout=self._write_timeout)
+
+        returncode = self._wait_proc_interruptible(self._write_timeout)
 
         if self._stderr_thread:
-            self._stderr_thread.join(timeout=10)
+            self._stderr_thread.join(timeout=2.0)
 
         with self._lock:
             stderr_tail = b"".join(self._stderr_chunks).decode(errors="replace")[-4000:]
@@ -246,9 +276,10 @@ if sys.platform == "win32":
         if not _k32.WriteFile(h, data, len(data), ctypes.byref(n), None):
             raise OSError(f"WriteFile failed: error {ctypes.get_last_error()}")
 
-    def _win_close(h) -> None:
+    def _win_close(h, graceful: bool = True) -> None:
         try:
-            _k32.FlushFileBuffers(h)
+            if graceful:
+                _k32.FlushFileBuffers(h)
             _k32.DisconnectNamedPipe(h)
         except Exception:
             pass
@@ -299,14 +330,14 @@ class _NamedPipe:
             assert self._fh is not None
             self._fh.write(data)
 
-    def close(self) -> None:
+    def close(self, graceful: bool = True) -> None:
         with self._close_lock:
             if self._closed:
                 return
             self._closed = True
         if sys.platform == "win32":
             try:
-                _win_close(self._h)  # type: ignore[name-defined]
+                _win_close(self._h, graceful=graceful)  # type: ignore[name-defined]
             except OSError:
                 pass
         else:
@@ -344,6 +375,8 @@ class NamedPipeMuxer:
 
         self._queues: list[queue.Queue] = [queue.Queue(maxsize=64) for _ in range(n_pipes)]
         self._pipes: list[_NamedPipe] = []
+        self._connect_done: list[threading.Event] = [threading.Event() for _ in range(n_pipes)]
+        self._connect_ok: list[bool] = [False] * n_pipes
         self._proc: subprocess.Popen | None = None
         self._stderr_chunks: list[bytes] = []
         self._stderr_thread: threading.Thread | None = None
@@ -395,20 +428,26 @@ class NamedPipeMuxer:
         pipe = self._pipes[i]
         q = self._queues[i]
 
-        if not pipe.connect():
+        connected = pipe.connect()
+        self._connect_ok[i] = bool(connected)
+        self._connect_done[i].set()
+        if not connected:
             self._mark_failed(f"pipe {i}: connect timed out or cancelled")
             _drain_queue(q)
             return
 
+        deadline = time.monotonic() + 7200.0
         while True:
-            try:
-                # Block indefinitely — close_writer() sends _SENTINEL when the track is done.
-                # Using a large-but-finite timeout so the thread is never permanently stuck
-                # if the caller crashes before calling close_writer().
-                item = q.get(timeout=7200.0)
-            except queue.Empty:
-                self._mark_failed(f"pipe {i}: no data for 2 h — giving up")
+            if self._failed.is_set():
+                _drain_queue(q)
                 break
+            try:
+                item = q.get(timeout=0.5)
+            except queue.Empty:
+                if time.monotonic() >= deadline:
+                    self._mark_failed(f"pipe {i}: no data for 2 h — giving up")
+                    break
+                continue
             if item is _SENTINEL:
                 break
             try:
@@ -418,7 +457,7 @@ class NamedPipeMuxer:
                 _drain_queue(q)
                 break
 
-        pipe.close()
+        pipe.close(graceful=not self._failed.is_set())
 
     def get_writer(self, n: int) -> Callable[[bytes], None]:
         """Return a callable that blocks until space is available in pipe *n*'s queue."""
@@ -451,24 +490,45 @@ class NamedPipeMuxer:
     def finish(self) -> StreamingMuxResult:
         # In deferred mode (prepare() called, start_ffmpeg() runs in a background
         # thread), wait up to 5 min for ffmpeg to start (or for abort() to fire).
-        if not self._ffmpeg_started_event.wait(timeout=300.0):
+        # Poll so abort()/Ctrl+C unblocks finish() instead of sleeping 5 min.
+        _start_deadline = time.monotonic() + 300.0
+        while not self._ffmpeg_started_event.is_set():
+            if self._failed.is_set() or time.monotonic() >= _start_deadline:
+                break
+            self._ffmpeg_started_event.wait(timeout=0.5)
+        if not self._ffmpeg_started_event.is_set() and not self._failed.is_set():
             self._mark_failed("ffmpeg never started — audio timed out")
         if self._proc is None:
             self._cleanup()
             return StreamingMuxResult(ok=False, returncode=None, error=self._fail_reason or "never started")
 
         for t in self._writer_threads:
-            t.join(timeout=self._write_timeout)
+            StreamingMuxFeeder._join_slice(t, timeout=self._write_timeout)
 
+        rc: int | None
         try:
-            rc = self._proc.wait(timeout=self._write_timeout)
-        except subprocess.TimeoutExpired:
-            self._proc.kill()
-            self._proc.wait(timeout=10)
+            _wait_deadline = time.monotonic() + max(0.0, self._write_timeout)
+            while True:
+                try:
+                    rc = self._proc.wait(timeout=0.5)
+                    break
+                except subprocess.TimeoutExpired:
+                    if self._failed.is_set() or time.monotonic() >= _wait_deadline:
+                        try:
+                            self._proc.kill()
+                        except OSError:
+                            pass
+                        try:
+                            rc = self._proc.wait(timeout=10)
+                        except Exception:
+                            rc = self._proc.returncode
+                        break
+                    continue
+        except Exception:
             rc = self._proc.returncode
 
         if self._stderr_thread:
-            self._stderr_thread.join(timeout=10)
+            self._stderr_thread.join(timeout=2.0)
 
         with self._lock:
             stderr_tail = b"".join(self._stderr_chunks).decode(errors="replace")[-4000:]
@@ -484,18 +544,23 @@ class NamedPipeMuxer:
     def abort(self) -> None:
         self._mark_failed("aborted")
         self._ffmpeg_started_event.set()  # unblock finish() in deferred mode
-        for p in self._pipes:
-            try:
-                p.close()
-            except Exception:
-                pass
-        for q in self._queues:
-            _drain_queue(q)
         if self._proc and self._proc.poll() is None:
             try:
                 self._proc.kill()
             except OSError:
                 pass
+        
+        for i, p in enumerate(self._pipes):
+            done = self._connect_done[i] if i < len(self._connect_done) else None
+            if done is not None and not done.is_set():
+                continue
+            try:
+                p.close(graceful=False)
+            except Exception:
+                pass
+        
+        for q in self._queues:
+            _drain_queue(q)
 
     def _mark_failed(self, reason: str) -> None:
         if not self._failed.is_set():

@@ -7,7 +7,7 @@ from typing import Any
 from rich.console import Console
 from rich.prompt import Prompt
 
-from VibraVid.core.downloader.base import DownloadResult
+from VibraVid.core.downloader.base import DownloadCancelled, DownloadResult
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.services._base import tmdb_artwork
 from VibraVid.services._base.tv_display_manager import (
@@ -40,6 +40,11 @@ def _is_user_stop_requested() -> bool:
             pass
 
     return download_tracker.is_stopped(download_id)
+
+
+def _is_cancelled_error(error_msg: str | None) -> bool:
+    """True when a downloader reported a user-initiated abort (exact ``"cancelled"`` error)."""
+    return str(error_msg or "").strip().lower() == "cancelled"
 
 
 def process_season_selection(
@@ -216,6 +221,10 @@ def process_episode_download(
             res = DownloadResult.from_raw(result)
             stopped, error_msg = res.stopped, res.error
 
+            if _is_cancelled_error(error_msg):
+                console.print("[yellow]Download cancelled by user.")
+                raise DownloadCancelled("Download cancelled by user.")
+
             # If callback signalled stop/failure, surface returned error (if any)
             if _is_user_stop_requested() or stopped:
                 if _is_user_stop_requested():
@@ -308,12 +317,17 @@ def process_episode_download(
             res = DownloadResult.from_raw(result)
             stopped, error_msg = res.stopped, res.error
 
+            if _is_cancelled_error(error_msg):
+                console.print("[yellow]Download cancelled by user.")
+                raise DownloadCancelled("Download cancelled by user.")
+
             # If callback signalled stop/failure, surface returned error (if any)
             if stopped or _is_user_stop_requested():
                 if _is_user_stop_requested():
                     break
                 if error_msg:
                     console.print(f"[red]Error: {error_msg}")
+                
                 console.print(f"[yellow]Warning: episode {i_episode} failed for season {index_season_selected}.")
                 failed_episodes.append(i_episode)
                 last_error = error_msg or last_error

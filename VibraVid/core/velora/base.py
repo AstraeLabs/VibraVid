@@ -137,7 +137,12 @@ class BaseMediaDownloader:
                 if config_manager.config.get("OUTPUT", "anime_folder_name") in str(self.output_dir)
                 else "other"
             )
-            download_tracker.start_download(self.download_id, self.filename, self.site_name or "Unknown", _type)
+            download_tracker.start_download(
+                self.download_id,
+                context_tracker.title or self.filename,
+                self.site_name or "Unknown",
+                _type,
+            )
 
     def set_key(self, key: Any) -> None:
         self.key = key.get_keys_list() if isinstance(key, KeysManager) else key

@@ -100,6 +100,7 @@ class DecryptPipelineMixin(
             return
 
         if self._stop_check() or not paths or self._abort_event.is_set():
+            self._record_track_done(task_key, None)
             return
 
         # Derive the merged-file extension from a *media* segment
@@ -118,6 +119,7 @@ class DecryptPipelineMixin(
             success = self._ism_postproc(paths, out_path, stream, bar_manager, task_key, total)
             if not success:
                 logger.error("ISM post‑processing failed")
+                self._record_track_done(task_key, None)
             return
 
         self._merge_track(ctx, paths, out_path, live_merge_ok)
@@ -465,6 +467,20 @@ class DecryptPipelineMixin(
                 stall_rounds = 0
                 failed = new_failed
 
+    @staticmethod
+    def _join_interruptible(thread, timeout: float, poll: float = 0.25) -> bool:
+        """Join *thread* in short slices so Ctrl+C stays deliverable; True when it finished in time."""
+        import time as _time
+
+        deadline = _time.monotonic() + max(0.0, timeout)
+        while True:
+            if not thread.is_alive():
+                return True
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                return not thread.is_alive()
+            thread.join(timeout=min(poll, remaining))
+
     def _stop_decrypt_workers(self, ctx: _SegmentDownloadContext) -> bool:
         """Drain and join the workers, close the decryptors and the live merger; returns True when the live merge produced the whole track."""
         stream = ctx.stream
@@ -474,14 +490,10 @@ class DecryptPipelineMixin(
             for _ in ctx.decrypt_threads:
                 ctx.decrypt_queue.put(None)
             for t in ctx.decrypt_threads:
-                t.join()
+                self._join_interruptible(t, timeout=30.0)
 
         if ctx.mux_setup_thread is not None:
-            # Bounded by _mux_join_timeout (sum of the thread's own per-track
-            # dynamic waits, computed above) -- must join before closing the
-            # merger below so a late attach_feeder() can never race a closed
-            # file handle.
-            ctx.mux_setup_thread.join(timeout=ctx.mux_join_timeout)
+            self._join_interruptible(ctx.mux_setup_thread, timeout=min(ctx.mux_join_timeout, 60.0))
         streaming_feeder = ctx.feeder_box[0]
 
         if ctx.dash_decryptor is not None:

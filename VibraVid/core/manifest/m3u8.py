@@ -28,7 +28,7 @@ console = Console()
 _CC_NAME_RE = re.compile(r"\[CC\]|\bCC\b|closed[- _]captions?|\bSDH\b", re.IGNORECASE)
 _SDH_NAME_RE = re.compile(r"\[SDH\]|\bSDH\b|hearing[- _]impaired|\bHI\b", re.IGNORECASE)
 _FORCED_NAME_RE = re.compile(r"\[forced\]|\bforced\b", re.IGNORECASE)
-_COMPOUND_LANG_RE = re.compile(r"^(.+?)[-_](forced|cc|sdh|hi|default)$", re.IGNORECASE)
+_COMPOUND_LANG_RE = re.compile(r"^(.+?)[-_.]\[?(forced|cc|sdh|hi|default)\]?$", re.IGNORECASE)
 _KEY_LINE_RE = re.compile(r"#EXT-X-(?:SESSION-)?KEY:([^\r\n]+)", re.IGNORECASE)
 _SESSION_KEY_LINE_RE = re.compile(r"#EXT-X-SESSION-KEY:([^\r\n]+)", re.IGNORECASE)
 _KEY_URI_RE = re.compile(r'URI="([^"]+)"', re.IGNORECASE)
@@ -569,11 +569,15 @@ class HLSParser:
             if "describes-music-and-sound" in chars.lower() or "hearing" in chars.lower():
                 s.is_sdh = True
 
-        # is_cc: detect from NAME for TYPE=SUBTITLES
+        # is_cc: detect from the LANGUAGE suffix or NAME for TYPE=SUBTITLES.
+        if not s.is_cc and lang_suffix == "cc":
+            s.is_cc = True
         if not s.is_cc and name and _CC_NAME_RE.search(name):
             s.is_cc = True
 
-        # is_sdh: detect from NAME if not already set via CHARACTERISTICS
+        # is_sdh: detect from the LANGUAGE suffix, NAME, or CHARACTERISTICS
+        if not s.is_sdh and lang_suffix == "sdh":
+            s.is_sdh = True
         if not s.is_sdh and name and _SDH_NAME_RE.search(name):
             s.is_sdh = True
 

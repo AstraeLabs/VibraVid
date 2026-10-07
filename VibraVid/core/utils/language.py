@@ -387,10 +387,10 @@ def resolve_iso639_1(lang: str) -> str:
 
 
 def extract_lang_and_flags(lang_raw: str, track_info: dict = None):
-    """Split a raw language string like ``en-us_cc`` into (base_lang, flags_set)."""
+    """Split a raw language string like ``en-us_cc`` or ``en-us.[CC]`` into (base_lang, flags_set)."""
     import re as _re
 
-    parts = _re.split(r"[-_]", lang_raw or "")
+    parts = _re.split(r"[-_.]", lang_raw or "")
     flags = set()
     clean = []
 
@@ -405,10 +405,12 @@ def extract_lang_and_flags(lang_raw: str, track_info: dict = None):
             flags.add("default")
 
     for p in parts:
-        if p.lower() in _SUBTITLE_FLAG_WORDS:
-            flags.add(p.lower())
+        token = p.strip("[]").lower()
+        if token in _SUBTITLE_FLAG_WORDS:
+            flags.add(token)
         else:
             clean.append(p)
+    
     return "-".join(clean), flags
 
 

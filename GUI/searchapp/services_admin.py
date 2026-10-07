@@ -5,6 +5,7 @@ import re
 import shutil
 
 BUILTIN_SERVICES = frozenset({
+    "7movies",
     "animeunity",
     "animeworld",
     "crunchyroll",
