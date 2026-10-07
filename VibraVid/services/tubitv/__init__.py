@@ -3,7 +3,6 @@
 import re
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
@@ -16,7 +15,6 @@ from .downloader import download_film, download_series
 indice = 8
 _useFor = "Film_Serie"
 _region = ["US"]
-msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()

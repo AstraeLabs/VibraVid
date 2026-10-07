@@ -18,6 +18,13 @@ _TV_MATCH_SITES = {
     "disney",
     "hbomax",
     "paramountplus",
+    "discoveryplus",
+    "realtime",
+    "nove",
+    "dmax",
+    "discovery",
+    "foodnetwork",
+    "homegardentv",
 }
 TRUSTED_TITLE_SIMILARITY = 0.92
 

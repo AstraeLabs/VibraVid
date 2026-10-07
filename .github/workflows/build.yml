@@ -130,7 +130,7 @@ jobs:
                       artifact_name: VibraVid_mac_26_arm64
                       executable: VibraVid_mac_26_arm64
                       separator: ":"
-                    - os: macos-15
+                    - os: macos-15-intel
                       arch: x64
                       artifact_name: VibraVid_mac_15_x64
                       executable: VibraVid_mac_15_x64
@@ -139,16 +139,6 @@ jobs:
                       arch: arm64
                       artifact_name: VibraVid_mac_15_arm64
                       executable: VibraVid_mac_15_arm64
-                      separator: ":"
-                    - os: macos-14
-                      arch: x64
-                      artifact_name: VibraVid_mac_14_x64
-                      executable: VibraVid_mac_14_x64
-                      separator: ":"
-                    - os: macos-14
-                      arch: arm64
-                      artifact_name: VibraVid_mac_14_arm64
-                      executable: VibraVid_mac_14_arm64
                       separator: ":"
                     - os: ubuntu-24.04
                       arch: x64
@@ -214,9 +204,16 @@ jobs:
                   --hidden-import=Cryptodome.Util.Padding \
                   --collect-all Cryptodome \
                   --exclude-module Cryptodome.SelfTest \
-                  --additional-hooks-dir=pyinstaller/hooks \
                   --add-data "VibraVid${{ matrix.separator }}VibraVid" \
                   --name=${{ matrix.artifact_name }} manual.py
+
+            - name: Verify binary architecture
+              if: runner.os == 'macOS'
+              run: |
+                  ACTUAL=$(lipo -archs "dist/${{ matrix.executable }}")
+                  if [ "${{ matrix.arch }}" = "arm64" ]; then EXPECTED=arm64; else EXPECTED=x86_64; fi
+                  echo "Built architecture: $ACTUAL (expected: $EXPECTED)"
+                  [ "$ACTUAL" = "$EXPECTED" ]
 
             - name: Upload executable to Artifacts
               uses: actions/upload-artifact@v7

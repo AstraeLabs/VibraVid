@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES, get_codec_token
 from VibraVid.core.utils.language import resolve_iso639_1, resolve_iso639_2, resolve_locale
+from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,11 @@ def _resolved_language(s) -> str:
 def _codecs(s) -> str:
     return (getattr(s, "codecs", "") or "").strip().lower()
 
+
+# CUSTOM (forse da rivedere)
+def configured_mux_dtsx() -> bool:
+    legacy = config_manager.config.get_bool("CODEC", "mux_dtsx", default=False)
+    return config_manager.config.get_bool("PROCESS", "mux_dtsx", default=False) or legacy
 
 
 def _is_unmuxable_audio(s, mux_dtsx: bool = False) -> bool:

@@ -10,8 +10,8 @@ import threading
 import time
 from typing import Any
 
-from VibraVid.cli.run import execute_hooks
 from VibraVid.core.ui.tracker import download_tracker
+from VibraVid.utils.hooks import execute_hooks
 
 logger = logging.getLogger(__name__)
 

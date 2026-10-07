@@ -4,33 +4,15 @@ import logging
 import shutil
 import struct
 from pathlib import Path
-from typing import Any
 
 from VibraVid.core.decryptor import Decryptor
 from VibraVid.core.muxing.helper.video import _segment_number
 
 from ._decrypt_pipeline import _skip_post_decrypt
+from .util._cenc_init import _iter_boxes
 from .util._ism_boxes import ISM_TIMESCALE, build_ism_init_segment
 
 logger = logging.getLogger("manual")
-
-
-def _iter_boxes(buf, start: int, end: int):
-    """Yield ``(offset, size, type, header_len)`` for each MP4 box in ``buf[start:end]``."""
-    off = start
-    while off + 8 <= end:
-        size = struct.unpack(">I", buf[off : off + 4])[0]
-        typ = bytes(buf[off + 4 : off + 8])
-        hdr = 8
-        if size == 1:
-            size = struct.unpack(">Q", buf[off + 8 : off + 16])[0]
-            hdr = 16
-        elif size == 0:
-            size = end - off
-        if size < hdr or off + size > end:
-            return
-        yield off, size, typ, hdr
-        off += size
 
 
 class IsmPostprocMixin:
@@ -209,25 +191,13 @@ class IsmPostprocMixin:
             return True
 
         # Continue the track's own bar for the decrypt phase (status "@ Merge" -> "@ CTR", bar restarts) instead of spawning a separate "Dec ..." bar.
-        def _decrypt_cb(parsed: dict[str, Any] | None) -> None:
-            if not parsed:
-                return
-
-            bar_manager.handle_progress_line(
-                {
-                    "task_key": task_key,
-                    "pct": parsed.get("pct"),
-                    "speed": parsed.get("status") or "Decrypt",
-                }
-            )
-
         decryptor = Decryptor()
         ok = decryptor.decrypt(
             str(encrypted_temp),
             self.key,
             str(out_path),
             stream_type=stream.type,
-            progress_cb=_decrypt_cb,
+            progress_cb=bar_manager.decrypt_progress_cb(task_key),
         )
 
         try:

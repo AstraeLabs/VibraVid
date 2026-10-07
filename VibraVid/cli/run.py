@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from VibraVid.cli.command.download import handle_direct_download, handle_direct_download_json
-from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
+from VibraVid.cli.command.equivalent_command import equivalent_command_builder
 from VibraVid.cli.command.global_search import global_search as call_global_search
 from VibraVid.cli.command.limits import add_limit_arguments, apply_limits
 from VibraVid.cli.command.queue import add_queue_arguments, handle_queue_dispatch
@@ -39,7 +39,6 @@ msg = Prompt()
 logger = logging.getLogger(__name__)
 
 COLOR_MAP = {"anime": "red", "film_serie": "yellow", "serie": "green", "song": "grey35", "tor": "blue"}
-CATEGORY_MAP = {1: "anime", 2: "Film_serie", 3: "serie", 4: "tor", 5: "song"}
 
 CLOSE_CONSOLE = config_manager.config.get_bool("DEFAULT", "close_console")
 PERSISTENT_ARGS = {"use_proxy", "proxy_scope", "extension", "close_console"}
@@ -48,36 +47,10 @@ _VERSION_FLAGS = {
     "FFprobe": ["-version"],
     "dovi_tool": ["--version"],
     "mkvmerge": ["--version"],
+    "mkvpropedit": ["--version"],
     "yt-dlp": ["--version"],
     "deno": ["--version"],
 }
-
-_EQUIVALENT_CMD_EXCLUDED_DESTS = {
-    "site",
-    "search",
-    "item",
-    "season",
-    "episode",
-    "down",
-    "stream_type",
-    "output",
-    "headers",
-    "license_url",
-    "license_headers",
-    "key",
-    "hls_method",
-    "hls_key",
-    "hls_iv",
-    "no_log",
-    "update",
-    "dep",
-    "queue_add",
-    "queue_run",
-    "queue_list",
-    "queue_remove",
-    "queue_clear",
-}
-equivalent_command_builder = EquivalentCommandBuilder(excluded_dests=_EQUIVALENT_CMD_EXCLUDED_DESTS)
 
 
 def run_function(func: Callable[..., None], search_terms: str | None = None, selections: dict | None = None) -> None:
@@ -498,6 +471,7 @@ def show_dependencies(search_functions):
         check_ffmpeg,
         check_flux,
         check_mkvmerge,
+        check_mkvpropedit,
         check_velora,
         check_yt_dlp,
     )
@@ -511,6 +485,7 @@ def show_dependencies(search_functions):
         "flux": check_flux(download=False),
         "dovi_tool": check_dovi_tool(download=False),
         "mkvmerge": check_mkvmerge(download=False),
+        "mkvpropedit": check_mkvpropedit(download=False),
         "Velora": check_velora(download=False),
         "yt-dlp": check_yt_dlp(download=False),
         "deno": check_deno(download=False),

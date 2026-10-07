@@ -22,7 +22,7 @@ from VibraVid.core.muxing.helper.sub.disposition import (
     get_configured_disposition_language,
 )
 from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
-from VibraVid.core.muxing.streaming_mux import ChunkRelay, StreamingMuxFeeder
+from VibraVid.core.muxing.streaming_mux import ChunkRelay, NamedPipeMuxer, StreamingMuxFeeder
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
@@ -41,6 +41,7 @@ from VibraVid.core.utils.selector import (
     _subtitle_matches_request,
     _subtitle_pref_score,
     _subtitle_variant_key,
+    configured_mux_dtsx,
 )
 from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.core.velora.util._stream_helpers import join_interruptible
@@ -163,7 +164,6 @@ class Generic_Downloader(BaseDownloader):
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url
-        context_tracker.poster_url = self.poster_url
         self._active: list[tuple[MediaDownloader, dict[str, Any]]] = []
         self._dv_stream = None
         self._no_match = False
@@ -172,6 +172,8 @@ class Generic_Downloader(BaseDownloader):
         self._track_done_events: dict[str, threading.Event] = {}
         self._track_results: dict[str, str | None] = {}
         self._direct_streaming_mux_result: str | None = None
+        self._pipe_mux_result: str | None = None
+
         logger.info(f"Initialized GENERIC_Downloader with {len(self.sources)} source(s), max_segments={self.max_segments}")
         super().__init__(output_path, "_generic_temp")
 
@@ -380,14 +382,18 @@ class Generic_Downloader(BaseDownloader):
 
     def _streaming_mux_direct_eligible(self) -> dict[str, Any] | None:
         """Return the eligible video entry for the direct-mp4 streaming-mux fast path, or None."""
-        if not context_tracker.force_livemux or context_tracker.no_livemux:
+        if context_tracker.no_livemux:
             return None
+        
         if config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower() != "ffmpeg":
             return None
+        
         if not str(self.output_path).lower().endswith(".mkv"):
             return None
+        
         if self._dv_stream is not None or self._active:
             return None  # manifest-based DV companion or any manifest track present -- stay on the safe post-download path
+        
         try:
             if not get_ffmpeg_path():
                 return None
@@ -629,6 +635,7 @@ class Generic_Downloader(BaseDownloader):
         role_streams: list = []
         auto_parsed: list[tuple[MediaDownloader, dict[str, Any]]] = []
         strict = bool(context_tracker.skip_no_match)
+        keep_dv = self._dv_companion_possible(video_filter)
 
         for md, src in parsed:
             role = str(src.get("role") or src.get("type") or "").strip().lower()
@@ -697,7 +704,7 @@ class Generic_Downloader(BaseDownloader):
             for s in md.streams:
                 if id(s) in picked_ids:
                     s._role_claimed = True
-                elif expected_type and getattr(s, "type", "") == expected_type and not _is_dv(s):
+                elif expected_type and getattr(s, "type", "") == expected_type and not (keep_dv and _is_dv(s)):
                     s._role_claimed = True
 
             lang = src.get("language") or src.get("lang")
@@ -929,6 +936,7 @@ class Generic_Downloader(BaseDownloader):
         # excluded from the pool too, so it can't be auto-picked as a
         # competing/duplicate second audio (or video, or subtitle) track.
         claimed_types = {getattr(s, "type", "") for s in role_streams}
+        keep_dv = self._dv_companion_possible(v)
 
         # Merge + dedup (keep first occurrence in source order).
         pool: list = []
@@ -937,7 +945,7 @@ class Generic_Downloader(BaseDownloader):
             for s in md.streams:
                 if getattr(s, "is_external", False) or getattr(s, "_role_claimed", False):
                     continue
-                if getattr(s, "type", "") in claimed_types and not _is_dv(s):
+                if getattr(s, "type", "") in claimed_types and not (keep_dv and _is_dv(s)):
                     continue
                 sig = _track_signature(s)
                 if sig in seen:
@@ -969,6 +977,12 @@ class Generic_Downloader(BaseDownloader):
 
         return role_streams + [s for s in pool if s.selected]
 
+    def _dv_companion_possible(self, video_filter: str) -> bool:
+        """True when a Dolby Vision stream may still be needed as RPU companion: ``select_video="hybrid"`` or ``CODEC.dv_auto`` (a per-run override wins)."""
+        if str(video_filter or "").strip().lower() == "hybrid":
+            return True
+        return bool(self.custom_filters.get("dv_auto", config_manager.config.get_bool("CODEC", "dv_auto")))
+
     def _build_selector(self, video: str, audio: str, subtitle: str) -> StreamSelector:
         f = self.custom_filters
         return StreamSelector(
@@ -983,7 +997,7 @@ class Generic_Downloader(BaseDownloader):
             minimum_video_height=int(f.get("minimum_video_height") or 0),
             strict_no_match=context_tracker.skip_no_match,
             dv_auto=bool(f.get("dv_auto", config_manager.config.get_bool("CODEC", "dv_auto"))),
-            mux_dtsx=bool(f.get("mux_dtsx", config_manager.config.get_bool("CODEC", "mux_dtsx"))),
+            mux_dtsx=bool(f.get("mux_dtsx", configured_mux_dtsx())),
             drop_clear_av=bool(f.get("drop_clear_av")),
             dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
         )
@@ -1052,6 +1066,15 @@ class Generic_Downloader(BaseDownloader):
         covered_kids = {kid for kid, _ in norm_keys}
         resolved_keys = [f"{kid}:{key}" for kid, key in norm_keys if kid in pssh_by_kid]
 
+        # Save any manual keys to the vaults, so they can be reused in future runs.
+        for kid, key in norm_keys:
+            if kid not in pssh_by_kid:
+                continue
+            try:
+                mgr._store_keys([f"{kid}:{key}"], drm_type or "mp4", "generic", pssh_by_kid[kid] or widevine_pssh, source=None)
+            except Exception as exc:
+                logger.debug(f"Could not save the manual key for KID {kid} to the vaults (non-fatal): {exc}")
+
         vault_tagged_keys: list[str] = []
         vault_source_name: str | None = None
         for kid, kid_pssh in pssh_by_kid.items():
@@ -1095,9 +1118,187 @@ class Generic_Downloader(BaseDownloader):
             md._stop_event.set()
             md._cancel_all_loops()
 
+    def _manifest_streaming_mux_eligible(self) -> bool:
+        """True if conditions are met to attempt multi-manifest named-pipe live mux."""
+        if context_tracker.no_livemux:
+            return False
+        
+        if config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower() != "ffmpeg":
+            return False
+        
+        if not str(self.output_path).lower().endswith(".mkv"):
+            return False
+        
+        if len(self._active) < 2 or self._direct_sources or self._dv_stream is not None:
+            return False
+        
+        try:
+            if not get_ffmpeg_path():
+                return False
+        except Exception:
+            return False
+        
+        has_video_manifest = False
+        has_audio_manifest = False
+        for md, _ in self._active:
+            sel = [s for s in md.streams if s.selected and not s.is_external and s.type in _MEDIA_TYPES]
+            if not sel:
+                return False
+            
+            sel_types = {s.type for s in sel}
+            if "video" in sel_types and "audio" in sel_types:
+                # Manifest carries both — belongs to the single-manifest path, not pipes.
+                return False
+            
+            if "video" in sel_types:
+                has_video_manifest = True
+
+            if "audio" in sel_types:
+                has_audio_manifest = True
+
+        return has_video_manifest and has_audio_manifest
+
+    def _launch_streaming_mux_manifest(self) -> "NamedPipeMuxer | None":
+        """Set up a NamedPipeMuxer for all active manifest sources and wire each MediaDownloader.
+
+        Returns the started muxer, or None if setup failed (caller falls back to normal mux).
+        """
+        try:
+            return self._launch_streaming_mux_manifest_inner()
+        except Exception as exc:
+            logger.warning(f"streaming_mux[pipes]: setup error ({exc!r}) — falling back to normal mux", exc_info=True)
+            return None
+
+    def _start_pipe_ffmpeg_when_audio_ready(self, muxer: "NamedPipeMuxer") -> None:
+        audio_paths: list[str] = []
+        for md, task_key in muxer.audio_watch:  # type: ignore[attr-defined]
+            if not md._track_done_event(task_key).wait(timeout=1800.0):
+                logger.warning(f"streaming_mux[pipes]: audio {task_key!r} timed out — falling back to normal mux")
+                muxer.abort()
+                return
+            
+            path = md._get_track_result(task_key)
+            if path is None:
+                logger.warning(f"streaming_mux[pipes]: audio {task_key!r} failed — falling back to normal mux")
+                muxer.abort()
+                return
+            
+            audio_paths.append(str(path))
+        sub_paths: list[tuple[int, str]] = []
+        for idx, (md, task_key) in enumerate(muxer.sub_watch):  # type: ignore[attr-defined]
+            if not md._track_done_event(task_key).wait(timeout=1800.0):
+                logger.warning(f"streaming_mux[pipes]: subtitle {task_key!r} timed out — leaving it out of live mux")
+                continue
+
+            path = md._get_track_result(task_key)
+            if path is None:
+                logger.warning(f"streaming_mux[pipes]: subtitle {task_key!r} failed — leaving it out of live mux")
+                continue
+
+            sub_paths.append((idx, str(path)))
+        muxer.start_ffmpeg(muxer.build_cmd(audio_paths, sub_paths))  # type: ignore[attr-defined]
+
+    def _launch_streaming_mux_manifest_inner(self) -> "NamedPipeMuxer | None":
+        from VibraVid.core.utils.language import resolve_iso639_2, resolve_language_display_name
+
+        ffmpeg_path = get_ffmpeg_path()
+        output_path = os_manager.get_sanitize_path(self.output_path)
+
+        # Only the video is piped. Audio is small and finishes downloading to disk
+        # quickly; ffmpeg reads it as a plain file, so it never competes with the
+        # video pipe for reads (multiple pipe inputs deadlock on Windows).
+        video_md: MediaDownloader | None = None
+        video_stream = None
+        audio_entries: list[tuple[MediaDownloader, object]] = []
+        sub_entries: list[tuple[MediaDownloader, object]] = []
+
+        for md, _ in self._active:
+            for s in md.streams:
+                if not s.selected or getattr(s, "is_external", False):
+                    continue
+                if s.type == "video" and video_stream is None:
+                    video_md, video_stream = md, s
+                elif s.type == "audio":
+                    audio_entries.append((md, s))
+                elif s.type == "subtitle":
+                    sub_entries.append((md, s))
+
+        if video_stream is None or video_md is None or not audio_entries:
+            logger.info("streaming_mux[pipes]: no clear video+audio split — skipping")
+            return None
+
+        muxer = NamedPipeMuxer(n_pipes=1)
+        video_pipe = muxer.pipe_paths[0]
+        video_md.enable_relay_mux(muxer.get_writer(0))  # type: ignore[arg-type]
+
+        audio_watch: list[tuple[MediaDownloader, str]] = [
+            (md, md._stream_task_key(s)) for md, s in audio_entries
+        ]
+        sub_watch: list[tuple[MediaDownloader, str]] = [
+            (md, md._stream_task_key(s)) for md, s in sub_entries
+        ]
+        audio_meta = [s for _, s in audio_entries]
+        sub_meta = [s for _, s in sub_entries]
+        video_codecs = (getattr(video_stream, "codecs", "") or "").lower()
+
+        def _lang_meta(kind: str, idx: int, s_t) -> list[str]:
+            lang = getattr(s_t, "resolved_language", "") or getattr(s_t, "language", "") or "und"
+            title = resolve_language_display_name(lang)
+            iso = resolve_iso639_2(lang)
+            return [
+                f"-metadata:s:{kind}:{idx}", f"title={title}",
+                f"-metadata:s:{kind}:{idx}", f"language={iso}",
+                f"-metadata:s:{kind}:{idx}", f"handler_name={title}",
+            ]
+
+        def _build_cmd(audio_paths: list[str], sub_paths: list[tuple[int, str]]) -> list[str]:
+            cmd = [ffmpeg_path, "-y", "-f", "mp4", "-i", video_pipe]
+            for p in audio_paths + [p for _, p in sub_paths]:
+                cmd += ["-i", p]
+
+            cmd += ["-map", "0:v:0"]
+            for j in range(len(audio_paths)):
+                cmd += ["-map", f"{j + 1}:a"]
+
+            for k in range(len(sub_paths)):
+                cmd += ["-map", f"{len(audio_paths) + k + 1}:s"]
+
+            if any(p in video_codecs for p in ("hev", "hvc", "dvh", "dvhe")):
+                cmd += ["-tag:v", "hvc1"]
+
+            for j, s_a in enumerate(audio_meta[: len(audio_paths)]):
+                cmd += _lang_meta("a", j, s_a)
+                cmd += [f"-disposition:a:{j}", "default" if j == 0 else "0"]
+
+            for k, (sub_idx, _) in enumerate(sub_paths):
+                cmd += _lang_meta("s", k, sub_meta[sub_idx])
+                cmd += [f"-disposition:s:{k}", "0"]
+            
+            cmd += ["-c", "copy", output_path]
+            return cmd
+
+        muxer.audio_watch = audio_watch     # type: ignore[attr-defined]
+        muxer.sub_watch = sub_watch         # type: ignore[attr-defined]
+        muxer.build_cmd = _build_cmd        # type: ignore[attr-defined]
+        muxer.prepare()
+        logger.info(f"streaming_mux[pipes]: prepared video pipe, waiting for {len(audio_watch)} audio track(s) -> {output_path}")
+        return muxer
+
     def _run_downloads(self) -> bool:
         """Download every selected stream of every source concurrently on ONE shared progress bar. Returns False if cancelled (Ctrl+C)."""
         self._preresolve_manifest_keys()
+        pipe_muxer: NamedPipeMuxer | None = (
+            self._launch_streaming_mux_manifest() if self._manifest_streaming_mux_eligible() else None
+        )
+
+        if pipe_muxer is not None:
+            threading.Thread(
+                target=self._start_pipe_ffmpeg_when_audio_ready,
+                args=(pipe_muxer,),
+                daemon=True,
+                name="pipe-mux-ffmpeg-starter",
+            ).start()
+
         for md, source in self._active:
             md.set_key(self._pooled_keys)
             sel = [s for s in md.streams if s.selected and not s.is_external and s.type in _MEDIA_TYPES]
@@ -1169,11 +1370,29 @@ class Generic_Downloader(BaseDownloader):
             logger.warning("KeyboardInterrupt — stopping all hybrid sources")
             self._stop_all()
             stop_event.set()
+            if pipe_muxer is not None:
+                pipe_muxer.abort()
             join_interruptible(threads, threading.Event(), hard_timeout=15.0)
             return False
 
         if any(md._stop_check() for md, _ in self._active):
+            if pipe_muxer is not None:
+                pipe_muxer.abort()
             return False
+
+        if pipe_muxer is not None:
+            for i in range(len(pipe_muxer.pipe_paths)):
+                pipe_muxer.close_writer(i)
+                
+            mux_result = pipe_muxer.finish()
+            if mux_result.ok:
+                self._pipe_mux_result = os_manager.get_sanitize_path(self.output_path)
+                logger.info(f"streaming_mux[pipes]: finished -> {self._pipe_mux_result}")
+            else:
+                logger.warning(f"streaming_mux[pipes]: ffmpeg failed ({mux_result.error}) — falling back to normal mux")
+                if mux_result.stderr_tail:
+                    logger.warning(f"streaming_mux[pipes]: stderr tail:\n{mux_result.stderr_tail[-500:]}")
+
         return True
 
     def _dv_entry(self, video_track: dict[str, Any]) -> dict[str, Any]:
@@ -1346,7 +1565,7 @@ class Generic_Downloader(BaseDownloader):
 
         self.media_downloader = SimpleNamespace(
             decrypt_failures=[f for md, _src in self._active for f in getattr(md, "decrypt_failures", None) or []],
-            streaming_mux_result=self._direct_streaming_mux_result,
+            streaming_mux_result=self._pipe_mux_result or self._direct_streaming_mux_result,
             streaming_mux_chapters_injected=False,
         )
 

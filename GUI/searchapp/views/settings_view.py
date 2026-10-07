@@ -14,9 +14,53 @@ from django.views.decorators.http import require_http_methods
 from VibraVid.services._base.tv_display_manager import refresh_output_formats
 from VibraVid.utils import config_manager
 
+from .. import services_admin
 from .._download_infra import set_max_download_slots
 
 logger = logging.getLogger(__name__)
+
+
+def _reload_service_registries(names: list[str]) -> list[str]:
+    """Make the CLI loader and the GUI API registry pick up added/removed service folders; returns the error messages."""
+    errors: list[str] = []
+    try:
+        # Drop cached VibraVid.services.<name> modules so subsequent imports see the files on disk now.
+        for svc in names:
+            prefix = f"VibraVid.services.{svc}"
+            for mod_name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
+                del sys.modules[mod_name]
+
+        # Reload CLI service loader
+        from VibraVid.services._base import site_loader
+        importlib.reload(site_loader)
+    except Exception as e:
+        errors.append(f"Reload CLI services: {e}")
+
+    try:
+        # Drop any GUI API modules from sys.modules so previously-failed imports are retried fresh.
+        for mod_name in [m for m in sys.modules if m.startswith("searchapp.api.") and not m.endswith(".base")]:
+            del sys.modules[mod_name]
+
+        # Reload GUI API registry.
+        from searchapp import api as gui_api_module
+        gui_api_module._INITIALIZED = False
+        gui_api_module._initialize_registry()
+        gui_api_module.reset_site_categories_cache()
+    except Exception as e:
+        errors.append(f"Reload GUI API registry: {e}")
+    return errors
+
+
+def _sites_snapshot() -> dict:
+    """What the provider dropdown contains right now and which services failed to load."""
+    try:
+        from searchapp import api as gui_api_module
+        return {
+            "available_sites_now": sorted(gui_api_module.get_available_sites()),
+            "load_errors": gui_api_module.get_load_errors(),
+        }
+    except Exception:
+        return {"available_sites_now": [], "load_errors": []}
 
 
 @require_http_methods(["POST"])
@@ -29,9 +73,7 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
     if not uploaded.name.lower().endswith(".zip"):
         return JsonResponse({"success": False, "error": "Il file deve essere un archivio .zip"}, status=400)
 
-    # Determine services directory (VibraVid/services)
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))  # project root
-    services_dir = os.path.join(base_dir, "VibraVid", "services")
+    services_dir = services_admin.services_dir()
 
     if not os.path.isdir(services_dir):
         return JsonResponse({"success": False, "error": f"Directory dei servizi non trovata: {services_dir}"}, status=500)
@@ -148,37 +190,12 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
 
         # Reload the service registries
         if installed_services:
-            try:
-                # Drop cached VibraVid.services.<name> modules for newly-installed services
-                # so subsequent imports pick up the freshly-extracted files.
-                for svc in installed_services:
-                    prefix = f"VibraVid.services.{svc}"
-                    for mod_name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
-                        del sys.modules[mod_name]
-
-                # Reload CLI service loader
-                from VibraVid.services._base import site_loader
-                importlib.reload(site_loader)
-            except Exception as e:
-                errors.append(f"Reload CLI services: {e}")
-
-            try:
-                # Drop any GUI API modules from sys.modules so previously-failed imports are retried fresh.
-                for mod_name in [m for m in sys.modules if m.startswith("GUI.searchapp.api.") and not m.endswith(".base")]:
-                    del sys.modules[mod_name]
-
-                # Reload GUI API registry.
-                from GUI.searchapp import api as gui_api_module
-                gui_api_module._INITIALIZED = False
-                gui_api_module._initialize_registry()
-                gui_api_module.reset_site_categories_cache()
-            except Exception as e:
-                errors.append(f"Reload GUI API registry: {e}")
+            errors.extend(_reload_service_registries(installed_services))
 
         # Report what the dropdown actually contains right now so the user can
         # verify their upload landed and which services failed to load.
         try:
-            from GUI.searchapp import api as gui_api_module
+            from searchapp import api as gui_api_module
             available_sites = sorted(gui_api_module.get_available_sites())
             load_errors_list = gui_api_module.get_load_errors()
         except Exception:
@@ -203,9 +220,43 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
+def remove_service_view(request: HttpRequest) -> JsonResponse:
+    """Remove a service that was added through the ZIP upload (built-in services are refused)."""
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        return JsonResponse({"success": False, "error": "JSON non valido"}, status=400)
+
+    try:
+        removed = services_admin.remove_service(data.get("name"))
+    except services_admin.ServiceRemovalError as exc:
+        return JsonResponse({"success": False, "error": exc.message}, status=exc.status)
+    except OSError as exc:
+        logger.exception("Service removal failed")
+        return JsonResponse({"success": False, "error": f"Impossibile rimuovere il servizio: {exc}"}, status=500)
+
+    errors = _reload_service_registries([removed])
+    return JsonResponse({
+        "success": True,
+        "removed": removed,
+        "errors": errors,
+        "message": f"Servizio rimosso: {removed}",
+        **_sites_snapshot(),
+    })
+
+
+@require_http_methods(["POST"])
 def save_settings(request: HttpRequest) -> JsonResponse:
     try:
-        data = json.loads(request.body.decode('utf-8'))
+        try:
+            data = json.loads(request.body.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            return JsonResponse({"success": False, "error": "JSON non valido"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"success": False, "error": "Parametri mancanti"}, status=400)
+
         file_type = data.get('file_type')  # 'config' or 'login'
         content = data.get('content', '').strip()
 
@@ -278,4 +329,4 @@ def save_settings(request: HttpRequest) -> JsonResponse:
         }, status=500)
 
 
-__all__ = ['upload_service_zip', 'save_settings']
+__all__ = ['upload_service_zip', 'remove_service_view', 'save_settings']

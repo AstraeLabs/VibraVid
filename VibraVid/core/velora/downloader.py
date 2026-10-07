@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -84,6 +86,7 @@ class MediaDownloader(
 
         # Cancellation
         self._stop_event: threading.Event = threading.Event()
+        self._abort_event: threading.Event = threading.Event()
         self._active_loops: list[asyncio.AbstractEventLoop] = []
         self._loops_lock: threading.Lock = threading.Lock()
 
@@ -93,7 +96,6 @@ class MediaDownloader(
         # Failed-segment accumulator
         self._failed_segments: list = []
         self._failed_segments_lock = threading.Lock()
-        self.missing_segments_count: int = 0
 
         # Decryption-failure accumulator: per-track records for streams that are still encrypted after decrypt
         self.decrypt_failures: list = []
@@ -112,6 +114,9 @@ class MediaDownloader(
         self._streaming_mux_output_path: str | None = None
         self._streaming_mux_chapters: list = []
 
+        # Set via enable_relay_mux() for multi-manifest named-pipe live mux.
+        self._relay_mux_writer: Callable[[bytes], None] | dict[int, Callable[[bytes], None]] | None = None
+
         # Set by the video stream's own _download_stream_generic() call if the fast path
         # actually completed successfully.
         self.streaming_mux_result: str | None = None
@@ -124,6 +129,10 @@ class MediaDownloader(
     def enable_streaming_mux(self, output_path: str, chapters: list | None = None) -> None:
         self._streaming_mux_output_path = output_path
         self._streaming_mux_chapters = list(chapters or [])
+
+    def enable_relay_mux(self, writer_fn: "Callable[[bytes], None] | dict[int, Callable[[bytes], None]]") -> None:
+        """Route this downloader's decoded chunks to *writer_fn* (named-pipe relay)."""
+        self._relay_mux_writer = writer_fn
 
     def _track_done_event(self, task_key: str) -> threading.Event:
         with self._track_done_lock:
@@ -356,18 +365,18 @@ class MediaDownloader(
             if self.download_id:
                 download_tracker.request_stop(self.download_id)
 
-            console.print("\n[yellow]Stopping — finishing the current segment and merging what was downloaded...")
+            console.print("\n[yellow]Stopping — finishing the current segment and merging what was downloaded... (Ctrl+C again to abort without merging)")
             logger.info("KeyboardInterrupt: waiting for stream threads to finish merging before returning")
 
-            for t in spawned_threads:
-                if t.is_alive():
-                    t.join(timeout=30.0)
+            if not self._wait_after_interrupt(spawned_threads):
+                console.print("\n[red]Aborted — merge skipped.")
+                logger.warning("Second KeyboardInterrupt: aborting without merging")
+                return {"error": "cancelled"}
 
             ext_subs = ext_result.get("ext_subs", [])
             ext_auds = ext_result.get("ext_auds", [])
 
         if self._failed_segments:
-            self.missing_segments_count += sum(len(failed) for _, failed in self._failed_segments)
             print_failed_segments_report(self._failed_segments)
             self._failed_segments.clear()
 
@@ -386,6 +395,33 @@ class MediaDownloader(
             return {"error": "cancelled"}
 
         return self.status
+
+    def _wait_after_interrupt(self, threads: list[threading.Thread], max_wait: float = 900.0, poll: float = 0.25, notice_every: float = 5.0) -> bool:
+        """Let the stream threads finish after the first Ctrl+C (a big video needs time to finalize) and return True once they all have."""
+        started = time.monotonic()
+        next_notice = started + notice_every
+        try:
+            while True:
+                alive = [t for t in threads if t.is_alive()]
+                if not alive:
+                    return True
+
+                now = time.monotonic()
+                if now - started >= max_wait:
+                    console.print(f"\n[red]{len(alive)} track(s) still running after {max_wait:.0f}s: not merging, the partial files are kept.")
+                    break
+                if now >= next_notice:
+                    console.print(f"\n[yellow]Finalizing {len(alive)} track(s)... (Ctrl+C again to abort without merging)")
+                    next_notice = now + notice_every
+                alive[0].join(timeout=poll)
+        except KeyboardInterrupt:
+            pass
+
+        self._abort_event.set()
+        self._cancel_all_loops()
+        if self.download_id:
+            download_tracker.request_stop(self.download_id)
+        return False
 
     def _register_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         with self._loops_lock:

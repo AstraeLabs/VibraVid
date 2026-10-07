@@ -63,11 +63,13 @@ from .helper.video import (
     is_mpegts_file,
     resolve_compatible_extension,
 )
+from .retag import build_container_tags
 
 console = Console()
 logger = logging.getLogger(__name__)
 
 USE_GPU = config_manager.config.get_bool("PROCESS", "use_gpu")
+EXTRACT_EMBEDDED_CC = config_manager.config.get_bool("DOWNLOAD", "extract_embedded_cc", default=False)
 FORCE_SUBTITLE = config_manager.config.get("PROCESS", "force_subtitle")
 SUBTITLE_DISPOSITION_LANGUAGE = config_manager.config.get("PROCESS", "subtitle_disposition_language")
 if isinstance(SUBTITLE_DISPOSITION_LANGUAGE, list):
@@ -326,38 +328,8 @@ def _build_global_metadata_flags() -> list:
     Build FFmpeg ``-metadata key=value`` flags for the output container, sourcing data from ``context_tracker``.
     """
     flags: list = []
-    title = (context_tracker.title or "").strip()
-    media_type = (context_tracker.media_type or "").upper().strip()
-    season = context_tracker.season or 0
-    episode = context_tracker.episode or 0
-    episode_name = (context_tracker.episode_name or "").strip()
-    site_name = (context_tracker.site_name or "").strip()
-
-    is_episode = (
-        media_type in ("EPISODE", "TV", "SERIES", "SHOW", "SERIE", "OVA", "ONA", "TV SHORT", "SPECIAL")
-        or season > 0
-        or episode > 0
-    )
-    if is_episode:
-        ep_title = episode_name or title
-        if ep_title:
-            flags += ["-metadata", f"title={ep_title}"]
-        if title:
-            flags += ["-metadata", f"show={title}"]
-        if season:
-            flags += ["-metadata", f"season_number={season}"]
-        if episode:
-            flags += ["-metadata", f"episode_sort={episode}"]
-        if episode_name:
-            flags += ["-metadata", f"episode_id={episode_name}"]
-    else:
-        if title:
-            flags += ["-metadata", f"title={title}"]
-
-    if site_name:
-        flags += ["-metadata", f"comment={site_name}"]
-
-    flags += ["-metadata", "encoder=VibraVid"]
+    for key, value in build_container_tags().items():
+        flags += ["-metadata", f"{key}={value}"]
     return flags
 
 
@@ -828,15 +800,48 @@ def join_media(
         logger.warning("Audio track uses a codec ffmpeg's demuxer can't parse (e.g. DTS:X) -- using mkvmerge directly")
         base, _ = os.path.splitext(out_path)
         out_path = base + ".mkv"
-        return _join_media_mkvmerge(video_path, audio_tracks, subtitle_tracks, out_path, chapters)
+        merged, result_json = _join_media_mkvmerge(video_path, audio_tracks, subtitle_tracks, out_path, chapters)
+        return merged, _ensure_video_kept(video_path, merged, result_json)
 
     if MUX_ENGINE == "mkvmerge":
         base, _ = os.path.splitext(out_path)
         out_path = base + ".mkv"
-        return _join_media_mkvmerge(video_path, audio_tracks, subtitle_tracks, out_path, chapters)
+        merged, result_json = _join_media_mkvmerge(video_path, audio_tracks, subtitle_tracks, out_path, chapters)
+        return merged, _ensure_video_kept(video_path, merged, result_json)
 
     out_path = _apply_compatible_extension(video_path, out_path)
-    return _join_media_ffmpeg(video_path, audio_tracks, subtitle_tracks, out_path, use_shortest, chapters, force_ts_fix)
+    merged, result_json = _join_media_ffmpeg(video_path, audio_tracks, subtitle_tracks, out_path, use_shortest, chapters, force_ts_fix)
+    return merged, _ensure_video_kept(video_path, merged, result_json)
+
+
+def _video_stream_state(path: str) -> bool | None:
+    """True/False: the file has/lacks a video stream; None when it can't be probed (never a reason to act)."""
+    try:
+        streams = get_stream_codecs(path)
+    except Exception:
+        return None
+    if not streams:
+        return None
+    return any(s.get("codec_type") == "video" for s in streams)
+
+
+def _ensure_video_kept(video_path: str, out_path: str, result_json: dict | None) -> dict | None:
+    """Ensure that the output file still has a video stream after muxing. If not, delete the output and return a flagged result."""
+    if _video_stream_state(video_path) is not True or _video_stream_state(out_path) is not False:
+        return result_json
+
+    message = f"Join Media lost the video track: '{os.path.basename(video_path)}' has one but '{os.path.basename(out_path)}' does not -- discarding the output, the temporary files are kept"
+    logger.error(message)
+    console.print(f"[red]{message}")
+    try:
+        os.remove(out_path)
+    except OSError:
+        pass
+    
+    flagged = dict(result_json or {})
+    flagged["exit_code"] = flagged.get("exit_code") or 1
+    flagged["video_missing"] = True
+    return flagged
 
 
 def _select_embedded_cc_streams(video_codecs: list[dict]) -> list[dict]:
@@ -907,7 +912,7 @@ def _join_media_ffmpeg(
 
     # Embedded CEA-608/708 closed captions ride inside the video elementary stream
     embedded_cc_streams: list[dict] = []
-    if output_ext == ".mp4":
+    if EXTRACT_EMBEDDED_CC and output_ext == ".mp4":
         video_codecs = get_stream_codecs(video_path)
         embedded_cc_streams = _select_embedded_cc_streams(video_codecs)
         if embedded_cc_streams:
@@ -1070,13 +1075,23 @@ def _join_media_ffmpeg(
     total_duration = get_video_duration(video_path)
     logger.info(f"Running Join Media command: {' '.join(ffmpeg_cmd)}")
     _join_t0 = time.monotonic()
-    result_json = capture_ffmpeg_real_time(ffmpeg_cmd, "[yellow]FFMPEG [cyan]Join media", total_duration)
+    try:
+        result_json = capture_ffmpeg_real_time(ffmpeg_cmd, "[yellow]FFMPEG [cyan]Join media", total_duration)
+    except KeyboardInterrupt:
+        # Ctrl+C during the final mux: drop the half-written file and let the interrupt end the run.
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+        raise
+
     _exit_code = result_json.get("exit_code")
     if _exit_code:
         _tail = "\n".join(result_json.get("last_lines") or [])
         logger.error(f"Join Media ffmpeg exited with code {_exit_code} -> {out_path} in {time.monotonic() - _join_t0:.1f}s\n{_tail}")
     else:
         logger.info(f"Join Media finished -> {out_path} in {time.monotonic() - _join_t0:.1f}s")
+    
     if context_tracker.should_print:
         print()
 

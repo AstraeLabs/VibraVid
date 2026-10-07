@@ -3,7 +3,6 @@
 
 """Downloads screen: live progress panel with per-track bars, status badges, cancel/retry."""
 
-import datetime
 import logging
 from typing import Any
 
@@ -15,6 +14,7 @@ from textual.timer import Timer
 from textual.widgets import Button, DataTable, Header, Static
 
 from VibraVid.core.ui.tracker import download_tracker
+from VibraVid.tui.formatting import format_time
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.utils.system_open import open_file, open_folder
@@ -43,17 +43,6 @@ def format_status_badge(status: str) -> str:
         return "[bold yellow]⏸ STOPPED[/bold yellow]"
     else:
         return f"[dim]⏳ {status.upper()}[/dim]"
-
-
-def _format_time(ts: Any) -> str:
-    if not ts:
-        return "-"
-    try:
-        if isinstance(ts, (int, float)):
-            return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-        return str(ts)
-    except Exception:
-        return str(ts)
 
 
 class DownloadsScreen(Screen):
@@ -174,9 +163,7 @@ class DownloadsScreen(Screen):
             site = str(dl.get("site", "?"))
             size = str(dl.get("size", "-"))
             path = str(dl.get("path") or "-")
-            finished = _format_time(dl.get("end_time") or dl.get("last_update"))
-            # A file may legitimately appear more than once in history after it
-            # has been downloaded again. DataTable keys must still be unique.
+            finished = format_time(dl.get("end_time") or dl.get("last_update"))
             row_key = f"{dl.get('id') or 'completed'}:{row_index}"
             completed_table.add_row(dl_id, title, site, size, path, finished, key=row_key)
 

@@ -1,8 +1,8 @@
 # 11.02.25
 
-import inspect
 import logging
 import os
+import sys
 
 from VibraVid.utils import config_manager
 
@@ -12,6 +12,19 @@ from .site_loader import folder_name as lazy_loader_folder
 logger = logging.getLogger(__name__)
 
 
+_last_logged_site: str | None = None
+_init_dirs: set[str] = set()
+
+
+def _has_init(dir_name: str) -> bool:
+    if dir_name in _init_dirs:
+        return True
+    if os.path.exists(os.path.join(dir_name, "__init__.py")):
+        _init_dirs.add(dir_name)
+        return True
+    return False
+
+
 def get_site_name_from_stack():
     """
     Resolve the current service name.
@@ -19,13 +32,20 @@ def get_site_name_from_stack():
     Returns:
         str: Site name, or None if not found
     """
+    global _last_logged_site
+
     ctx_name = current_site_var.get()
     if ctx_name:
-        logger.debug(f"Extracted site_name from context variable: {ctx_name}")
+        if ctx_name != _last_logged_site:
+            _last_logged_site = ctx_name
+            logger.debug(f"Extracted site_name from context variable: {ctx_name}")
         return ctx_name
 
-    for frame_info in inspect.stack():
-        file_path = frame_info.filename
+    frame = sys._getframe(1)
+    while frame is not None:
+        file_path = frame.f_code.co_filename
+        frame = frame.f_back
+
         if f"{lazy_loader_folder}{os.sep}" in file_path:
             parts = file_path.split(f"{lazy_loader_folder}{os.sep}")
             if len(parts) > 1:
@@ -42,10 +62,9 @@ def get_site_name_from_stack():
             potential_site
             and potential_site not in ("_base", "__pycache__", "VibraVid")
             and not potential_site.startswith(".")
+            and _has_init(dir_name)
         ):
-            init_file = os.path.join(dir_name, "__init__.py")
-            if os.path.exists(init_file):
-                return potential_site
+            return potential_site
 
     logger.error("Could not extract site_name from call stack - returning None")
     return None

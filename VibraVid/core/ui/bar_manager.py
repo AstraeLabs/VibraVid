@@ -157,6 +157,21 @@ class DownloadBarManager:
                     compact_metrics=False,
                 )
 
+    def decrypt_progress_cb(self, task_key: str):
+        """Callback for ``Decryptor`` progress: continue the track's own row for the decrypt phase (only the bar position and the status text change)."""
+        def _cb(parsed: dict[str, Any] | None) -> None:
+            if not parsed:
+                return
+            self.handle_progress_line(
+                {
+                    "task_key": task_key,
+                    "pct": parsed.get("pct"),
+                    "speed": parsed.get("status") or "Decrypt",
+                }
+            )
+
+        return _cb
+
     def handle_progress_line(self, parsed: dict[str, Any] | None):
         if not parsed:
             return

@@ -8,7 +8,7 @@ from rich.prompt import Prompt
 from VibraVid.core.downloader import MP4_Downloader
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.player.sweetpixel import VideoSource
-from VibraVid.services._base import Entries, anime_folder, site_constants
+from VibraVid.services._base import Entries, anime_folder, print_episode_header, site_constants
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import os_manager, start_message
@@ -60,7 +60,7 @@ def download_episode(episode_data, index_select, scrape_serie):
     episode_number = index_select + 1
     episode_name = f"Episode {episode_number}"
     series_name = scrape_serie.get_name()
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{series_name} ([cyan]E{episode_number}) \n")
+    print_episode_header(series_name, episode=episode_number)
 
     # Add episode information to context tracker
     context_tracker.season = 1

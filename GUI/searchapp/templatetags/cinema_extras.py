@@ -4,6 +4,7 @@ from django import template
 
 register = template.Library()
 _PROVIDER_LABELS = {
+    "7movies": "7Movies",
     "animeunity": "AnimeUnity",
     "animeworld": "AnimeWorld",
     "annasarchive": "Anna's Archive",

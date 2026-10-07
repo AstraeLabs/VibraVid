@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["GET"])
 def registry_status(request: HttpRequest) -> JsonResponse:
     """Diagnostic endpoint: report what the GUI service registry currently knows."""
-    from GUI.searchapp import api as gui_api_module
+    from searchapp import api as gui_api_module
 
     api_dir = os.path.dirname(gui_api_module.__file__)
     static_stubs = sorted(

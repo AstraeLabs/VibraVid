@@ -28,7 +28,7 @@ jobs:
             - name: Bump version in version.py
               id: bump
               run: |
-                  CURRENT=$(grep -oP "__version__ = '\K[^']+" VibraVid/upload/version.py)
+                  CURRENT=$(grep -oP '__version__ = "\K[^"]+' VibraVid/utils/upload/version.py)
                   MAJOR=$(echo "$CURRENT" | cut -d. -f1)
                   MINOR=$(echo "$CURRENT" | cut -d. -f2)
                   PATCH=$(echo "$CURRENT" | cut -d. -f3)
@@ -40,7 +40,7 @@ jobs:
                   esac
 
                   NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-                  sed -i "s/__version__ = '.*'/__version__ = '$NEW_VERSION'/" VibraVid/upload/version.py
+                  sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" VibraVid/utils/upload/version.py
 
                   echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
                   echo "old_version=$CURRENT" >> $GITHUB_OUTPUT
@@ -49,6 +49,6 @@ jobs:
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
-                  git add VibraVid/upload/version.py
+                  git add VibraVid/utils/upload/version.py
                   git commit -m "[RELEASE] Version ${{ steps.bump.outputs.new_version }} by @${{ github.actor }}"
                   git push

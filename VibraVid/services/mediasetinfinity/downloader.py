@@ -5,11 +5,10 @@ import urllib.parse
 from urllib.parse import urlparse, urlunparse
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.downloader.base import DownloadResult
-from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
+from VibraVid.services._base import Entries, movie_folder, print_download_header, print_episode_header, series_folder
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, os_manager, start_message
@@ -20,7 +19,6 @@ from .regions import get_region
 from .scrapper import GetSerieInfo
 
 console = Console()
-msg = Prompt()
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 
@@ -129,7 +127,7 @@ def _resolve_and_download(content_id: str, output_path: str) -> DownloadResult:
 def download_film(select_title: Entries) -> DownloadResult:
     """Download a single film / episode (used for ES /player/ URLs too)."""
     start_message()
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{select_title.name} \n")
+    print_download_header(select_title)
 
     path_components, filename = map_movie_path(select_title.name, select_title.year)
     movie_path = movie_folder(*path_components)
@@ -141,7 +139,7 @@ def download_film(select_title: Entries) -> DownloadResult:
 def download_episode(obj_episode, index_season_selected, index_episode_selected, scrape_serie):
     """Download a specific episode from a season."""
     start_message()
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{scrape_serie.series_name} [white]\\ [magenta]{obj_episode.name} ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    print_episode_header(scrape_serie.series_name, obj_episode.name, index_season_selected, index_episode_selected)
 
     path_components, filename = map_episode_path(
         scrape_serie.series_name,

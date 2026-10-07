@@ -4,7 +4,6 @@ import re
 from datetime import datetime
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.services._base import Entries, EntriesManager
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
@@ -16,7 +15,6 @@ from .downloader import download_film, download_live, download_series
 
 indice = 9
 _useFor = "Film_Serie"
-msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()

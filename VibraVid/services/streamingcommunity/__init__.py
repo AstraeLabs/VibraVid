@@ -4,7 +4,6 @@ import json
 
 from bs4 import BeautifulSoup
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.core.utils.language import resolve_iso639_1
 from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
@@ -17,8 +16,6 @@ from .downloader import download_film, download_series
 
 indice = 0
 _useFor = "Film_Serie"
-_db_upload = True
-msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()

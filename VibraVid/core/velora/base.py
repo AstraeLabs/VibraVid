@@ -28,7 +28,7 @@ from VibraVid.core.utils.codec import (
 )
 from VibraVid.core.utils.language import LANGUAGE_MAP, language_variants, resolve_locale, subtitle_flags
 from VibraVid.core.utils.resolution import classify_resolution
-from VibraVid.core.utils.selector import FilterSpec, StreamSelector, StreamSelectorFormatter
+from VibraVid.core.utils.selector import FilterSpec, StreamSelector, StreamSelectorFormatter, configured_mux_dtsx
 from VibraVid.core.utils.stream_selector_ui import InteractiveStreamSelector
 from VibraVid.core.velora.subtitle import build_ext_track_label, ext_from_url, is_valid_format, normalize_sub_filename
 from VibraVid.core.velora.util._subtitle_segments import get_subtitle_resolve_workers, resolve_subtitle_segments_sync
@@ -319,7 +319,7 @@ class BaseMediaDownloader:
             minimum_video_height=0 if requested_quality else int(f.get("minimum_video_height") or config_manager.config.get("DOWNLOAD", "minimum_video_height", default=0) or 0),
             strict_no_match=context_tracker.skip_no_match,
             dv_auto=_pref("dv_auto", True, section="CODEC"),
-            mux_dtsx=_pref("mux_dtsx", False, section="CODEC"),
+            mux_dtsx=bool(f.get("mux_dtsx", configured_mux_dtsx())),
             drop_clear_av=bool(f.get("drop_clear_av", False)),
             dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
         )
@@ -486,21 +486,7 @@ class BaseMediaDownloader:
         seen_normalized: set[str] = set()
 
         for s in sel_audio:
-            lang = s.resolved_language or s.language or "und"
-            codec = s.get_short_codec() or s.codecs or ""
-            parts = []
-
-            if codec:
-                parts.append(f"[yellow]\\[{codec}][/yellow]")
-
-            parts.append(f"[bold white]{lang}[/bold white]")
-            if s.bitrate:
-                parts.append(f"[blue]{s.bitrate_display}[/blue]")
-
-            if s.default:
-                parts.append("[bold red][DEFAULT][/bold red]")
-
-            label = " ".join(parts)
+            label = self._audio_stream_label(s)
             raw = (s.language or "und").lower()
             normalized = resolve_locale(raw) if raw else ""
             # Must match _stream_task_key's audio branch exactly (prefers resolved_language over
@@ -552,6 +538,25 @@ class BaseMediaDownloader:
                 self._sub_task_keys.append((task_key, label))
 
     @staticmethod
+    def _audio_stream_label(s: "Stream") -> str:
+        """Rich label of an audio track: ``[codec] lang bitrate [DEFAULT]``."""
+        lang = s.resolved_language or s.language or "und"
+        codec = s.get_short_codec() or s.codecs or ""
+        parts = []
+
+        if codec:
+            parts.append(f"[yellow]\\[{codec}][/yellow]")
+
+        parts.append(f"[bold white]{lang}[/bold white]")
+        if s.bitrate:
+            parts.append(f"[blue]{s.bitrate_display}[/blue]")
+
+        if s.default:
+            parts.append("[bold red][DEFAULT][/bold red]")
+
+        return " ".join(parts)
+
+    @staticmethod
     def _sub_discriminator(stream) -> str:
         if getattr(stream, "forced", False):
             return "_forced"
@@ -583,7 +588,7 @@ class BaseMediaDownloader:
                 ext_tag = "WVTT"
             else:
                 fmt = (s.format or "").lower().strip()
-                _IGNORE = {"dash", ""}
+                _IGNORE = {"dash", "hls", ""}
                 if fmt not in _IGNORE:
                     ext_tag = fmt.upper()
                 else:

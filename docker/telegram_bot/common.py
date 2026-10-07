@@ -159,8 +159,9 @@ def _site_view(options: list[dict], selected: str, page: int, token: str) -> tup
 
 def is_allowed(event) -> bool:
     state.cfg.refresh()
-    allowed = state.cfg.allowed_users
-    return not allowed or event.sender_id in allowed
+    if not state.cfg.restricted:
+        return True
+    return event.sender_id in state.cfg.allowed_users
 
 
 async def deny(event) -> None:

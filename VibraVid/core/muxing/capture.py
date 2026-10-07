@@ -306,6 +306,7 @@ def capture_ffmpeg_real_time(
     process: subprocess.Popen | None = None
     output_thread: threading.Thread | None = None
     timed_out = False
+    interrupted = False
 
     try:
         log_command(ffmpeg_command, f"Starting ffmpeg process for {description}", log=logger)
@@ -337,6 +338,9 @@ def capture_ffmpeg_real_time(
             terminate_process(process)
         except KeyboardInterrupt:
             logger.error("Terminating ffmpeg process...")
+            interrupted = True
+            terminate_flag.set()
+            terminate_process(process)
         except Exception as e:
             logger.error(f"Error in ffmpeg process: {e}")
         finally:
@@ -354,6 +358,17 @@ def capture_ffmpeg_real_time(
 
     except Exception as e:
         logger.error(f"Failed to start ffmpeg process: {e}")
+
+    if interrupted:
+        # Ctrl+C while muxing: ffmpeg is stopped, don't leave a half-written file and let the interrupt reach the caller so nothing else runs.
+        if process is not None:
+            terminate_process(process)
+        if output_path:
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+        raise KeyboardInterrupt
 
     result = progress_data.get() or {}
     if process is not None:

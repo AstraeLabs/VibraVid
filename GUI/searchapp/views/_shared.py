@@ -5,7 +5,6 @@ import inspect
 import json
 import logging
 import os
-import shutil
 import threading
 import time
 import uuid
@@ -16,10 +15,10 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone
+from searchapp.api import get_api, get_available_sites, get_site_categories
+from searchapp.api.base import Entries
 
-from GUI.searchapp.api import get_api, get_available_sites, get_site_categories
-from GUI.searchapp.api.base import Entries
-from VibraVid.cli.run import equivalent_command_builder
+from VibraVid.cli.command.equivalent_command import equivalent_command_builder
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.services._base.site_extra_args import (
     get_site_extra_args_schema as get_site_extra_args_schema,
@@ -565,42 +564,6 @@ def _conf_dir() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "Conf")
 
 
-def _read_json(path: str) -> dict:
-    """Read JSON file at `path`. Returns {} if the file is missing or empty, or if it contains invalid JSON."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f) or {}
-    except (ValueError, TypeError):
-        return {}
-
-
-def _read_json_strict(path: str) -> dict:
-    """Read JSON file at `path`. Returns {} if the file is missing, but raises if the file contains invalid JSON."""
-    if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f) or {}
-
-
-def _write_json_backup(path: str, data: dict) -> None:
-    """Write JSON file at `path`, making a backup of the previous version if it exists."""
-    if os.path.exists(path):
-        try:
-            shutil.copy2(path, path + ".backup")
-        except OSError as e:
-            logger.exception("[settings] backup failed: %s", e)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(data, indent=4, ensure_ascii=False))
-
-
-def _mask_secret(val: str) -> str:
-    """Mask a secret string for display in logs/UI. Shows only the last 4 characters, or "••••" if shorter."""
-    val = str(val or "")
-    if not val:
-        return ""
-    return ("…" + val[-4:]) if len(val) > 4 else "••••"
-
-
 _update_check_cache: dict = {}
 _UPDATE_CHECK_TTL = 3600
-__all__ = ['_recent_webhooks', '_recent_webhooks_lock', '_WEBHOOK_DEDUP_WINDOW', '_GLOBAL_SEARCH_TIMEOUT', '_is_recent_webhook', '_mark_native_webhook_seen', '_MEDIA_KINDS', '_DIRECT_KINDS', '_FILTER_GROUPS', '_is_anime_source', '_media_item_to_display_dict', '_accepts_audio_format', '_to_bool', '_resolve_global_sites', '_run_global_search', '_log_gui_equivalent_command', '_run_download_in_thread', '_handle_series_download', '_tag_anime_entries', '_update_single_item', '_conf_dir', '_read_json', '_read_json_strict', '_write_json_backup', '_mask_secret', '_update_check_cache', '_UPDATE_CHECK_TTL']
+__all__ = ['_recent_webhooks', '_recent_webhooks_lock', '_WEBHOOK_DEDUP_WINDOW', '_GLOBAL_SEARCH_TIMEOUT', '_is_recent_webhook', '_mark_native_webhook_seen', '_MEDIA_KINDS', '_DIRECT_KINDS', '_FILTER_GROUPS', '_is_anime_source', '_media_item_to_display_dict', '_accepts_audio_format', '_to_bool', '_resolve_global_sites', '_run_global_search', '_log_gui_equivalent_command', '_run_download_in_thread', '_handle_series_download', '_tag_anime_entries', '_update_single_item', '_conf_dir', '_update_check_cache', '_UPDATE_CHECK_TTL']

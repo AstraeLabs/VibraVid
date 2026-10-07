@@ -5,7 +5,6 @@
         "close_console": true,
         "show_message": true,
         "fetch_domain_online": true,
-        "auto_update_check": true,
         "disable_scraper_cache": false,
         "imp_service": ["default"],
         "installation": "",
@@ -45,8 +44,7 @@
         "cleanup_tmp_folder": true
     },
     "CODEC": {
-        "dv_auto": true,
-        "mux_dtsx": false
+        "dv_auto": false
     },
     "PROCESS": {
         "engine": "ffmpeg",
@@ -61,6 +59,7 @@
         "merge_audio": true,
         "merge_subtitle": true,
         "force_subtitle": "auto",
+        "mux_dtsx": false,
         "extension": "mkv"
     },
     "REQUESTS": {
@@ -91,9 +90,7 @@
         "pre_run": [],
         "pre_download": [],
         "post_download": [],
-        "post_run": [],
-        "db_store": false,
-        "db_info": {}
+        "post_run": []
     },
     "ARR": {
         "enabled": false,

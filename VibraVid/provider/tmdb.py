@@ -15,6 +15,12 @@ from VibraVid.utils.http_client import create_client, get_headers
 console = Console()
 logger = logging.getLogger(__name__)
 _warned_legacy_login_key = False
+_SECRET_PARAMS = ("api_key",)
+
+
+def _redact_params(params: dict) -> dict:
+    """Copy of the request params that is safe to log: secret values are masked."""
+    return {k: ("***" if k in _SECRET_PARAMS else v) for k, v in (params or {}).items()}
 
 
 def _configured_api_key() -> str | None:
@@ -79,7 +85,7 @@ class TMDBClient:
         for attempt in range(retries + 1):
             try:
                 with create_client(headers=get_headers()) as client:
-                    logger.debug(f"Make req: {url} with params: {params}")
+                    logger.debug(f"Make req: {url} with params: {_redact_params(params)}")
                     response = client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
@@ -98,7 +104,7 @@ class TMDBClient:
                             time.sleep(wait_time)
                             continue
 
-                console.log(f"[red]Error making request to {endpoint}: {e}[/red]")
+                console.log(f"[red]Error making request to {endpoint}: {str(e).replace(self.api_key, '***')}[/red]")
                 return {}
 
         return {}

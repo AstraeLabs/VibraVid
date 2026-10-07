@@ -283,6 +283,21 @@
 				</div>
 
 				<div id="cn-zip-out" hidden></div>
+
+				<h3 style="margin-top:24px">Uploaded providers</h3>
+				<p class="cn-sub" style="margin-bottom:10px">
+					Providers added from a ZIP can be removed here. The ones shipped with the app can't.
+				</p>
+				<div class="cn-lines" id="cn-uploaded" style="gap:2px">
+					{% for name in uploaded_services %}
+						<div class="cn-ln" data-uploaded-row="{{ name }}" style="background:var(--cn-surf-2);padding:11px 15px">
+							<span class="cn-grow"><span class="cn-t" style="font-size:14px">{{ name }}</span></span>
+							<button class="cn-cta" type="button" data-remove="{{ name }}">Remove</button>
+						</div>
+					{% endfor %}
+				</div>
+				<p class="cn-sub" id="cn-uploaded-empty" {% if uploaded_services %}hidden{% endif %}>None uploaded yet.</p>
+				<p class="cn-sub" id="cn-remove-msg"></p>
 			</div>
 
 			<div class="cn-box">
@@ -323,6 +338,7 @@
 	var URL_ARR      = "{% url 'arr_status' %}";
 	var URL_ARR_SYNC = "{% url 'arr_trigger_sync' %}";
 	var URL_UPLOAD   = "{% url 'upload_service_zip' %}";
+	var URL_REMOVE   = "{% url 'remove_service' %}";
 	var URL_BINARIES = "{% url 'trigger_binaries_update' %}";
 	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
 	var CSRF         = "{{ csrf_token }}";
@@ -801,6 +817,44 @@
 				out.textContent = "Network error: " + err.message;
 			})
 			.finally(function () { btn.disabled = false; });
+	});
+
+	// ── Rimozione di un provider caricato ───────────────────────────────────
+	el("cn-uploaded").addEventListener("click", function (e) {
+		var btn = e.target.closest("button[data-remove]");
+		if (!btn) return;
+		var msg = el("cn-remove-msg");
+
+		if (!btn.dataset.armed) {
+			btn.dataset.armed = "1";
+			btn.textContent = "Click again to confirm";
+			setTimeout(function () {
+				delete btn.dataset.armed;
+				btn.textContent = "Remove";
+			}, 4000);
+			return;
+		}
+
+		btn.disabled = true;
+		say(msg, "Removing…");
+		post(URL_REMOVE, JSON.stringify({ name: btn.dataset.remove }), true)
+			.then(function (data) {
+				if (!data || !data.success) {
+					btn.disabled = false;
+					say(msg, (data && data.error) || "Removal failed.", "bad");
+					return;
+				}
+				var row = btn.closest("[data-uploaded-row]");
+				if (row) row.remove();
+				if (!el("cn-uploaded").children.length) el("cn-uploaded-empty").hidden = false;
+				var issues = (data.errors || []).length ? " — issue: " + data.errors.join("; ") : "";
+				say(msg, data.message + ". Reload the page to refresh the provider list." + issues,
+					(data.errors || []).length ? "bad" : "good");
+			})
+			.catch(function (err) {
+				btn.disabled = false;
+				say(msg, "Network error: " + err.message, "bad");
+			});
 	});
 
 	// ── Binaries ──────────────────────────────────────────────────────────────

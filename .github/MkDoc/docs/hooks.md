@@ -86,39 +86,6 @@ Execute custom scripts at specific points in the download lifecycle. Hooks are c
 - **Bat / cmd / shell:** executed via `cmd /c` on Windows
 - **Inline commands:** use `command` instead of `path` for simple one-liners
 
-## Shared Download Cache (Vault)
-
-The `HOOKS` block also holds two keys that are **not** a script hook: `db_store` and
-`db_info`. Together they control an opt-in shared cache of already-processed (downloaded,
-decrypted, muxed) files, keyed by title/type/season/episode:
-
-```json
-{
-  "HOOKS": {
-    "db_store": false,
-    "db_info": {
-      "url": "",
-      "token": "",
-      "skip_if_cached": false
-    }
-  }
-}
-```
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `db_store` | `false` | Master switch for the shared cache. Has no effect unless `db_info.url` is also set — with an empty `db_info` (the shipped default) the feature is completely inert |
-| `db_info.url` | — | Base URL of the vault service to query/upload to. Required for **any** interaction, fetch or upload |
-| `db_info.token` | — | Upload authorization token. Without it VibraVid is **fetch-only**: it can still look up and download cache hits, but never uploads what it downloads |
-| `db_info.skip_if_cached` | `false` | Stricter mode: if a vault hit exists, **skip the item entirely** instead of fetching it — no file is produced locally at all for that movie/episode this run. Off by default, since normally a cache hit should still get you the file |
-
-Even with `db_store: true` and a valid `db_info.token`, **uploads only happen for services that
-opt in**: the site module's `__init__.py` must set `_db_upload = True`. This is separate from
-`db_info.token` being set — the token controls *authorization*, `_db_upload` controls whether
-that particular service is even allowed to try. A handful of services ship with this set; most
-don't, so they stay fetch-only regardless of `db_info` configuration.
-
-
 ## Context Placeholders
 
 | Placeholder | Description |

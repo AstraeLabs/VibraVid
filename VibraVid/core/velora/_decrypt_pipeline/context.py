@@ -2,6 +2,7 @@
 
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,13 @@ class _SegmentDownloadContext:
     stream_dir: Path
     all_headers: dict
     progress_label: str
+    default_ext: str = ""
+    live_decryption: bool = False
+
+    # Callbacks bound to this context (stop request / progress bar / velora events)
+    stop: Callable[[], bool] | None = None
+    progress_cb: Callable[..., None] | None = None
+    event_cb: Callable[[dict], None] | None = None
 
     # Segment bookkeeping
     key_cache: dict[str, bytes] = field(default_factory=dict)

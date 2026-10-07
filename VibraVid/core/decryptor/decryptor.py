@@ -57,6 +57,21 @@ def _ansi_encodable(path: str) -> bool:
         return False
 
 
+def _alias_dir(path: str) -> str:
+    """Get a directory for creating aliased files (for paths that can't be encoded in ANSI)."""
+    if os.name == "nt":
+        drive = os.path.splitdrive(os.path.abspath(path))[0]
+        if len(drive) == 2 and drive[1] == ":":
+            folder = drive + os.sep + ".vv_tmp"
+            try:
+                os.makedirs(folder, exist_ok=True)
+                if os.access(folder, os.W_OK) and _ansi_encodable(folder):
+                    return folder
+            except OSError:
+                pass
+    return tempfile.gettempdir()
+
+
 class _AnsiSafePathGuard:
     def __init__(self, encrypted_path: str, output_path: str, forbid_comma: bool = False):
         self.encrypted_path = encrypted_path
@@ -72,7 +87,7 @@ class _AnsiSafePathGuard:
     def __enter__(self) -> "_AnsiSafePathGuard":
         if self._needs_alias(self.encrypted_path):
             ext = os.path.splitext(self.encrypted_path)[1]
-            alias = os.path.join(tempfile.gettempdir(), f"vv_dec_in_{uuid.uuid4().hex}{ext}")
+            alias = os.path.join(_alias_dir(self.encrypted_path), f"vv_dec_in_{uuid.uuid4().hex}{ext}")
             try:
                 os.link(self.encrypted_path, alias)
             except OSError:
@@ -83,7 +98,7 @@ class _AnsiSafePathGuard:
 
         if self._needs_alias(self.output_path):
             ext = os.path.splitext(self.output_path)[1]
-            self.safe_output_path = os.path.join(tempfile.gettempdir(), f"vv_dec_out_{uuid.uuid4().hex}{ext}")
+            self.safe_output_path = os.path.join(_alias_dir(self.output_path), f"vv_dec_out_{uuid.uuid4().hex}{ext}")
             logger.debug(f"Output path unsafe for this tool (ANSI/comma), aliased via {self.safe_output_path}")
 
         return self

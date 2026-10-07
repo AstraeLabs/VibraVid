@@ -24,6 +24,7 @@ from .util.formatting import format_size
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT = config_manager.config.get_int("REQUESTS", "timeout")
+_RANGED_CHUNK_BYTES = 8 * 1024 * 1024
 
 
 def _frag_init_probe(dl_segs: list[dict], headers: dict) -> tuple[bool, str | None]:
@@ -311,7 +312,8 @@ class VodStreamMixin:
             self.decrypt_failures.append(
                 {"label": label, "track": label, "message": f"no key for required KID(s): {required}", "skipped": True}
             )
-        self._finish_bar_task(bar_manager, task_key or self._stream_task_key(stream), "Skipped")
+        task_key = task_key or self._stream_task_key(stream)
+        self._finish_bar_task(bar_manager, task_key, "Skipped", self._skipped_track_bar_label(stream, task_key))
         self._record_track_done(self._stream_task_key(stream), None)
 
     def _skip_stream_wrong_key(self, stream, kid: str, bar_manager=None, task_key: str | None = None) -> None:
@@ -330,7 +332,8 @@ class VodStreamMixin:
                 }
             )
 
-        self._finish_bar_task(bar_manager, task_key or self._stream_task_key(stream), "Failed")
+        task_key = task_key or self._stream_task_key(stream)
+        self._finish_bar_task(bar_manager, task_key, "Failed", self._skipped_track_bar_label(stream, task_key))
         self._record_track_done(self._stream_task_key(stream), None)
 
     # Live trial: wait until the growing single-file segment passes
@@ -544,15 +547,80 @@ class VodStreamMixin:
         t = threading.Thread(target=_run, daemon=True, name=f"key-trial-{getattr(stream, 'id', '?')}")
         t.start()
 
+    def _skipped_track_bar_label(self, stream, task_key: str) -> str:
+        """Return a label for a skipped track's progress bar row, or "" if no label should be shown. The row is marked "Skipped" in the progress bar manager."""
+        if stream.type == "video":
+            return ""
+        
+        label = self._stream_progress_label(stream, task_key)
+        if label:
+            return label
+        
+        if stream.type == "audio":
+            return f"[bold cyan]Aud[/bold cyan] {self._audio_stream_label(stream)}"
+        
+        if stream.type == "subtitle":
+            return f"[bold cyan]Sub[/bold cyan] {self._sub_stream_label(stream)}"
+        
+        return ""
+
     @staticmethod
-    def _finish_bar_task(bar_manager, task_key: str, status: str) -> None:
+    def _finish_bar_task(bar_manager, task_key: str, status: str, label: str = "") -> None:
         """Mark a track's progress-bar row terminal so it never freezes at 0B."""
         if bar_manager is None or not task_key:
             return
+        
+        line = {"task_key": task_key, "pct": 100, "speed": status}
+        if label:
+            line["label"] = label
+        
         try:
-            bar_manager.handle_progress_line({"task_key": task_key, "pct": 100, "speed": status})
+            bar_manager.handle_progress_line(line)
         except Exception:
             pass
+
+    def _limit_segments(self, dl_segs: list[dict], label: str, keep_init: bool = True) -> list[dict]:
+        """Apply ``--max-segments`` (``N`` or ``(start, end)``); the leading init segment is kept unless ``keep_init`` is False."""
+        seg_start, seg_end = self.max_segments if isinstance(self.max_segments, tuple) else (0, self.max_segments)
+        if seg_start > 0 or seg_end is not None:
+            if keep_init and dl_segs and dl_segs[0].get("seg_type") == "init":
+                dl_segs = [dl_segs[0]] + dl_segs[1:][seg_start:seg_end]
+            else:
+                dl_segs = dl_segs[seg_start:seg_end]
+            logger.debug(f"Limiting {label} download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
+        return dl_segs
+
+    def _make_seg_url_refresher(self, label: str, dl_segs: list[dict]):
+        """Closure that re-signs the URLs of failed segments with the query string of a freshly fetched manifest URL."""
+        def _refresh_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
+            logger.info(f"{label} token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")
+            if not self.manifest_refresh_fn:
+                return {}
+
+            fresh_master = self.manifest_refresh_fn()
+            if not fresh_master:
+                logger.error(f"{label} token refresh: manifest_refresh_fn returned no URL")
+                return {}
+
+            fresh_query = urlsplit(fresh_master).query
+            failed_set = set(failed_numbers)
+            return {
+                s["number"]: urlunsplit(urlsplit(s["url"])._replace(query=fresh_query))
+                for s in dl_segs
+                if s["number"] in failed_set
+            }
+
+        return _refresh_seg_urls
+
+    def _probe_kid_or_skip(self, stream, dl_segs: list[dict], headers: dict, bar_manager, probed_kid: str | None = None) -> bool:
+        """Probe the init segment for the KID when the manifest didn't tell it; True (and the stream is skipped) if no provided key covers it."""
+        if probed_kid is None and self._needs_kid_probe(stream):
+            _, probed_kid = _frag_init_probe(dl_segs, headers)
+
+        if probed_kid and not self._key_matches_kid(probed_kid):
+            self._skip_stream_no_key(stream, probed_kid, bar_manager)
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Dispatch per stream type
@@ -660,40 +728,12 @@ class VodStreamMixin:
                 }
             )
 
-        if self._needs_kid_probe(stream):
-            _, probed_kid = _frag_init_probe(dl_segs, all_headers)
-            if probed_kid and not self._key_matches_kid(probed_kid):
-                self._skip_stream_no_key(stream, probed_kid, bar_manager)
-                return
+        if self._probe_kid_or_skip(stream, dl_segs, all_headers, bar_manager):
+            return
 
-        seg_start, seg_end = self.max_segments if isinstance(self.max_segments, tuple) else (0, self.max_segments)
-        if seg_start > 0 or seg_end is not None:
-            if init_url:
-                dl_segs = [dl_segs[0]] + dl_segs[1:][seg_start:seg_end]
-            else:
-                dl_segs = dl_segs[seg_start:seg_end]
-            logger.debug(f"Limiting HLS download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
-
+        dl_segs = self._limit_segments(dl_segs, "HLS")
         dl_segs = self._apply_max_time(dl_segs)
         self._sync_estimated_size(stream, dl_segs, all_headers)
-
-        def _refresh_hls_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
-            logger.info(f"HLS token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")
-            if not self.manifest_refresh_fn:
-                return {}
-
-            fresh_master = self.manifest_refresh_fn()
-            if not fresh_master:
-                logger.error("HLS token refresh: manifest_refresh_fn returned no URL")
-                return {}
-
-            fresh_query = urlsplit(fresh_master).query
-            failed_set = set(failed_numbers)
-            return {
-                s["number"]: urlunsplit(urlsplit(s["url"])._replace(query=fresh_query))
-                for s in dl_segs
-                if s["number"] in failed_set
-            }
 
         self._download_stream_generic(
             dl_segs,
@@ -702,7 +742,7 @@ class VodStreamMixin:
             "ts",
             bar_manager,
             live_decryption=live_decryption,
-            seg_url_refresh_fn=_refresh_hls_seg_urls,
+            seg_url_refresh_fn=self._make_seg_url_refresher("HLS", dl_segs),
         )
 
     def _download_dash_stream(self, stream, bar_manager: DownloadBarManager, live_decryption: bool = False) -> None:
@@ -773,7 +813,7 @@ class VodStreamMixin:
                     return
 
         all_headers = self._build_headers()
-        chunk_size = max(8 * 1024 * 1024, 1 * 1024 * 1024)
+        chunk_size = _RANGED_CHUNK_BYTES
         media_segments = [s for s in stream.segments if s.seg_type == "media"]
         unique_media_urls = {s.url for s in media_segments}
         is_single_file = len(unique_media_urls) == 1 and not any(s.byte_range for s in media_segments)
@@ -829,34 +869,9 @@ class VodStreamMixin:
 
         self._assign_segment_durations(stream, dl_segs, all_headers)
 
-        seg_start, seg_end = self.max_segments if isinstance(self.max_segments, tuple) else (0, self.max_segments)
-        if seg_start > 0 or seg_end is not None:
-            if dl_segs and dl_segs[0].get("seg_type") == "init":
-                dl_segs = [dl_segs[0]] + dl_segs[1:][seg_start:seg_end]
-            else:
-                dl_segs = dl_segs[seg_start:seg_end]
-            logger.debug(f"Limiting DASH download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
-
+        dl_segs = self._limit_segments(dl_segs, "DASH")
         dl_segs = self._apply_max_time(dl_segs)
         self._sync_estimated_size(stream, dl_segs, all_headers)
-
-        def _refresh_dash_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
-            logger.info(f"DASH token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")
-            if not self.manifest_refresh_fn:
-                return {}
-
-            fresh_master = self.manifest_refresh_fn()
-            if not fresh_master:
-                logger.error("DASH token refresh: manifest_refresh_fn returned no URL")
-                return {}
-
-            fresh_query = urlsplit(fresh_master).query
-            failed_set = set(failed_numbers)
-            return {
-                s["number"]: urlunsplit(urlsplit(s["url"])._replace(query=fresh_query))
-                for s in dl_segs
-                if s["number"] in failed_set
-            }
 
         # Single-file byte-range DASH: every media segment is a byte range of ONE file.
         byte_range_single_file = bool(media_segments) and all(s.byte_range for s in media_segments)
@@ -870,11 +885,7 @@ class VodStreamMixin:
                 effective_live = False
                 logger.info("DASH byte-range single-file stream: decrypting after merge (not per-segment)")
 
-        if probed_kid is None and self._needs_kid_probe(stream):
-            _, probed_kid = _frag_init_probe(dl_segs, all_headers)
-
-        if probed_kid and not self._key_matches_kid(probed_kid):
-            self._skip_stream_no_key(stream, probed_kid, bar_manager)
+        if self._probe_kid_or_skip(stream, dl_segs, all_headers, bar_manager, probed_kid):
             return
 
         # If the stream is a single-file DASH and live decryption is enabled, spawn a background thread to fetch the growing segment and check for sample-encryption. If the stored key is wrong, poison the KID so all tracks sharing it terminate mid-download.
@@ -892,7 +903,7 @@ class VodStreamMixin:
             "mp4",
             bar_manager,
             live_decryption=effective_live,
-            seg_url_refresh_fn=_refresh_dash_seg_urls,
+            seg_url_refresh_fn=self._make_seg_url_refresher("DASH", dl_segs),
         )
 
     def _download_ism_stream(self, stream, bar_manager: DownloadBarManager, live_decryption: bool = False) -> None:
@@ -901,7 +912,7 @@ class VodStreamMixin:
             return
 
         all_headers = self._build_headers()
-        chunk_size = max(8 * 1024 * 1024, 1 * 1024 * 1024)
+        chunk_size = _RANGED_CHUNK_BYTES
         media_segments = [s for s in stream.segments if s.seg_type == "media"]
         unique_media_urls = {s.url for s in media_segments}
         is_single_file = len(unique_media_urls) == 1 and not any(s.byte_range for s in media_segments)
@@ -955,31 +966,10 @@ class VodStreamMixin:
 
         self._assign_segment_durations(stream, dl_segs, all_headers)
 
-        seg_start, seg_end = self.max_segments if isinstance(self.max_segments, tuple) else (0, self.max_segments)
-        if seg_start > 0 or seg_end is not None:
-            dl_segs = dl_segs[seg_start:seg_end]
-            logger.debug(f"Limiting ISM download to segments [{seg_start}:{seg_end}] ({len(dl_segs)} segments)")
-
+        # Unlike HLS/DASH, ISM slices the whole plan, init segment included.
+        dl_segs = self._limit_segments(dl_segs, "ISM", keep_init=False)
         dl_segs = self._apply_max_time(dl_segs)
         self._sync_estimated_size(stream, dl_segs, all_headers)
-
-        def _refresh_ism_seg_urls(failed_numbers: list[int]) -> dict[int, str]:
-            logger.info(f"ISM token refresh: {len(failed_numbers)} failed segment(s), attempting manifest refresh to get new token")
-            if not self.manifest_refresh_fn:
-                return {}
-
-            fresh_master = self.manifest_refresh_fn()
-            if not fresh_master:
-                logger.error("ISM token refresh: manifest_refresh_fn returned no URL")
-                return {}
-
-            fresh_query = urlsplit(fresh_master).query
-            failed_set = set(failed_numbers)
-            return {
-                s["number"]: urlunsplit(urlsplit(s["url"])._replace(query=fresh_query))
-                for s in dl_segs
-                if s["number"] in failed_set
-            }
 
         # A byte-range-split single file has no per-fragment boundary to decrypt
         # independently -- unless the first segment turns out to be a real
@@ -996,13 +986,9 @@ class VodStreamMixin:
                 effective_live = False
                 logger.info("ISM byte-range single-file stream: decrypting after merge (not per-segment)")
 
-        if probed_kid is None and self._needs_kid_probe(stream):
-            _, probed_kid = _frag_init_probe(dl_segs, all_headers)
-
-        if probed_kid and not self._key_matches_kid(probed_kid):
-            self._skip_stream_no_key(stream, probed_kid, bar_manager)
+        if self._probe_kid_or_skip(stream, dl_segs, all_headers, bar_manager, probed_kid):
             return
 
         self._download_stream_generic(
-            dl_segs, stream, "ism", "mp4", bar_manager, live_decryption=effective_live, seg_url_refresh_fn=_refresh_ism_seg_urls
+            dl_segs, stream, "ism", "mp4", bar_manager, live_decryption=effective_live, seg_url_refresh_fn=self._make_seg_url_refresher("ISM", dl_segs)
         )

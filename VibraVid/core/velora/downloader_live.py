@@ -82,6 +82,21 @@ def _emit_live_progress(
     )
 
 
+def _make_batch_progress_cb(bar_manager, task_key: str, segs_before: int, bytes_before: int, elapsed_before: float, avg_dur: float):
+    """Progress callback for one live batch: offsets the batch counters by what the previous batches already downloaded."""
+    def _cb(done, total_, cur_bytes, speed_bps, speed_label=None):
+        _emit_live_progress(
+            bar_manager,
+            task_key,
+            segs_before + done,
+            bytes_before + cur_bytes,
+            speed_bps,
+            elapsed_before + done * avg_dur,
+        )
+
+    return _cb
+
+
 def _reset_live_timestamps(out_path: Path) -> None:
     """Rewrite *out_path* in place (stream-copy) so presentation timestamps start at 0."""
     from VibraVid.setup import get_ffmpeg_path
@@ -375,25 +390,7 @@ class LiveDownloadMixin:
                     _bytes_before = total_bytes
                     _elapsed_before = elapsed_dur
 
-                    def _batch_progress_cb(
-                        done,
-                        total_,
-                        cur_bytes,
-                        speed_bps,
-                        speed_label=None,
-                        _segs_before=_segs_before,
-                        _bytes_before=_bytes_before,
-                        _elapsed_before=_elapsed_before,
-                        _batch_avg_dur=_batch_avg_dur,
-                    ):
-                        _emit_live_progress(
-                            bar_manager,
-                            task_key,
-                            _segs_before + done,
-                            _bytes_before + cur_bytes,
-                            speed_bps,
-                            _elapsed_before + done * _batch_avg_dur,
-                        )
+                    _batch_progress_cb = _make_batch_progress_cb(bar_manager, task_key, _segs_before, _bytes_before, _elapsed_before, _batch_avg_dur)
 
                     batch_t0 = time.monotonic()
 
@@ -470,22 +467,10 @@ class LiveDownloadMixin:
         if (not live_decryption) and self.key and stream_is_encrypted:
             post_merge_path = out_path.with_suffix(out_path.suffix + ".dec")
 
-            def _decrypt_cb(parsed):
-                if not parsed:
-                    return
-
-                bar_manager.handle_progress_line(
-                    {
-                        "task_key": task_key,
-                        "pct": parsed.get("pct"),
-                        "speed": parsed.get("status") or "Decrypt",
-                    }
-                )
-
             try:
                 decryptor = Decryptor()
                 if decryptor.decrypt(
-                    str(out_path), self.key, str(post_merge_path), stream_type=stream.type, progress_cb=_decrypt_cb
+                    str(out_path), self.key, str(post_merge_path), stream_type=stream.type, progress_cb=bar_manager.decrypt_progress_cb(task_key)
                 ):
                     try:
                         out_path.unlink(missing_ok=True)
@@ -597,28 +582,6 @@ class LiveDownloadMixin:
                 dec_tmp.unlink(missing_ok=True)
                 return False
 
-        def _download_batch(dl_batch: list[dict], progress_cb=None) -> list[Path]:
-            """
-            Download a DASH batch and return paths ordered by segment number
-            """
-            self._run_dl(
-                dl_batch,
-                stream_dir,
-                headers,
-                progress_cb=progress_cb,
-                stream=stream,
-                event_cb=None,
-                default_ext="mp4",
-            )
-            ordered: list[Path] = []
-            for seg in dl_batch:
-                seg_ext = detect_seg_ext(seg.get("url", ""), default="mp4")
-                if seg_ext == "m4s":
-                    seg_ext = "mp4"
-
-                ordered.append(stream_dir / f"seg_{seg['number']:05d}.{seg_ext}")
-            return ordered
-
         def _fetch_and_parse_mpd() -> tuple[list | None, float, bool]:
             nonlocal min_update_period
             try:
@@ -692,7 +655,7 @@ class LiveDownloadMixin:
                     if init_seg.byte_range:
                         init_entry["headers"] = {"Range": f"bytes={init_seg.byte_range}"}
 
-                    init_paths = _download_batch([init_entry])
+                    init_paths = self._live_download_batch([init_entry], stream_dir, headers, stream)
                     if init_paths and init_paths[0].exists():
                         req_headers = dict(headers)
                         req_headers.update(init_entry.get("headers") or {})
@@ -774,29 +737,11 @@ class LiveDownloadMixin:
                 _bytes_before = total_bytes
                 _elapsed_before = elapsed_dur
 
-                def _batch_progress_cb(
-                    done,
-                    total_,
-                    cur_bytes,
-                    speed_bps,
-                    speed_label=None,
-                    _segs_before=_segs_before,
-                    _bytes_before=_bytes_before,
-                    _elapsed_before=_elapsed_before,
-                    _batch_avg_dur=_batch_avg_dur,
-                ):
-                    _emit_live_progress(
-                        bar_manager,
-                        task_key,
-                        _segs_before + done,
-                        _bytes_before + cur_bytes,
-                        speed_bps,
-                        _elapsed_before + done * _batch_avg_dur,
-                    )
+                _batch_progress_cb = _make_batch_progress_cb(bar_manager, task_key, _segs_before, _bytes_before, _elapsed_before, _batch_avg_dur)
 
                 logger.debug(f"Live DASH: batch first URL: {getattr(fresh_segs[0], 'url', '?')[:120]}")
                 batch_t0 = time.monotonic()
-                batch_paths = _download_batch(dl_batch, progress_cb=_batch_progress_cb)
+                batch_paths = self._live_download_batch(dl_batch, stream_dir, headers, stream, progress_cb=_batch_progress_cb)
                 elapsed = max(time.monotonic() - batch_t0, 0.001)
                 batch_bytes = 0
                 decrypt_fails = 0

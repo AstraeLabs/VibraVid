@@ -3,9 +3,7 @@
 
 """History screen: past downloads viewer with status, paths, timestamps and errors."""
 
-import datetime
 import logging
-import uuid
 from typing import Any
 
 from textual import on
@@ -16,31 +14,14 @@ from textual.timer import Timer
 from textual.widgets import Button, DataTable, Header, Static
 
 from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
-from VibraVid.cli.command.queue import (
-    _PROCESS_TAG,
-    _load_queue,
-    _now_iso,
-    _queue_path,
-    _QueueLock,
-    _save_queue,
-)
+from VibraVid.cli.command.queue import enqueue_argv
 from VibraVid.core.ui.tracker import download_tracker
+from VibraVid.tui.formatting import format_time
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.utils.system_open import open_file, open_folder
 
 logger = logging.getLogger(__name__)
-
-
-def _format_time(ts: Any) -> str:
-    if not ts:
-        return "-"
-    try:
-        if isinstance(ts, (int, float)):
-            return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-        return str(ts)
-    except Exception:
-        return str(ts)
 
 
 class HistoryScreen(Screen):
@@ -113,7 +94,7 @@ class HistoryScreen(Screen):
             status = str(dl.get("status", "unknown"))
             path = str(dl.get("path") or "-")
             path_short = path if len(path) <= 40 else "..." + path[-37:]
-            end_time = _format_time(dl.get("end_time") or dl.get("last_update"))
+            end_time = format_time(dl.get("end_time") or dl.get("last_update"))
 
             if status == "completed":
                 status_fmt = f"[green]{status}[/green]"
@@ -168,7 +149,7 @@ class HistoryScreen(Screen):
             f"[bold cyan]Title:[/] {dl.get('title', '?')}",
             f"[bold cyan]Status:[/] {dl.get('status', '?')}   [bold cyan]Progress:[/] {dl.get('progress', 0):.1f}%",
             f"[bold cyan]Output Path:[/] {dl.get('path') or '-'}",
-            f"[bold cyan]Start Time:[/] {_format_time(dl.get('start_time'))}   [bold cyan]End Time:[/] {_format_time(dl.get('end_time'))}",
+            f"[bold cyan]Start Time:[/] {format_time(dl.get('start_time'))}   [bold cyan]End Time:[/] {format_time(dl.get('end_time'))}",
         ]
 
         if dl.get("error"):
@@ -300,25 +281,8 @@ class HistoryScreen(Screen):
             self.app.notify("Could not construct equivalent command to retry.", severity="error")
             return
 
-        tag = _PROCESS_TAG
-        path = _queue_path(tag)
-        item = {
-            "id": uuid.uuid4().hex[:8],
-            "argv": argv,
-            "status": "pending",
-            "tag": tag,
-            "enqueued_at": _now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "returncode": None,
-            "attempts": 0,
-        }
-
         try:
-            with _QueueLock(path):
-                data = _load_queue(path)
-                data.setdefault("items", []).append(item)
-                _save_queue(path, data)
+            item = enqueue_argv(argv)
             self.app.notify(f"Re-queued download '{title[:25]}' ({item['id']})", severity="information")
         except Exception as e:
             self.app.notify(f"Failed to re-queue download: {e}", severity="error")

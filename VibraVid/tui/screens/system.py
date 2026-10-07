@@ -29,6 +29,7 @@ from VibraVid.setup.system import (
     get_ffprobe_path,
     get_flux_path,
     get_mkvmerge_path,
+    get_mkvpropedit_path,
     get_prd_path,
     get_velora_path,
     get_wvd_path,
@@ -108,6 +109,7 @@ class SystemScreen(Screen):
             ("flux", get_flux_path()),
             ("dovi_tool", get_dovi_tool_path()),
             ("mkvmerge", get_mkvmerge_path()),
+            ("mkvpropedit", get_mkvpropedit_path()),
             ("Velora", get_velora_path()),
         ]
 

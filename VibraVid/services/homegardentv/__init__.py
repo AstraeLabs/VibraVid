@@ -1,7 +1,6 @@
 ﻿# 26.11.25
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
@@ -14,7 +13,6 @@ indice = 13
 _useFor = "Serie"
 _region = ["IT"]
 _live_mux = True
-msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()
@@ -65,7 +63,7 @@ def title_search(query: str) -> int:
                 Entries(
                     name=dict_title.get("title"),
                     type="tv",
-                    year=dict_title.get("dateLastModified").split("-")[0],
+                    year="9999",  # the API only has page dates (not the first-air year): "9999" makes EntriesManager resolve it from TMDB
                     image=dict_title.get("image").get("url"),
                     url=f"https://public.aurora.enhanced.live/site/page/{str(dict_title.get('slug')).lower().replace(' ', '-')}/?include=default&filter[environment]=hgtvit&v=2&parent_slug={dict_title.get('parentSlug')}",
                 )

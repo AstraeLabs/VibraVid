@@ -8,7 +8,7 @@ _AUDIO_SAMPLE_ENTRY_HEADER_SIZE = 28        # enca
 
 
 def _iter_boxes(buf, start: int, end: int):
-    """Yield (offset, size, type, header_len) for each direct-child box in buf[start:end]. 32-bit sizes only (real CMAF/DASH init segments never need 64-bit here)."""
+    """Yield ``(offset, size, type, header_len)`` for each direct-child MP4 box in ``buf[start:end]``."""
     off = start
     while off + 8 <= end:
         size = struct.unpack(">I", buf[off : off + 4])[0]

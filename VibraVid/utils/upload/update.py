@@ -11,7 +11,7 @@ from rich.console import Console
 
 from VibraVid.setup import get_is_binary_installation
 from VibraVid.setup.binary_paths import binary_paths
-from VibraVid.utils import _startup_prefetch, config_manager
+from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
 from .version import __author__, __title__
@@ -26,24 +26,42 @@ else:
 console = Console()
 logger = logging.getLogger(__name__)
 
-auto_update_check = config_manager.config.get_bool("DEFAULT", "auto_update_check")
-timeout = config_manager.config.get_int("REQUESTS", "timeout")
 _GENERIC_UPDATABLE_TOOLS = {
     "ffmpeg": ["ffmpeg", "ffprobe"],
     "flux": ["flux"],
     "dovi_tool": ["dovi_tool"],
-    "mkvtoolnix": ["mkvmerge", "mkvinfo"],
+    "mkvtoolnix": ["mkvmerge", "mkvinfo", "mkvpropedit"],
     "velora": ["velora"],
     "yt-dlp": ["yt-dlp"],
     "deno": ["deno"],
 }
+_ASSET_SYSTEM_MARKERS = {"windows": ".exe", "linux": "linux", "darwin": "_mac_"}
+
+
+def _asset_arch(name: str) -> str | None:
+    """Architecture suffix of a release asset name (``..._x64``, ``..._arm64``), or None when it has none."""
+    stem = name.lower().removesuffix(".exe")
+    for token in ("arm64", "x64"):
+        if stem.endswith(f"_{token}"):
+            return token
+    return None
+
+
+def pick_release_asset(assets: list[dict], system: str, arch: str) -> dict | None:
+    """First release asset built for *system* that runs on *arch* (an asset without an arch suffix is accepted)."""
+    marker = _ASSET_SYSTEM_MARKERS.get(system, "")
+    for asset in assets:
+        name = asset.get("name", "").lower()
+        if marker not in name:
+            continue
+        asset_arch = _asset_arch(name)
+        if asset_arch is None or asset_arch == arch:
+            return asset
+    return None
+
 
 def fetch_github_releases():
     """Fetch releases data from GitHub API (sync)"""
-    prefetched = _startup_prefetch.collect("releases", timeout=timeout)
-    if prefetched is not None:
-        return prefetched
-
     url = f"https://api.github.com/repos/{__author__}/{__title__}/releases"
     logger.info(f"Checking latest {__title__} release: {url}")
     with create_client(headers=get_headers()) as client:
@@ -93,14 +111,10 @@ def auto_update():
 
         # Find appropriate asset
         system = binary_paths._detect_system()
-        patterns = {"windows": ".exe", "linux": "linux", "darwin": "macos"}
-        pattern = patterns.get(system, "")
-
-        asset = None
-        for a in latest.get("assets", []):
-            if pattern in a["name"].lower():
-                asset = a
-                break
+        asset = pick_release_asset(latest.get("assets", []), system, binary_paths.arch)
+        if asset is None:
+            console.print(f"[#E63946]No release asset found for {system} {binary_paths.arch}")
+            return False
         console.print(f"[#00BCD4]Downloading {asset['name']}...")
 
         # Download
@@ -281,24 +295,7 @@ def check_all_binaries_update() -> dict:
 
 
 def update():
-    """Check for updates on GitHub and display relevant information."""
-    if auto_update_check:
-        try:
-            response_releases = fetch_github_releases()
-        except Exception as e:
-            logger.warning(f"Error accessing GitHub API: {e}")
-            console.print("[#E63946]Failed to fetch latest version")
-            return
-
-        # Get latest version tag
-        if response_releases:
-            last_version = response_releases[0].get("tag_name", "Unknown")
-        else:
-            last_version = "Unknown"
-
-    else:
-        last_version = "Unknown"
-
+    """Print the one-line status banner: execution mode, version, platform, country and community links."""
     # Get the current version (installed version)
     try:
         current_version = importlib.metadata.version(__title__)
@@ -315,18 +312,5 @@ def update():
     except Exception:
         pass
 
-    logger.info(f"Execution mode: {get_execution_mode()}, System: {binary_paths._detect_system()}, Version: {current_version}, Latest: {last_version}, Country: {country_code}")
+    logger.info(f"Execution mode: {get_execution_mode()}, System: {binary_paths._detect_system()}, Version: {current_version}, Country: {country_code}")
     console.print(f"      [green]{get_execution_mode()} [dim]·[/] [red]{current_version} [dim]·[/] [cyan]{binary_paths.system} {binary_paths.arch} [dim]·[/] [purple]{country_code if country_code else 'None'} [dim]·[/] [link=https://discord.com/invite/8vV68UGRc7][#5865F2]Discord[/link] [dim]·[/] [link=https://www.paypal.com/donate/?hosted_button_id=UXTWMT8P6HE2C][#ea4aaa]Donate[/link]")
-
-    if str(current_version).lower().replace("v.", "").replace("v", "") != str(last_version).lower().replace(
-        "v.", ""
-    ).replace("v", ""):
-        if last_version == "Unknown" or last_version == "Beta Build":
-            return
-
-        tag_url = last_version if last_version.startswith("v") else f"v{last_version}"
-        mode = get_execution_mode()
-        if mode == "installer":
-            console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run with [#FFD60A]-UP [#00BCD4]to auto-update\n")
-        elif mode == "source_code":
-            console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A][link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{last_version}[/link] [dim]·[/] [#00BCD4]Run [#FFD60A]git pull [#00BCD4]to update\n")

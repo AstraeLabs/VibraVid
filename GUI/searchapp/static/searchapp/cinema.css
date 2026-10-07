@@ -79,12 +79,13 @@
   color: var(--cn-white); text-decoration: none;
 }
 .cn-wordmark i { font-style: normal; color: var(--cn-hot); }
-.cn-vtag { font-size: 11px; font-weight: 650; color: var(--cn-mute); }
+.cn-vtag { font-size: 14px; font-weight: 650; color: var(--cn-mute); }
 .cn-donate {
   font-size: 11px; font-weight: 750; color: var(--cn-hot); text-decoration: none;
   letter-spacing: .02em;
 }
 .cn-donate:hover { color: var(--cn-white); }
+.cn-top-right .cn-donate { font-size: 14px; }
 
 .cn-menu { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
 .cn-menu a {
@@ -456,6 +457,8 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
   margin: 12px 0 0; font-size: 13px; color: var(--cn-faint); font-weight: 600;
   min-height: 1.2em;
 }
+
+.cn-extra-line { margin-top: 4px; }
 
 .cn-opt.is-toggle {
   display: inline-flex; align-items: center; gap: 8px; border-radius: var(--cn-radius-sm);

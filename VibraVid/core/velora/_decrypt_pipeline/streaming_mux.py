@@ -116,6 +116,13 @@ class StreamingMuxMixin:
     ) -> threading.Thread:
         """Runs _try_start_streaming_mux() (eligibility checks + the wait for other tracks + ffmpeg launch)"""
         def _worker() -> None:
+            relay_writer = getattr(self, "_relay_mux_writer", None)
+            if relay_writer is not None:
+                fn = relay_writer.get(id(video_stream)) if isinstance(relay_writer, dict) else relay_writer
+                if fn is not None:
+                    merger.attach_feeder(fn)
+                return
+            
             feeder = self._try_start_streaming_mux(video_ext, video_stream, video_duration_cap)
             if feeder is not None:
                 feeder_box[0] = feeder

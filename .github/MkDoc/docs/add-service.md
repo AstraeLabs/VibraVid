@@ -31,6 +31,16 @@ _useFor = "Film_Serie"  # one of: Anime, Film_Serie, Serie, Song, Tor
 A module that defines `_hide = True` is loaded but excluded from CLI/GUI/ARR listings —
 useful while a service is still being built.
 
+**The folder name must be a valid Python identifier** (letters/digits/underscore, not starting
+with a digit) if anything elsewhere in the project will reference it with a literal import
+statement — the loader itself uses `importlib.import_module("VibraVid.services.<name>")`, which
+works fine with any string, but `from VibraVid.services.<name>.scrapper import X` written as
+source code is parsed by the compiler and `<name>` must be identifier-like there. A site whose
+natural name isn't one still works for the CLI
+loader itself, but any other code that needs a submodule must resolve it dynamically with
+`resolve_service_submodule(module_name, submodule)` (`VibraVid/services/_base/site_loader.py`)
+instead of a literal import — see the GUI adapter note below.
+
 #### Loading services from a remote repository
 
 `imp_service` (in `Conf/config.json`, `DEFAULT.imp_service`) doesn't only accept local folder
@@ -166,6 +176,23 @@ the package directory) — no separate registration step, and no logo/icon asset
 the GUI has no per-site static image requirement. `GenericStreamingAPI.search()` and
 `get_series_metadata()` already call your CLI-side `search()`/scrapper for you; only override
 `_build_entry`/`_map_episode` if the default field mapping doesn't fit.
+
+**If `<name>` isn't a valid Python identifier**, the literal
+`from VibraVid.services.<name>.scrapper import GetSerieInfo` above is a `SyntaxError` — resolve
+the submodule dynamically instead:
+
+```python
+from VibraVid.services._base.site_loader import resolve_service_submodule
+
+class MyService(GenericStreamingAPI):
+    site_name = "7movies"
+
+    def _build_scraper(self, media_item: Entries):
+        scrapper = resolve_service_submodule("7movies", "scrapper")
+        return scrapper.GetSerieInfo(media_item.id)
+```
+
+See `GUI/searchapp/api/7movies.py` for a real example.
 
 If you want your service to show up in a specific position in the GUI site list instead of just
 being appended after the known ones, add its module name to `_PREFERRED_ORDER` in
@@ -449,3 +476,13 @@ final_path = process_song(
 Note: TMDB poster/still art embedding into the final file is separate and needs no extra work
 here — it's zero-touch as long as `image`/`slug`/`year` are populated per the
 [Metadata](#metadata-scrapperpy) section above.
+
+### Installing and removing a service from the GUI
+
+Settings → *Providers* → **Add a provider** installs a ZIP into `VibraVid/services/<name>`. The same
+box lists the services you uploaded under **Uploaded providers**, each with a **Remove** button
+(click twice to confirm). Only folders that are not shipped with the project can be removed; the
+built-in services are refused. Services that come from an `imp_service` source (a git repository or
+a local path) are not touched. With Docker, uploaded services live in the container's writable
+layer, so they are lost when the container is recreated — re-upload them or keep them in an
+`imp_service` source.

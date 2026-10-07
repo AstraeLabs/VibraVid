@@ -5,12 +5,11 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.utils.language import resolve_locale
 from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
-from VibraVid.services._base import Entries, anime_folder, movie_folder, site_constants
+from VibraVid.services._base import Entries, anime_folder, movie_folder, print_download_header, print_episode_header
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, os_manager, start_message
@@ -20,7 +19,6 @@ from .manifest_builder import build_unified_manifest
 from .scrapper import GetSerieInfo
 
 console = Console()
-msg = Prompt()
 extension_output = config_manager.config.get("PROCESS", "extension")
 CR_LICENSE_URL = "https://www.crunchyroll.com/license/v1/license/widevine"
 
@@ -144,7 +142,7 @@ def download_film(select_title: Entries) -> str:
     Downloads a film using the provided Entries information.
     """
     start_message()
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{select_title.name} \n")
+    print_download_header(select_title)
 
     # Initialize Crunchyroll client
     client = CrunchyrollClient()
@@ -227,7 +225,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     start_message()
     client = scrape_serie.client
     client.clear_all_sessions()  # release anything leaked by a crashed/killed previous run
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{scrape_serie.series_name} [white]\\ [magenta]{obj_episode.name} ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    print_episode_header(scrape_serie.series_name, obj_episode.name, index_season_selected, index_episode_selected)
 
     path_components, filename = map_episode_path(
         scrape_serie.series_name,

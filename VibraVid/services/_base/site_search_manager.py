@@ -159,11 +159,6 @@ def get_select_title(table_show_manager, media_search_manager):
     if not media_search_manager.media_list:
         return None
 
-    if not media_search_manager.media_list:
-        console.print("\n[red]No media items available.")
-        logger.info("No media items available for selection.")
-        return None
-
     first_media_item = media_search_manager.media_list[0]
     column_info = {"Index": {"color": available_colors[0]}}
 

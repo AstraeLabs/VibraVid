@@ -8,7 +8,7 @@ from rich.prompt import Prompt
 from VibraVid.core.downloader import HLS_Downloader, MP4_Downloader
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.player.vixcloud import VideoSourceAnime
-from VibraVid.services._base import Entries, anime_folder, movie_folder, site_constants
+from VibraVid.services._base import Entries, anime_folder, movie_folder, print_episode_header, site_constants
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import config_manager, os_manager, start_message
@@ -41,7 +41,7 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source):
     Downloads a specific episode from the specified season.
     """
     start_message()
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{scrape_serie.series_name} ([cyan]E{obj_episode.number}) \n")
+    print_episode_header(scrape_serie.series_name, episode=obj_episode.number)
 
     # Collect mp4 url
     video_source.get_embed(obj_episode.id, not DOWNOAD_HLS)

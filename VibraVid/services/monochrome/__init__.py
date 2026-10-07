@@ -5,7 +5,6 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.provider.amazon import amazon_music
@@ -20,7 +19,6 @@ from .downloader import download_song, download_track_from_album
 indice = 14
 _useFor = "Song"
 console = Console()
-msg = Prompt()
 logger = logging.getLogger(__name__)
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()

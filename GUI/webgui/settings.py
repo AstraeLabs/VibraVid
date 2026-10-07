@@ -1,5 +1,6 @@
 # 06.06.25
 
+import logging
 import os
 import sys
 from datetime import datetime
@@ -168,6 +169,9 @@ try:
 
     _VIBRAVID_LOG_LEVEL = _vm_config.config.get("DEFAULT", "log_level", default="INFO").upper()
 except Exception:
+    _VIBRAVID_LOG_LEVEL = "INFO"
+
+if not isinstance(logging.getLevelName(_VIBRAVID_LOG_LEVEL), int):
     _VIBRAVID_LOG_LEVEL = "INFO"
 
 _VV_LOG_DIR = PROJECT_ROOT / ".cache" / "logs"

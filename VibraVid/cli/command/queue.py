@@ -204,18 +204,10 @@ def _strip_queue_flags(argv: list) -> list:
     return result
 
 
-def enqueue(argv: list, args) -> None:
-    ok, reason = _is_enqueueable(args)
-    if not ok:
-        console.print(f"[red]Cannot enqueue: {reason}")
-        raise SystemExit(1)
-
-    tag = _PROCESS_TAG
-    path = _queue_path(tag)
-
-    item = {
+def _new_queue_item(argv: list, tag: str) -> dict:
+    return {
         "id": uuid.uuid4().hex[:8],
-        "argv": _strip_queue_flags(argv),
+        "argv": argv,
         "status": "pending",
         "tag": tag,
         "enqueued_at": _now_iso(),
@@ -225,13 +217,39 @@ def enqueue(argv: list, args) -> None:
         "attempts": 0,
     }
 
+
+def enqueue_many(argv_list: list[list], tag: str | None = None) -> list[dict]:
+    """Append one pending job per argv to this process's queue file (one lock + load + save) and return the new items."""
+    if not argv_list:
+        return []
+
+    tag = tag or _PROCESS_TAG
+    path = _queue_path(tag)
+    items = [_new_queue_item(argv, tag) for argv in argv_list]
+
     with _QueueLock(path):
         data = _load_queue(path)
-        data["items"].append(item)
+        data.setdefault("items", []).extend(items)
         _save_queue(path, data)
 
-    logger.info(f"Queued item {item['id']} [tag={tag}]: {' '.join(item['argv'])}")
-    queue_name = os.path.splitext(os.path.basename(path))[0]
+    return items
+
+
+def enqueue_argv(argv: list, tag: str | None = None) -> dict:
+    """Append a single pending job to this process's queue file and return the new item."""
+    return enqueue_many([argv], tag)[0]
+
+
+def enqueue(argv: list, args) -> None:
+    ok, reason = _is_enqueueable(args)
+    if not ok:
+        console.print(f"[red]Cannot enqueue: {reason}")
+        raise SystemExit(1)
+
+    item = enqueue_argv(_strip_queue_flags(argv))
+
+    logger.info(f"Queued item {item['id']} [tag={item['tag']}]: {' '.join(item['argv'])}")
+    queue_name = os.path.splitext(os.path.basename(_queue_path(item["tag"])))[0]
     console.print(f"[green]Added to queue[/green]: [cyan]{queue_name}[/cyan]")
 
 

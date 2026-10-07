@@ -8,9 +8,9 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
+from searchapp.api import get_api
+from searchapp.api.base import Entries
 
-from GUI.searchapp.api import get_api
-from GUI.searchapp.api.base import Entries
 from VibraVid.provider.tmdb import tmdb_client
 
 from ..library_index import owned_episodes

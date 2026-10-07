@@ -4,18 +4,16 @@ import logging
 import random
 import threading
 import time
-from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.velora.util.formatting import format_size, format_speed, resolve_display_total
+from VibraVid.core.velora.util.formatting import SpeedWindow, format_size, format_speed, resolve_display_total
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
 logger = logging.getLogger("curl_cffi_bridge")
-SPEED_WINDOW_SECONDS = 3.0
 
 _thread_local = threading.local()
 _GLOBAL_CONCURRENCY_LIMIT = max(1, config_manager.config.get_int("DOWNLOAD", "thread_count"))
@@ -143,8 +141,7 @@ def run_download_plan_curl_cffi(
     results: list[dict[str, Any]] = []
     done_count = 0
     total_bytes = 0
-    speed_window: deque[tuple[float, int]] = deque()
-    speed_window.append((time.monotonic(), 0))
+    speed_meter = SpeedWindow()
     lock = threading.Lock()
 
     logger.debug(f"Starting curl_cffi download plan for {plan.get('task_key', 'download')} with {total} segments")
@@ -169,12 +166,7 @@ def run_download_plan_curl_cffi(
                 elif event_name == "error":
                     logger.warning(f"curl_cffi segment failed: {event.get('url')} — {event.get('message')}")
 
-                now = time.monotonic()
-                speed_window.append((now, total_bytes))
-                while len(speed_window) > 1 and now - speed_window[0][0] > SPEED_WINDOW_SECONDS:
-                    speed_window.popleft()
-                window_start_at, window_start_bytes = speed_window[0]
-                speed = (total_bytes - window_start_bytes) / max(now - window_start_at, 0.001)
+                speed = speed_meter.update(total_bytes)
 
                 if event_name == "completed":
                     if progress_cb:

@@ -43,7 +43,7 @@ Relevant environment variables (see `.env.telegram.example`):
 |---|---|---|
 | `TG_BOT_TOKEN` | yes | Token from BotFather |
 | `TG_API_ID` / `TG_API_HASH` | yes | From https://my.telegram.org |
-| `TG_ALLOWED_USERS` | recommended | Comma-separated numeric Telegram IDs allowed to use the bot; empty = everyone |
+| `TG_ALLOWED_USERS` | recommended | Comma-separated numeric Telegram IDs allowed to use the bot; empty = everyone. |
 | `TG_GUI_URL` | no | Internal URL of the VibraVid GUI (default `http://vibravid:8000`) |
 | `VIBRAVID_BOT_SECRET` | no | Shared secret used to authenticate the bot against the GUI (`X-VibraVid-Token`); optional, must also be set on the GUI side if used |
 

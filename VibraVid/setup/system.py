@@ -11,6 +11,7 @@ from .checker import (
     check_ffmpeg,
     check_flux,
     check_mkvmerge,
+    check_mkvpropedit,
     check_velora,
     check_yt_dlp,
 )
@@ -37,6 +38,7 @@ _prd_path = None
 _velora_path = None
 _dovi_tool_path = None
 _mkvmerge_path = None
+_mkvpropedit_path = None
 _flux_path = None
 _initialized = False
 _init_lock = threading.Lock()
@@ -52,7 +54,7 @@ def _initialize_paths():
     """
     global _ffmpeg_path, _ffprobe_path
     global _wvd_path, _prd_path, _velora_path
-    global _dovi_tool_path, _mkvmerge_path, _flux_path
+    global _dovi_tool_path, _mkvmerge_path, _mkvpropedit_path, _flux_path
     global _initialized
 
     # Fast path: already initialized, return immediately.
@@ -70,6 +72,7 @@ def _initialize_paths():
         _velora_path = check_velora()
         _dovi_tool_path = check_dovi_tool()
         _mkvmerge_path = check_mkvmerge()
+        _mkvpropedit_path = check_mkvpropedit()
         _flux_path = check_flux()
         _initialized = True
 
@@ -157,6 +160,18 @@ def get_mkvmerge_path() -> str:
         _drop_cached("mkvmerge")
         _mkvmerge_path = check_mkvmerge()
     return _mkvmerge_path
+
+
+def get_mkvpropedit_path() -> str | None:
+    global _mkvpropedit_path
+    if not _initialized:
+        _initialize_paths()
+
+    if not _is_alive(_mkvpropedit_path):
+        _drop_cached("mkvpropedit")
+        _mkvpropedit_path = check_mkvpropedit()
+    
+    return _mkvpropedit_path
 
 
 def get_info_wvd(cdm_device_path):

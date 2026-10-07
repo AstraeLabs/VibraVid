@@ -9,13 +9,13 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
+from searchapp.api import get_api
 
-from GUI.searchapp.api import get_api
 from VibraVid.provider.tmdb import tmdb_client
 from VibraVid.services._base import tmdb_artwork
 
 from ..forms import DownloadForm, SearchForm
-from ._shared import _media_item_to_display_dict, _resolve_global_sites, _run_global_search
+from ._shared import _known_series_tmdb_id, _media_item_to_display_dict, _resolve_global_sites, _run_global_search
 
 logger = logging.getLogger(__name__)
 
@@ -96,16 +96,6 @@ def _series_identity(item: dict[str, Any]) -> tuple:
     )
 
 
-def _known_tmdb_id(raw: Any) -> int | None:
-    """Return a valid integer TMDB ID or None if not usable."""
-    if raw in (None, ""):
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
 def _resolve_episode_artwork(items: list[dict[str, Any]]) -> tuple[dict[Any, str], dict[Any, dict]]:
     """Resolve TMDB stills and episode info for a batch of episode items."""
     groups: dict[tuple, list[dict[str, Any]]] = {}
@@ -116,7 +106,7 @@ def _resolve_episode_artwork(items: list[dict[str, Any]]) -> tuple[dict[Any, str
     info: dict[Any, dict] = {}
     for group in groups.values():
         head = group[0]
-        series_tmdb_id = _known_tmdb_id(head.get("tmdb_id"))
+        series_tmdb_id = _known_series_tmdb_id(head.get("tmdb_id"))
         if series_tmdb_id is None:
             try:
                 series_tmdb_id = tmdb_artwork.resolve_series_tmdb_id(

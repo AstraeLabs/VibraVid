@@ -3,7 +3,6 @@
 import re
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
@@ -15,7 +14,6 @@ from .scrapper import GetSerieInfo
 
 indice = 5
 _useFor = "Anime"
-msg = Prompt()
 console = Console()
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()

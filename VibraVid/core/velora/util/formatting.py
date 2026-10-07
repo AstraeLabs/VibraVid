@@ -1,8 +1,26 @@
 # 01.04.24
 
+import time
+from collections import deque
 from pathlib import Path
 
 _NOMINAL_FULL_TRUST_AT = 0.10
+SPEED_WINDOW_SECONDS = 3.0
+
+
+class SpeedWindow:
+    def __init__(self, window: float = SPEED_WINDOW_SECONDS):
+        self._window = window
+        self._samples: deque[tuple[float, int]] = deque([(time.monotonic(), 0)])
+
+    def update(self, total_bytes: int) -> float:
+        """Record the running byte total and return the speed over the current window."""
+        now = time.monotonic()
+        self._samples.append((now, total_bytes))
+        while len(self._samples) > 1 and now - self._samples[0][0] > self._window:
+            self._samples.popleft()
+        window_start_at, window_start_bytes = self._samples[0]
+        return (total_bytes - window_start_bytes) / max(now - window_start_at, 0.001)
 
 
 def normalize_path_key(path_value: str) -> str:
@@ -50,15 +68,7 @@ def resolve_display_total(
     known_total: int = 0,
     known_exact: bool = True,
 ) -> int:
-    """
-    Resolve the total to show as ``downloaded/total``.
-
-    ``known_exact`` False means *known_total* is only an estimate (bitrate x duration or a size probe;
-    HLS/DASH/ISM manifests carry no per-segment sizes): the declared bandwidth is a peak, so a VBR
-    stream is far smaller. That total is blended with the extrapolation of the bytes actually
-    downloaded. With no known total the extrapolation is used directly. Neither is ever pinned: the
-    total follows the real data and may be revised downward.
-    """
+    """Resolve the total to show as ``downloaded/total``."""
     try:
         known = int(known_total or 0)
     except (TypeError, ValueError):

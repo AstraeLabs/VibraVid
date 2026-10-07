@@ -48,6 +48,7 @@
 		</div>
 
 		<p class="cn-seek-hint" id="cn-scope-hint"></p>
+		<p class="cn-seek-hint cn-extra-line" id="cn-extra-line" hidden></p>
 
 		<div class="cn-opts cn-sitelist" id="cn-site-filter" hidden>
 			{% for s in sites %}
@@ -67,9 +68,54 @@
 
 
 {% block scripts %}
+{# Le opzioni personalizzate (login.json -> extra_args) entrano come JSON, non interpolate in JS: sono testo scritto dall'utente. #}
+{{ site_extra_args|json_script:"cn-site-extra-args" }}
 <script>
 (function () {
 	"use strict";
+
+	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
+	var extraLine = document.getElementById("cn-extra-line");
+	var savedArgs = {};
+	try { savedArgs = JSON.parse(document.getElementById("cn-site-extra-args").textContent) || {}; }
+	catch (err) { savedArgs = {}; }
+	var schemaCache = {};
+	var shownSite = null;
+
+	function describe(arg) {
+		if (arg.kind === "flag") return arg.flag;
+		if (arg.kind === "choice") return arg.flag + " {" + arg.choices.join(",") + "}";
+		if (arg.kind === "int") return arg.flag + " N";
+		return arg.flag + " " + String(arg.dest || "value").toUpperCase();
+	}
+
+	function paint(site, args) {
+		if (shownSite !== site) return;  // the user already picked something else
+		extraLine.textContent = "Custom arguments: ";
+		if (!args.length) extraLine.appendChild(document.createTextNode("none"));
+		args.forEach(function (arg, i) {
+			if (i) extraLine.appendChild(document.createTextNode(" · "));
+			var item = document.createElement("span");
+			item.textContent = describe(arg);
+			if (arg.help) item.title = arg.help;
+			extraLine.appendChild(item);
+		});
+		if (savedArgs[site]) extraLine.appendChild(document.createTextNode("  —  saved: " + savedArgs[site]));
+		extraLine.hidden = false;
+	}
+
+	// Info only: the options this provider's CLI accepts (the same list as Settings -> Custom CLI options).
+	function showExtra(site) {
+		shownSite = site;
+		if (!site) { extraLine.hidden = true; extraLine.textContent = ""; return; }
+		if (schemaCache[site]) { paint(site, schemaCache[site]); return; }
+		extraLine.textContent = "Custom arguments: …";
+		extraLine.hidden = false;
+		fetch(URL_CLI_OPTIONS + "?site=" + encodeURIComponent(site))
+			.then(function (r) { return r.json(); })
+			.then(function (data) { schemaCache[site] = (data && data.args) || []; paint(site, schemaCache[site]); })
+			.catch(function () { schemaCache[site] = []; paint(site, []); });
+	}
 
 	var scopeRow = document.getElementById("cn-scope");
 	var siteRow  = document.getElementById("cn-site-filter");
@@ -105,6 +151,7 @@
 		press(scopeRow, b);
 		press(siteRow, null);
 		hidden.value = b.dataset.scope;
+		showExtra(null);
 
 		var n = narrow(b.dataset.cat);
 		hint.textContent = b.dataset.cat
@@ -120,6 +167,7 @@
 		press(scopeRow, null);
 		hidden.value = b.dataset.site;
 		hint.textContent = "Will search only on " + b.textContent.trim() + ".";
+		showExtra(b.dataset.site);
 	});
 
 	toggle.addEventListener("click", function () {

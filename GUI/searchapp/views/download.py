@@ -7,9 +7,8 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.views.decorators.http import require_http_methods
-
-from GUI.searchapp.api import get_api
-from GUI.searchapp.api.base import Entries
+from searchapp.api import get_api
+from searchapp.api.base import Entries
 
 from ..forms import DownloadForm
 from ._shared import _run_download_in_thread
@@ -130,10 +129,17 @@ def start_download(request: HttpRequest) -> HttpResponse:
 def available_qualities(request: HttpRequest) -> JsonResponse:
     """Inspect one exact provider video, without starting a download."""
     try:
-        data = json.loads(request.body)
-        payload = data.get("item_payload") or {}
-        if isinstance(payload, str):
-            payload = json.loads(payload)
+        try:
+            data = json.loads(request.body)
+            payload = data.get("item_payload") or {}
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            missing = [f for f in ("name", "type") if f not in payload]
+        except (ValueError, AttributeError, TypeError):
+            return JsonResponse({"qualities": [], "message": "Invalid request body."}, status=400)
+        if missing:
+            return JsonResponse({"qualities": [], "message": f"Missing item_payload field(s): {', '.join(missing)}."}, status=400)
+
         item = Entries(**{k: v for k, v in payload.items() if k in Entries.__dataclass_fields__})
         api = get_api(data.get("source_alias") or "")
         season = episode = None

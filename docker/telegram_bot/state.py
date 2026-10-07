@@ -92,11 +92,18 @@ class Config:
     @property
     def allowed_users(self) -> set[int]:
         raw = os.getenv("TG_ALLOWED_USERS", "")
-        ids = [x for x in raw.replace(" ", "").split(",") if x]
-        try:
-            return {int(x) for x in ids}
-        except ValueError:
-            return set()
+        allowed = set()
+        for entry in (x for x in raw.replace(" ", "").split(",") if x):
+            try:
+                allowed.add(int(entry))
+            except ValueError:
+                log.warning("Ignoring invalid TG_ALLOWED_USERS entry: %r", entry)
+        return allowed
+
+    @property
+    def restricted(self) -> bool:
+        """An allow-list is configured. A malformed one stays a restriction: it must never turn into "everyone is allowed"."""
+        return bool(os.getenv("TG_ALLOWED_USERS", "").replace(" ", "").strip(","))
 
     @property
     def max_results(self) -> int:

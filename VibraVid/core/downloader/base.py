@@ -20,18 +20,20 @@ from VibraVid.core.muxing import (
     inject_chapters,
     join_media,
     probe_media_file,
+    retag_file,
 )
 from VibraVid.core.muxing.helper.audio import audio_ext_for_codec
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.muxing.helper.video.hybrid import download_other_tracks
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.utils.media_players import MediaPlayers
+from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.proc import run_logged
-from VibraVid.utils.storage_upload.hook import is_cached, try_fetch, upload_after
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -345,13 +347,6 @@ class BaseDownloader:
             enqueue_down_from_context(manifest_url, self.output_path)
             return DownloadResult(self.output_path, False, None)
 
-        if not context_tracker.video_quality and is_cached():
-            console.print("[dim]Skipping — already in cache.")
-            return DownloadResult(self.output_path, False, None)
-
-        if not context_tracker.video_quality and try_fetch(self.output_path):
-            return DownloadResult(self.output_path, False, None)
-
         os_manager.create_path(self.output_dir)
         return None
 
@@ -360,6 +355,51 @@ class BaseDownloader:
         if self.download_id:
             download_tracker.complete_download(self.download_id, success=False, error=error)
         return DownloadResult(None, True, error)
+
+    def _update_status(self, text: str) -> None:
+        """Show *text* as the GUI status of this download."""
+        if self.download_id:
+            download_tracker.update_status(self.download_id, text)
+
+    def _new_media_downloader(self, url: str, headers: dict, manifest_content: str | None, manifest_protocol: str, **extra) -> MediaDownloader:
+        """MediaDownloader for this download: only url/headers/content/protocol change between HLS, DASH and ISM, the rest is download-wide."""
+        return MediaDownloader(
+            url=url,
+            output_dir=self.output_dir,
+            filename=self.filename_base,
+            headers=headers,
+            manifest_refresh_fn=self.manifest_refresh_fn,
+            cookies=self.cookies,
+            download_id=self.download_id,
+            site_name=self.site_name,
+            max_segments=self.max_segments,
+            max_time=self.max_time,
+            manifest_content=manifest_content,
+            manifest_protocol=manifest_protocol,
+            **extra,
+        )
+
+    def _no_match_result(self) -> "DownloadResult | None":
+        """Terminal result when -sv/-sa/-ss with --skip-no-match matched no track, else ``None``."""
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+        return None
+
+    def _skip_download_result(self) -> "DownloadResult":
+        """Result of the ``DOWNLOAD.skip_download`` switch: optional pause, then the (never downloaded) output path."""
+        if DELAY_SS > 0:
+            console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
+            time.sleep(DELAY_SS)
+        return DownloadResult(self.output_path, False, None)
+
+    def _create_media_players(self) -> None:
+        """Best-effort creation of the player playlists next to the output."""
+        try:
+            self.media_players = MediaPlayers(self.output_dir)
+            self.media_players.create()
+        except Exception:
+            pass
 
     def _check_download_status(self, status: dict) -> "DownloadResult | None":
         """Guard the raw download ``status``: return a terminal DownloadResult for
@@ -651,6 +691,9 @@ class BaseDownloader:
             force_ts_fix=getattr(getattr(self, "media_downloader", None), "_needs_join_ts_fix", False),
         )
         self.last_merge_result = result_json
+        if (result_json or {}).get("video_missing"):
+            self.error = "The muxed file lost the video track (the video file was not readable); temporary files were kept"
+        
         if not self._merge_output_ok(merged_file):
             return None
         # Chapters are already baked into merged_file by join_media() above — no separate _inject_chapters() pass needed.
@@ -709,6 +752,16 @@ class BaseDownloader:
                         "extension": os.path.splitext(audio_path)[1],
                     }
                 )
+
+    def _cleanup_temp_dir(self, verified_ok: bool) -> None:
+        """Delete the temporary download folder, but only once the final file is verified: after a failed or partial run the segments and per-track files are all that is left of a (possibly 25 GB) download."""
+        if not CLEANUP_TMP:
+            return
+        if not verified_ok:
+            logger.warning(f"Output not verified: keeping the temporary files in {self.output_dir}")
+            console.print(f"[yellow]Temporary files kept in [cyan]{self.output_dir}[yellow] (the output was not verified).")
+            return
+        os_manager.fast_rmtree(self.output_dir)
 
     def _move_copied_subtitles(self) -> None:
         """Move staged subtitle files to final location."""
@@ -823,15 +876,12 @@ class BaseDownloader:
         if final_file and os.path.exists(final_file):
             self._move_to_final_location(final_file)
 
-        cached_height: int | None = None
-
         # The working file was downloaded/muxed under a clean name (media tokens stripped).
         template = getattr(self, "_final_name_template", self.output_path)
         if any(p in template for p in self._MEDIA_PLACEHOLDERS):
             try:
                 metadata = get_media_metadata(self.output_path)
                 logger.info(f"Metadata for dynamic rename: {metadata}")
-                cached_height = metadata.get("height", 0)
 
                 replacements = {
                     "quality": metadata.get("quality", ""),
@@ -878,25 +928,13 @@ class BaseDownloader:
         self._move_copied_audios()
         verified_ok = self._verify_output()
         if verified_ok:
+            retag_file(self.output_path)
             Sidecars.write_for(self.output_path, getattr(self, "_sidecar_target", None))
 
         if self.output_path and os.path.exists(self.output_path):
             title, media_type, site, _ = self._resolve_track_info()
             from VibraVid.utils.vault.vault_1 import claudio_vault
             claudio_vault.track_download_async(title=title, media_type=media_type, service=site)
-
-        # Never publish a file that failed decryption, is missing segments, or is below 1080p.
-        if verified_ok:
-            base_name = os.path.basename(self.output_path or "")
-            missing = getattr(getattr(self, "media_downloader", None), "missing_segments_count", 0)
-            if missing:
-                logger.warning(f"Skipping vault upload for {base_name}: {missing} segment(s) missing")
-            else:
-                height = cached_height if cached_height is not None else get_media_metadata(self.output_path).get("height", 0)
-                if height < 1080:
-                    logger.warning(f"Skipping vault upload for {base_name}: resolution below 1080p ({height}p)")
-                else:
-                    upload_after(self.output_path)
 
         if self.download_id:
             download_tracker.complete_download(
@@ -906,7 +944,6 @@ class BaseDownloader:
                 error=None if verified_ok else LAST_DOWNLOADER_ERROR,
             )
 
-        if CLEANUP_TMP:
-            os_manager.fast_rmtree(self.output_dir)
+        self._cleanup_temp_dir(verified_ok)
 
         execute_hooks("post_run")

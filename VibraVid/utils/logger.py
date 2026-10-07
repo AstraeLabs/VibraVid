@@ -14,9 +14,19 @@ from VibraVid.utils._log_buffer import flush_startup_buffer
 # WARNING → warning, error, critical
 # ERROR   → error, critical
 # DEBUG   → debug, info, warning, error, critical
-conf_log_level = config_manager.config.get("DEFAULT", "log_level").upper()
-LOG_LEVEL = getattr(logging, conf_log_level)
 
+def resolve_log_level(name) -> int:
+    """Numeric level for a ``log_level`` config value; an unknown name (e.g. ``FULL``) falls back to INFO instead of crashing at import."""
+    level = logging.getLevelName(str(name or "").strip().upper())
+    if isinstance(level, int):
+        return level
+    
+    print(f"[VibraVid] Unknown DEFAULT.log_level {name!r} in config.json (use DEBUG, INFO, WARNING, ERROR or CRITICAL): using INFO.", file=sys.stderr)
+    return logging.INFO
+
+
+conf_log_level = str(config_manager.config.get("DEFAULT", "log_level") or "").upper()
+LOG_LEVEL = resolve_log_level(conf_log_level)
 _log_file = None
 
 

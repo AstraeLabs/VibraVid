@@ -2,7 +2,6 @@
 
 import logging
 import os
-import time
 from collections.abc import Callable
 
 from rich.console import Console
@@ -12,9 +11,7 @@ from VibraVid.core.drm.system import DRMType, _DRMSystems
 from VibraVid.core.manifest.stream import track_label
 from VibraVid.core.muxing.helper.sub import extract_embedded_cc
 from VibraVid.core.muxing.helper.video.hybrid import split_other_tracks
-from VibraVid.core.ui.tracker import context_tracker, download_tracker
-from VibraVid.core.utils.media_players import MediaPlayers
-from VibraVid.core.velora.downloader import MediaDownloader
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.velora.util.formatting import (
     parse_max_segments as _parse_max_segments,
 )
@@ -26,13 +23,13 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
 
 from .base import BaseDownloader, DownloadResult
+from .drm_keys import fetch_drm_keys
 
 console = Console()
 logger = logging.getLogger(__name__)
 
 EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
 SKIP_DOWNLOAD = config_manager.config.get_bool("DOWNLOAD", "skip_download")
-DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
 EXTRACT_EMBEDDED_CC = config_manager.config.get_bool("DOWNLOAD", "extract_embedded_cc", default=False)
 
 
@@ -299,49 +296,19 @@ class HLS_Downloader(BaseDownloader):
 
     def _fetch_keys(self, drm_psshs: dict[str, list[dict]]) -> list[str]:
         """Dispatch key fetch to DRMManager using the configured drm_preference"""
-        keys = None
-
-        if self.drm_preference == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
-            try:
-                keys = self.drm_manager.get_wv_keys(
-                    drm_psshs[DRMType.WIDEVINE],
-                    self.license_url,
-                    license_data=self.license_data,
-                    license_certificate=self.license_certificate,
-                    headers=self.license_headers,
-                    key=self.key,
-                    license_request_fn=self.license_request_fn,
-                )
-            except Exception as exc:
-                logger.error(f"Widevine key fetch failed: {exc}")
-
-        if self.drm_preference == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
-            try:
-                keys = self.drm_manager.get_pr_keys(
-                    drm_psshs[DRMType.PLAYREADY],
-                    self.license_url,
-                    headers=self.license_headers,
-                    key=self.key,
-                    license_data=self.license_data,
-                    license_request_fn=self.license_request_fn,
-                )
-            except Exception as exc:
-                logger.error(f"PlayReady key fetch failed: {exc}")
-
-        if self.drm_preference == DRMType.FAIRPLAY and drm_psshs.get(DRMType.FAIRPLAY):
-            try:
-                keys = self.drm_manager.get_fp_keys(
-                    drm_psshs[DRMType.FAIRPLAY],
-                    self.license_url,
-                    key=self.key,
-                )
-            except Exception as exc:
-                logger.error(f"FairPlay key fetch failed: {exc}")
-
-        if not keys and self.key:
-            keys = [self.key] if isinstance(self.key, str) else list(self.key)
-
-        return keys or []
+        return fetch_drm_keys(
+            self.drm_manager,
+            drm_psshs,
+            preference=self.drm_preference,
+            license_url=self.license_url,
+            license_headers=self.license_headers,
+            key=self.key,
+            license_data=self.license_data,
+            license_certificate=self.license_certificate,
+            license_request_fn=self.license_request_fn,
+            fairplay=True,
+            swallow_errors=True,
+        )
 
     def _collect_embedded_cc(self, streams: list) -> list:
         """Find EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS renditions (CEA-608/708 baked into the video elementary stream, no separate playlist"""
@@ -399,20 +366,8 @@ class HLS_Downloader(BaseDownloader):
         if precheck is not None:
             return precheck
 
-        self.media_downloader = MediaDownloader(
-            url=self.m3u8_url,
-            output_dir=self.output_dir,
-            filename=self.filename_base,
-            headers=self.headers,
-            manifest_refresh_fn=self.manifest_refresh_fn,
-            cookies=self.cookies,
-            download_id=self.download_id,
-            site_name=self.site_name,
-            max_segments=self.max_segments,
-            max_time=self.max_time,
-            manifest_content=self.m3u8_content,
-            manifest_protocol="hls",
-            has_drm=self.has_drm,
+        self.media_downloader = self._new_media_downloader(
+            self.m3u8_url, self.headers, self.m3u8_content, "hls", has_drm=self.has_drm
         )
         self.media_downloader.other_tracks = self.other_tracks
         self.media_downloader.custom_filters = self.custom_filters
@@ -429,14 +384,13 @@ class HLS_Downloader(BaseDownloader):
         if self.chapters:
             logger.info(f"Adding {len(self.chapters)} external chapter(s).")
 
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Parsing HLS ...")
+        self._update_status("Parsing HLS ...")
 
         streams = self.media_downloader.parse_stream(show_table=context_tracker.should_print and not context_tracker.hide_manifest_info)
 
-        if getattr(self.media_downloader, "no_match_skip", False):
-            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
-            return DownloadResult(self.output_path, False, None)
+        no_match = self._no_match_result()
+        if no_match is not None:
+            return no_match
 
         self._embedded_cc_streams = self._collect_embedded_cc(streams)
         if not self._embedded_cc_streams:
@@ -473,19 +427,11 @@ class HLS_Downloader(BaseDownloader):
         # ── Download ──────────────────────────────────────────────────────────
         self._log_tracks_json(streams, keys, self.m3u8_url)
         if SKIP_DOWNLOAD:
-            if DELAY_SS > 0:
-                console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
-                time.sleep(DELAY_SS)
-            return DownloadResult(self.output_path, False, None)
+            return self._skip_download_result()
 
-        try:
-            self.media_players = MediaPlayers(self.output_dir)
-            self.media_players.create()
-        except Exception:
-            pass
+        self._create_media_players()
 
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Downloading ...")
+        self._update_status("Downloading ...")
         print()
 
         status = self.media_downloader.start_download()

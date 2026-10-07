@@ -5,7 +5,6 @@
 
 import logging
 import re
-import uuid
 from dataclasses import dataclass
 
 from textual import on, work
@@ -19,10 +18,9 @@ from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
 from VibraVid.cli.command.queue import (
     _PROCESS_TAG,
     _load_queue,
-    _now_iso,
     _queue_path,
-    _QueueLock,
-    _save_queue,
+    enqueue_argv,
+    enqueue_many,
 )
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.tui import bridge
@@ -822,25 +820,8 @@ class SearchScreen(Screen):
             self.app.notify(t("could_not_build_cmd"), severity="error")
             return
 
-        tag = _PROCESS_TAG
-        path = _queue_path(tag)
-        job_item = {
-            "id": uuid.uuid4().hex[:8],
-            "argv": argv,
-            "status": "pending",
-            "tag": tag,
-            "enqueued_at": _now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "returncode": None,
-            "attempts": 0,
-        }
-
         try:
-            with _QueueLock(path):
-                data = _load_queue(path)
-                data.setdefault("items", []).append(job_item)
-                _save_queue(path, data)
+            job_item = enqueue_argv(argv)
             self.app.notify(
                 t("added_to_queue_msg", title=search_term[:20], job_id=job_item["id"]),
                 severity="information",
@@ -926,36 +907,18 @@ class SearchScreen(Screen):
             self.app.notify(t("no_item_selected_to_enqueue"), severity="warning")
             return
 
-        tag = _PROCESS_TAG
-        path = _queue_path(tag)
         builder = EquivalentCommandBuilder(excluded_dests=[])
-        enqueued_count = 0
+        argv_list = []
 
-        with _QueueLock(path):
-            data = _load_queue(path)
-            items_list = data.setdefault("items", [])
+        for site, item, _providers in self._raw:
+            item_key = f"{site}:{getattr(item, 'id', getattr(item, 'name', ''))}"
+            if item_key in self._selected_keys:
+                search_term = str(getattr(item, "name", "") or getattr(item, "title", "") or "")
+                argv = builder.build_argv_from_params(site=site, search=search_term, item="1")
+                if argv:
+                    argv_list.append(argv)
 
-            for site, item, _providers in self._raw:
-                item_key = f"{site}:{getattr(item, 'id', getattr(item, 'name', ''))}"
-                if item_key in self._selected_keys:
-                    search_term = str(getattr(item, "name", "") or getattr(item, "title", "") or "")
-                    argv = builder.build_argv_from_params(site=site, search=search_term, item="1")
-                    if argv:
-                        job_item = {
-                            "id": uuid.uuid4().hex[:8],
-                            "argv": argv,
-                            "status": "pending",
-                            "tag": tag,
-                            "enqueued_at": _now_iso(),
-                            "started_at": None,
-                            "finished_at": None,
-                            "returncode": None,
-                            "attempts": 0,
-                        }
-                        items_list.append(job_item)
-                        enqueued_count += 1
-
-            _save_queue(path, data)
+        enqueued_count = len(enqueue_many(argv_list))
 
         self._selected_keys.clear()
         self._populate_results_list()

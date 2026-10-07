@@ -158,3 +158,31 @@ class EquivalentCommandBuilder:
         if text == "" or any(ch in text for ch in EquivalentCommandBuilder._SHELL_UNSAFE):
             return f'"{text}"'
         return text
+
+
+_EQUIVALENT_CMD_EXCLUDED_DESTS = {
+    "site",
+    "search",
+    "item",
+    "season",
+    "episode",
+    "down",
+    "stream_type",
+    "output",
+    "headers",
+    "license_url",
+    "license_headers",
+    "key",
+    "hls_method",
+    "hls_key",
+    "hls_iv",
+    "no_log",
+    "update",
+    "dep",
+    "queue_add",
+    "queue_run",
+    "queue_list",
+    "queue_remove",
+    "queue_clear",
+}
+equivalent_command_builder = EquivalentCommandBuilder(excluded_dests=_EQUIVALENT_CMD_EXCLUDED_DESTS)

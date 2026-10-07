@@ -16,7 +16,6 @@ from VibraVid.services._base.tv_display_manager import (
     manage_selection,
     validate_selection,
 )
-from VibraVid.utils.storage_upload.hook import is_cached
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -206,10 +205,6 @@ def process_episode_download(
                 context_tracker.series_tmdb_id, index_season_selected, i_episode
             )
 
-            if not context_tracker.video_quality and is_cached():
-                console.print(f"[dim]Skipping episode {i_episode} of season {index_season_selected} — already in cache.")
-                continue
-
             # Trigger the download callback for the current episode
             try:
                 result = download_video_callback(episodes[i_episode - 1], index_season_selected, i_episode)
@@ -301,10 +296,6 @@ def process_episode_download(
             context_tracker.poster_url = tmdb_artwork.resolve_episode_artwork_url(
                 context_tracker.series_tmdb_id, index_season_selected, i_episode
             )
-
-            if not context_tracker.video_quality and is_cached():
-                console.print(f"[dim]Skipping episode {i_episode} of season {index_season_selected} — already in cache.")
-                continue
 
             # Trigger the download callback for the current episode
             try:

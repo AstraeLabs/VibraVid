@@ -1,8 +1,6 @@
 bs4
 requests
-httpx
 rich
-json5
 ttconv
 unidecode
 curl_cffi

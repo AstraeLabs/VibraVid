@@ -127,7 +127,6 @@ own copy.
     "close_console": true,
     "show_message": true,
     "fetch_domain_online": true,
-    "auto_update_check": true,
     "disable_scraper_cache": false,
     "imp_service": ["default"],
     "installation": "",
@@ -143,7 +142,6 @@ own copy.
 | `log_level` | `"INFO"` | Logging verbosity. Accepts standard Python values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `show_message` | `true` | Show the startup banner and clear the console before printing it |
 | `fetch_domain_online` | `true` | Automatically fetch the latest domains from GitHub |
-| `auto_update_check` | `true` | Notify you at startup when a new VibraVid version is available |
 | `disable_scraper_cache` | `false` | GUI only: the Django backend caches an already-instantiated site scraper per title for 15 minutes so repeat requests (e.g. opening the same series-detail page) don't re-scrape. |
 | `imp_service` | `["default"]` | Service source paths to load site modules from. `"default"` loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have `__init__.py` defining `indice` and `_useFor`. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name. |
 | `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup. `""` (base): FFmpeg, Velora, flux. `"yt"`: base + yt-dlp, deno. `"full"`: base + dovi_tool, mkvtoolnix, yt-dlp, deno |
@@ -410,8 +408,7 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 ```json
 {
   "CODEC": {
-    "dv_auto": true,
-    "mux_dtsx": false
+    "dv_auto": true
   }
 }
 ```
@@ -419,7 +416,6 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 | Key | Default | Description |
 |-----|---------|-------------|
 | `dv_auto` | `true` | Automatically pair a Dolby Vision companion with the main video (at the cheapest available quality) when `select_video` picks a non-DV video and the title also ships a DV variant, even without `select_video="hybrid"`. Set to `false` to only pair a companion when `select_video="hybrid"` is explicitly requested |
-| `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio tracks instead of dropping them at selection time. ffmpeg cannot demux DTS:X, so this requires mkvmerge to be installed |
 
 ## PROCESS (Post-Processing)
 
@@ -438,6 +434,7 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
     "merge_audio": true,
     "merge_subtitle": true,
     "force_subtitle": "auto",
+    "mux_dtsx": false,
     "extension": "mkv"
   }
 }
@@ -456,6 +453,7 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 | `merge_audio` | `true` | Merge all audio tracks into a single output file |
 | `merge_subtitle` | `true` | Merge all subtitle tracks into a single output file |
 | `subtitle_disposition_language` | `"it-it_forced"` | Mark a specific subtitle track as default/forced |
+| `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio tracks instead of dropping them at selection time. ffmpeg cannot demux DTS:X, so this requires mkvmerge to be installed.
 | `extension` | `"mkv"` | Output container format: `"mkv"` or `"mp4"` |
 
 **`force_subtitle`** — Controls how subtitles are handled before remuxing:

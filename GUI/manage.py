@@ -19,7 +19,7 @@ def main():
 
     if "RUN_MAIN" not in os.environ and "VIBRAVID_SKIP_PRE_RUN_HOOKS" not in os.environ:
         print("Running pre-run hooks...")
-        from VibraVid.cli.run import execute_hooks
+        from VibraVid.utils.hooks import execute_hooks
 
         execute_hooks("pre_run")
 

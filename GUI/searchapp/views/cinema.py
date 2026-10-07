@@ -4,9 +4,9 @@ import logging
 
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
+from searchapp.api import get_available_sites, get_site_categories
 
-from GUI.searchapp.api import get_available_sites, get_site_categories
-
+from .. import services_admin
 from .._download_infra import _get_scheduled_downloads
 from .._library_paths import titleize_name
 from ..models import WatchlistItem
@@ -58,6 +58,22 @@ def _watchlist_tiles(limit: int | None = None) -> list[dict]:
     return rows
 
 
+def _site_extra_args_map() -> dict:
+    """``{site: "custom CLI-style options"}`` for the providers that have ``extra_args`` set in login.json."""
+    import json as _json
+
+    try:
+        login_data = _json.loads(_conf_text("login.json") or "{}")
+        return {
+            site_name: block["extra_args"]
+            for site_name, block in login_data.items()
+            if isinstance(block, dict) and block.get("extra_args")
+        }
+    except Exception:
+        logger.exception("login.json non leggibile per site_extra_args")
+        return {}
+
+
 def cinema_search(request: HttpRequest) -> HttpResponse:
     """Search: form with scope and site selection, results in a grid."""
     from ..forms import _CATEGORY_LABELS, GLOBAL_ALL_TOKEN, GLOBAL_CATEGORY_PREFIX
@@ -83,6 +99,7 @@ def cinema_search(request: HttpRequest) -> HttpResponse:
         "sites": sites,
         "scopes": scopes,
         "all_token": GLOBAL_ALL_TOKEN,
+        "site_extra_args": _site_extra_args_map(),
     })
 
 
@@ -172,29 +189,19 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
     except Exception:
         queued = 0
 
-    site_extra_args = {}
-    try:
-        import json as _json
-
-        login_data = _json.loads(_conf_text("login.json") or "{}")
-        for site_name, block in login_data.items():
-            if isinstance(block, dict) and block.get("extra_args"):
-                site_extra_args[site_name] = block["extra_args"]
-    except Exception:
-        logger.exception("login.json non leggibile per site_extra_args")
-
     return render(request, "searchapp/cinema_system.html", {
         "nav_active": "settings",
         "providers": providers,
         "cli_option_providers": cli_option_providers,
         "disabled_sites": disabled,
         "services": services,
+        "uploaded_services": services_admin.removable_services(),
         "arr": arr,
         "queued": queued,
         "app_version": __version__,
         "config_content": _conf_text("config.json"),
         "login_content": _conf_text("login.json"),
-        "site_extra_args": site_extra_args,
+        "site_extra_args": _site_extra_args_map(),
     })
 
 

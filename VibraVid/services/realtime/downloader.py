@@ -3,10 +3,9 @@
 import os
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.core.downloader import HLS_Downloader
-from VibraVid.services._base import Entries, series_folder, site_constants
+from VibraVid.services._base import Entries, print_episode_header, series_folder
 from VibraVid.services._base.tv_display_manager import map_episode_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, start_message
@@ -14,7 +13,6 @@ from VibraVid.utils import config_manager, start_message
 from .client import get_bearer_token, get_playback_url
 from .scrapper import GetSerieInfo
 
-msg = Prompt()
 console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
 
@@ -24,7 +22,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     Downloads a specific episode from the specified season.
     """
     start_message()
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{scrape_serie.series_name} [white]\\ [magenta]{obj_episode.name} ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    print_episode_header(scrape_serie.series_name, obj_episode.name, index_season_selected, index_episode_selected)
 
     # Define filename and path for the downloaded video
     path_components, filename = map_episode_path(

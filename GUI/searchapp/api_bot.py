@@ -13,9 +13,9 @@ from django.conf import settings
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from searchapp.api import get_api
+from searchapp.api.base import Entries
 
-from GUI.searchapp.api import get_api
-from GUI.searchapp.api.base import Entries
 from VibraVid.utils import config_manager
 
 from . import _download_infra as _dl

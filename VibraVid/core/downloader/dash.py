@@ -3,7 +3,6 @@
 import logging
 import os
 import shutil
-import time
 from collections.abc import Callable
 
 from rich.console import Console
@@ -16,7 +15,6 @@ from VibraVid.core.manifest.stream import track_label
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.language import resolve_iso639_1
-from VibraVid.core.utils.media_players import MediaPlayers
 from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.core.velora.util.formatting import (
     parse_max_segments as _parse_max_segments,
@@ -29,6 +27,7 @@ from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
 from .base import BaseDownloader, DownloadResult
+from .drm_keys import fetch_drm_keys
 from .util._drm_probe import PROBE_BYTES_FAST, DRMProbe
 
 console = Console()
@@ -38,7 +37,6 @@ EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
 SKIP_DOWNLOAD = config_manager.config.get_bool("DOWNLOAD", "skip_download")
 AUDIO_FILTER = config_manager.config.get("DOWNLOAD", "select_audio")
 SUBTITLE_FILTER = config_manager.config.get("DOWNLOAD", "select_subtitle")
-DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
 
 
 def _stream_drm_label(s) -> str:
@@ -196,7 +194,6 @@ class DASH_Downloader(BaseDownloader):
         """
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
-        context_tracker.poster_url = self.poster_url
         context_tracker.poster_url = self.poster_url
         self.mpd_url = self._resolve_url(str(mpd_url).strip()) if mpd_url else None
         self.mpd_content = mpd_content
@@ -450,39 +447,18 @@ class DASH_Downloader(BaseDownloader):
         resolution entirely -- otherwise a manually-provided key never reaches
         DRMManager and is used "blind"
         """
-        keys = None
-        effective_pref = self.drm_preference
-        if not drm_psshs.get(effective_pref):
-            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
-            if drm_psshs.get(other):
-                effective_pref = other
-
-        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
-            keys = self.drm_manager.get_wv_keys(
-                drm_psshs[DRMType.WIDEVINE],
-                self.license_url,
-                self.license_data,
-                self.license_certificate,
-                self.license_headers,
-                self.key,
-                license_request_fn=self.license_request_fn,
-            )
-
-        if effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
-            keys = self.drm_manager.get_pr_keys(
-                drm_psshs[DRMType.PLAYREADY],
-                self.license_url,
-                self.license_headers,
-                self.key,
-                self.license_data,
-                license_request_fn=self.license_request_fn,
-            )
-
-        # Final fallback: use a manually provided key
-        if not keys and self.key:
-            keys = [self.key] if isinstance(self.key, str) else list(self.key)
-
-        return keys or []
+        return fetch_drm_keys(
+            self.drm_manager,
+            drm_psshs,
+            preference=self.drm_preference,
+            license_url=self.license_url,
+            license_headers=self.license_headers,
+            key=self.key,
+            license_data=self.license_data,
+            license_certificate=self.license_certificate,
+            license_request_fn=self.license_request_fn,
+            cross_drm_fallback=True,
+        )
 
     def _fetch_keys_for_audio_mpd(
         self,
@@ -521,37 +497,20 @@ class DASH_Downloader(BaseDownloader):
             return []
 
         self._warn_drm_mismatch(drm_psshs)
-        eff_url = license_url or self.license_url
-        eff_hdrs = license_hdrs or self.license_headers
-
-        keys = None
-        effective_pref = self.drm_preference
-        if not drm_psshs.get(effective_pref):
-            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
-            if drm_psshs.get(other):
-                effective_pref = other
-
-        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
-            keys = self.drm_manager.get_wv_keys(
-                drm_psshs[DRMType.WIDEVINE],
-                eff_url,
-                license_certificate=self.license_certificate,
-                headers=eff_hdrs,
-                key=self.key,
-                license_request_fn=self.license_request_fn,
-            )
-
-        elif effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
-            keys = self.drm_manager.get_pr_keys(
-                drm_psshs[DRMType.PLAYREADY],
-                eff_url,
-                headers=eff_hdrs,
-                key=self.key,
-                license_data=self.license_data,
-                license_request_fn=self.license_request_fn,
-            )
-
-        return keys or []
+        return fetch_drm_keys(
+            self.drm_manager,
+            drm_psshs,
+            preference=self.drm_preference,
+            license_url=license_url or self.license_url,
+            license_headers=license_hdrs or self.license_headers,
+            key=self.key,
+            license_data=self.license_data,
+            license_certificate=self.license_certificate,
+            license_request_fn=self.license_request_fn,
+            cross_drm_fallback=True,
+            widevine_license_data=False,
+            manual_key_fallback=False,
+        )
 
     def _download_extra_audios(self) -> tuple[list[dict], list[dict]]:
         """Download extra DASH audio tracks from ``other_tracks`` audio entries."""
@@ -678,25 +637,13 @@ class DASH_Downloader(BaseDownloader):
         if precheck is not None:
             return precheck
 
-        try:
-            self.media_players = MediaPlayers(self.output_dir)
-            self.media_players.create()
-        except Exception:
-            pass
+        self._create_media_players()
 
-        self.media_downloader = MediaDownloader(
-            url=self.mpd_url,
-            output_dir=self.output_dir,
-            filename=self.filename_base,
-            headers=self.mpd_headers,
-            manifest_refresh_fn=self.manifest_refresh_fn,
-            cookies=self.cookies,
-            download_id=self.download_id,
-            site_name=self.site_name,
-            max_segments=self.max_segments,
-            max_time=self.max_time,
-            manifest_content=self.mpd_content,
-            manifest_protocol="custom" if is_custom_manifest(self.mpd_content or "") else "dash",
+        self.media_downloader = self._new_media_downloader(
+            self.mpd_url,
+            self.mpd_headers,
+            self.mpd_content,
+            "custom" if is_custom_manifest(self.mpd_content or "") else "dash",
         )
         self.media_downloader.other_tracks = self._merge_other_tracks
         self.media_downloader.license_url = self.license_url
@@ -721,15 +668,14 @@ class DASH_Downloader(BaseDownloader):
             logger.info(f"Adding {len(self.chapters)} external chapter(s).")
 
         # ── Parse
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Parsing DASH ...")
+        self._update_status("Parsing DASH ...")
 
         # Parse without showing table so we can annotate the DV companion first
         streams = self.media_downloader.parse_stream(show_table=False)
 
-        if getattr(self.media_downloader, "no_match_skip", False):
-            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
-            return DownloadResult(self.output_path, False, None)
+        no_match = self._no_match_result()
+        if no_match is not None:
+            return no_match
 
         # StreamSelector marks the DV companion with dv_companion=True (select_video="hybrid" or CODEC.dv_auto)
         _dv_companion_stream = next(
@@ -820,8 +766,7 @@ class DASH_Downloader(BaseDownloader):
             self._warn_drm_mismatch(drm_psshs)
             if not self.license_url and not self.key:
                 logger.error("Content is DRM-protected but no license_url or manual key provided")
-            if self.download_id:
-                download_tracker.update_status(self.download_id, "Fetching keys ...")
+            self._update_status("Fetching keys ...")
 
             self.decryption_keys = self._fetch_keys(drm_psshs)
 
@@ -834,13 +779,9 @@ class DASH_Downloader(BaseDownloader):
         # ── Download
         self._log_tracks_json(streams, self.decryption_keys, self.mpd_url)
         if SKIP_DOWNLOAD:
-            if DELAY_SS > 0:
-                console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
-                time.sleep(DELAY_SS)
-            return DownloadResult(self.output_path, False, None)
+            return self._skip_download_result()
 
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Downloading ...")
+        self._update_status("Downloading ...")
         print()
 
         self.media_downloader.set_key(self.decryption_keys)

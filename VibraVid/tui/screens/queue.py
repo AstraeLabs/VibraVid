@@ -7,7 +7,6 @@ import logging
 import os
 import shlex
 import subprocess
-import uuid
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -17,17 +16,15 @@ from textual.timer import Timer
 from textual.widgets import Button, DataTable, Header, Input, Static
 
 from VibraVid.cli.command.queue import (
-    _PROCESS_TAG,
     _all_queue_paths,
     _child_command,
     _claim_next_any,
     _finish_item,
     _load_queue,
-    _now_iso,
-    _queue_path,
     _QueueLock,
     _save_queue,
     clear,
+    enqueue_argv,
     remove,
 )
 from VibraVid.tui.i18n import t
@@ -341,25 +338,8 @@ class QueueScreen(Screen):
             self.app.notify(f"Invalid command string: {e}", severity="error")
             return
 
-        tag = _PROCESS_TAG
-        path = _queue_path(tag)
-        item = {
-            "id": uuid.uuid4().hex[:8],
-            "argv": argv,
-            "status": "pending",
-            "tag": tag,
-            "enqueued_at": _now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "returncode": None,
-            "attempts": 0,
-        }
-
         try:
-            with _QueueLock(path):
-                data = _load_queue(path)
-                data.setdefault("items", []).append(item)
-                _save_queue(path, data)
+            item = enqueue_argv(argv)
             self.app.notify(f"Enqueued job {item['id']}", severity="information")
         except Exception as e:
             self.app.notify(f"Enqueue failed: {e}", severity="error")

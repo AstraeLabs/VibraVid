@@ -5,15 +5,17 @@ set -e
 # If PUID or PGID is set and differs from the built-in appuser (1000), remap
 # the user so that files written to host-mounted volumes are owned by the
 # expected uid/gid. This is the standard pattern for rootless NAS containers.
+# -o (non-unique) is needed because the target id often already exists in the image: PGID=100 is the "users" group (Synology's default),
+# and without it groupmod fails, "set -e" aborts the script and the container restarts forever.
 CURRENT_UID=$(id -u appuser)
 CURRENT_GID=$(id -g appuser)
 
 if [ -n "$PUID" ] && [ "$PUID" != "$CURRENT_UID" ]; then
-    usermod -u "$PUID" appuser
+    usermod -o -u "$PUID" appuser
 fi
 
 if [ -n "$PGID" ] && [ "$PGID" != "$CURRENT_GID" ]; then
-    groupmod -g "$PGID" appuser
+    groupmod -o -g "$PGID" appuser
 fi
 
 if [ -n "$PUID" ] || [ -n "$PGID" ]; then

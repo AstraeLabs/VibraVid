@@ -19,3 +19,23 @@ jobs:
         uses: astral-sh/ruff-action@v4.1.0
         with:
           args: "check ."
+
+  pytest:
+    name: Run pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install system tools
+        # ffmpeg/ffprobe and mkvpropedit are used by the muxing/retag tests; the tests never download them (Test/conftest.py)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mkvtoolnix
+      
+        - name: Install dependencies
+        # telethon only (the bot tests need it; cryptg, its optional C speed-up, is not needed)
+        run: pip install -r requirements.txt -r GUI/requirements.txt "telethon<2" pytest anyio
+      
+        - name: Run tests
+        run: python -m pytest -q

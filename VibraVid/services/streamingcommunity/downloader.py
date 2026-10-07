@@ -4,13 +4,19 @@ import logging
 import os
 
 from rich.console import Console
-from rich.prompt import Prompt
 
 from VibraVid.core.downloader import HLS_Downloader
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.player.vixcloud import ENABLE_VIXCLOUD_API_V2, VideoSource
 from VibraVid.provider.tmdb import tmdb_client
-from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
+from VibraVid.services._base import (
+    Entries,
+    movie_folder,
+    print_download_header,
+    print_episode_header,
+    series_folder,
+    site_constants,
+)
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, start_message
@@ -18,7 +24,6 @@ from VibraVid.utils import config_manager, start_message
 from .scrapper import GetSerieInfo
 
 console = Console()
-msg = Prompt()
 logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 
@@ -42,7 +47,7 @@ def download_film(select_title: Entries) -> str:
         console.print(f"[yellow][SKIP] Download aborted: TS/CAM version detected for '{select_title.name}'")
         return None
 
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{select_title.name} \n")
+    print_download_header(select_title)
 
     tmdb_data = None
     if tmdb_client.api_key is not None:
@@ -88,7 +93,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     """
     start_message()
     series_display = getattr(scrape_serie, "series_display_name", None) or scrape_serie.series_name
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{series_display} [white]\\ [magenta]{obj_episode.name} ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    print_episode_header(series_display, obj_episode.name, index_season_selected, index_episode_selected)
 
     # Define filename and path for the downloaded video
     path_components, filename = map_episode_path(

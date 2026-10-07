@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
-from VibraVid.core.muxing import embed_poster, inject_chapters
+from VibraVid.core.muxing import embed_poster, inject_chapters, retag_file
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
@@ -23,7 +23,6 @@ from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.utils import config_manager, internet_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.http_client import create_client, get_userAgent
-from VibraVid.utils.storage_upload.hook import is_cached, try_fetch, upload_after
 from VibraVid.utils.vault.vault_1 import claudio_vault
 
 from .util._drm_probe import PROBE_BYTES, PROBE_BYTES_FAST, DRMProbe
@@ -608,19 +607,7 @@ class MP4FileDownloader:
 
     def _run_decrypt(self, bar_mgr: DownloadBarManager) -> None:
         """Decrypt while continuing the same bar row in place."""
-
-        def _decrypt_cb(parsed: dict[str, Any] | None) -> None:
-            if not parsed:
-                return
-            bar_mgr.handle_progress_line(
-                {
-                    "task_key": self._task_key,
-                    "pct": parsed.get("pct"),
-                    "speed": parsed.get("status") or "Decrypt",
-                }
-            )
-
-        self._decryptor.run(self.path, self.key, self.download_id, progress_cb=_decrypt_cb)
+        self._decryptor.run(self.path, self.key, self.download_id, progress_cb=bar_mgr.decrypt_progress_cb(self._task_key))
 
     def _finalise(self, bar_mgr: DownloadBarManager) -> tuple:
 
@@ -698,11 +685,11 @@ class MP4FileDownloader:
         # Resolve media tokens (quality/codec/language) by probing the finished file.
         self._resolve_media_tokens()
 
+        # In-place title/comment/encoder tags, no remux (mirrors BaseDownloader._finalize).
+        retag_file(self.path)
+
         # Kodi/Jellyfin .nfo + image next to the final file (opt-in, trusted TMDB match only).
         Sidecars.write_for(self.path, self._sidecar_target)
-
-        # Vault upload - must run before complete_download()
-        upload_after(self.path)
 
         # GUI completion
         self._complete_tracking(success=True, path=os.path.abspath(self.path))
@@ -826,13 +813,6 @@ def MP4_Downloader(
         from VibraVid.cli.command.queue import enqueue_down_from_context
 
         enqueue_down_from_context(url, path)
-        return path, False, None
-
-    if is_cached():
-        console.print("[dim]Skipping — already in cache.")
-        return path, False, None
-
-    if try_fetch(path):
         return path, False, None
 
     result = MP4FileDownloader(

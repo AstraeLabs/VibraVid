@@ -511,13 +511,12 @@ def _finalize(tmp_path, monkeypatch):
     """Run the real BaseDownloader.__init__ + _finalize on a finished file, with everything else stubbed."""
     from VibraVid.core.downloader import base
 
-    out = tmp_path / "The Irishman (2019).mkv"
+    out = tmp_path / f"The Irishman (2019).{base.EXTENSION_OUTPUT}"  # BaseDownloader enforces the configured extension
     out.write_bytes(b"x")
     dl = base.BaseDownloader(str(out), "_hls_temp", sanitize_path=False)
     monkeypatch.setattr(dl, "_move_to_final_location", lambda f: None)
     monkeypatch.setattr(dl, "_verify_output", lambda: True)
     monkeypatch.setattr(base, "get_media_metadata", lambda p: {"height": 0})
-    monkeypatch.setattr(base, "upload_after", lambda p: None)
     monkeypatch.setattr(base, "execute_hooks", lambda *a, **k: None)
     monkeypatch.setattr(base.download_tracker, "complete_download", lambda *a, **k: None)
     monkeypatch.setattr("VibraVid.utils.vault.vault_1.claudio_vault.track_download_async", lambda **k: None)
@@ -541,7 +540,7 @@ def test_downloader_skips_sidecars_for_a_failed_download(tmp_path, tmdb, images,
     from VibraVid.core.downloader import base
 
     _target("tmdb", "movie", 398978)
-    out = tmp_path / "The Irishman (2019).mkv"
+    out = tmp_path / f"The Irishman (2019).{base.EXTENSION_OUTPUT}"  # BaseDownloader enforces the configured extension
     out.write_bytes(b"x")
     dl = base.BaseDownloader(str(out), "_hls_temp", sanitize_path=False)
     monkeypatch.setattr(dl, "_move_to_final_location", lambda f: None)
@@ -560,7 +559,7 @@ def test_downloader_uses_the_context_captured_at_creation(tmp_path, tmdb, images
     from VibraVid.core.downloader import base
 
     _target("tmdb", "movie", 398978)
-    out = tmp_path / "The Irishman (2019).mkv"
+    out = tmp_path / f"The Irishman (2019).{base.EXTENSION_OUTPUT}"  # BaseDownloader enforces the configured extension
     out.write_bytes(b"x")
     dl = base.BaseDownloader(str(out), "_hls_temp", sanitize_path=False)
 
@@ -570,7 +569,6 @@ def test_downloader_uses_the_context_captured_at_creation(tmp_path, tmdb, images
     monkeypatch.setattr(dl, "_move_to_final_location", lambda f: None)
     monkeypatch.setattr(dl, "_verify_output", lambda: True)
     monkeypatch.setattr(base, "get_media_metadata", lambda p: {"height": 0})
-    monkeypatch.setattr(base, "upload_after", lambda p: None)
     monkeypatch.setattr(base, "execute_hooks", lambda *a, **k: None)
     monkeypatch.setattr(base.download_tracker, "complete_download", lambda *a, **k: None)
     monkeypatch.setattr("VibraVid.utils.vault.vault_1.claudio_vault.track_download_async", lambda **k: None)

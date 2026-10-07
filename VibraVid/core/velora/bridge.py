@@ -9,12 +9,17 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.velora.util.formatting import format_size, format_speed, normalize_path_key, resolve_display_total
+from VibraVid.core.velora.util.formatting import (
+    SpeedWindow,
+    format_size,
+    format_speed,
+    normalize_path_key,
+    resolve_display_total,
+)
 from VibraVid.setup import get_velora_path
 
 logger = logging.getLogger("velora_bridge")
@@ -22,7 +27,6 @@ _QUEUE_SENTINEL = object()
 _EVENT_CB_LOCK = threading.Lock()
 _PROGRESS_CB_LOCK = threading.Lock()
 DEFAULT_WAIT_TIMEOUT_SECONDS = 900.0
-SPEED_WINDOW_SECONDS = 3.0
 MAX_SPEED_MIN_VERSION = (2, 2, 0)
 
 
@@ -220,6 +224,17 @@ def _normalize_event_task_key(event: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
+def _failure_event(event: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    """Event for the progress UI when a segment retries/fails/is cancelled: plan defaults filled in, speed shown as ``ERR``."""
+    normalized_event = dict(event)
+    normalized_event.setdefault("task_key", plan.get("task_key", "download"))
+    normalized_event.setdefault("label", plan.get("label", ""))
+    normalized_event.setdefault("display_label", plan.get("display_label", ""))
+    normalized_event.setdefault("segments", "0/1")
+    normalized_event.setdefault("speed", "ERR")
+    return normalized_event
+
+
 def run_download_plan(
     plan: dict[str, Any],
     progress_cb: Callable[[int, int, int, float], None] | None = None,
@@ -261,9 +276,7 @@ def run_download_plan(
     results: list[dict[str, Any]] = []
     done_count = 0
     total_bytes = 0
-    started_at = time.monotonic()
-    speed_window: deque[tuple[float, int]] = deque()
-    speed_window.append((started_at, 0))
+    speed_meter = SpeedWindow()
 
     try:
         # Write plan to a temp file.
@@ -276,12 +289,8 @@ def run_download_plan(
             json.dump(plan, tmp, ensure_ascii=False)
             tmp.flush()
 
-        command = (
-            ["dotnet", binary_path, plan_path] if binary_path.lower().endswith(".dll") else [binary_path, plan_path]
-        )
-
         process = subprocess.Popen(
-            command,
+            [binary_path, plan_path],
             stdout=subprocess.PIPE,
             stdin=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -372,13 +381,7 @@ def run_download_plan(
             if event_name == "retry":
                 logger.warning(_format_bridge_event(event))
                 if event_cb:
-                    normalized_event = dict(event)
-                    normalized_event.setdefault("task_key", plan.get("task_key", "download"))
-                    normalized_event.setdefault("label", plan.get("label", ""))
-                    normalized_event.setdefault("display_label", plan.get("display_label", ""))
-                    normalized_event.setdefault("segments", "0/1")
-                    normalized_event.setdefault("speed", "ERR")
-                    _safe_event_cb(event_cb, normalized_event)
+                    _safe_event_cb(event_cb, _failure_event(event, plan))
                 continue
 
             if event_name in {"error", "cancelled"}:
@@ -388,13 +391,7 @@ def run_download_plan(
                     logger.info(_format_bridge_event(event))
 
                 if event_cb:
-                    normalized_event = dict(event)
-                    normalized_event.setdefault("task_key", plan.get("task_key", "download"))
-                    normalized_event.setdefault("label", plan.get("label", ""))
-                    normalized_event.setdefault("display_label", plan.get("display_label", ""))
-                    normalized_event.setdefault("segments", "0/1")
-                    normalized_event.setdefault("speed", "ERR")
-                    _safe_event_cb(event_cb, normalized_event)
+                    _safe_event_cb(event_cb, _failure_event(event, plan))
                 continue
 
             if event_name == "progress":
@@ -404,12 +401,7 @@ def run_download_plan(
                 live_bytes = int(event.get("total_bytes") or 0)
                 display_bytes = max(total_bytes, live_bytes)  # monotonic merge; does NOT mutate the ledger
 
-                now = time.monotonic()
-                speed_window.append((now, display_bytes))
-                while len(speed_window) > 1 and now - speed_window[0][0] > SPEED_WINDOW_SECONDS:
-                    speed_window.popleft()
-                window_start_at, window_start_bytes = speed_window[0]
-                speed = (display_bytes - window_start_bytes) / max(now - window_start_at, 0.001)
+                speed = speed_meter.update(display_bytes)
                 _safe_progress_cb(progress_cb, done_count, total, display_bytes, speed)
 
                 progress_event = dict(event)
@@ -444,12 +436,7 @@ def run_download_plan(
                 bytes_written = int(event.get("bytes") or 0)
                 total_bytes += bytes_written
 
-                now = time.monotonic()
-                speed_window.append((now, total_bytes))
-                while len(speed_window) > 1 and now - speed_window[0][0] > SPEED_WINDOW_SECONDS:
-                    speed_window.popleft()
-                window_start_at, window_start_bytes = speed_window[0]
-                speed = (total_bytes - window_start_bytes) / max(now - window_start_at, 0.001)
+                speed = speed_meter.update(total_bytes)
                 _safe_progress_cb(progress_cb, done_count, total, total_bytes, speed)
 
                 progress_event = dict(event)

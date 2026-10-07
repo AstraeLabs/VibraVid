@@ -1,15 +1,21 @@
 # 11.09.26
 
 import logging
+import os
 import queue
 import subprocess
+import sys
+import tempfile
 import threading
+import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 _FEED_QUEUE_MAXSIZE = 64
+_PIPE_CONNECT_TIMEOUT = 60.0
 _SENTINEL = object()
 
 
@@ -185,5 +191,325 @@ class StreamingMuxFeeder:
         if self._proc and self._proc.poll() is None:
             try:
                 self._proc.kill()
+            except OSError:
+                pass
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes as _wt
+
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    _k32.CreateNamedPipeW.restype = ctypes.c_void_p
+    _k32.CreateNamedPipeW.argtypes = [
+        ctypes.c_wchar_p, _wt.DWORD, _wt.DWORD, _wt.DWORD,
+        _wt.DWORD, _wt.DWORD, _wt.DWORD, ctypes.c_void_p,
+    ]
+    _k32.ConnectNamedPipe.restype = _wt.BOOL
+    _k32.ConnectNamedPipe.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    _k32.WriteFile.restype = _wt.BOOL
+    _k32.WriteFile.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, _wt.DWORD,
+        ctypes.POINTER(_wt.DWORD), ctypes.c_void_p,
+    ]
+    _k32.FlushFileBuffers.restype = _wt.BOOL
+    _k32.FlushFileBuffers.argtypes = [ctypes.c_void_p]
+    _k32.DisconnectNamedPipe.restype = _wt.BOOL
+    _k32.DisconnectNamedPipe.argtypes = [ctypes.c_void_p]
+    _k32.CloseHandle.restype = _wt.BOOL
+    _k32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    _PIPE_ACCESS_OUTBOUND = 0x00000002
+    _FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000
+    _PIPE_TYPE_BYTE = 0x00000000
+    _PIPE_WAIT = 0x00000000
+    _ERROR_PIPE_CONNECTED = 535
+
+    def _win_make_pipe(name: str):
+        h = _k32.CreateNamedPipeW(
+            name,
+            _PIPE_ACCESS_OUTBOUND | _FILE_FLAG_FIRST_PIPE_INSTANCE,
+            _PIPE_TYPE_BYTE | _PIPE_WAIT,
+            1, 4 << 20, 0, 0, None,
+        )
+        if h in (None, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+            raise OSError(f"CreateNamedPipeW({name!r}) failed: error {ctypes.get_last_error()}")
+        return h
+
+    def _win_connect(h) -> bool:
+        if _k32.ConnectNamedPipe(h, None):
+            return True
+        return ctypes.get_last_error() == _ERROR_PIPE_CONNECTED
+
+    def _win_write(h, data: bytes) -> None:
+        n = _wt.DWORD(0)
+        if not _k32.WriteFile(h, data, len(data), ctypes.byref(n), None):
+            raise OSError(f"WriteFile failed: error {ctypes.get_last_error()}")
+
+    def _win_close(h) -> None:
+        try:
+            _k32.FlushFileBuffers(h)
+            _k32.DisconnectNamedPipe(h)
+        except Exception:
+            pass
+        _k32.CloseHandle(h)
+
+
+class _NamedPipe:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._closed = False
+        self._close_lock = threading.Lock()
+        if sys.platform == "win32":
+            self._h = _win_make_pipe(path)  # type: ignore[name-defined]
+            self._fh = None
+        else:
+            os.mkfifo(path)
+            self._fh = None
+
+    def connect(self) -> bool:
+        """Block until ffmpeg opens the read end. Returns False on error or cancel."""
+        try:
+            if sys.platform == "win32":
+                return _win_connect(self._h)  # type: ignore[name-defined]
+            else:
+                import errno as _errno
+                deadline = time.monotonic() + _PIPE_CONNECT_TIMEOUT
+                while time.monotonic() < deadline:
+                    if self._closed:
+                        return False
+                    try:
+                        fd = os.open(self.path, os.O_WRONLY | os.O_NONBLOCK)
+                        import io
+                        self._fh = io.FileIO(fd, mode="wb", closefd=True)
+                        return True
+                    except OSError as exc:
+                        if exc.errno in (_errno.ENXIO, _errno.EINTR):
+                            time.sleep(0.05)
+                            continue
+                        return False
+                return False
+        except OSError:
+            return False
+
+    def write(self, data: bytes) -> None:
+        if sys.platform == "win32":
+            _win_write(self._h, data)  # type: ignore[name-defined]
+        else:
+            assert self._fh is not None
+            self._fh.write(data)
+
+    def close(self) -> None:
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        if sys.platform == "win32":
+            try:
+                _win_close(self._h)  # type: ignore[name-defined]
+            except OSError:
+                pass
+        else:
+            try:
+                if self._fh is not None:
+                    self._fh.close()
+            except OSError:
+                pass
+
+
+def _drain_queue(q: queue.Queue) -> None:
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass
+
+
+class NamedPipeMuxer:
+    def __init__(self, n_pipes: int, write_timeout: float = 120.0) -> None:
+        self._n = n_pipes
+        self._write_timeout = write_timeout
+        self._failed = threading.Event()
+        self._fail_reason = ""
+        self._lock = threading.Lock()
+        self._ffmpeg_started_event = threading.Event()
+
+        session = uuid.uuid4().hex[:8]
+        if sys.platform == "win32":
+            self._pipe_paths = [rf"\\.\pipe\vv_{session}_{i}" for i in range(n_pipes)]
+            self._tmpdir: str | None = None
+        else:
+            self._tmpdir = tempfile.mkdtemp(prefix="vv_pipe_")
+            self._pipe_paths = [os.path.join(self._tmpdir, f"p{i}") for i in range(n_pipes)]
+
+        self._queues: list[queue.Queue] = [queue.Queue(maxsize=64) for _ in range(n_pipes)]
+        self._pipes: list[_NamedPipe] = []
+        self._proc: subprocess.Popen | None = None
+        self._stderr_chunks: list[bytes] = []
+        self._stderr_thread: threading.Thread | None = None
+        self._writer_threads: list[threading.Thread] = []
+
+    @property
+    def pipe_paths(self) -> list[str]:
+        return list(self._pipe_paths)
+
+    def prepare(self) -> None:
+        """Create named pipe servers and start per-pipe writer threads."""
+        if self._pipes:
+            raise RuntimeError("already prepared")
+        self._pipes = [_NamedPipe(p) for p in self._pipe_paths]
+        for i in range(self._n):
+            t = threading.Thread(target=self._pipe_writer, args=(i,), daemon=True)
+            self._writer_threads.append(t)
+            t.start()
+
+    def start_ffmpeg(self, ffmpeg_cmd: list[str]) -> None:
+        """Launch the ffmpeg subprocess.  Writer threads are already waiting for it."""
+        if self._failed.is_set():
+            return  # abort() was called before we got here
+        self._proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+        def _drain_stderr() -> None:
+            assert self._proc and self._proc.stderr
+            for line in self._proc.stderr:
+                with self._lock:
+                    self._stderr_chunks.append(line)
+                    if len(self._stderr_chunks) > 500:
+                        self._stderr_chunks.pop(0)
+
+        self._stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        self._stderr_thread.start()
+        self._ffmpeg_started_event.set()
+
+    def start(self, ffmpeg_cmd: list[str]) -> None:
+        """Create pipe servers, launch ffmpeg, start per-pipe writer threads."""
+        self.prepare()
+        self.start_ffmpeg(ffmpeg_cmd)
+
+    def _pipe_writer(self, i: int) -> None:
+        pipe = self._pipes[i]
+        q = self._queues[i]
+
+        if not pipe.connect():
+            self._mark_failed(f"pipe {i}: connect timed out or cancelled")
+            _drain_queue(q)
+            return
+
+        while True:
+            try:
+                # Block indefinitely — close_writer() sends _SENTINEL when the track is done.
+                # Using a large-but-finite timeout so the thread is never permanently stuck
+                # if the caller crashes before calling close_writer().
+                item = q.get(timeout=7200.0)
+            except queue.Empty:
+                self._mark_failed(f"pipe {i}: no data for 2 h — giving up")
+                break
+            if item is _SENTINEL:
+                break
+            try:
+                pipe.write(item)
+            except OSError as exc:
+                self._mark_failed(f"pipe {i}: write error: {exc}")
+                _drain_queue(q)
+                break
+
+        pipe.close()
+
+    def get_writer(self, n: int) -> Callable[[bytes], None]:
+        """Return a callable that blocks until space is available in pipe *n*'s queue."""
+        q = self._queues[n]
+        failed = self._failed
+
+        def _write(data: bytes) -> None:
+            while True:
+                if failed.is_set():
+                    return
+                try:
+                    q.put(data, timeout=5.0)
+                    return
+                except queue.Full:
+                    pass  # ffmpeg is slow — keep waiting (backpressure)
+
+        return _write
+
+    def close_writer(self, n: int) -> None:
+        """Signal EOF for track *n* (no more data will be written)."""
+        while True:
+            if self._failed.is_set():
+                return
+            try:
+                self._queues[n].put(_SENTINEL, timeout=5.0)
+                return
+            except queue.Full:
+                pass  # ffmpeg is slow — keep retrying
+
+    def finish(self) -> StreamingMuxResult:
+        # In deferred mode (prepare() called, start_ffmpeg() runs in a background
+        # thread), wait up to 5 min for ffmpeg to start (or for abort() to fire).
+        if not self._ffmpeg_started_event.wait(timeout=300.0):
+            self._mark_failed("ffmpeg never started — audio timed out")
+        if self._proc is None:
+            self._cleanup()
+            return StreamingMuxResult(ok=False, returncode=None, error=self._fail_reason or "never started")
+
+        for t in self._writer_threads:
+            t.join(timeout=self._write_timeout)
+
+        try:
+            rc = self._proc.wait(timeout=self._write_timeout)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait(timeout=10)
+            rc = self._proc.returncode
+
+        if self._stderr_thread:
+            self._stderr_thread.join(timeout=10)
+
+        with self._lock:
+            stderr_tail = b"".join(self._stderr_chunks).decode(errors="replace")[-4000:]
+
+        self._cleanup()
+
+        if self._failed.is_set():
+            return StreamingMuxResult(ok=False, returncode=rc, stderr_tail=stderr_tail, error=self._fail_reason)
+        if rc != 0:
+            return StreamingMuxResult(ok=False, returncode=rc, stderr_tail=stderr_tail, error=f"ffmpeg exited {rc}")
+        return StreamingMuxResult(ok=True, returncode=rc, stderr_tail=stderr_tail)
+
+    def abort(self) -> None:
+        self._mark_failed("aborted")
+        self._ffmpeg_started_event.set()  # unblock finish() in deferred mode
+        for p in self._pipes:
+            try:
+                p.close()
+            except Exception:
+                pass
+        for q in self._queues:
+            _drain_queue(q)
+        if self._proc and self._proc.poll() is None:
+            try:
+                self._proc.kill()
+            except OSError:
+                pass
+
+    def _mark_failed(self, reason: str) -> None:
+        if not self._failed.is_set():
+            self._fail_reason = reason
+            self._failed.set()
+
+    def _cleanup(self) -> None:
+        if self._tmpdir:
+            for p in self._pipe_paths:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            try:
+                os.rmdir(self._tmpdir)
             except OSError:
                 pass

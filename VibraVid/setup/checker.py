@@ -19,6 +19,9 @@ INSTALLATION_LEVELS = {
     "yt": ["ffmpeg", "velora", "flux", "yt-dlp", "deno"],
     "full": ["ffmpeg", "velora", "flux", "dovi_tool", "mkvtoolnix", "yt-dlp", "deno"],
 }
+_TERMUX_PREBUILT = "prebuilt"
+_TERMUX_RETRY = "retry"
+_TERMUX_MANUAL = "manual"
 
 
 def is_termux() -> bool:
@@ -31,46 +34,28 @@ def _should_download(tool_group: str) -> bool:
     level = config_manager.config.get("DEFAULT", "installation") or ""
     return tool_group in INSTALLATION_LEVELS.get(level, INSTALLATION_LEVELS[""])
 
-def check_flux(download: bool = True) -> str | None:
-    """
-    Check for a flux binary and download if not found.
-    Order: system PATH -> binary directory -> download from GitHub
-    """
-    system_platform = binary_paths.system
-    binary_exec = "flux.exe" if system_platform == "windows" else "flux"
+def _executable_name(name: str) -> str:
+    return f"{name}.exe" if binary_paths.system == "windows" else name
 
-    # STEP 1: Check system PATH
+
+def _find_installed(group: str, binary_exec: str) -> str | None:
+    """STEP 1 and 2: system PATH, then the local binary directory."""
     binary_path = shutil.which(binary_exec)
     if binary_path:
         logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
         return binary_path
 
-    # STEP 2: Check local binary directory
-    binary_local = binary_paths.get_binary_path("flux", binary_exec)
+    binary_local = binary_paths.get_binary_path(group, binary_exec)
     if binary_local and os.path.isfile(binary_local):
         logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
         return binary_local
 
-    if not download:
-        return None
+    return None
 
-    # Termux-specific check: try the prebuilt android-target binary first
-    if is_termux():
-        if _should_download("flux"):
-            binary_downloaded = binary_paths.download_binary("flux", binary_exec)
-            if binary_downloaded:
-                logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-                return binary_downloaded
-        
-        console.print("[red]No prebuilt flux binary available for this Termux device.[/red]")
-        console.print("[cyan]If required, please compile it and place it in system PATH.[/cyan]")
-        return None
 
-    # STEP 3: Download (only if installation level includes flux)
-    if not _should_download("flux"):
-        return None
-
-    binary_downloaded = binary_paths.download_binary("flux", binary_exec)
+def _download_binary(group: str, binary_exec: str) -> str | None:
+    """STEP 3: download the binary from AstraeLabs/Binary and report a failure."""
+    binary_downloaded = binary_paths.download_binary(group, binary_exec)
     if binary_downloaded:
         logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
         return binary_downloaded
@@ -78,6 +63,43 @@ def check_flux(download: bool = True) -> str | None:
     logger.error(f"Failed to download {binary_exec}")
     console.print(f"Failed to download {binary_exec}", style="red")
     return None
+
+
+def _check_binary(group: str, name: str, download: bool = True, termux: str = _TERMUX_PREBUILT, termux_hint: tuple[str, ...] = ()) -> str | None:
+    """
+    Find a helper binary or download it.
+    Order: system PATH -> binary directory -> download (only when the installation level includes *group*)
+    """
+    binary_exec = _executable_name(name)
+    found = _find_installed(group, binary_exec)
+    if found or not download:
+        return found
+
+    if is_termux():
+        if termux != _TERMUX_MANUAL and _should_download(group):
+            binary_downloaded = binary_paths.download_binary(group, binary_exec)
+            if binary_downloaded:
+                logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
+                return binary_downloaded
+
+        if termux != _TERMUX_RETRY:
+            for line in termux_hint:
+                console.print(line)
+            return None
+
+    if not _should_download(group):
+        return None
+
+    return _download_binary(group, binary_exec)
+
+
+def check_flux(download: bool = True) -> str | None:
+    """Check for a flux binary and download if not found."""
+    hint = (
+        "[red]No prebuilt flux binary available for this Termux device.[/red]",
+        "[cyan]If required, please compile it and place it in system PATH.[/cyan]",
+    )
+    return _check_binary("flux", "flux", download, _TERMUX_PREBUILT, hint)
 
 
 def check_ffmpeg(download: bool = True) -> tuple[str | None, str | None]:
@@ -132,23 +154,10 @@ def check_dovi_tool(download: bool = True) -> str | None:
     Check for dovi_tool binary and download if not found.
     Order: system PATH -> binary directory -> download from GitHub
     """
-    system_platform = binary_paths.system
-    binary_exec = "dovi_tool.exe" if system_platform == "windows" else "dovi_tool"
-
-    # STEP 1: Check system PATH
-    binary_path = shutil.which(binary_exec)
-    if binary_path:
-        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
-        return binary_path
-
-    # STEP 2: Check local binary directory
-    binary_local = binary_paths.get_binary_path("dovi_tool", binary_exec)
-    if binary_local and os.path.isfile(binary_local):
-        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
-        return binary_local
-
-    if not download:
-        return None
+    binary_exec = _executable_name("dovi_tool")
+    found = _find_installed("dovi_tool", binary_exec)
+    if found or not download:
+        return found
 
     # Termux-specific check
     if is_termux():
@@ -180,195 +189,41 @@ def check_dovi_tool(download: bool = True) -> str | None:
         console.print("[cyan]Please compile manually using: [yellow]cargo install --git https://github.com/quietvoid/dovi_tool[/cyan]")
         return None
 
-    # STEP 3: Download (only if installation level includes dovi_tool)
     if not _should_download("dovi_tool"):
         return None
 
-    binary_downloaded = binary_paths.download_binary("dovi_tool", binary_exec)
-    if binary_downloaded:
-        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-        return binary_downloaded
+    return _download_binary("dovi_tool", binary_exec)
 
-    logger.error(f"Failed to download {binary_exec}")
-    console.print(f"Failed to download {binary_exec}", style="red")
-    return None
+
+def _check_mkvtoolnix_binary(name: str, download: bool = True) -> str | None:
+    """Check for a binary shipped with MKVToolNix (mkvmerge, mkvpropedit...) and download if not found."""
+    hint = (
+        f"[red]MKVToolNix ({name}) is required on Termux.[/red]",
+        "[cyan]Please install it using: [yellow]pkg install mkvtoolnix[/cyan]",
+    )
+    return _check_binary("mkvtoolnix", name, download, _TERMUX_MANUAL, hint)
 
 
 def check_mkvmerge(download: bool = True) -> str | None:
-    """
-    Check for mkvmerge binary and download if not found.
-    Order: system PATH -> binary directory -> download from GitHub
-    """
-    system_platform = binary_paths.system
-    binary_exec = "mkvmerge.exe" if system_platform == "windows" else "mkvmerge"
+    """Check for mkvmerge binary and download if not found."""
+    return _check_mkvtoolnix_binary("mkvmerge", download)
 
-    # STEP 1: Check system PATH
-    binary_path = shutil.which(binary_exec)
-    if binary_path:
-        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
-        return binary_path
 
-    # STEP 2: Check local binary directory
-    binary_local = binary_paths.get_binary_path("mkvtoolnix", binary_exec)
-    if binary_local and os.path.isfile(binary_local):
-        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
-        return binary_local
-
-    if not download:
-        return None
-
-    # Termux-specific check
-    if is_termux():
-        console.print("[red]MKVToolNix (mkvmerge) is required on Termux.[/red]")
-        console.print("[cyan]Please install it using: [yellow]pkg install mkvtoolnix[/cyan]")
-        return None
-
-    # STEP 3: Download (only if installation level includes mkvtoolnix)
-    if not _should_download("mkvtoolnix"):
-        return None
-
-    binary_downloaded = binary_paths.download_binary("mkvtoolnix", binary_exec)
-    if binary_downloaded:
-        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-        return binary_downloaded
-
-    logger.error(f"Failed to download {binary_exec}")
-    console.print(f"Failed to download {binary_exec}", style="red")
-    return None
+def check_mkvpropedit(download: bool = True) -> str | None:
+    """Check for mkvpropedit binary (in-place MKV tag editing) and download if not found."""
+    return _check_mkvtoolnix_binary("mkvpropedit", download)
 
 
 def check_velora(download: bool = True) -> str | None:
-    """
-    Check for velora binary and download if not found.
-    Order: system PATH -> binary directory -> download from GitHub
-    """
-    system_platform = binary_paths.system
-    binary_exec = "velora.exe" if system_platform == "windows" else "velora"
-
-    # STEP 1: Check system PATH
-    binary_path = shutil.which(binary_exec)
-    if binary_path:
-        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
-        return binary_path
-
-    # STEP 2: Check local binary directory
-    binary_local = binary_paths.get_binary_path("velora", binary_exec)
-    if binary_local and os.path.isfile(binary_local):
-        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
-        return binary_local
-
-    if not download:
-        return None
-
-    # Termux-specific check: try the prebuilt android-target binary first
-    if is_termux():
-        if _should_download("velora"):
-            binary_downloaded = binary_paths.download_binary("velora", binary_exec)
-            if binary_downloaded:
-                logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-                return binary_downloaded
-
-    # STEP 3: Download (only if installation level includes velora)
-    if not _should_download("velora"):
-        return None
-
-    binary_downloaded = binary_paths.download_binary("velora", binary_exec)
-    if binary_downloaded:
-        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-        return binary_downloaded
-
-    logger.error(f"Failed to download {binary_exec}")
-    console.print(f"Failed to download {binary_exec}", style="red")
-    return None
+    """Check for velora binary and download if not found (on Termux the prebuilt download is attempted twice)."""
+    return _check_binary("velora", "velora", download, _TERMUX_RETRY)
 
 
 def check_yt_dlp(download: bool = True) -> str | None:
-    """
-    Check for yt-dlp binary and download if not found.
-    Order: system PATH -> binary directory -> download from GitHub
-    """
-    system_platform = binary_paths.system
-    binary_exec = "yt-dlp.exe" if system_platform == "windows" else "yt-dlp"
-
-    # STEP 1: Check system PATH
-    binary_path = shutil.which(binary_exec)
-    if binary_path:
-        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
-        return binary_path
-
-    # STEP 2: Check local binary directory
-    binary_local = binary_paths.get_binary_path("yt-dlp", binary_exec)
-    if binary_local and os.path.isfile(binary_local):
-        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
-        return binary_local
-
-    if not download:
-        return None
-
-    # Termux-specific check
-    if is_termux():
-        if _should_download("yt-dlp"):
-            binary_downloaded = binary_paths.download_binary("yt-dlp", binary_exec)
-            if binary_downloaded:
-                return binary_downloaded
-        console.print("[red]No prebuilt yt-dlp binary for this Termux device.[/red]")
-        return None
-
-    # STEP 3: Download from AstraeLabs/Binary (only if installation level includes yt-dlp)
-    if not _should_download("yt-dlp"):
-        return None
-
-    binary_downloaded = binary_paths.download_binary("yt-dlp", binary_exec)
-    if binary_downloaded:
-        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-        return binary_downloaded
-
-    logger.error(f"Failed to download {binary_exec}")
-    console.print(f"Failed to download {binary_exec}", style="red")
-    return None
+    """Check for yt-dlp binary and download if not found."""
+    return _check_binary("yt-dlp", "yt-dlp", download, _TERMUX_PREBUILT, ("[red]No prebuilt yt-dlp binary for this Termux device.[/red]",))
 
 
 def check_deno(download: bool = True) -> str | None:
-    """
-    Check for deno binary and download if not found.
-    Order: system PATH -> binary directory -> download from GitHub
-    """
-    system_platform = binary_paths.system
-    binary_exec = "deno.exe" if system_platform == "windows" else "deno"
-
-    # STEP 1: Check system PATH
-    binary_path = shutil.which(binary_exec)
-    if binary_path:
-        logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
-        return binary_path
-
-    # STEP 2: Check local binary directory
-    binary_local = binary_paths.get_binary_path("deno", binary_exec)
-    if binary_local and os.path.isfile(binary_local):
-        logger.debug(f"Found {binary_exec} in local binary directory ({binary_local})")
-        return binary_local
-
-    if not download:
-        return None
-
-    # Termux-specific check
-    if is_termux():
-        if _should_download("deno"):
-            binary_downloaded = binary_paths.download_binary("deno", binary_exec)
-            if binary_downloaded:
-                return binary_downloaded
-        console.print("[red]No prebuilt deno binary for this Termux device.[/red]")
-        return None
-
-    # STEP 3: Download from AstraeLabs/Binary (only if installation level includes deno)
-    if not _should_download("deno"):
-        return None
-
-    binary_downloaded = binary_paths.download_binary("deno", binary_exec)
-    if binary_downloaded:
-        logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
-        return binary_downloaded
-
-    logger.error(f"Failed to download {binary_exec}")
-    console.print(f"Failed to download {binary_exec}", style="red")
-    return None
+    """Check for deno binary and download if not found."""
+    return _check_binary("deno", "deno", download, _TERMUX_PREBUILT, ("[red]No prebuilt deno binary for this Termux device.[/red]",))

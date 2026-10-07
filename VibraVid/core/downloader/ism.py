@@ -2,7 +2,6 @@
 
 import logging
 import os
-import time
 from collections.abc import Callable
 
 from rich.console import Console
@@ -11,9 +10,7 @@ from VibraVid.core.drm.manager import DRMManager
 from VibraVid.core.drm.system import DRMType
 from VibraVid.core.manifest.ism import ISMParser
 from VibraVid.core.muxing.helper.video.hybrid import split_other_tracks
-from VibraVid.core.ui.tracker import context_tracker, download_tracker
-from VibraVid.core.utils.media_players import MediaPlayers
-from VibraVid.core.velora.downloader import MediaDownloader
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.velora.util.formatting import (
     parse_max_segments as _parse_max_segments,
 )
@@ -25,13 +22,13 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
 
 from .base import BaseDownloader, DownloadResult
+from .drm_keys import fetch_drm_keys
 
 console = Console()
 logger = logging.getLogger(__name__)
 
 EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
 SKIP_DOWNLOAD = config_manager.config.get_bool("DOWNLOAD", "skip_download")
-DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
 
 
 class ISM_Downloader(BaseDownloader):
@@ -211,44 +208,20 @@ class ISM_Downloader(BaseDownloader):
         Dispatch key-fetch to :class:`DRMManager`.
 
         When the manifest only carries the *other* DRM type, fall back to that type instead of skipping key resolution entirely.
+        ``license_request_fn`` is intentionally not forwarded (historical ISM behavior, pinned by Test/Manifest/test_fetch_keys_dispatch.py).
         """
-        keys = None
-        effective_pref = self.drm_preference
-        if not drm_psshs.get(effective_pref):
-            other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
-            if drm_psshs.get(other):
-                effective_pref = other
-
-        if effective_pref == DRMType.WIDEVINE and drm_psshs.get(DRMType.WIDEVINE):
-            try:
-                keys = self.drm_manager.get_wv_keys(
-                    drm_psshs[DRMType.WIDEVINE],
-                    self.license_url,
-                    license_data=self.license_data,
-                    license_certificate=self.license_certificate,
-                    headers=self.license_headers,
-                    key=self.key,
-                )
-            except Exception as exc:
-                logger.error(f"Widevine key fetch failed: {exc}")
-
-        if effective_pref == DRMType.PLAYREADY and drm_psshs.get(DRMType.PLAYREADY):
-            try:
-                keys = self.drm_manager.get_pr_keys(
-                    drm_psshs[DRMType.PLAYREADY],
-                    self.license_url,
-                    headers=self.license_headers,
-                    key=self.key,
-                    license_data=self.license_data,
-                )
-            except Exception as exc:
-                logger.error(f"PlayReady key fetch failed: {exc}")
-
-        # Manual key supplied directly
-        if not keys and self.key:
-            keys = [self.key] if isinstance(self.key, str) else list(self.key)
-
-        return keys or []
+        return fetch_drm_keys(
+            self.drm_manager,
+            drm_psshs,
+            preference=self.drm_preference,
+            license_url=self.license_url,
+            license_headers=self.license_headers,
+            key=self.key,
+            license_data=self.license_data,
+            license_certificate=self.license_certificate,
+            cross_drm_fallback=True,
+            swallow_errors=True,
+        )
 
     def start(self) -> DownloadResult:
         """Execute the full ISM download pipeline."""
@@ -256,20 +229,7 @@ class ISM_Downloader(BaseDownloader):
         if precheck is not None:
             return precheck
 
-        self.media_downloader = MediaDownloader(
-            url=self.ism_url,
-            output_dir=self.output_dir,
-            filename=self.filename_base,
-            headers=self.headers,
-            manifest_refresh_fn=self.manifest_refresh_fn,
-            cookies=self.cookies,
-            download_id=self.download_id,
-            site_name=self.site_name,
-            max_segments=self.max_segments,
-            max_time=self.max_time,
-            manifest_content=self.ism_content,
-            manifest_protocol="ism",
-        )
+        self.media_downloader = self._new_media_downloader(self.ism_url, self.headers, self.ism_content, "ism")
         self.media_downloader.other_tracks = self.other_tracks
         self.media_downloader.display_selected_only = self.display_selected_only
 
@@ -282,14 +242,13 @@ class ISM_Downloader(BaseDownloader):
             logger.info(f"Adding {len(self.chapters)} external chapter(s).")
 
         # ── Parse ─────────────────────────────────────────────────────────────
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Parsing ISM ...")
+        self._update_status("Parsing ISM ...")
 
         streams = self.media_downloader.parse_stream(show_table=context_tracker.should_print and not context_tracker.hide_manifest_info)
 
-        if getattr(self.media_downloader, "no_match_skip", False):
-            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
-            return DownloadResult(self.output_path, False, None)
+        no_match = self._no_match_result()
+        if no_match is not None:
+            return no_match
 
         # ── DRM key fetch ─────────────────────────────────────────────────────
         raw_ism = (
@@ -309,8 +268,7 @@ class ISM_Downloader(BaseDownloader):
         is_protected = bool(drm_psshs.get(DRMType.WIDEVINE) or drm_psshs.get(DRMType.PLAYREADY))
 
         if is_protected:
-            if self.download_id:
-                download_tracker.update_status(self.download_id, "Fetching keys ...")
+            self._update_status("Fetching keys ...")
             keys = self._fetch_keys(drm_psshs)
 
             if keys:
@@ -324,19 +282,11 @@ class ISM_Downloader(BaseDownloader):
         self._log_tracks_json(streams, keys, self.ism_url)
 
         if SKIP_DOWNLOAD:
-            if DELAY_SS > 0:
-                console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
-                time.sleep(DELAY_SS)
-            return DownloadResult(self.output_path, False, None)
+            return self._skip_download_result()
 
-        try:
-            self.media_players = MediaPlayers(self.output_dir)
-            self.media_players.create()
-        except Exception:
-            pass
+        self._create_media_players()
 
-        if self.download_id:
-            download_tracker.update_status(self.download_id, "Downloading ...")
+        self._update_status("Downloading ...")
         print()
 
         self._maybe_enable_streaming_mux()

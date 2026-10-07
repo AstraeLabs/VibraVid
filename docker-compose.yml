@@ -64,7 +64,7 @@ services:
     environment:
       DJANGO_DEBUG: "false"
       DJANGO_DB_DIR: "/app/data"
-      DJANGO_SECRET_KEY: "change-me-to-a-secure-key"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-}"
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: "/app"
 
@@ -72,12 +72,13 @@ services:
       # Set these to match the uid/gid that owns your NAS share so that
       # downloaded files are writable by your normal user. Run `id <user>`
       # on the NAS host to find the correct values.
-      # PUID: "1000"
-      # PGID: "1000"
+      # Both are read from .env (empty = keep the image's default uid/gid).
+      PUID: "${PUID:-}"
+      PGID: "${PGID:-}"
 
-      # Host Configuration
-      ALLOWED_HOSTS: "localhost,127.0.0.1,vibravid"
-      CSRF_TRUSTED_ORIGINS: "http://localhost:8000,http://127.0.0.1:8000"
+      # Host Configuration (override both in .env when you reach the UI from another machine)
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1,vibravid}"
+      CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
 
       # ── Turnstile solver sidecar ──
       BYPASSER_URL: "http://bypasser:8192"
@@ -92,8 +93,8 @@ services:
       # WATCHLIST_AUTO_INTERVAL_SECONDS: "14400"
 
       # ── ARR Integration (Sonarr / Radarr / Overseerr) ──
-      # TMDB credentials are configured exclusively through the environment.
       TMDB_API_KEY: "${TMDB_API_KEY:-}"
+      TVDB_API_KEY: "${TVDB_API_KEY:-}"
       # USE_ARR_SERVICES: "false"
       # ENABLE_ARR_POLLING: "true"
       # ENABLE_SEERR_WEBHOOK: "false"

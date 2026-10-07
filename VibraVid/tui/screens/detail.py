@@ -425,17 +425,9 @@ class TitleDetailScreen(Screen):
 
     @on(Button.Pressed, "#queue")
     def _on_queue(self) -> None:
-        import uuid
 
         from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
-        from VibraVid.cli.command.queue import (
-            _PROCESS_TAG,
-            _load_queue,
-            _now_iso,
-            _queue_path,
-            _QueueLock,
-            _save_queue,
-        )
+        from VibraVid.cli.command.queue import enqueue_argv
 
         search_term = str(getattr(self._item, "name", "") or getattr(self._item, "title", "") or "")
         season_str = None
@@ -470,25 +462,8 @@ class TitleDetailScreen(Screen):
             self.app.notify(t("could_not_build_cmd_queue"), severity="error")
             return
 
-        tag = _PROCESS_TAG
-        path = _queue_path(tag)
-        item = {
-            "id": uuid.uuid4().hex[:8],
-            "argv": argv,
-            "status": "pending",
-            "tag": tag,
-            "enqueued_at": _now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "returncode": None,
-            "attempts": 0,
-        }
-
         try:
-            with _QueueLock(path):
-                data = _load_queue(path)
-                data.setdefault("items", []).append(item)
-                _save_queue(path, data)
+            item = enqueue_argv(argv)
             self.app.notify(t("added_item_to_queue_msg", id=item['id'], title=search_term[:25]), severity="information")
         except Exception as e:
             logger.exception("Failed to enqueue item")
