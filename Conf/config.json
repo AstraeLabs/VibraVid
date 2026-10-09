@@ -19,7 +19,8 @@
         "live_folder_name": "Live",
         "movie_format": "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]",
         "episode_format": "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]",
-        "song_format": "%(album)/%(track_number:02d). %(title)"
+        "song_format": "%(album)/%(track_number:02d). %(title)",
+        "tag_format": "[VibraVid]"
     },
     "DOWNLOAD": {
         "skip_download": false,

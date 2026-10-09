@@ -55,9 +55,52 @@ def test_no_title_still_tags_encoder_only(ctx):
     assert build_container_tags() == {"encoder": "VibraVid"}
 
 
-def test_tags_do_not_depend_on_config(ctx):
-    # no new config keys: nothing in retag may read config_manager
-    assert not hasattr(retag, "config_manager")
+@pytest.fixture
+def tag_format(monkeypatch):
+    """Control OUTPUT.tag_format as seen by retag."""
+
+    def _set(value):
+        real_get = retag.config_manager.config.get
+
+        def fake_get(section, key, *args, **kwargs):
+            if (section, key) == ("OUTPUT", "tag_format"):
+                return value
+            return real_get(section, key, *args, **kwargs)
+
+        monkeypatch.setattr(retag.config_manager.config, "get", fake_get)
+
+    return _set
+
+
+def test_tag_format_default_is_vibravid_prefix(ctx):
+    ctx(title="Film", media_type="Film")
+    assert build_container_tags()["title"] == "[VibraVid] Film"
+
+
+def test_tag_format_custom_prefix(ctx, tag_format):
+    ctx(title="Film", media_type="Film")
+    tag_format("[Mio]")
+    tags = build_container_tags()
+    assert tags["title"] == "[Mio] Film"
+    assert tags["comment"] == "[Mio] Film"
+
+
+@pytest.mark.parametrize("value", ["", "   ", None])
+def test_tag_format_empty_disables_tags(ctx, tag_format, value):
+    ctx(title="Film", media_type="Film")
+    tag_format(value)
+    assert build_container_tags() == {}
+
+
+@pytest.mark.parametrize("name", ["a.mkv", "a.mp4"])
+def test_tag_format_empty_leaves_file_untouched(tmp_path, have_ffmpeg, ctx, tag_format, name):
+    ctx(title="Film", media_type="Film")
+    tag_format("")
+    path = _make(tmp_path, name)
+    before = open(path, "rb").read()
+
+    assert retag_file(path) is False
+    assert open(path, "rb").read() == before
 
 
 # --- retag_file on real files ----------------------------------------------

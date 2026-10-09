@@ -10,6 +10,7 @@ from mutagen.mp4 import MP4
 
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.setup import get_mkvpropedit_path
+from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,18 @@ _MP4_ATOMS = {
 }
 
 
+def _tag_prefix() -> str:
+    """``OUTPUT.tag_format`` prefix for title/comment tags; read on every call so GUI edits apply without restart. Empty means tagging is disabled."""
+    value = config_manager.config.get("OUTPUT", "tag_format", default=TAG_PREFIX)
+    return (value or "").strip()
+
+
 def build_container_tags() -> dict:
-    """Container-level tags for the file being produced, sourced from ``context_tracker``."""
+    """Container-level tags for the file being produced, sourced from ``context_tracker``. Empty when ``OUTPUT.tag_format`` is empty (tagging disabled)."""
+    prefix = _tag_prefix()
+    if not prefix:
+        return {}
+
     title = (context_tracker.title or "").strip()
     media_type = (context_tracker.media_type or "").upper().strip()
     season = context_tracker.season or 0
@@ -38,7 +49,7 @@ def build_container_tags() -> dict:
 
     tags: dict = {}
     if title:
-        tags["title"] = f"{TAG_PREFIX} {title}"
+        tags["title"] = f"{prefix} {title}"
 
     if is_episode:
         comment = episode_name or title
@@ -53,7 +64,7 @@ def build_container_tags() -> dict:
     else:
         comment = title
     if comment:
-        tags["comment"] = f"{TAG_PREFIX} {comment}"
+        tags["comment"] = f"{prefix} {comment}"
 
     tags["encoder"] = TAG_ENCODER
     return tags

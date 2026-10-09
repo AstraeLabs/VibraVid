@@ -176,7 +176,8 @@ Embed the credentials directly in the URL userinfo, as `<scheme>://<username>:<p
     "live_folder_name": "Live",
     "movie_format": "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]",
     "episode_format": "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]",
-    "song_format": "%(album)/%(track_number:02d). %(title)"
+    "song_format": "%(album)/%(track_number:02d). %(title)",
+    "tag_format": "[VibraVid]"
   }
 }
 ```
@@ -283,6 +284,15 @@ S%(season:02d)/     ->  season folder   S01/
 | `%(title_slug)` | Track title as slug |
 | `%(year)` | Release year (omitted if unavailable) |
 | `%(track_number:FORMAT)` | Track number with inline padding (see above) |
+
+### Tag Format
+
+**Default:** `"[VibraVid]"`
+
+Prefix written in the `title` and `comment` tags of the produced file (e.g. `[VibraVid] Inception`). It is applied both by the in-place retag at the end of a download and by the `-metadata` flags used during the merge.
+
+- Set it to `""` to disable tagging entirely: no retag and no metadata tags are written.
+- Any other text replaces the prefix, e.g. `"[MyPrefix]"` -> `[MyPrefix] Inception`.
 
 ### Recommended configuration (with a TMDB API key)
 

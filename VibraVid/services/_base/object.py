@@ -181,6 +181,18 @@ class EntriesManager:
     def __init__(self):
         self.media_list: list[Entries] = []
 
+    @staticmethod
+    def _years_differ(a: str, b: str) -> bool:
+        """True only if both years are known (not empty/"9999" placeholder) and different (e.g. original vs remake)."""
+        unknown = ("", "9999")
+        return a not in unknown and b not in unknown and a != b
+
+    @staticmethod
+    def _ids_differ(a, b) -> bool:
+        """True only if both ids are present and different."""
+        a, b = str(a or "").strip(), str(b or "").strip()
+        return bool(a) and bool(b) and a != b
+
     def add(self, media: Entries) -> None:
 
         # MUSIC: Remove duplicates based on name, artist, album, and type
@@ -188,6 +200,8 @@ class EntriesManager:
         media_artist = str(getattr(media, "artist", "") or "").strip().lower()
         media_album = str(getattr(media, "album", "") or "").strip().lower()
         media_type = str(getattr(media, "type", "") or "").strip().lower()
+        media_year = str(getattr(media, "year", "") or "").strip()
+        
         if media_name:
             for existing in self.media_list:
                 if (
@@ -195,7 +209,10 @@ class EntriesManager:
                     and str(getattr(existing, "artist", "") or "").strip().lower() == media_artist
                     and str(getattr(existing, "album", "") or "").strip().lower() == media_album
                     and str(getattr(existing, "type", "") or "").strip().lower() == media_type
+                    and not self._ids_differ(getattr(existing, "id", None), getattr(media, "id", None))
+                    and not self._years_differ(str(getattr(existing, "year", "") or "").strip(), media_year)
                 ):
+                    logger.info(f"Skipping duplicate entry: {media.name} (type={media.type}, year={media_year}, id={getattr(media, 'id', None)})")
                     return
 
         # FILM / TV: Fetch year if it's "9999" and TMDB API key is available
