@@ -6,7 +6,7 @@ from typing import Any
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.setup import binary_paths
+from VibraVid.setup import binary_paths, get_prd_path, get_wvd_path, resolve_service_cdm
 from VibraVid.utils import config_manager
 from VibraVid.utils.vault import build_named_vault, claudio_vault, lab_vault
 from VibraVid.utils.vault._url_utils import clean_license_url
@@ -50,6 +50,8 @@ class DRMManager:
         widevine_remote_cdm_api: list[str] = None,
         playready_remote_cdm_api: list[str] = None,
         prefer_remote_cdm: bool = True,
+        prefer_remote_widevine: bool | None = None,
+        prefer_remote_playready: bool | None = None,
     ):
         """Initialize DRM Manager with CDM paths and database connections."""
         self.widevine_device_path = widevine_device_path
@@ -57,7 +59,34 @@ class DRMManager:
         self.widevine_remote_cdm_api = widevine_remote_cdm_api
         self.playready_remote_cdm_api = playready_remote_cdm_api
         self.prefer_remote_cdm = prefer_remote_cdm
+        self.prefer_remote_widevine = prefer_remote_widevine
+        self.prefer_remote_playready = prefer_remote_playready
         self._vaults: list[object] = self._build_vaults()
+
+    @classmethod
+    def for_site(cls, site_name: str | None) -> "DRMManager":
+        """
+        Build the manager for a service, honouring the "cdm" entry of that service in login.json.
+        """
+        chosen = resolve_service_cdm(site_name)
+        drm = config_manager.config
+
+        def _prefer(remote: dict | None, local_path: str | None) -> bool | None:
+            if remote:
+                return True
+            if local_path:
+                return False
+            return None
+
+        return cls(
+            chosen.wvd_path or get_wvd_path(),
+            chosen.prd_path or get_prd_path(),
+            chosen.widevine_remote or drm.get_dict("DRM", "widevine", default={}),
+            chosen.playready_remote or drm.get_dict("DRM", "playready", default={}),
+            drm.get_bool("DRM", "prefer_remote_cdm"),
+            prefer_remote_widevine=_prefer(chosen.widevine_remote, chosen.wvd_path),
+            prefer_remote_playready=_prefer(chosen.playready_remote, chosen.prd_path),
+        )
 
     def _display_keys(
         self,
@@ -504,7 +533,7 @@ class DRMManager:
                 key=key,
                 license_data=license_data,
                 license_certificate=license_certificate,
-                prefer_remote_cdm=self.prefer_remote_cdm,
+                prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_widevine is None else self.prefer_remote_widevine,
                 license_request_fn=license_request_fn,
             ),
             key=key,
@@ -547,7 +576,7 @@ class DRMManager:
                 headers=headers,
                 key=key,
                 license_data=license_data,
-                prefer_remote_cdm=self.prefer_remote_cdm,
+                prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_playready is None else self.prefer_remote_playready,
                 license_request_fn=license_request_fn,
             ),
             key=key,

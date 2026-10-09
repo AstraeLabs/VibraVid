@@ -2,6 +2,7 @@
 
 import logging
 import os
+from dataclasses import dataclass
 
 from rich.console import Console
 
@@ -100,39 +101,98 @@ def check_device_prd_path() -> str | None:
         return None
 
 
-def resolve_service_cdm_paths(site_name: str | None) -> tuple[str | None, str | None]:
-    """Resolve per-service .wvd/.prd overrides from the service's "cdm" entry in login.json."""
+@dataclass
+class ServiceCdm:
+    wvd_path: str | None = None
+    prd_path: str | None = None
+    widevine_remote: dict | None = None
+    playready_remote: dict | None = None
+
+
+def get_remote_cdm_registry() -> dict:
+    """Named remote CDMs from config.json (``DRM.remote_cdm``): ``{id: <same block as DRM.widevine / DRM.playready>}``."""
+    from VibraVid.utils import config_manager
+
+    registry = config_manager.config.get_dict("DRM", "remote_cdm", default={})
+    return registry if isinstance(registry, dict) else {}
+
+
+def remote_cdm_system(cfg: dict) -> str:
+    """Which DRM system a remote CDM block serves: an explicit ``system`` key wins, otherwise it is inferred."""
+    explicit = str(cfg.get("system", "")).lower()
+    if explicit in ("widevine", "playready"):
+        return explicit
+
+    device_type = str(cfg.get("device_type", cfg.get("Device Type", ""))).upper()
+    device_name = str(cfg.get("device_name", cfg.get("Device Name", "")))
+    if device_type == "PLAYREADY" or device_name.upper().startswith("SL"):
+        return "playready"
+    
+    if str(cfg.get("type", "")).lower() == "decrypt_labs" or device_type:
+        return "widevine"  # decrypt_labs without an SL* device, or a pywidevine block (ANDROID / CHROME)
+    
+    return "playready"  # a stock pyplayready block has no device_type
+
+
+def resolve_service_cdm(site_name: str | None) -> ServiceCdm:
+    """
+    Resolve the service's "cdm" entry in login.json (a string or a list).
+    """
+    result = ServiceCdm()
     if not site_name:
-        return None, None
+        return result
 
     from VibraVid.utils import config_manager
 
     section = config_manager.login.get_section(site_name) or config_manager.login.get_section(site_name.lower())
     cdm_value = section.get("cdm") if section else None
     if not cdm_value:
-        return None, None
+        return result
 
-    filenames = [cdm_value] if isinstance(cdm_value, str) else list(cdm_value)
+    entries = [cdm_value] if isinstance(cdm_value, str) else list(cdm_value)
 
-    searcher = DeviceSearcher()
-    wvd_path = prd_path = None
-    for filename in filenames:
-        if not filename:
+    searcher = None
+    for entry in entries:
+        if not entry:
             continue
 
-        resolved = searcher.search(filename=filename)
-        if not resolved:
-            console.print(f"[red]Error: [red]cdm[/red] file '{filename}' configured for '{site_name}' in login.json was not found in the binary directory.")
-            raise FileNotFoundError(
-                f"cdm file '{filename}' configured for '{site_name}' in login.json was not found in the binary directory."
+        lowered = str(entry).lower()
+        if lowered.endswith((".wvd", ".prd")):
+            searcher = searcher or DeviceSearcher()
+            resolved = searcher.search(filename=entry)
+            if not resolved:
+                console.print(f"[red]Error: [red]cdm[/red] file '{entry}' configured for '{site_name}' in login.json was not found in the binary directory.")
+                raise FileNotFoundError(
+                    f"cdm file '{entry}' configured for '{site_name}' in login.json was not found in the binary directory."
+                )
+            
+            if lowered.endswith(".wvd"):
+                result.wvd_path = resolved
+            else:
+                result.prd_path = resolved
+            continue
+
+        registry = get_remote_cdm_registry()
+        remote_cfg = registry.get(entry)
+        if not isinstance(remote_cfg, dict) or not remote_cfg:
+            known = ", ".join(sorted(registry)) or "none defined"
+            message = (
+                f"cdm '{entry}' configured for '{site_name}' in login.json is neither a .wvd/.prd file "
+                f"nor a remote CDM id in config.json DRM.remote_cdm (known ids: {known})."
             )
+            console.print(f"[red]Error: {message}")
+            raise FileNotFoundError(message)
 
-        if filename.lower().endswith(".wvd"):
-            wvd_path = resolved
-        elif filename.lower().endswith(".prd"):
-            prd_path = resolved
+        remote_cfg = {k: v for k, v in remote_cfg.items() if k != "system"}
+        if remote_cdm_system(registry[entry]) == "widevine":
+            result.widevine_remote = remote_cfg
         else:
-            console.print(f"[yellow]Warning: [red]cdm[/red] file '{filename}' configured for '{site_name}' in login.json has an unrecognized extension (expected .wvd or .prd) - ignoring.")
-            logger.warning(f"Unrecognized cdm file extension for '{filename}' (site '{site_name}'), ignoring.")
+            result.playready_remote = remote_cfg
 
-    return wvd_path, prd_path
+    return result
+
+
+def resolve_service_cdm_paths(site_name: str | None) -> tuple[str | None, str | None]:
+    """Resolve per-service .wvd/.prd overrides from the service's "cdm" entry in login.json (remote CDM ids are ignored here)."""
+    resolved = resolve_service_cdm(site_name)
+    return resolved.wvd_path, resolved.prd_path

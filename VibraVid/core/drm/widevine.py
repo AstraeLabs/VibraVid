@@ -8,6 +8,7 @@ from collections.abc import Callable
 from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
+from VibraVid.core.drm.cdm.remote.decrypt_labs_cdm import DecryptLabsRemoteCDM, build_remote_cdm
 from VibraVid.core.drm.system import accumulate_content_key, normalize_kid
 from VibraVid.setup import binary_paths, get_info_wvd
 from VibraVid.utils.http_client import create_client
@@ -84,6 +85,9 @@ def get_widevine_keys(
         )
         return None
 
+    if prefer_remote_cdm:
+        cdm_device_path = None  # the remote CDM was asked for: a local device file must not win over it
+
     return _get_widevine_keys(
         pssh_list,
         license_url,
@@ -113,9 +117,8 @@ def _get_widevine_keys(
         return None
 
     from pywidevine.cdm import Cdm
-    from pywidevine.device import Device, DeviceTypes
+    from pywidevine.device import Device
     from pywidevine.pssh import PSSH
-    from pywidevine.remotecdm import RemoteCdm
 
     device = None
     cdm = None
@@ -133,15 +136,7 @@ def _get_widevine_keys(
     else:
         console.print("[cyan]Using remote CDM.")
         try:
-            if cdm_remote_api["device_type"] == "ANDROID":
-                cdm_remote_api["device_type"] = DeviceTypes.ANDROID
-            elif cdm_remote_api["device_type"] == "CHROME":
-                cdm_remote_api["device_type"] = DeviceTypes.CHROME
-            else:
-                logger.error(f"Unsupported remote CDM device type: {cdm_remote_api['device_type']}")
-                console.print(f"[red]Unsupported remote CDM device type: {cdm_remote_api['device_type']}")
-                return None
-            cdm = RemoteCdm(**cdm_remote_api)
+            cdm = build_remote_cdm(cdm_remote_api, "widevine")
         except Exception as e:
             logger.error(f"Error initializing remote CDM: {e}")
             console.print(f"[red]Error initializing remote CDM: {e}")
@@ -158,6 +153,8 @@ def _get_widevine_keys(
         except Exception as e:
             logger.error(f"Failed to set service certificate: {e}")
             console.print(f"[yellow]Warning: Failed to set service certificate: {e}")
+    elif isinstance(cdm, DecryptLabsRemoteCDM):
+        cdm.set_service_certificate(session_id, None)  # default privacy certificate for L1/L2
 
     all_content_keys = []
     extracted_kids = set()
@@ -176,7 +173,15 @@ def _get_widevine_keys(
             console.print(f"[red]{type_info} [cyan](PSSH: [yellow]{pssh[:30]}...[cyan] KID: [red]{kid_info})")
 
             # Create license challenge
+            if isinstance(cdm, DecryptLabsRemoteCDM) and kid_info and kid_info != "n/a":
+                cdm.set_required_kids([kid_info], session_id)
             challenge = cdm.get_license_challenge(session_id, PSSH(pssh))
+
+            if not challenge and isinstance(cdm, DecryptLabsRemoteCDM):
+                for key_obj in cdm.get_keys(session_id):
+                    if key_obj.type == "CONTENT":
+                        accumulate_content_key(all_content_keys, extracted_kids, key_obj.kid.hex, key_obj.key.hex())
+                continue
 
             # Custom license request (service-supplied): bypass the built-in HTTP POST.
             if license_request_fn is not None:

@@ -45,6 +45,7 @@ _PREFERRED_ORDER = [
     "foodnetwork",
     "tubitv",
     "plutotv",
+    "rakutentv",
     "amazon_music",
 ]
 _OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax"}
@@ -107,10 +108,8 @@ def _initialize_registry():
             api_cls._indice = idx
             new_registry[module_name] = api_cls
         except Exception as e:
-            # Un servizio esterno assente è la norma, non un guasto: non deve
-            # finire in load_errors (che la GUI mostra come problema da risolvere).
             if module_name in _OPTIONAL_EXTERNAL and isinstance(e, ModuleNotFoundError):
-                logger.info("'%s' non disponibile in questo checkout (servizio esterno)", module_name)
+                logger.info("'%s' not available in this checkout (optional external service)", module_name)
                 continue
 
             err = f"{module_name}: {type(e).__name__}: {e}"

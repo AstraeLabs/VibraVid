@@ -170,6 +170,15 @@ ARR can process media in two ways:
 
 Both modes can be enabled together. Native Sonarr/Radarr webhooks can be prioritized over Seerr events to reduce duplicate processing.
 
+## Monitored items
+
+Only items that are **Monitored** in Sonarr/Radarr are downloaded. This always applies, on every path (polling, Seerr, Sonarr and Radarr webhooks), and there is nothing to configure.
+
+- An unmonitored movie, series or episode is skipped. The queue shows the reason (`Radarr movie is unmonitored` / `Sonarr episode is unmonitored`).
+- The state is re-checked live right before each download, so un-monitoring something after it was queued is enough to cancel it.
+- Queued items that are not started yet are skipped automatically when they become unmonitored. A download already in progress is allowed to finish.
+- If Sonarr/Radarr cannot be reached for the check, the item is treated as monitored and is not blocked.
+
 ## Provider selection
 
 VibraVid determines which provider to use for each item through two mechanisms — you can use one or both.

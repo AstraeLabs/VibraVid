@@ -100,7 +100,9 @@ def _resolve_and_download(content_id: str, output_path: str) -> DownloadResult:
     except RuntimeError as e:
         if not any(code in str(e) for code in ("PL043", "AG006")):
             raise
-        console.print("[yellow]Playback gateway blocked this content, falling back to direct stream...")
+        
+        detail = str(e).removeprefix("Failed to get playback URL error: ")
+        console.print(f"[yellow]Playback error: {detail}, falling back to direct stream...")
         playback_json = get_playback_url_direct(content_id)
 
     tracking = get_tracking_info(playback_json)

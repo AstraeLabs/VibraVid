@@ -40,14 +40,18 @@ log in, click the extension icon, then use:
 
 ### Steps
 
-1. **Open** [Mediaset](https://mediasetinfinity.mediaset.it/) and **log in**.
-2. **Open Developer Tools** (<kbd>F12</kbd>).
-3. Navigate to the **Application** tab (or **Storage** in Firefox) → **Session Storage** → select the `mediasetinfinity.mediaset.it` domain.
-4. **Find** the `accountData` key.
-5. **Copy the value** of the `adminBeToken` field inside it.
+1. **Open** [Mediaset](https://mediasetinfinity.mediaset.it/) and **log in** (pick your profile).
+2. **Click** the CookieInspector extension icon, then **GET STORAGE**.
+3. Type `rtilogin_acd` in the **filter** box and **click** "Copy JSON".
+4. Add it to `Conf/login.json`:
+   ```json
+   "mediasetinfinity": <paste_copied_json_here>
+   ```
+   The result looks like `"mediasetinfinity": {"rtilogin_acd": {"caToken": "...", "persona": {"id": "..."}, ...}}`.
 
-### Screenshot Reference
-![beToken location](assets/login/mediasetinfinity_beToken.png)
+Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application** tab → **Local Storage** →
+`mediasetinfinity.mediaset.it`, copy the value of the `rtilogin_acd` key and put it in
+`"mediasetinfinity": {"rtilogin_acd": <value>}`.
 
 ---
 

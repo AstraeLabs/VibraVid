@@ -971,7 +971,7 @@ def trigger_webhook_sync(event_data: dict) -> int:
             return trigger_polling_sync(full_resync=True)
 
         # Filter: monitored, already aired episodes without files
-        missing_eps = [e for e in episodes if e.get("monitored") and not e.get("hasFile") and _episode_has_aired(e)]
+        missing_eps = [e for e in episodes if e.get("monitored", True) is not False and not e.get("hasFile") and _episode_has_aired(e)]
 
         if not missing_eps:
             logger.info(f"[trigger_webhook_sync] Series '{matched['title']}' has no monitored episodes without files")
@@ -1133,7 +1133,7 @@ def trigger_sonarr_webhook_sync(event_data: dict) -> int:
             return trigger_polling_sync(full_resync=True)
 
         # Filter: monitored, already aired episodes without files
-        missing_eps = [e for e in episodes if e.get("monitored") and not e.get("hasFile") and _episode_has_aired(e)]
+        missing_eps = [e for e in episodes if e.get("monitored", True) is not False and not e.get("hasFile") and _episode_has_aired(e)]
 
         if not missing_eps:
             logger.info(f"[Sonarr WH] Series '{serie['title']}' has no monitored episodes without files")

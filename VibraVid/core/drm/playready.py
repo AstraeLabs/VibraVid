@@ -7,6 +7,7 @@ import logging
 from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
+from VibraVid.core.drm.cdm.remote.decrypt_labs_cdm import DecryptLabsRemoteCDM, build_remote_cdm
 from VibraVid.core.drm.system import accumulate_content_key, normalize_kid
 from VibraVid.setup import binary_paths, get_info_prd
 from VibraVid.utils.http_client import create_client
@@ -80,6 +81,9 @@ def get_playready_keys(
         )
         return None
 
+    if prefer_remote_cdm:
+        cdm_device_path = None  # the remote CDM was asked for: a local device file must not win over it
+
     return _get_playready_keys_local_cdm(
         pssh_list, license_url, cdm_device_path, cdm_remote_api, headers, license_data, license_request_fn
     )
@@ -102,7 +106,6 @@ def _get_playready_keys_local_cdm(
 
     from pyplayready.cdm import Cdm
     from pyplayready.device import Device
-    from pyplayready.remote.remotecdm import RemoteCdm
     from pyplayready.system.pssh import PSSH
 
     cdm = None
@@ -118,7 +121,7 @@ def _get_playready_keys_local_cdm(
     else:
         console.print("[green]Using remote CDM.")
         try:
-            cdm = RemoteCdm(**cdm_remote_api)
+            cdm = build_remote_cdm(cdm_remote_api, "playready")
         except Exception as e:
             logger.error(f"Error initializing remote CDM: {e}")
             console.print(f"[red]Error initializing remote CDM: {e}")
@@ -150,7 +153,16 @@ def _get_playready_keys_local_cdm(
                 continue
 
             # Create license challenge
+            if isinstance(cdm, DecryptLabsRemoteCDM):
+                cdm.set_pssh_b64(pssh, session_id)
+                if kid_info and kid_info != "n/a":
+                    cdm.set_required_kids([kid_info], session_id)
             challenge = cdm.get_license_challenge(session_id, pssh_obj.wrm_headers[0])
+
+            if not challenge and isinstance(cdm, DecryptLabsRemoteCDM):
+                for key_obj in cdm.get_keys(session_id):
+                    accumulate_content_key(all_content_keys, extracted_kids, key_obj.key_id.hex, key_obj.key.hex())
+                continue
             challenge_bytes = challenge if isinstance(challenge, bytes) else challenge.encode("utf-8")
 
             # Custom license request (service-supplied): bypass the built-in HTTP POST.

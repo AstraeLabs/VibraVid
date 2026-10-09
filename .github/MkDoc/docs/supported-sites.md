@@ -26,5 +26,27 @@ GUI site pickers. Select a service by name or by index:
 | `homegardentv` | 14 | Series | IT | HLS | - | - |
 | `plutotv` | 17 | Series | IT | DASH / HLS | PlayReady |
 | `monochrome` | 18 | Music | Global | - | - | - |
+| `rakutentv` | 19 | Movies & Series | Multi-country (see below) | DASH / HLS | PlayReady / Widevine |
 
 ---
+
+## Rakuten TV countries
+
+`rakutentv` works with any Rakuten TV country (it, nl, fr, de, es, uk, pt, at, ch, be, ...), each with its own catalogue. The country is picked in this order:
+
+1. the country in the title URL: `python manual.py -i rakutentv --url "https://www.rakuten.tv/nl/movies/de-eetclub"`
+2. the `--country` option: `python manual.py -i rakutentv -s "eetclub" --country nl`
+3. `country` in the `rakutentv` section of `login.json` (this is also what the Web GUI search uses; in the GUI you can paste a title URL to open another country's title)
+4. `it`
+
+```json
+"rakutentv": {
+  "email": "",
+  "password": "",
+  "country": "nl"
+}
+```
+
+- The audio language defaults to the country's main one (`NLD` for `nl`, `ITA` for `it`, ...) if the title has it, otherwise the first one the title offers. Use `--audio-lang` to force one (for example `ENG`).
+- Free titles (with ads) need no account. Rented or bought ones need `email` and `password`, and the login is kept separately for each country.
+- The country only selects the catalogue: Rakuten can still restrict the stream by your IP address, so some titles may need a connection from that country.

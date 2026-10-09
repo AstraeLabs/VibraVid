@@ -20,6 +20,7 @@ BUILTIN_SERVICES = frozenset({
     "nove",
     "plutotv",
     "raiplay",
+    "rakutentv",
     "realtime",
     "streamingcommunity",
     "tubitv",

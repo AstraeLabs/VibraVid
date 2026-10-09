@@ -6,7 +6,6 @@
         "password": ""
     },
     "mediasetinfinity": {
-        "adminBeToken": ""
     },
     "discoveryplus": {
         "st": ""
@@ -25,5 +24,12 @@
     "disney": {
         "token": "",
         "refresh_token": ""
+    },
+    "nowtvit": {
+        "skyCEsidismesso01 ": ""
+    },
+    "rakutentv": {
+        "email": "",
+        "password": ""
     }
 }

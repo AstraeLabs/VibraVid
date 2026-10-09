@@ -537,7 +537,7 @@ Any invalid value falls back to `scrap+down`. Override per run from the CLI with
 | Key | Default | Description |
 |-----|---------|-------------|
 | `use_cdm` | `true` | Enable CDM-based key extraction. When `false`, only database/vault lookups are attempted |
-| `prefer_remote_cdm` | `false` | Prefer remote CDM services (see [Remote CDM Services](#remote-cdm-services) below) over local device files |
+| `prefer_remote_cdm` | `false` | Use the remote CDM configured in `widevine` / `playready` (see [Remote CDM Services](#remote-cdm-services) below) instead of local device files. When `true`, a local `.wvd` / `.prd` is ignored even if present |
 | `bypass_vault_cache` | `false` | Skip the DRM key vault lookup and force a fresh CDM license request every run, instead of reusing a previously-seen key. |
 | `log_engine_output` | `false` | Log the decrypt engine's own stdout/stderr output — equivalent to the CLI's `--log-decryptor-output`. Off by default since it's verbose; useful when a decrypt is failing and you need the raw engine output |
 | `vault` | — | Optional external DRM key store(s), queried before CDM extraction |
@@ -618,6 +618,77 @@ When remote CDM services are available, add one or both of the following blocks 
 | `host` | Remote CDM server URL |
 | `secret` | Authentication secret |
 
+### Decrypt Labs (KeyXtractor)
+
+[Decrypt Labs](https://decryptlabs.com) is a hosted CDM service (Widevine and PlayReady). To use it, set `"type": "decrypt_labs"` in the `widevine` and/or `playready` block, put your API key in `secret`, and turn on `prefer_remote_cdm`:
+
+```json
+"DRM": {
+  "prefer_remote_cdm": true,
+  "widevine": {
+    "type": "decrypt_labs",
+    "secret": "YOUR_DECRYPT_LABS_API_KEY",
+    "device_name": "L3"
+  },
+  "playready": {
+    "type": "decrypt_labs",
+    "secret": "YOUR_DECRYPT_LABS_API_KEY",
+    "device_name": "SL3"
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `type` | - | Must be `"decrypt_labs"`. Without it the block is a standard pywidevine / pyplayready remote CDM (above) |
+| `secret` | required | Your Decrypt Labs API key |
+| `device_name` | `ChromeCDM` | Widevine: `ChromeCDM`, `L1`, `L2` or `L3`. PlayReady: `SL2` or `SL3` |
+| `host` | `https://keyxtractor.decryptlabs.com` | API URL, change it only for a self-hosted compatible service |
+| `service_name` | - | Optional service tag |
+
+### Named remote CDMs and per-service CDM
+
+To use a different CDM for one service, give each remote CDM a unique id under `DRM.remote_cdm` in `config.json`, then pick it in `login.json`. Each entry has the same fields as the `widevine` / `playready` blocks above (stock pywidevine / pyplayready remote CDMs, or `"type": "decrypt_labs"`):
+
+```json
+"DRM": {
+  "remote_cdm": {
+    "remote_widevine_1": {
+      "type": "decrypt_labs",
+      "secret": "YOUR_DECRYPT_LABS_API_KEY",
+      "device_name": "L3"
+    },
+    "remote_widevine_2": {
+      "device_type": "ANDROID",
+      "system_id": 22594,
+      "security_level": 3,
+      "host": "http://192.168.1.10:8786",
+      "secret": "my_secret",
+      "device_name": "device"
+    },
+    "remote_playready_1": {
+      "host": "http://192.168.1.10:8787",
+      "secret": "my_secret",
+      "device_name": "device",
+      "security_level": 3000
+    }
+  }
+}
+```
+
+The ids are free text. Then, in `login.json`, list what the service should use in its `cdm` entry (a single value or a list):
+
+```json
+"mysite": {
+  "cdm": ["remote_widevine_1", "my_playready.prd"]
+}
+```
+
+| `cdm` entry | Meaning |
+|-------------|---------|
+| ends with `.wvd` / `.prd` | A device file, looked up in the binary directory |
+| anything else | The id of a remote CDM from `DRM.remote_cdm` |
+
 ### Local CDM Devices
 
 To use local CDM device files instead of remote services, place them in the binary directory resolved at runtime:
@@ -628,4 +699,4 @@ To use local CDM device files instead of remote services, place them in the bina
 - **Widevine:** `.wvd` file (from pywidevine)
 - **PlayReady:** `.prd` file (from pyplayready)
 
-Set `prefer_remote_cdm` to `false` and local devices will be picked up automatically.
+Set `prefer_remote_cdm` to `false` and local devices will be picked up automatically. With `true`, the remote block is used and the local files are ignored.

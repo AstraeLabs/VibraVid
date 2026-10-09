@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from rich.console import Console
 
 from VibraVid.services._base.login_status import ACCOUNT, ANONYMOUS, print_login
-from VibraVid.utils import config_manager
+from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
 
 from .regions import get_region, region_conf
@@ -51,7 +51,13 @@ class MediasetAPI:
         self.adminBeToken = None
         self.account_id = None
         self.is_anonymous = True
-        login_token = config_manager.login.get(conf["login_key"], "adminBeToken", default=None)
+        cached = disk_cache.load("mediasetinfinity", conf["login_key"])
+        login_token = cached["adminBeToken"] if disk_cache.is_fresh(cached, buffer_seconds=300) else None
+        if not login_token:
+            login_token = config_manager.login.get(conf["login_key"], "adminBeToken", default=None)
+
+        if not (login_token and _is_token_valid(login_token)):
+            login_token = self.refresh_betoken() or login_token
 
         if login_token:
             if _is_token_valid(login_token):
@@ -136,6 +142,34 @@ class MediasetAPI:
             data = response.json()["response"]
             self.sid = data.get("sid", self.client_id)
             return data["beToken"]
+
+    def refresh_betoken(self):
+        """Exchange the stored caToken + persona id for a fresh 24h beToken and cache it on disk."""
+        login_key = self.conf["login_key"]
+        section = config_manager.login.get_section(login_key)
+        acd = section.get("rtilogin_acd") or {}
+        ca_token = acd.get("caToken")
+        persona_id = (acd.get("persona") or {}).get("id")
+        url = self.conf.get("persona_login_url")
+        if not (ca_token and persona_id and url):
+            return None
+
+        try:
+            with create_client(headers=self.headers) as client:
+                response = client.post(url, params={"sid": self.client_id}, json={"id": persona_id, "caToken": ca_token})
+            data = response.json()
+            new_token = (data.get("response") or data).get("beToken")
+        except Exception as e:
+            logger.debug(f"beToken refresh failed: {e}")
+            return None
+
+        if not new_token:
+            console.print("[yellow]Could not refresh the login token (caToken invalid/expired?)")
+            return None
+
+        disk_cache.save("mediasetinfinity", login_key, {"adminBeToken": new_token, "expiry": _decode_jwt_payload(new_token).get("exp", 0)})
+        logger.debug("beToken refreshed from caToken")
+        return new_token
 
     def fetch_html(self, head_only: bool = False):
         headers = dict(self.headers)

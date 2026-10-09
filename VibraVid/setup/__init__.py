@@ -1,7 +1,7 @@
 # 18.07.25
 
 from .binary_paths import binary_paths
-from .device_install import resolve_service_cdm_paths
+from .device_install import ServiceCdm, resolve_service_cdm, resolve_service_cdm_paths
 from .system import (
     get_deno_path,
     get_dovi_tool_path,
@@ -36,4 +36,6 @@ __all__ = [
     "get_info_prd",
     "get_info_wvd",
     "resolve_service_cdm_paths",
+    "resolve_service_cdm",
+    "ServiceCdm",
 ]
