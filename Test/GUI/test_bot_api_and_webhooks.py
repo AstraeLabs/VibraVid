@@ -4,6 +4,7 @@
 """``/api/bot/*`` (the bridge used by the Telegram bot) and the ARR webhooks: shared-secret handling and input validation."""
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -149,3 +150,52 @@ def test_webhook_with_the_right_token_still_validates_the_body(client, monkeypat
 
     assert response.status_code == 400
     assert response.json()["message"] == "Invalid JSON"
+
+
+@pytest.mark.parametrize("url, section, flag", WEBHOOKS)
+@pytest.mark.parametrize("valid_token", [False, True])
+def test_webhook_does_not_log_auth_headers_or_raw_body(client, monkeypatch, caplog, url, section, flag, valid_token):
+    secret = "webhook-secret-should-not-be-logged"
+    supplied_token = secret if valid_token else "incorrect-token-should-not-be-logged"
+    _arr_config(monkeypatch, **{section: {"webhook_secret": secret}})
+
+    with caplog.at_level(logging.INFO, logger="searchapp.views.arr"):
+        response = client.post(
+            url,
+            data="invalid-json-with-sensitive-body-value",
+            content_type="application/json",
+            headers={
+                "X-Webhook-Token": supplied_token,
+                "Authorization": "Bearer sensitive-authorization-value",
+            },
+        )
+
+    assert response.status_code == (400 if valid_token else 403)
+    for sensitive in (
+        secret,
+        supplied_token,
+        "sensitive-authorization-value",
+        "sensitive-body-value",
+    ):
+        assert sensitive not in caplog.text
+
+
+@pytest.mark.parametrize("url, section, flag", WEBHOOKS)
+def test_webhook_does_not_log_parsed_test_payload(client, monkeypatch, caplog, url, section, flag):
+    secret = "webhook-secret-should-not-be-logged"
+    _arr_config(monkeypatch, **{section: {"webhook_secret": secret}})
+    payload = {
+        "notification_type": "TEST_NOTIFICATION",
+        "eventType": "Test",
+        "media": {"media_type": "movie"},
+        "series": {"id": 1},
+        "movie": {"id": 1},
+        "private": "sensitive-json-payload-value",
+    }
+
+    with caplog.at_level(logging.INFO, logger="searchapp.views.arr"):
+        response = _post(client, url, payload, headers={"X-Webhook-Token": secret})
+
+    assert response.status_code == 200
+    assert secret not in caplog.text
+    assert "sensitive-json-payload-value" not in caplog.text

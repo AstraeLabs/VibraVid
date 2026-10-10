@@ -92,10 +92,9 @@ def seerr_webhook(request: HttpRequest) -> JsonResponse:
         # ── Log incoming request ──
         logger.info("=" * 60)
         logger.info("[SEERR WEBHOOK] Received request")
-        logger.info(f"[SEERR WEBHOOK] Headers: {dict(request.headers)}")
         logger.info(f"[SEERR WEBHOOK] Method: {request.method}")
         logger.info(f"[SEERR WEBHOOK] Content-Type: {request.content_type}")
-        logger.info(f"[SEERR WEBHOOK] Body (raw): {request.body[:2000]}")
+        logger.info("[SEERR WEBHOOK] Request body size: %d bytes", len(request.body))
         logger.info("=" * 60)
 
         cfg = _load_arr_config()
@@ -126,7 +125,6 @@ def seerr_webhook(request: HttpRequest) -> JsonResponse:
             logger.error("[SEERR WEBHOOK] Invalid JSON in request body")
             return JsonResponse({"status": "error", "message": "Invalid JSON"}, status=400)
 
-        logger.info(f"[SEERR WEBHOOK] Parsed payload: {json.dumps(payload, indent=2, ensure_ascii=False)[:1000]}")
 
         # Detect event type
         notification_type = payload.get("notification_type", "").upper()
@@ -236,8 +234,7 @@ def sonarr_webhook(request: HttpRequest) -> JsonResponse:
         # ── Log incoming request ──
         logger.info("=" * 60)
         logger.info("[SONARR WEBHOOK] Received request")
-        logger.info(f"[SONARR WEBHOOK] Headers: {dict(request.headers)}")
-        logger.info(f"[SONARR WEBHOOK] Body (raw): {request.body[:2000]}")
+        logger.info("[SONARR WEBHOOK] Request body size: %d bytes", len(request.body))
         logger.info("=" * 60)
 
         cfg = _load_arr_config()
@@ -266,7 +263,6 @@ def sonarr_webhook(request: HttpRequest) -> JsonResponse:
             logger.error("[SONARR WEBHOOK] Invalid JSON in request body")
             return JsonResponse({"status": "error", "message": "Invalid JSON"}, status=400)
 
-        logger.info(f"[SONARR WEBHOOK] Parsed payload: {json.dumps(payload, indent=2, ensure_ascii=False)[:1000]}")
 
         event_type = payload.get("eventType", "UNKNOWN").upper()
         logger.info(f"[SONARR WEBHOOK] eventType: {event_type}")
@@ -290,8 +286,7 @@ def sonarr_webhook(request: HttpRequest) -> JsonResponse:
         logger.info(f"[SONARR WEBHOOK] Created ArrWebhookEvent id={webhook_event.id}")
 
         if event_type == "TEST":
-            payload_str = json.dumps(payload, indent=2, ensure_ascii=False)
-            logger.info(f"[SONARR WEBHOOK TEST] Payload:\n{payload_str}")
+            logger.info("[SONARR WEBHOOK TEST] Test notification received")
             webhook_event.processed = True
             webhook_event.save(update_fields=["processed"])
             return JsonResponse({
@@ -374,8 +369,7 @@ def radarr_webhook(request: HttpRequest) -> JsonResponse:
         # ── Log incoming request ──
         logger.info("=" * 60)
         logger.info("[RADARR WEBHOOK] Received request")
-        logger.info(f"[RADARR WEBHOOK] Headers: {dict(request.headers)}")
-        logger.info(f"[RADARR WEBHOOK] Body (raw): {request.body[:2000]}")
+        logger.info("[RADARR WEBHOOK] Request body size: %d bytes", len(request.body))
         logger.info("=" * 60)
 
         cfg = _load_arr_config()
@@ -404,7 +398,6 @@ def radarr_webhook(request: HttpRequest) -> JsonResponse:
             logger.error("[RADARR WEBHOOK] Invalid JSON in request body")
             return JsonResponse({"status": "error", "message": "Invalid JSON"}, status=400)
 
-        logger.info(f"[RADARR WEBHOOK] Parsed payload: {json.dumps(payload, indent=2, ensure_ascii=False)[:1000]}")
 
         event_type = payload.get("eventType", "UNKNOWN").upper()
         logger.info(f"[RADARR WEBHOOK] eventType: {event_type}")
@@ -426,8 +419,7 @@ def radarr_webhook(request: HttpRequest) -> JsonResponse:
         logger.info(f"[RADARR WEBHOOK] Created ArrWebhookEvent id={webhook_event.id}")
 
         if event_type == "TEST":
-            payload_str = json.dumps(payload, indent=2, ensure_ascii=False)
-            logger.info(f"[RADARR WEBHOOK TEST] Payload:\n{payload_str}")
+            logger.info("[RADARR WEBHOOK TEST] Test notification received")
             webhook_event.processed = True
             webhook_event.save(update_fields=["processed"])
             return JsonResponse({
