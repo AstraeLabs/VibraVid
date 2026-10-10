@@ -25,6 +25,7 @@ from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.http_client import create_client, get_userAgent
 from VibraVid.utils.vault.vault_1 import claudio_vault
 
+from .drm_keys import effective_manual_key
 from .util._drm_probe import PROBE_BYTES, PROBE_BYTES_FAST, DRMProbe
 from .util._interrupt import InterruptHandler
 from .util._live_frag_mp4 import LiveFragMp4Decryptor
@@ -103,7 +104,7 @@ class MP4FileDownloader:
         self._on_clear_abandon = on_clear_abandon
         self._task_key = label
         self.label = label
-        self.key = key
+        self.key = effective_manual_key(key)
         self.check_content_type = check_content_type
         self.close_tracking = close_tracking
         self.max_percentage = self._normalize_max_percentage(max_percentage)

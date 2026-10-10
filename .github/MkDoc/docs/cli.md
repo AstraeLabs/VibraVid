@@ -305,6 +305,8 @@ python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist
 | `-o`, `--output <PATH>` | Output file path for `--down`/`--yt-dlp` direct downloads |
 | `--amazon-music-login` | Log in to Amazon Music (stores credentials for future runs) |
 | `--amazon-music-logout` | Clear stored Amazon Music login credentials |
+| `--clear` | Delete the cached login/session tokens of the service selected with `-i` (e.g. `-i crunchyroll --clear`) before running. Requires `-i`; never touches other services or `login.json` |
+| `--key <KID:KEY>` | Decryption key in hex `KID:KEY` format, repeatable. Works with `--down` and with a service run (`-i 0 --key <KID>:<KEY>`): it is used instead of looking the key up in the vault/CDM for the KIDs it covers; any other KID is still resolved normally |
 | `--no-vault-cache` | Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens) |
 | `--no-decrypt` | Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass) |
 | `--no-livemux` | Disable the streaming-mux fast path for this run, always falling back to the normal post-download `join_media()` pass. On by default |

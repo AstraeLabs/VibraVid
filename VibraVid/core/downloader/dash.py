@@ -26,7 +26,7 @@ from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
 from .base import BaseDownloader, DownloadResult
-from .drm_keys import fetch_drm_keys
+from .drm_keys import effective_manual_key, fetch_drm_keys
 from .util._drm_probe import PROBE_BYTES_FAST, DRMProbe
 
 console = Console()
@@ -222,7 +222,7 @@ class DASH_Downloader(BaseDownloader):
         logger.info(f"DASH Downloader initialized with MPD URL: {self.mpd_url}, License URL: {self.license_url}, DRM Preference: {drm_preference}, Key provided: {'yes' if key else 'no'}")
 
         self.drm_preference = drm_preference
-        self.key = key
+        self.key = effective_manual_key(key)
         self.cookies = cookies or {}
         self.max_segments = _parse_max_segments(
             max_segments if max_segments is not None else context_tracker.max_segments

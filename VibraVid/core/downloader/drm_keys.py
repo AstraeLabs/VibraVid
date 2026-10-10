@@ -8,6 +8,15 @@ from VibraVid.core.drm.system import DRMType
 logger = logging.getLogger(__name__)
 
 
+def effective_manual_key(key: Any) -> Any:
+    """The manual key to use: the one a service passes explicitly, else the ``--key`` given on a ``-i`` run."""
+    if key:
+        return key
+
+    from VibraVid.core.ui.tracker import context_tracker
+    return (context_tracker.site_options or {}).get("key") or None
+
+
 def manual_keys(key: Any) -> list[str]:
     """Normalize a manually supplied key (one ``"kid:key"`` string or an iterable of them) to a list."""
     return [key] if isinstance(key, str) else list(key)

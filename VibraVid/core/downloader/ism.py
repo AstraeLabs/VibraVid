@@ -21,7 +21,7 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
 
 from .base import BaseDownloader, DownloadResult
-from .drm_keys import fetch_drm_keys
+from .drm_keys import effective_manual_key, fetch_drm_keys
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class ISM_Downloader(BaseDownloader):
         self.license_data = license_data
         self.drm_preference = drm_preference
 
-        self.key = key
+        self.key = effective_manual_key(key)
         self.cookies = cookies or {}
         self.max_segments = _parse_max_segments(
             max_segments if max_segments is not None else context_tracker.max_segments

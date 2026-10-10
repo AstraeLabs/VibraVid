@@ -29,7 +29,7 @@ from VibraVid.setup.system import (
     get_ffmpeg_path,
     get_ffprobe_path,
 )
-from VibraVid.utils import config_manager, get_log_file_path, setup_logger, start_message
+from VibraVid.utils import config_manager, disk_cache, get_log_file_path, setup_logger, start_message
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
 from VibraVid.utils.upload.version import __title__, __version__
@@ -218,6 +218,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
     util_group.add_argument("--amazon-music-login", dest="amazon_music_login", action="store_true", help="Log in to Amazon Music via direct API device registration (no proxy/CA needed).")
     util_group.add_argument("--amazon-music-logout", dest="amazon_music_logout", action="store_true", help="Remove stored Amazon Music credentials from login.json.")
+    util_group.add_argument("--clear", dest="clear", action="store_true", help="Delete the cached login/session tokens of the service selected with -i before running (use after changing account/cookies). Requires -i; never touches other services.")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
     # ── Queue
@@ -310,13 +311,17 @@ def _apply_interactive_site_options(selected_module_name, site_module_name):
 def build_site_options(args, parser, site_option_dests, site_module_name):
     """Merge this run's site-specific CLI values with the site's persisted `extra_args` (login.json)"""
     persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
-    site_options = {"drm": getattr(args, "drm", None), "key": getattr(args, "key", None)}
+    site_options = {"drm": getattr(args, "drm", None)}
     for dest in site_option_dests:
         cli_val = getattr(args, dest, None)
         if cli_val != parser.get_default(dest):
             site_options[dest] = cli_val  # explicit CLI flag wins
         else:
             site_options[dest] = persisted.get(dest, cli_val)
+
+    global_key = getattr(args, "key", None)
+    if global_key:
+        site_options["key"] = global_key
 
     return site_options
 
@@ -341,6 +346,13 @@ def build_function_mappings(search_functions):
     return input_to_function, choice_labels, module_name_to_function
 
 
+def clear_args_error(args):
+    """Error message when --clear is used without -i (it never acts globally), else None."""
+    if getattr(args, "clear", False) and not getattr(args, "site", None):
+        return "--clear requires -i <service>: it only clears the cache of the selected service."
+    return None
+
+
 def handle_direct_site_selection(args, input_to_function, module_name_to_function, search_terms, selections=None):
     """Handle direct site selection via command line."""
     if not args.site:
@@ -355,6 +367,14 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
         return False
 
     context_tracker.cli_site = args.site
+
+    if getattr(args, "clear", False):
+        service = func_to_run.module_name
+        removed = disk_cache.clear_service(service)
+        if removed:
+            console.print(f"[yellow][+][/yellow] --clear: removed {removed} cached file(s) for {service}")
+        else:
+            console.print(f"[yellow][+][/yellow] --clear: no cached data for {service}")
 
     # Direct result selection by index (--item N, 0 = first result)
     requested_index = args.item
@@ -562,6 +582,11 @@ def main():
             from VibraVid.provider.amazon import logout as amazon_music_logout
 
             amazon_music_logout()
+            return
+
+        clear_error = clear_args_error(args)
+        if clear_error:
+            console.print(f"[red]{clear_error}")
             return
 
         if handle_queue_dispatch(args, argv):

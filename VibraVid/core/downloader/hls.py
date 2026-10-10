@@ -22,7 +22,7 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
 
 from .base import BaseDownloader, DownloadResult
-from .drm_keys import fetch_drm_keys
+from .drm_keys import effective_manual_key, fetch_drm_keys
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ class HLS_Downloader(BaseDownloader):
         self.license_data = license_data
         self.license_request_fn = license_request_fn
         self.drm_preference = drm_preference
-        self.key = key
+        self.key = effective_manual_key(key)
         # Auto-override: real DRM args always imply DRM, regardless of the caller-supplied flag.
         self.has_drm = has_drm or bool(license_url or license_data or license_request_fn or key)
         if self.has_drm and not has_drm:
