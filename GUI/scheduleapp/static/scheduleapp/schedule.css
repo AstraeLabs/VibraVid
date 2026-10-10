@@ -1,0 +1,102 @@
+/* Scheduled downloads: the "more" button, its menu, the day/time picker and
+   the strip on the Download page. Same tokens as cinema.css. */
+
+.cn-mini.cn-sch-dots {
+  flex: 0 0 auto; padding-inline: 10px;
+  background: rgba(255,255,255,.18); color: var(--cn-white);
+}
+.cn-mini.cn-sch-dots:hover { background: rgba(255,255,255,.32); }
+.cn-cta.cn-sch-dots { padding-inline: 15px; margin-left: 8px; }
+.cn-sch-dots { letter-spacing: .08em; line-height: 1; }
+
+.cn-sch-menu {
+  position: fixed; z-index: 70; min-width: 190px; padding: 6px;
+  background: var(--cn-surf-2); border-radius: var(--cn-radius);
+  box-shadow: 0 12px 40px rgba(0,0,0,.55), inset 0 0 0 1px var(--cn-edge);
+  animation: cn-rise .16s ease-out both;
+}
+.cn-sch-menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  cursor: pointer; border: 0; font-family: inherit; border-radius: var(--cn-radius-sm);
+  padding: 10px 12px; font-size: 13.5px; font-weight: 700; text-align: left;
+  background: none; color: var(--cn-white);
+}
+.cn-sch-menu button:hover,
+.cn-sch-menu button:focus-visible { background: rgba(255,255,255,.1); outline: 0; }
+.cn-sch-menu svg { flex: 0 0 auto; color: var(--cn-mute); }
+
+.cn-sch {
+  width: min(480px, calc(100vw - 24px)); max-height: calc(100vh - 24px);
+  padding: 24px; border: 0; border-radius: var(--cn-radius-lg); overflow-y: auto;
+  background: var(--cn-surf); color: var(--cn-white); font-family: var(--cn-sans);
+  box-shadow: 0 24px 80px rgba(0,0,0,.6), inset 0 0 0 1px var(--cn-edge);
+}
+.cn-sch::backdrop { background: rgba(5,5,9,.72); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.cn-sch[open] { animation: cn-rise .2s ease-out both; }
+.cn-sch .cn-tag { color: var(--cn-faint); }
+.cn-sch h2 { font-size: 22px; font-weight: 850; letter-spacing: -.035em; margin-top: 6px; overflow-wrap: anywhere; }
+.cn-sch-what { margin: 3px 0 0; font-size: 13px; color: var(--cn-mute); font-weight: 600; }
+
+.cn-sch-sec { margin-top: 20px; }
+.cn-sch-sec-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; min-height: 26px; }
+.cn-sch-month { margin-left: auto; font-size: 12.5px; font-weight: 700; color: var(--cn-mute); }
+.cn-sch-nav {
+  cursor: pointer; border: 0; font-family: inherit; border-radius: var(--cn-radius-sm);
+  width: 26px; height: 26px; font-size: 15px; font-weight: 800; line-height: 1;
+  background: var(--cn-surf-2); color: var(--cn-white);
+}
+.cn-sch-nav:disabled { opacity: .3; cursor: not-allowed; }
+
+.cn-sch-grid { display: grid; gap: 5px; }
+.cn-sch-days  { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cn-sch-hours { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.cn-sch-mins  { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.cn-sch-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.cn-sch-cell {
+  cursor: pointer; border: 0; font-family: inherit; border-radius: var(--cn-radius-sm);
+  padding: 9px 2px; font-size: 13.5px; font-weight: 750; font-variant-numeric: tabular-nums;
+  background: var(--cn-surf-2); color: var(--cn-mute);
+  display: grid; gap: 1px; justify-items: center; min-width: 0;
+}
+.cn-sch-cell small {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .7;
+}
+.cn-sch-cell b { font-size: 16px; font-weight: 850; }
+.cn-sch-quick .cn-sch-cell { padding: 8px 13px; font-size: 12.5px; }
+.cn-sch-cell:hover { color: var(--cn-white); }
+.cn-sch-cell:focus-visible, .cn-sch-nav:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 2px; }
+.cn-sch-cell[aria-pressed="true"] { background: var(--cn-white); color: var(--cn-void); }
+.cn-sch-cell:disabled { opacity: .28; cursor: not-allowed; }
+.cn-sch-cell:disabled:hover { color: var(--cn-mute); }
+
+.cn-sch-when {
+  margin-top: 20px; padding: 13px 16px; border-radius: var(--cn-radius-sm);
+  background: var(--cn-deep); display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.cn-sch-when b { font-size: 17px; font-weight: 850; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.cn-sch-when span { font-size: 13px; color: var(--cn-mute); font-weight: 600; }
+.cn-sch-when.is-bad span { color: var(--cn-hot); }
+.cn-sch-foot { margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px; }
+
+.cn-sch-toast {
+  position: fixed; left: 50%; bottom: 26px; z-index: 80; transform: translateX(-50%);
+  max-width: calc(100vw - 28px); display: flex; align-items: center; gap: 14px;
+  padding: 13px 18px; border-radius: var(--cn-radius); background: var(--cn-surf-2);
+  box-shadow: 0 12px 40px rgba(0,0,0,.5), inset 0 0 0 1px var(--cn-edge);
+  font-size: 13.5px; font-weight: 650; animation: cn-rise .25s ease-out both;
+}
+.cn-sch-toast.is-bad { box-shadow: 0 12px 40px rgba(0,0,0,.5), inset 0 0 0 1px var(--cn-hot); }
+.cn-sch-toast a { color: var(--cn-gold); font-weight: 800; text-decoration: none; white-space: nowrap; }
+
+.cn-sch-line .cn-r b { color: var(--cn-white); font-weight: 750; }
+.cn-sch-line .cn-r small { display: block; font-size: 12px; color: var(--cn-faint); margin-top: 2px; }
+.cn-sch-line .cn-st { margin-right: 8px; }
+.cn-sch-line .cn-cta { padding: 8px 14px; font-size: 13px; }
+.cn-sch-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.cn-sch-note { color: var(--cn-amber) !important; }
+
+@media (max-width: 420px) {
+  .cn-sch { padding: 18px; }
+  .cn-sch-hours { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
