@@ -163,6 +163,15 @@ def process_season_selection(
         )
 
 
+def _episode_number(ep_obj: Any, position: int) -> int:
+    """Real episode number of an entry (what the site calls it), or its 1-based list position if it has none."""
+    number = ep_obj.get("number") if isinstance(ep_obj, dict) else getattr(ep_obj, "number", None)
+    try:
+        return int(str(number).strip())
+    except (TypeError, ValueError):
+        return position
+
+
 def process_episode_download(
     index_season_selected: int,
     scrape_serie: Any,
@@ -202,17 +211,18 @@ def process_episode_download(
                 break
 
             # Update context tracker for the current episode
-            context_tracker.season = index_season_selected
-            context_tracker.episode = i_episode
             ep_obj = episodes[i_episode - 1]
+            ep_number = _episode_number(ep_obj, i_episode)
+            context_tracker.season = index_season_selected
+            context_tracker.episode = ep_number
             context_tracker.episode_name = (ep_obj.get("name") if isinstance(ep_obj, dict) else getattr(ep_obj, "name", None))
             context_tracker.poster_url = tmdb_artwork.resolve_episode_artwork_url(
-                context_tracker.series_tmdb_id, index_season_selected, i_episode
+                context_tracker.series_tmdb_id, index_season_selected, ep_number
             )
 
             # Trigger the download callback for the current episode
             try:
-                result = download_video_callback(episodes[i_episode - 1], index_season_selected, i_episode)
+                result = download_video_callback(ep_obj, index_season_selected, ep_number)
             except Exception as e:
                 logger.exception("Error downloading episode %s of season %s", i_episode, index_season_selected)
                 console.print(f"[red]Error downloading episode {i_episode} of season {index_season_selected}: {e}")
@@ -298,17 +308,18 @@ def process_episode_download(
                 break
 
             # Update context tracker for the current episode
-            context_tracker.season = index_season_selected
-            context_tracker.episode = i_episode
             ep_obj = episodes[i_episode - 1]
+            ep_number = _episode_number(ep_obj, i_episode)
+            context_tracker.season = index_season_selected
+            context_tracker.episode = ep_number
             context_tracker.episode_name = (ep_obj.get("name") if isinstance(ep_obj, dict) else getattr(ep_obj, "name", None))
             context_tracker.poster_url = tmdb_artwork.resolve_episode_artwork_url(
-                context_tracker.series_tmdb_id, index_season_selected, i_episode
+                context_tracker.series_tmdb_id, index_season_selected, ep_number
             )
 
             # Trigger the download callback for the current episode
             try:
-                result = download_video_callback(episodes[i_episode - 1], index_season_selected, i_episode)
+                result = download_video_callback(ep_obj, index_season_selected, ep_number)
             except Exception as e:
                 logger.exception("Error downloading episode %s of season %s", i_episode, index_season_selected)
                 console.print(f"[red]Error downloading episode {i_episode} of season {index_season_selected}: {e}")

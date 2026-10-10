@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "searchapp.apps.SearchappConfig",
+    "scheduleapp.apps.ScheduleappConfig",
 ]
 
 MIDDLEWARE = [

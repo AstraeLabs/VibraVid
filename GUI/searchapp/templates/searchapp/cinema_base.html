@@ -164,6 +164,14 @@
         <script src="{% static 'searchapp/watchlist_picker.js' %}"
                 data-watchlist-url="{% url 'add_to_watchlist' %}"
                 data-metadata-url="{% url 'series_metadata' %}"></script>
+        <script src="{% static 'scheduleapp/schedule.js' %}"
+                data-css="{% static 'scheduleapp/schedule.css' %}"
+                data-csrf="{{ csrf_token }}"
+                data-download-url="{% url 'start_download' %}"
+                data-queue-url="{% url 'download_dashboard' %}"
+                data-add-url="{% url 'schedule_add' %}"
+                data-list-url="{% url 'schedule_list' %}"
+                data-update-url="{% url 'schedule_update' %}"></script>
 		{% block scripts %}{% endblock %}
 	</body>
 </html>
