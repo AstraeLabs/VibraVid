@@ -4,6 +4,7 @@ import logging
 import os
 
 from VibraVid.core.downloader import Generic_Downloader, HLS_Downloader, MP4_Downloader
+from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
 from VibraVid.services._base import (
     Entries,
     movie_folder,
@@ -22,6 +23,16 @@ logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 
+def _wanted_audio_langs() -> set[str] | None:
+    """Languages named by select_audio (slot digits stripped), or None when it doesn't restrict by language."""
+    raw = config_manager.config.get("DOWNLOAD", "select_audio")
+    slots = split_audio_slots(raw)
+    spec = FilterSpec.parse("|".join(slots.values()) if slots else raw, "audio")
+    if spec.drop or spec.select_all or not spec.langs:
+        return None
+    return {t.strip().lower() for t in spec.langs.split("|") if t.strip()}
+
+
 def _start_download(stream_url: str, stream_headers: dict, stream_type: str, extra_tracks: list, output_path: str):
     """Start the download process based on the stream type and extra tracks."""
     if not extra_tracks:
@@ -30,7 +41,12 @@ def _start_download(stream_url: str, stream_headers: dict, stream_type: str, ext
         return HLS_Downloader(m3u8_url=stream_url, headers=stream_headers or None, output_path=output_path).start()
 
     sources = [{"url": stream_url, "type": "video", "headers": stream_headers}]
-    for track in extra_tracks:
+    wanted = _wanted_audio_langs()
+    if stream_type == "hls" and (wanted is None or "und" in wanted):
+        sources.append({"url": stream_url, "type": "audio", "language": "und", "name": "Original", "headers": stream_headers})
+
+    extras = [t for t in extra_tracks if wanted is None or (t.get("language") or "").lower() in wanted]
+    for track in extras or ([] if len(sources) > 1 else extra_tracks):
         sources.append(
             {
                 "url": track["url"],
