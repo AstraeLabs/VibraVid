@@ -101,3 +101,20 @@ def test_subprocess_logs_are_redacted_without_mutating_callback_urls(monkeypatch
     assert "https://cdn.example.test" in caplog.text
     for sensitive in ("password", "signed-path", "secret-query", "secret-fragment", "secret-header-value"):
         assert sensitive not in caplog.text
+
+
+def test_non_json_line_without_url_is_kept_for_debugging():
+    line = "thread 'main' panicked at src/runner.rs:42: index out of bounds"
+    assert bridge._describe_non_json_line(line + "\n") == line
+
+
+def test_non_json_line_with_url_is_not_logged():
+    described = bridge._describe_non_json_line("failed: https://cdn.example.test/private?token=secret\n")
+    assert "secret" not in described
+    assert "cdn.example.test" not in described
+    assert "line length" in described
+
+
+def test_long_non_json_line_is_truncated():
+    assert len(bridge._describe_non_json_line("x" * 5000)) == bridge._MAX_RAW_LOG_CHARS
+

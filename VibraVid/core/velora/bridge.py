@@ -31,6 +31,7 @@ _PROGRESS_CB_LOCK = threading.Lock()
 DEFAULT_WAIT_TIMEOUT_SECONDS = 900.0
 MAX_SPEED_MIN_VERSION = (2, 2, 0)
 _LOG_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_MAX_RAW_LOG_CHARS = 500
 
 
 def _safe_event_cb(event_cb: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
@@ -153,6 +154,14 @@ def _redact_url_for_log(url: str) -> str:
 def _redact_urls_in_text(value: object) -> str:
     """Remove sensitive URL components from arbitrary downloader diagnostics."""
     return _LOG_URL_RE.sub(lambda match: _redact_url_for_log(match.group()), str(value))
+
+
+def _describe_non_json_line(line: str) -> str:
+    """Describe a non-JSON Velora line for the log: the text itself unless it may carry a URL."""
+    text = line.strip()
+    if _LOG_URL_RE.search(text):
+        return f"line length: {len(line)}"
+    return text[:_MAX_RAW_LOG_CHARS]
 
 
 def _format_bridge_event(event: dict[str, Any]) -> str:
@@ -383,7 +392,7 @@ def run_download_plan(
             try:
                 event: dict[str, Any] = json.loads(line)
             except json.JSONDecodeError:
-                logger.info("Failed to decode Velora output as JSON (line length: %d)", len(line))
+                logger.info("Failed to decode Velora output as JSON (%s)", _describe_non_json_line(line))
                 continue
 
             # Enrich event with url/headers from the plan when missing.
