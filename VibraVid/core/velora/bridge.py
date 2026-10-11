@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import queue
+import re
 import subprocess
 import tempfile
 import threading
@@ -12,6 +13,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from VibraVid.core.velora.util.formatting import (
     SpeedWindow,
@@ -28,6 +30,8 @@ _EVENT_CB_LOCK = threading.Lock()
 _PROGRESS_CB_LOCK = threading.Lock()
 DEFAULT_WAIT_TIMEOUT_SECONDS = 900.0
 MAX_SPEED_MIN_VERSION = (2, 2, 0)
+_LOG_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_MAX_RAW_LOG_CHARS = 500
 
 
 def _safe_event_cb(event_cb: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
@@ -132,12 +136,41 @@ def _format_header_keys(headers: dict[str, Any] | None) -> str:
     return ",".join(sorted(display_keys))
 
 
+
+def _redact_url_for_log(url: str) -> str:
+    """Log only a URL's scheme and host. Tokens may live in its path, query, fragment, or userinfo."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return "[redacted URL]"
+        host = parsed.hostname
+        if ":" in host:
+            host = f"[{host}]"
+        return f"{parsed.scheme.lower()}://{host}"
+    except (TypeError, ValueError):
+        return "[redacted URL]"
+
+
+def _redact_urls_in_text(value: object) -> str:
+    """Remove sensitive URL components from arbitrary downloader diagnostics."""
+    return _LOG_URL_RE.sub(lambda match: _redact_url_for_log(match.group()), str(value))
+
+
+def _describe_non_json_line(line: str) -> str:
+    """Describe a non-JSON Velora line for the log: the text itself unless it may carry a URL."""
+    text = line.strip()
+    if _LOG_URL_RE.search(text):
+        return f"line length: {len(line)}"
+    return text[:_MAX_RAW_LOG_CHARS]
+
+
 def _format_bridge_event(event: dict[str, Any]) -> str:
     """Format a Velora event dict into a human-readable string for logging."""
     event_name = (event.get("event") or "").lower()
-    label = event.get("display_label") or event.get("label") or event.get("task_key") or "download"
-    url = event.get("url") or ""
-    path = event.get("path") or ""
+    label = _redact_urls_in_text(event.get("display_label") or event.get("label") or event.get("task_key") or "download")
+    raw_url = event.get("url") or ""
+    url = _redact_url_for_log(str(raw_url)) if raw_url else ""
+    path = _redact_urls_in_text(event.get("path") or "")
     headers = _format_header_keys(event.get("headers") if isinstance(event.get("headers"), dict) else None)
     elapsed_seconds = event.get("elapsed_seconds")
 
@@ -175,7 +208,7 @@ def _format_bridge_event(event: dict[str, Any]) -> str:
         parts.extend(
             [
                 f"RETRY={event.get('attempt', '?')}/{event.get('retry_count', '?')}",
-                f"ERROR: {event.get('message', event.get('error', ''))}",
+                f"ERROR: {_redact_urls_in_text(event.get('message', event.get('error', '')))}",
                 f"in={float(elapsed_seconds):.1f}s" if isinstance(elapsed_seconds, (int, float)) else None,
             ]
         )
@@ -188,7 +221,7 @@ def _format_bridge_event(event: dict[str, Any]) -> str:
 
         parts.extend(
             [
-                f"ERROR: {event.get('message', '')}",
+                f"ERROR: {_redact_urls_in_text(event.get('message', ''))}",
                 f"RETRY={event.get('attempt', '?')}/{event.get('retry_count', '?')}"
                 if event.get("attempt") is not None
                 else None,
@@ -198,9 +231,10 @@ def _format_bridge_event(event: dict[str, Any]) -> str:
         return f"ERROR {label} | " + " | ".join(p for p in parts if p)
 
     if event_name == "cancelled":
-        return f"CANCELLED {label} | {event.get('message', 'Cancellation requested')}"
+        return f"CANCELLED {label} | {_redact_urls_in_text(event.get('message', 'Cancellation requested'))}"
 
-    return f"{event_name.upper() or 'EVENT'} {label} | {event}"
+    # Do not dump unexpected events: they may contain credentials or complete request headers.
+    return f"{event_name.upper() or 'EVENT'} {label}"
 
 
 
@@ -358,7 +392,7 @@ def run_download_plan(
             try:
                 event: dict[str, Any] = json.loads(line)
             except json.JSONDecodeError:
-                logger.info(f"Failed to decode JSON from Velora: {line}")
+                logger.info("Failed to decode Velora output as JSON (%s)", _describe_non_json_line(line))
                 continue
 
             # Enrich event with url/headers from the plan when missing.
