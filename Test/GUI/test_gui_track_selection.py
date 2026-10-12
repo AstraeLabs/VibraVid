@@ -151,3 +151,18 @@ def test_download_worker_sets_and_clears_filters(monkeypatch):
     assert context_tracker.track_filters == {}
     assert context_tracker.skip_no_match is False
     assert context_tracker.video_quality is None
+
+
+def test_equivalent_command_reports_gui_track_selections(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        _shared.equivalent_command_builder, "log_equivalent_command_from_params",
+        lambda **kwargs: captured.append(kwargs),
+    )
+    _shared._log_gui_equivalent_command(
+        "streamingcommunity", {"name": "Example"},
+        options={"video": "2160", "audio": "ita", "subtitle": "false", "skip_no_match": True},
+    )
+    assert captured[0]["options"] == {
+        "video": "2160", "audio": "ita", "subtitle": "false", "skip_no_match": True,
+    }

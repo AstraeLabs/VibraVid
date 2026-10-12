@@ -217,10 +217,10 @@ def _run_global_search(query: str, sites: list[str]):
     return results, failed
 
 
-def _log_gui_equivalent_command(site: str, item_payload: dict[str, Any], season: str = None, episodes: str = None) -> None:
+def _log_gui_equivalent_command(site: str, item_payload: dict[str, Any], season: str = None, episodes: str = None, options: dict | None = None) -> None:
     """Log the CLI command equivalent to a GUI download."""
     try:
-        equivalent_command_builder.log_equivalent_command_from_params(site=site, search=item_payload.get("name"), season=season, episode=episodes)
+        equivalent_command_builder.log_equivalent_command_from_params(site=site, search=item_payload.get("name"), season=season, episode=episodes, options=options)
     except Exception:
         pass
 
@@ -338,7 +338,11 @@ def _run_download_in_thread(
             if output_path:
                 context_tracker.output_path = output_path
 
-            _log_gui_equivalent_command(site, item_payload, season, episodes)
+            _log_gui_equivalent_command(
+                site, item_payload, season, episodes,
+                options={"video": video_filter or quality, "audio": audio_filter,
+                         "subtitle": subtitle_filter, "skip_no_match": bool(skip_no_match)},
+            )
             logger.debug("[_task] Calling api.start_download with: season=%s, episodes=%s, output_path=%s, audio_format=%s", season, episodes, output_path, audio_format,)
             if audio_format and _accepts_audio_format(api.start_download):
                 provider_result = api.start_download(
