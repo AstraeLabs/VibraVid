@@ -29,9 +29,10 @@ from VibraVid.setup.system import (
     get_ffmpeg_path,
     get_ffprobe_path,
 )
-from VibraVid.utils import config_manager, disk_cache, get_log_file_path, setup_logger, start_message
+from VibraVid.utils import _startup_prefetch, config_manager, disk_cache, get_log_file_path, setup_logger, start_message
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
+from VibraVid.utils.upload.update import check_for_updates, update_command
 from VibraVid.utils.upload.version import __title__, __version__
 
 console = Console()
@@ -214,6 +215,8 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("--no-log", action="store_true", help="Disable log file for this run")
     util_group.add_argument("--no-manifest-info", action="store_true", help="Don't print the parsed manifest/streams table")
     util_group.add_argument("-UP", "--update", action="store_true", help="Auto-update to latest version (binary only)")
+    util_group.add_argument("--skip-update-check", action="store_true", help="Skip the automatic interactive CLI update check")
+    util_group.add_argument("--check-update", action="store_true", help="Check GitHub Releases for a newer version and exit (no download)")
     util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
     util_group.add_argument("--amazon-music-login", dest="amazon_music_login", action="store_true", help="Log in to Amazon Music via direct API device registration (no proxy/CA needed).")
@@ -407,6 +410,20 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
     return True
 
 
+def _show_update_notice(info: dict) -> None:
+    if not info["available"]:
+        return
+    
+    tag = info["latest"]
+    tag_url = tag if str(tag).startswith("v") else f"v{tag}"
+    link = f"[link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{tag}[/link]"
+    if info["mode"] == "installer":
+        hint = "Run with [#FFD60A]-UP [#00BCD4]to auto-update"
+    else:
+        hint = f"Update with: [#FFD60A]{update_command(info['mode'])}"
+    console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A]{link} [dim]·[/] [#00BCD4]{hint}\n")
+
+
 def get_user_site_selection(args, choice_labels):
     """Get site selection from user (interactive or category-based)."""
     counts: dict[str, int] = {}
@@ -562,6 +579,19 @@ def main():
         setup_logger(no_log=getattr(args, "no_log", False))
         context_tracker.hide_manifest_info = getattr(args, "no_manifest_info", False)
 
+        if args.check_update:
+            info = check_for_updates(force=True)
+            if info["error"]:
+                console.print(f"[yellow]Update check unavailable: {info['error']}[/]")
+            elif not info["available"]:
+                console.print(f"[green]VibraVid is up to date ({info['current']}).[/]")
+            else:
+                _show_update_notice(info)
+            return
+
+        if not args.skip_update_check and sys.stdin.isatty() and sys.stdout.isatty() and not getattr(args, "tui", False):
+            _startup_prefetch.start_update_check()
+
         if getattr(args, "tui", False):
             from VibraVid.tui.app import main as tui_main
 
@@ -696,6 +726,10 @@ def main():
         if handle_direct_site_selection(args, input_to_function, module_name_to_function, args.search, selections):
             equivalent_command_builder.log_equivalent_command(args, parser, context_tracker, site_option_dests)
             return
+
+        update_info = _startup_prefetch.collect("update", timeout=1)
+        if update_info is not None:
+            _show_update_notice(update_info)
 
         if not close_console_flag:
             while True:

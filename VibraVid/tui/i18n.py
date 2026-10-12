@@ -168,6 +168,7 @@ CATALOGS = {
         "system_app_info": "Info Sistema e Applicazione",
         "refresh_log_list": "Ricarica Lista Log",
         "check_for_updates": "Controlla Aggiornamenti",
+        "download_update": "Scarica aggiornamento",
         # Help Screen
         "keyboard_help_guide": "Guida e Scorciatoie da Tastiera",
         "global_navigation": "Navigazione Globale",
@@ -404,6 +405,7 @@ CATALOGS = {
         "system_app_info": "System & Application Info",
         "refresh_log_list": "Refresh Log List",
         "check_for_updates": "Check for Updates",
+        "download_update": "Download update",
         # Help Screen
         "keyboard_help_guide": "Keyboard Help & Guide",
         "global_navigation": "Global Navigation",

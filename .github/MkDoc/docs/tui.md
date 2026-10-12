@@ -16,9 +16,6 @@ python tui.py
 
 # Or via uv package manager
 uv run python tui.py
-
-# Or if installed via pip/termux
-vibravid --tui
 ```
 
 ## Key Capabilities & Features
@@ -28,7 +25,7 @@ vibravid --tui
 - **Automatic i18n Localization (IT / EN)** — Automatic OS system language detection (Italian and English) with full bilingual support across all UI screens, data tables, modals, action bars, and keyboard guides.
 - **Interactive Queue & Batch Manager** — Add, remove, reorder, and retry batch download jobs with custom CLI arguments and tags.
 - **Live Stream & Download Progress Tracking** — Real-time progress indicators, speed, segment counts, track/stream details, and completed file actions (Open Folder / Launch File).
-- **System & DRM Inspector** — Diagnostics tab inspecting external binary dependencies (`ffmpeg`, `flux`, `mkvmerge`, etc.), Widevine DRM CDM device status, an application log viewer, and an Updates tab (app version/info + check-for-update).
+- **System & DRM Inspector** — Diagnostics tab inspecting external binary dependencies (`ffmpeg`, `flux`, `mkvmerge`, etc.), Widevine DRM CDM device status, an application log viewer, and an Updates tab (app version/info, release check cached for 24 hours, and a **Download update** button for binary builds that downloads the matching executable with SHA-256 verification without replacing the running one).
 - **Full Keyboard & Mouse Navigation** — Directional arrow key navigation, contextual shortcuts (`a` select all, `u` clear, `Space` toggle, `ESC` back, `?` help), and mouse click support.
 
 ## TUI Screen Map

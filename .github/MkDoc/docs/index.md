@@ -28,7 +28,7 @@ pip install -r requirements.txt --upgrade  # sync deps
 ```bash
 uv sync              # install
 uv run manual.py     # run
-uv sync --upgrade    # sync deps
+uv sync --upgrade  # sync deps
 ```
 
 ### Option 2 — Unraid
@@ -72,10 +72,19 @@ python manual.py
 
 ## Update
 
+When an interactive CLI session starts, VibraVid checks GitHub Releases in the background (cached for 24 hours) and prints the command that matches your installation if a newer release exists. Use `VibraVid --check-update` to check on demand or `--skip-update-check` to disable the startup check.
+
 ### Binary (Windows / macOS / Linux)
 
 ```bash
 VibraVid -UP
+```
+
+### Docker
+
+```bash
+docker compose pull
+docker compose up -d
 ```
 
 ### Manual clone
