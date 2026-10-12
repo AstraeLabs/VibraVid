@@ -1,9 +1,8 @@
 # 11.10.26
 # LA7 Cinema downloader - PlayReady DRM
 
-import os
-import re
 import base64
+import os
 import xml.etree.ElementTree as ET
 
 from curl_cffi.requests.exceptions import HTTPError

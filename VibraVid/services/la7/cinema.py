@@ -3,7 +3,6 @@
 
 import json
 import re
-import base64
 from urllib.parse import urljoin
 
 from curl_cffi.requests.exceptions import HTTPError

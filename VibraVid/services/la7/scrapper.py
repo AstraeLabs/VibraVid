@@ -5,9 +5,10 @@ import re
 import threading
 from urllib.parse import urljoin
 
+from rich.console import Console
+
 from VibraVid.services._base.object import Episode, Season, SeasonManager
 from VibraVid.utils.http_client import create_client, get_userAgent
-from rich.console import Console
 
 console = Console()
 

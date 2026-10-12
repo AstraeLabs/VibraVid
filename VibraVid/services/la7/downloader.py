@@ -1,9 +1,9 @@
 # 22.08.26
 # By @sync-luca98
 
+import base64
 import logging
 import os
-import base64
 import xml.etree.ElementTree as ET
 
 from curl_cffi.requests.exceptions import HTTPError
