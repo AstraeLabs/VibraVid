@@ -19,6 +19,7 @@ _PROVIDER_LABELS = {
     "libgen": "Library Genesis",
     "mediasetinfinity": "Mediaset Infinity",
     "mostraguarda": "MostraGuarda",
+    "nowtvit": "NOW",
     "primevideo": "Prime Video",
     "raiplay": "RaiPlay",
     "realtime": "Real Time",

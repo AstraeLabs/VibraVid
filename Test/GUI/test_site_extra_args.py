@@ -83,3 +83,76 @@ def test_resolve_persisted_site_options_invalid_args_does_not_raise(fake_site, m
         lambda s, default=None: {"extra_args": '--quality "unterminated'} if s == fake_site else (default or {}),
     )
     assert _shared._resolve_persisted_site_options(fake_site) == {}
+
+
+def _fake_login_site(monkeypatch, spec, stored):
+    lazy = SimpleNamespace(get_module=lambda: SimpleNamespace(LOGIN=spec))
+    monkeypatch.setattr(site_extra_args, "load_search_functions", lambda: {"mysite_search": lazy})
+    monkeypatch.setattr(site_extra_args.config_manager.login, "get", lambda section, key, *a, **k: stored.get((section, key)))
+
+
+def test_login_status_reports_missing_keys_without_values(monkeypatch):
+    spec = {"section": "sec", "need": "required", "keys": ["a", "b"], "optional_keys": ["c"]}
+    _fake_login_site(monkeypatch, spec, {("sec", "a"): "SECRET-A", ("sec", "b"): ""})
+
+    status = site_extra_args.get_site_login_status("mysite")
+
+    assert status["need"] == "required"
+    assert status["present"] is False
+    assert status["missing"] == ["b"]
+    assert "SECRET-A" not in repr(status)
+
+
+def test_login_status_any_of_needs_only_one(monkeypatch):
+    spec = {"need": "required", "any_of": ["token", "access_token"]}
+    _fake_login_site(monkeypatch, spec, {("mysite", "access_token"): "x"})
+    assert site_extra_args.get_site_login_status("mysite")["present"] is True
+
+    _fake_login_site(monkeypatch, spec, {})
+    status = site_extra_args.get_site_login_status("mysite")
+    assert status["present"] is False
+    assert status["missing"] == ["token or access_token"]
+
+
+def test_login_status_none_when_site_declares_nothing(monkeypatch):
+    lazy = SimpleNamespace(get_module=lambda: SimpleNamespace())
+    monkeypatch.setattr(site_extra_args, "load_search_functions", lambda: {"mysite_search": lazy})
+    assert site_extra_args.get_site_login_status("mysite") is None
+
+
+def _fake_login_section(monkeypatch, sections):
+    lazy = SimpleNamespace(get_module=lambda: SimpleNamespace())
+    monkeypatch.setattr(site_extra_args, "load_search_functions", lambda: {"mysite_search": lazy})
+    login = site_extra_args.config_manager.login
+    monkeypatch.setattr(login, "has_section", lambda section: section in sections)
+    monkeypatch.setattr(login, "get_section", lambda section, default=None: dict(sections.get(section) or {}))
+
+
+def test_login_status_from_section_empty_values_mean_not_set(monkeypatch):
+    _fake_login_section(monkeypatch, {"mysite": {"email": "", "password": ""}})
+    status = site_extra_args.get_site_login_status("mysite")
+    assert status["present"] is False
+    assert status["missing"] == ["email", "password"]
+
+
+def test_login_status_from_section_any_filled_value_counts(monkeypatch):
+    _fake_login_section(monkeypatch, {"mysite": {"token": "SECRET", "refresh_token": ""}})
+    status = site_extra_args.get_site_login_status("mysite")
+    assert status["present"] is True
+    assert "SECRET" not in repr(status)
+
+
+def test_login_status_from_section_ignores_non_credential_keys(monkeypatch):
+    _fake_login_section(monkeypatch, {"mysite": {"cdm": "device.wvd", "extra_args": "--quality UHD", "token": ""}})
+    assert site_extra_args.get_site_login_status("mysite")["present"] is False
+
+
+def test_login_status_from_section_empty_section_has_login_but_no_keys(monkeypatch):
+    _fake_login_section(monkeypatch, {"mysite": {}})
+    status = site_extra_args.get_site_login_status("mysite")
+    assert status is not None and status["present"] is False
+
+
+def test_login_status_site_without_section_has_no_login(monkeypatch):
+    _fake_login_section(monkeypatch, {"other": {"token": "x"}})
+    assert site_extra_args.get_site_login_status("mysite") is None

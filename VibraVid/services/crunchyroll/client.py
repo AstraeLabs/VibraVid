@@ -7,7 +7,7 @@ import time
 
 from rich.console import Console
 
-from VibraVid.services._base.login_status import ACCOUNT, ANONYMOUS, print_login
+from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_my_location, get_userAgent
 
@@ -93,6 +93,8 @@ class CrunchyrollClient:
 
         # Load cached tokens
         cache_data = self._load_token_cache()
+        if self.access_token and disk_cache.is_fresh({"expiry": self.expires_at}, buffer_seconds=30):
+            Login.refresh_cached(self.token_cache_path)
         if not self.user_agent:
             cached_ua = cache_data.get("user_agent") if isinstance(cache_data, dict) else None
             self.user_agent = cached_ua if isinstance(cached_ua, str) and cached_ua.strip() else get_userAgent()
@@ -247,7 +249,7 @@ class CrunchyrollClient:
         self._set_expires_at(expires_in=expires_in)
         self._save_token_cache()
 
-        print_login(ACCOUNT if self.etp_rt else ANONYMOUS)
+        Login.show(Login.ACCOUNT if self.etp_rt else Login.ANONYMOUS)
         return True
 
     def _refresh(self) -> None:
@@ -255,6 +257,15 @@ class CrunchyrollClient:
         if not self.refresh_token:
             raise RuntimeError("refresh_token missing")
 
+        Login.refresh_try()
+        try:
+            self._refresh_request()
+        except Exception as e:
+            Login.refresh_failed(str(e) or e.__class__.__name__)
+            raise
+        Login.refresh_ok()
+
+    def _refresh_request(self) -> None:
         headers = self._get_headers()
         headers["authorization"] = f"Basic {PUBLIC_TOKEN}"
         headers["content-type"] = "application/x-www-form-urlencoded"

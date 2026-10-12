@@ -86,7 +86,8 @@ class TVShowManager:
             if entry:
                 row_data = []
                 for col_name in self.column_info.keys():
-                    value = str(entry.get(col_name, ""))
+                    raw = entry.get(col_name, "")
+                    value = "-" if raw is None or str(raw).strip() in ("", "None") else str(raw)
                     max_len = self.column_info[col_name].get("max_length", None)
                     if max_len and len(value) > max_len:
                         value = value[: max_len - 3] + "..."

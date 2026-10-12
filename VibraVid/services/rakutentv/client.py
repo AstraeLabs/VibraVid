@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import uuid
 
-from VibraVid.services._base.login_status import ACCOUNT, print_login
+from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
 
@@ -73,8 +73,8 @@ def classification_id(market: str | None = None) -> str:
     if market in _classification_cache:
         return _classification_cache[market]
 
-    cached = disk_cache.load("rakutentv", f"classification_{market}")
-    if cached and cached.get("id") and disk_cache.is_fresh(cached):
+    cached = disk_cache.load_fresh("rakutentv", f"classification_{market}")
+    if cached and cached.get("id"):
         _classification_cache[market] = str(cached["id"])
         return _classification_cache[market]
 
@@ -90,7 +90,7 @@ def classification_id(market: str | None = None) -> str:
         raise RuntimeError(f"Could not read the Rakuten TV classification for country '{market}': {e}") from e
 
     _classification_cache[market] = value
-    disk_cache.save("rakutentv", f"classification_{market}", {"id": value, "expiry": time.time() + _CLASSIFICATION_TTL})
+    disk_cache.save("rakutentv", f"classification_{market}", {"id": value}, ttl=_CLASSIFICATION_TTL)
     return value
 
 
@@ -385,8 +385,9 @@ def login(force: bool = False, market: str | None = None) -> dict:
     market = resolve_market(market)
     cache_name = "session" if market == DEFAULT_MARKET else f"session_{market}"
     if not force:
-        cached = disk_cache.load("rakutentv", cache_name)
-        if cached and cached.get("access_token") and disk_cache.is_fresh(cached, buffer_seconds=60):
+        cached = disk_cache.load_fresh("rakutentv", cache_name, buffer_seconds=60)
+        if cached and cached.get("access_token"):
+            Login.refresh_cached(disk_cache.cache_path("rakutentv", cache_name))
             return cached
 
     email, password = _credentials()
@@ -422,16 +423,15 @@ def login(force: bool = False, market: str | None = None) -> dict:
 
     user = data["data"]["user"]
     market_info = data["data"].get("market") or {}
-    print_login(ACCOUNT, user=user.get("email") or email)
+    Login.show(Login.ACCOUNT, user=user.get("email") or email)
     session = {
         "access_token": user["access_token"],
         "session_uuid": user["session_uuid"],
         "classification_id": str(user.get("profile", {}).get("classification", {}).get("id") or classification_id(market)),
         "locale": market_info.get("locale") or locale_for(market),
         "market_code": market_info.get("code") or market,
-        "expiry": time.time() + 12 * 3600,
     }
-    disk_cache.save("rakutentv", cache_name, session)
+    disk_cache.save("rakutentv", cache_name, session, ttl=12 * 3600)
     return session
 
 

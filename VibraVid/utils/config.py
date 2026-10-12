@@ -184,6 +184,10 @@ class ConfigAccessor:
         """Return the entire section as a dict (e.g. all cookies/keys for a service's login block), uncached and un-typed."""
         return dict(self._config_dict.get(section) or (default or {}))
 
+    def has_section(self, section: str) -> bool:
+        """True if the section exists, even when empty (get_section cannot tell an empty section from a missing one)."""
+        return isinstance(self._config_dict.get(section), dict)
+
     def set_key(self, section: str, key: str, value: Any) -> None:
         """
         Set a key in the configuration and update cache.

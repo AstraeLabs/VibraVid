@@ -17,6 +17,9 @@ from .system import (
     get_velora_path,
     get_wvd_path,
     get_yt_dlp_path,
+    read_device_prd,
+    read_device_wvd,
+    resolve_service_cdm_info,
 )
 
 __all__ = [
@@ -35,6 +38,9 @@ __all__ = [
     "get_prd_path",
     "get_info_prd",
     "get_info_wvd",
+    "read_device_wvd",
+    "read_device_prd",
+    "resolve_service_cdm_info",
     "resolve_service_cdm_paths",
     "resolve_service_cdm",
     "ServiceCdm",

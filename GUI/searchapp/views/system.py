@@ -57,7 +57,7 @@ def registry_status(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 def site_cli_options_schema(request: HttpRequest) -> JsonResponse:
     """Describe the custom CLI options a given site's register_cli_args() exposes."""
-    from ._shared import get_site_extra_args_schema
+    from ._shared import get_site_extra_args_schema, get_site_login_status
 
     site = (request.GET.get("site") or "").strip()
     if not site:
@@ -65,11 +65,12 @@ def site_cli_options_schema(request: HttpRequest) -> JsonResponse:
 
     try:
         args = get_site_extra_args_schema(site)
+        login = get_site_login_status(site)
     except Exception as exc:
         logger.exception("Failed to load CLI options schema for site '%s'", site)
         return JsonResponse({"error": str(exc)}, status=500)
 
-    return JsonResponse({"args": args})
+    return JsonResponse({"args": args, "login": login})
 
 
 @require_http_methods(["POST"])
