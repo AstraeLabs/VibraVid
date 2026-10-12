@@ -794,3 +794,11 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
 .cn-manual-track-row { display:flex; align-items:center; gap:10px; font-size:13px; }
 .cn-manual-track-row input { flex:0 0 auto; }
 .cn-manual-track-note { font-size:12px; color:var(--cn-mute); }
+
+/* Selected manifest metadata for active downloads and completed history. */
+.cn-selected-tracks { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+.cn-track-spec { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; padding:4px 7px; border:1px solid var(--cn-edge);
+  border-radius:6px; background:var(--cn-surf); color:var(--cn-mute); font-size:11px; }
+.cn-track-spec b { color:var(--cn-white); font-weight:650; }
+.cn-facts .cn-selected-tracks { flex-basis:100%; }

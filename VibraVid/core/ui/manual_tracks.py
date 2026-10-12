@@ -37,6 +37,25 @@ def _describe(stream, index):
     }
 
 
+def selected_track_metadata(streams):
+    """JSON-safe metadata for selected manifest tracks, without media URLs or secrets."""
+    fields = (
+        "type", "resolution", "height", "codecs", "language", "channels",
+        "bitrate", "video_range", "forced", "sdh", "cc", "default",
+    )
+    output = []
+    for stream in streams:
+        if not getattr(stream, "selected", False):
+            continue
+        if getattr(stream, "type", "") not in {"video", "audio", "subtitle"}:
+            continue
+        info = _describe(stream, len(output))
+        output.append({key: info[key] for key in fields})
+        if len(output) == 48:
+            break
+    return output
+
+
 class _Pending:
     def __init__(self, download_id, streams):
         self.download_id = download_id

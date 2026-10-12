@@ -1570,6 +1570,12 @@ class Generic_Downloader(BaseDownloader):
             )
             md._prepare_labels()
 
+        if self.download_id:
+            download_tracker.update_selected_tracks(
+                self.download_id,
+                [stream for md, _ in self._active for stream in md.streams],
+            )
+
         def _safe_download(md, stream, bm) -> None:
             try:
                 md._download_stream(stream, bm)
@@ -1682,6 +1688,12 @@ class Generic_Downloader(BaseDownloader):
                 and all(getattr(s, "supports_live_decryption", False) for s in sel)
             )
             md._prepare_labels()
+
+        if self.download_id:
+            download_tracker.update_selected_tracks(
+                self.download_id,
+                [stream for md, _ in self._active for stream in md.streams],
+            )
 
         def _safe_download(md, stream, bm) -> None:
             label = getattr(stream, "_src_label", "") or stream.type

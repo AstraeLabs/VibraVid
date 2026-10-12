@@ -166,6 +166,7 @@
 					<span class="cn-cap">{{ result.display_title }}</span>
 					<span class="cn-sub">{{ result.source_alias|provider }}{% if is_global %} · {{ result.display_type }}{% endif %}</span>
 					{% if result.availability %}<span class="cn-avail">{{ result.availability }}</span>{% endif %}
+						{% if result.catalog_language %}<span class="cn-sub" title="Provider catalog language, not verified audio">Catalog: {{ result.catalog_language|upper }}</span>{% endif %}
 				</article>
 			{% endfor %}
 		</div>
