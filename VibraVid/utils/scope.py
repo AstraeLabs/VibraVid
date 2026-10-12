@@ -92,10 +92,10 @@ def scoped(overlay: dict, scope: str, cache: dict | None = None):
     """Temporarily set the per-thread overlay, scope, and cache for the duration of a ``with`` block."""
     previous = tuple(getattr(_state, name, None) for name in _FIELDS)
     values = (overlay, scope, set(), set(), cache if cache is not None else {}, {}, set())
-    for name, value in zip(_FIELDS, values):
+    for name, value in zip(_FIELDS, values, strict=True):
         setattr(_state, name, value)
     try:
         yield
     finally:
-        for name, value in zip(_FIELDS, previous):
+        for name, value in zip(_FIELDS, previous, strict=True):
             setattr(_state, name, value)

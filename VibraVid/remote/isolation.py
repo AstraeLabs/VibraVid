@@ -11,14 +11,14 @@ import tempfile
 import threading
 import types
 
+from .models import RemoteError
+
 logger = logging.getLogger(__name__)
 
 
 _INSTANCE_NAME = re.compile(r"^_[a-z0-9_]*(client|api)[a-z0-9_]*$")
 _REGISTRY_NAME = re.compile(r"^_[a-z0-9_]*(client|by_region|cache)[a-z0-9_]*$")
 EXPLICIT_ATTRIBUTE = "_identity_state"
-
-from .models import RemoteError
 
 _guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}

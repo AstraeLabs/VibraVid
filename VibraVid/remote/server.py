@@ -375,7 +375,7 @@ class LoginJob:
 
     def ask(self, cls, prompt, **kwargs):
         """``Prompt.ask`` for the service: the client is asked, and rich's own validation/conversion is applied to the answer."""
-        from rich.prompt import Confirm, FloatPrompt, InvalidResponse, IntPrompt
+        from rich.prompt import Confirm, FloatPrompt, IntPrompt, InvalidResponse
 
         has_default = kwargs.get("default", ...) is not ...
         spec = {
