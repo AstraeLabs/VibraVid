@@ -196,7 +196,7 @@ class BaseMediaDownloader:
 
         self.streams = [s for s in parser.parse_streams() if s.type != "image"]
 
-        if auto_select or context_tracker.video_quality:
+        if auto_select or context_tracker.video_quality or context_tracker.track_filters:
             self._apply_selection()
         else:
             selector = InteractiveStreamSelector(self.streams, window_size=15)
@@ -305,9 +305,10 @@ class BaseMediaDownloader:
     def _apply_selection(self) -> None:
         f = self.custom_filters or {}
         requested_quality = context_tracker.video_quality
-        v_cfg = "best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
-        s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+        overrides = context_tracker.track_filters
+        v_cfg = overrides.get("video") or ("best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video"))
+        a_cfg = overrides.get("audio") or f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        s_cfg = overrides.get("subtitle") or f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         def _pref(key: str, default: bool = False, section: str = "DOWNLOAD") -> bool:
             return bool(f.get(key, config_manager.config.get_bool(section, key, default=default)))
@@ -346,7 +347,7 @@ class BaseMediaDownloader:
         """Return the active selection filter for *track_type*, preferring custom_filters over config."""
         cf_key = "subtitle" if track_type == "subtitle" else "audio"
         cfg_key = "select_subtitle" if track_type == "subtitle" else "select_audio"
-        return (self.custom_filters or {}).get(cf_key) or config_manager.config.get("DOWNLOAD", cfg_key) or ""
+        return context_tracker.track_filters.get(cf_key) or (self.custom_filters or {}).get(cf_key) or config_manager.config.get("DOWNLOAD", cfg_key) or ""
 
     @staticmethod
     def _ext_filter_tokens(cfg: str, track_type: str) -> list[str]:

@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 from rich.console import Console
 
 from VibraVid.core.utils.language import resolve_iso639_1
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
@@ -30,7 +31,7 @@ def register_cli_args(parser) -> list:
 
 def _effective_languages() -> list[str]:
     """Derive which site catalog(s) to search/list from the global DOWNLOAD.select_audio filter"""
-    select_audio = config_manager.config.get("DOWNLOAD", "select_audio", default="")
+    select_audio = context_tracker.track_filters.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio", default="")
     if not select_audio:
         return ["it", "en"]
 

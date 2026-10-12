@@ -60,7 +60,25 @@ class SearchForm(forms.Form):
         self.fields["site"].choices = get_site_choices()
 
 
-class DownloadForm(forms.Form):
+class TrackSelectionForm(forms.Form):
+    """Per-download overrides using the same filter expressions as the CLI."""
+
+    video_filter = forms.RegexField(
+        regex=r"^[A-Za-z0-9][A-Za-z0-9_:=|.,+\- ]{0,159}$",
+        max_length=160, required=False,
+    )
+    audio_filter = forms.RegexField(
+        regex=r"^[A-Za-z0-9][A-Za-z0-9_:=|.,+\- ]{0,159}$",
+        max_length=160, required=False,
+    )
+    subtitle_filter = forms.RegexField(
+        regex=r"^[A-Za-z0-9][A-Za-z0-9_:=|.,+\- ]{0,159}$",
+        max_length=160, required=False,
+    )
+    skip_no_match = forms.BooleanField(required=False)
+
+
+class DownloadForm(TrackSelectionForm):
     source_alias = forms.CharField(widget=forms.HiddenInput)
     item_payload = forms.CharField(widget=forms.HiddenInput, required=False)
     season = forms.CharField(max_length=100, required=False, label="Stagione")

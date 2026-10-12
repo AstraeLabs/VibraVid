@@ -459,6 +459,15 @@ class ContextTracker:
         self.local.download_id = value
 
     @property
+    def track_filters(self) -> dict:
+        """CLI-compatible filters scoped to the current download worker."""
+        return getattr(self.local, "track_filters", None) or {}
+
+    @track_filters.setter
+    def track_filters(self, value):
+        self.local.track_filters = dict(value or {})
+
+    @property
     def video_quality(self):
         return getattr(self.local, "video_quality", None)
 

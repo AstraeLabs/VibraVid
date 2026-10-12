@@ -89,6 +89,10 @@ def start_download(request: HttpRequest) -> HttpResponse:
     season = form.cleaned_data.get("season") or None
     episode = form.cleaned_data.get("episode") or None
     audio_format = form.cleaned_data.get("audio_format") or None
+    video_filter = form.cleaned_data["video_filter"]
+    audio_filter = form.cleaned_data["audio_filter"]
+    subtitle_filter = form.cleaned_data["subtitle_filter"]
+    skip_no_match = form.cleaned_data["skip_no_match"]
 
     # Normalize
     if season:
@@ -122,7 +126,12 @@ def start_download(request: HttpRequest) -> HttpResponse:
     quality = form.cleaned_data.get("quality") or None
 
     # Run download
-    _run_download_in_thread(source_alias, item_payload, season, episode, media_type, audio_format=audio_format, quality=quality)
+    _run_download_in_thread(
+        source_alias, item_payload, season, episode, media_type,
+        audio_format=audio_format, quality=quality, video_filter=video_filter,
+        audio_filter=audio_filter, subtitle_filter=subtitle_filter,
+        skip_no_match=skip_no_match,
+    )
     return redirect("download_dashboard")
 
 @require_http_methods(["POST"])

@@ -1077,9 +1077,10 @@ class Generic_Downloader(BaseDownloader):
 
     def _select(self, parsed: list[tuple[MediaDownloader, dict[str, Any]]]) -> list:
         f = self.custom_filters
-        v = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
-        sub = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+        overrides = context_tracker.track_filters
+        v = overrides.get("video") or f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
+        a = overrides.get("audio") or f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        sub = overrides.get("subtitle") or f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         # Sources with an explicit role bypass attribute-based dedup/selection,
         # but _apply_explicit_roles still narrows each source by the same filters.

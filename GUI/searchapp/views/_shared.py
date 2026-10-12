@@ -39,6 +39,7 @@ from .._download_infra import (
     _submit_download_task,
 )
 from ..library_index import forget
+from ..forms import TrackSelectionForm
 from ..models import WatchlistItem
 
 logger = logging.getLogger(__name__)
@@ -229,10 +230,15 @@ def _run_download_in_thread(
     media_type: str = "Film", output_path: str = None, audio_format: str = None,
     poster: str = None, _submit: bool = True, _metadata: list | None = None,
     _batch_id: str | None = None, quality: str | None = None,
+    video_filter: str = "", audio_filter: str = "", subtitle_filter: str = "",
+    skip_no_match: bool = False,
 ) -> concurrent.futures.Future | Callable[[], bool]:
     """Register a job, then submit it or return its worker for a sequential batch."""
     from VibraVid.core.utils.quality import normalize_quality
     quality = normalize_quality(quality) or None
+    if video_filter:
+        # An explicit CLI video filter takes precedence over the simple quality picker.
+        quality = None
     if quality and not get_api(site).supports_quality_discovery:
         logger.warning("%s cannot honor a chosen quality; ignoring %s", site, quality)
         quality = None
@@ -299,6 +305,14 @@ def _run_download_in_thread(
 
             # Set context for downloaders in this thread
             context_tracker.video_quality = quality
+            context_tracker.track_filters = {
+                kind: spec for kind, spec in (
+                    ("video", video_filter),
+                    ("audio", audio_filter),
+                    ("subtitle", subtitle_filter),
+                ) if spec
+            }
+            context_tracker.skip_no_match = bool(skip_no_match)
             context_tracker.download_id = download_id
             context_tracker.site_name = site
             context_tracker.media_type = media_type
@@ -372,6 +386,8 @@ def _run_download_in_thread(
             _remove_scheduled_download(download_id)
             download_tracker.clear_stop_request(download_id)
             context_tracker.video_quality = None
+            context_tracker.track_filters = None
+            context_tracker.skip_no_match = False
             context_tracker.download_id = None
             context_tracker.poster_url = None
             context_tracker.output_path = None
@@ -393,6 +409,17 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
     download_type = request.POST.get("download_type")
     season_number = request.POST.get("season_number")
     selected_episodes = request.POST.get("selected_episodes", "")
+    selection_form = TrackSelectionForm(request.POST)
+    if not selection_form.is_valid():
+        messages.error(request, "Invalid track selection.")
+        return redirect("search_home")
+    choices = selection_form.cleaned_data
+    track_options = {
+        "video_filter": choices["video_filter"],
+        "audio_filter": choices["audio_filter"],
+        "subtitle_filter": choices["subtitle_filter"],
+        "skip_no_match": choices["skip_no_match"],
+    }
     from VibraVid.core.utils.quality import normalize_quality
     try:
         quality = normalize_quality(request.POST.get("quality")) or None
@@ -441,7 +468,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
         # waiting for executor capacity are already visible and cancellable.
         batch_id = uuid.uuid4().hex if len(seasons) > 1 else None
         tasks = [_run_download_in_thread(source_alias, item_payload, season=s,
-                                        episodes="*", media_type=media_type, _submit=False, _metadata=metadata, _batch_id=batch_id, quality=quality)
+                                        episodes="*", media_type=media_type, _submit=False, _metadata=metadata, _batch_id=batch_id, quality=quality, **track_options)
                  for s in seasons]
 
         def _download_seasons():
@@ -459,7 +486,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Missing season number.")
             return redirect("search_home")
         _run_download_in_thread(source_alias, item_payload, season=season_number,
-                                episodes="*", media_type=media_type, quality=quality)
+                                episodes="*", media_type=media_type, quality=quality, **track_options)
         return redirect("download_dashboard")
 
     else:
@@ -483,7 +510,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             item_payload=item_payload,
             season=season_number,
             episodes=episode_param,
-            media_type=media_type, quality=quality,
+            media_type=media_type, quality=quality, **track_options,
         )
         logger.debug("Download thread started for S%s E%s", season_number, episode_param)
 

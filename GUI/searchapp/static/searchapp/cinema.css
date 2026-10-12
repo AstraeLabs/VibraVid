@@ -782,3 +782,14 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
 .cn-season-hd button { min-height:38px; display:inline-flex; align-items:center; justify-content:center; }
 .cn-watch-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 520px; }
 .cn-watch-settings .cn-quality-result { flex-basis: 100%; font-size: 12px; }
+
+
+.cn-track-picker { margin: 8px 0; border: 1px solid var(--cn-edge); border-radius: 8px; background: var(--cn-surf); color: var(--cn-white); }
+.cn-track-picker summary { cursor: pointer; padding: 9px 12px; font-size: 12px; font-weight: 650; }
+.cn-track-grid { display: grid; gap: 9px; padding: 8px 12px 12px; }
+.cn-track-grid label { display: grid; gap: 4px; font-size: 12px; }
+.cn-track-grid input[type="text"] { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--cn-edge); border-radius: 6px; background: var(--cn-deep); color: var(--cn-white); }
+.cn-track-grid input[type="text"]::placeholder { color: var(--cn-mute); }
+.cn-track-grid .cn-track-strict { display: flex; gap: 8px; align-items: center; }
+.cn-track-grid small { color: var(--cn-mute); line-height: 1.4; }
+.cn-pick { overflow-y: auto; }

@@ -64,6 +64,21 @@
             if (picker._generation === generation) button.disabled = false;
         }
     }
+    function applyTrackOptions(form) {
+        const picker = form.closest(".cn-tile")?.querySelector(".cn-track-picker") ||
+            document.querySelector("#cn-series-tracks .cn-track-picker");
+        if (!picker) return "";
+        const values = [
+            ["video_filter", ".cn-track-video"],
+            ["audio_filter", ".cn-track-audio"],
+            ["subtitle_filter", ".cn-track-subtitle"]
+        ];
+        for (const [name, selector] of values) {
+            field(form, name, picker.querySelector(selector).value.trim());
+        }
+        field(form, "skip_no_match", picker.querySelector(".cn-track-skip").checked ? "on" : "");
+        return picker.querySelector(".cn-track-video").value.trim();
+    }
     function key(form) {
         const data = new FormData(form);
         return "cn-quality:" + data.get("source_alias") + ":" + data.get("item_payload");
@@ -94,9 +109,11 @@
         if (!picker) return;
         const data = new FormData(form);
         if (!data.has("item_payload")) return;
-        const quality = picker.querySelector("select").value;
-        field(form, "quality", quality);
         const action = new URL(form.action, location.href).pathname;
+        const isDownload = action === config.downloadUrl || data.has("download_type");
+        const advancedVideo = isDownload ? applyTrackOptions(form) : "";
+        const quality = advancedVideo ? "" : picker.querySelector("select").value;
+        field(form, "quality", quality);
         const watchlist = action === config.watchlistUrl;
         if (watchlist) { field(form, "auto_enabled", "on"); return; }
         const download = action === config.downloadUrl || data.has("download_type");

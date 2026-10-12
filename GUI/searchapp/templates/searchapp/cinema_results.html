@@ -107,6 +107,9 @@
 						<div class="cn-pick">
                             {% if result.media_kind == "movie" or result.media_kind == "series" %}
                             {% include "searchapp/quality_picker.html" %}
+                            {% if result.media_kind == "movie" %}
+                            {% include "searchapp/track_picker.html" with picker_id=forloop.counter %}
+                            {% endif %}
                             {% endif %}
                             <div class="cn-pick-row">
 							{% comment %}
