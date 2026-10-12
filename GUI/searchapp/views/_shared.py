@@ -38,8 +38,8 @@ from .._download_infra import (
     _remove_scheduled_download,
     _submit_download_task,
 )
-from ..library_index import forget
 from ..forms import TrackSelectionForm
+from ..library_index import forget
 from ..models import WatchlistItem
 
 logger = logging.getLogger(__name__)
