@@ -19,9 +19,13 @@ from searchapp.api import get_api, get_available_sites, get_site_categories
 from searchapp.api.base import Entries
 
 from VibraVid.cli.command.equivalent_command import equivalent_command_builder
+from VibraVid.core.ui.manual_tracks import manual_track_broker
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.services._base.site_extra_args import (
     get_site_extra_args_schema as get_site_extra_args_schema,
+)
+from VibraVid.services._base.site_extra_args import (
+    get_site_login_status as get_site_login_status,
 )
 from VibraVid.services._base.site_extra_args import (
     parse_site_extra_args as parse_site_extra_args,
@@ -229,6 +233,7 @@ def _run_download_in_thread(
     media_type: str = "Film", output_path: str = None, audio_format: str = None,
     poster: str = None, _submit: bool = True, _metadata: list | None = None,
     _batch_id: str | None = None, quality: str | None = None,
+    manual_tracks: bool = False,
 ) -> concurrent.futures.Future | Callable[[], bool]:
     """Register a job, then submit it or return its worker for a sequential batch."""
     from VibraVid.core.utils.quality import normalize_quality
@@ -291,6 +296,20 @@ def _run_download_in_thread(
             download_tracker.clear_stop_request(download_id)
             return False
         _acquire_download_slot()
+        slot_held = True
+
+        def _release_slot_for_manual_choice():
+            nonlocal slot_held
+            if slot_held:
+                _release_download_slot()
+                slot_held = False
+
+        def _acquire_slot_after_manual_choice():
+            nonlocal slot_held
+            if not slot_held:
+                _acquire_download_slot()
+                slot_held = True
+
         try:
             if _is_scheduled_cancelled(download_id):
                 logger.info("[_task] Download cancelled before start")
@@ -298,7 +317,11 @@ def _run_download_in_thread(
                 return False
 
             # Set context for downloaders in this thread
-            context_tracker.video_quality = quality
+            context_tracker.video_quality = None if manual_tracks else quality
+            context_tracker.manual_tracks = bool(manual_tracks)
+            context_tracker.defer_manual_tracks = False
+            context_tracker.manual_track_on_wait = _release_slot_for_manual_choice if manual_tracks else None
+            context_tracker.manual_track_on_confirm = _acquire_slot_after_manual_choice if manual_tracks else None
             context_tracker.download_id = download_id
             context_tracker.site_name = site
             context_tracker.media_type = media_type
@@ -372,6 +395,12 @@ def _run_download_in_thread(
             _remove_scheduled_download(download_id)
             download_tracker.clear_stop_request(download_id)
             context_tracker.video_quality = None
+            context_tracker.manual_tracks = False
+            context_tracker.defer_manual_tracks = False
+            context_tracker.manual_track_on_wait = None
+            context_tracker.manual_track_on_confirm = None
+            manual_track_broker.forget(download_id)
+            context_tracker.is_gui = False
             context_tracker.download_id = None
             context_tracker.poster_url = None
             context_tracker.output_path = None
@@ -381,7 +410,8 @@ def _run_download_in_thread(
             context_tracker.series_tmdb_id = None
             context_tracker.is_cancelled_callback = None
             context_tracker.site_options = None
-            _release_download_slot()
+            if slot_held:
+                _release_download_slot()
 
     return _submit_download_task(_task) if _submit else _task
 
@@ -393,6 +423,8 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
     download_type = request.POST.get("download_type")
     season_number = request.POST.get("season_number")
     selected_episodes = request.POST.get("selected_episodes", "")
+    manual_tracks = request.POST.get("manual_tracks") == "on"
+    track_options = {"manual_tracks": True} if manual_tracks else {}
     from VibraVid.core.utils.quality import normalize_quality
     try:
         quality = normalize_quality(request.POST.get("quality")) or None
@@ -441,7 +473,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
         # waiting for executor capacity are already visible and cancellable.
         batch_id = uuid.uuid4().hex if len(seasons) > 1 else None
         tasks = [_run_download_in_thread(source_alias, item_payload, season=s,
-                                        episodes="*", media_type=media_type, _submit=False, _metadata=metadata, _batch_id=batch_id, quality=quality)
+                                        episodes="*", media_type=media_type, _submit=False, _metadata=metadata, _batch_id=batch_id, quality=quality, **track_options)
                  for s in seasons]
 
         def _download_seasons():
@@ -459,7 +491,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Missing season number.")
             return redirect("search_home")
         _run_download_in_thread(source_alias, item_payload, season=season_number,
-                                episodes="*", media_type=media_type, quality=quality)
+                                episodes="*", media_type=media_type, quality=quality, **track_options)
         return redirect("download_dashboard")
 
     else:
@@ -483,7 +515,7 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             item_payload=item_payload,
             season=season_number,
             episodes=episode_param,
-            media_type=media_type, quality=quality,
+            media_type=media_type, quality=quality, **track_options,
         )
         logger.debug("Download thread started for S%s E%s", season_number, episode_param)
 

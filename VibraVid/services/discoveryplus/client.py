@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import Any
 
-from VibraVid.services._base.login_status import ACCOUNT, ANONYMOUS, print_login
+from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
@@ -74,7 +74,7 @@ class DiscoveryPlus:
         # Final headers for all subsequent requests
         self.headers = self.base_headers.copy()
         self.headers["Authorization"] = f"Bearer {self.access_token}"
-        print_login(ACCOUNT if self.cookies.get("st") else ANONYMOUS)
+        Login.show(Login.ACCOUNT if self.cookies.get("st") else Login.ANONYMOUS)
 
     def _playback_info_request(self, edit_id: str, cdms: list[dict]) -> dict:
         """One playbackInfo call, requesting only the given DRM system(s)."""

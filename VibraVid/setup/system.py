@@ -174,12 +174,12 @@ def get_mkvpropedit_path() -> str | None:
     return _mkvpropedit_path
 
 
-def get_info_wvd(cdm_device_path):
+def read_device_wvd(cdm_device_path) -> dict | None:
+    """Structured info of a Widevine .wvd: path, DeviceTypes name (CHROME / ANDROID), security level, model, kind (TV / Emulator / Phone)."""
     if cdm_device_path is None:
         return None
 
     from pywidevine.device import Device
-
     device = Device.load(cdm_device_path)
 
     info = {ci.name: ci.value for ci in device.client_id.client_info}
@@ -192,21 +192,25 @@ def get_info_wvd(cdm_device_path):
     )
 
     if "tv" in model.lower():
-        dev_type = "TV"
+        kind = "TV"
     elif is_emulator:
-        dev_type = "Emulator"
+        kind = "Emulator"
     else:
-        dev_type = "Phone"
+        kind = "Phone"
 
-    return (
-        f"[red]Load [cyan]{dev_type} [red]{cdm_device_path}[cyan] | "
-        f"[cyan]Security: [red]L{device.security_level} [cyan]| "
-        f"[cyan]Model: [red]{model} [cyan]| "
-        f"[cyan]SysID: [red]{device.system_id}"
-    )
+    return {
+        "system": "widevine",
+        "path": cdm_device_path,
+        "type": device.type.name,
+        "security_level": device.security_level,
+        "system_id": device.system_id,
+        "model": model,
+        "kind": kind,
+    }
 
 
-def get_info_prd(cdm_device_path):
+def read_device_prd(cdm_device_path) -> dict | None:
+    """Structured info of a PlayReady .prd: path, certificate type, security level, manufacturer / model."""
     if cdm_device_path is None:
         return None
 
@@ -231,8 +235,60 @@ def get_info_prd(cdm_device_path):
         model = un_pad(mfr.attribute.model_name)
         model_number = un_pad(mfr.attribute.model_number)
 
+    return {
+        "system": "playready",
+        "path": cdm_device_path,
+        "type": cert_type,
+        "security_level": security_level,
+        "manufacturer": manufacturer,
+        "model": model,
+        "model_number": model_number,
+    }
+
+
+def get_info_wvd(cdm_device_path):
+    info = read_device_wvd(cdm_device_path)
+    if info is None:
+        return None
+
     return (
-        f"[red]Load [cyan]{cert_type} [red]{cdm_device_path}[cyan] | "
-        f"[cyan]Security: [red]SL{security_level} [cyan]| "
-        f"[cyan]Model: [red]{manufacturer} {model} {model_number} [cyan]"
+        f"[red]Load [cyan]{info['kind']} [red]{info['path']}[cyan] | "
+        f"[cyan]Security: [red]L{info['security_level']} [cyan]| "
+        f"[cyan]Model: [red]{info['model']} [cyan]| "
+        f"[cyan]SysID: [red]{info['system_id']}"
     )
+
+
+def get_info_prd(cdm_device_path):
+    info = read_device_prd(cdm_device_path)
+    if info is None:
+        return None
+
+    return (
+        f"[red]Load [cyan]{info['type']} [red]{info['path']}[cyan] | "
+        f"[cyan]Security: [red]SL{info['security_level']} [cyan]| "
+        f"[cyan]Model: [red]{info['manufacturer']} {info['model']} {info['model_number']} [cyan]"
+    )
+
+
+def resolve_service_cdm_info(site_name: str | None) -> dict:
+    """Resolve the Widevine and PlayReady CDM paths for a given site, returning structured info about each."""
+    from .device_install import resolve_service_cdm
+
+    chosen = resolve_service_cdm(site_name)
+
+    def describe(path: str | None, override: str | None, reader) -> dict | None:
+        if not path:
+            return None
+        source = "service" if override else "default"
+        try:
+            return {**reader(path), "source": source}
+        except Exception as e:
+            return {"path": path, "source": source, "error": str(e)}
+
+    return {
+        "widevine": describe(chosen.wvd_path or get_wvd_path(), chosen.wvd_path, read_device_wvd),
+        "playready": describe(chosen.prd_path or get_prd_path(), chosen.prd_path, read_device_prd),
+        "widevine_remote": bool(chosen.widevine_remote),
+        "playready_remote": bool(chosen.playready_remote),
+    }

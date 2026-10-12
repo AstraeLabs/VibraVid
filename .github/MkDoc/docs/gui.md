@@ -31,8 +31,14 @@ directly.
 - **Home** (`/`) — pick a site and search for a title.
 - **Results** (`/search/`) — each result can be downloaded, added to the watchlist, or (for
   series) expanded to show seasons and episodes via the series-detail view.
-- **Start download** (`/download/`) — queues the selected movie or episodes. Track selection
-  (video/audio/subtitle) follows the same `config.json` filters as the CLI.
+- **Start download** (`/download/`) — queues the selected movie or episodes. By default, track
+  selection (video/audio/subtitle) follows the same `config.json` filters as the CLI. To pick
+  tracks yourself, tick **Choose tracks manually** (next to the Quality picker, which it
+  overrides) before downloading: the download pauses and a **Choose tracks** panel appears on
+  the Downloads page. Tick the tracks you want and press **Download selected tracks** (at least
+  one is required; use **Stop** to cancel). A download waiting for your choice does not occupy
+  a concurrent-download slot. Manual selection is GUI-only and not available for Watchlist
+  auto-downloads, which use the config.
 - Set `VIBRAVID_DISABLED_SITES` (comma-separated site module names) to hide specific sites from
   the GUI's site list entirely — useful to disable a site for the web UI without removing it
   from the CLI/TUI.

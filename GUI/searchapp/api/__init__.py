@@ -33,6 +33,7 @@ _PREFERRED_ORDER = [
     "hbomax",
     "paramountplus",
     "appletv",
+    "nowtvit",
     "mediasetinfinity",
     "raiplay",
     "la7",
@@ -48,7 +49,7 @@ _PREFERRED_ORDER = [
     "rakutentv",
     "amazon_music",
 ]
-_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax"}
+_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax", "nowtvit"}
 _SITE_CATEGORIES: dict[str, str] = {}
 _SITE_ALIASES: dict[str, str] = {}
 

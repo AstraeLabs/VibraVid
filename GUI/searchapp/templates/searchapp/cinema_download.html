@@ -51,6 +51,11 @@
 	<p class="cn-empty" id="cn-empty-active">No downloads running.</p>
 </section>
 
+<section class="cn-strip cn-manual-section" id="cn-manual-section" hidden>
+    <div class="cn-strip-hd"><h2>Choose tracks</h2></div>
+    <div id="cn-manual-requests"></div>
+</section>
+
 <section class="cn-strip">
 	<div class="cn-strip-hd">
 		<h2>Queued</h2><span class="cn-n" id="cn-n-queue">0</span>
@@ -108,6 +113,7 @@
 (function () {
 	"use strict";
 	var URL_DOWNLOADS = "{% url 'get_downloads_json' %}?history=20";
+    var URL_CONFIRM_TRACKS = "{% url 'confirm_manual_tracks' %}";
 	var URL_KILL      = "{% url 'kill_download' %}";
 	var URL_STOP_ALL = "{% url 'stop_all_downloads' %}";
 	var URL_CLEAR_HISTORY = "{% url 'clear_download_history' %}";
@@ -482,6 +488,75 @@
 			.finally(function () { btn.disabled = false; });
 	});
 
+    function renderPendingTracks(requests) {
+        var section = document.getElementById("cn-manual-section");
+        var root = document.getElementById("cn-manual-requests");
+        section.hidden = !requests.length;
+        var live = new Set(requests.map(function (r) { return r.token; }));
+        Array.from(root.children).forEach(function (node) {
+            if (!live.has(node.dataset.token)) node.remove();
+        });
+        requests.forEach(function (request) {
+            if (Array.from(root.children).some(function (node) { return node.dataset.token === request.token; })) return;
+            var container = document.createElement("div");
+            container.className = "cn-manual-request";
+            container.dataset.token = request.token;
+            container.dataset.downloadId = request.download_id;
+            var header = document.createElement("strong");
+            header.textContent = "Choose tracks for " + (request.title || request.download_id);
+            container.appendChild(header);
+            var list = document.createElement("div");
+            list.className = "cn-manual-tracks-list";
+            request.tracks.forEach(function (track) {
+                var row = document.createElement("label");
+                row.className = "cn-manual-track-row";
+                var checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = String(track.index);
+                checkbox.checked = !!track.selected;
+                var resolution = track.height ? track.height + "p" : track.resolution;
+                var bitrate = track.bitrate ? (track.bitrate / 1000000).toFixed(2) + " Mbps" : "";
+                var details = [track.type, resolution, track.language, track.codecs,
+                    track.channels, bitrate, track.forced ? "forced" : "",
+                    track.sdh ? "SDH" : "", track.cc ? "CC" : ""].filter(Boolean).join(" | ");
+                var caption = document.createElement("span");
+                caption.textContent = details || "Track " + (track.index + 1);
+                row.append(checkbox, caption);
+                list.appendChild(row);
+            });
+            container.appendChild(list);
+            var note = document.createElement("p");
+            note.className = "cn-manual-track-note";
+            note.textContent = "Confirm to start downloading the selected tracks. Cancel with Stop.";
+            container.appendChild(note);
+            var button = document.createElement("button");
+            button.className = "cn-cta";
+            button.type = "button";
+            button.dataset.confirmTracks = request.download_id;
+            button.textContent = "Download selected tracks";
+            container.appendChild(button);
+            root.appendChild(container);
+        });
+    }
+
+    document.getElementById("cn-manual-requests").addEventListener("click", function (event) {
+        var button = event.target.closest("[data-confirm-tracks]");
+        if (!button) return;
+        var container = button.closest(".cn-manual-request");
+        var selected = Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(function (input) { return Number(input.value); });
+        if (!selected.length) { window.alert("Select at least one track."); return; }
+        button.disabled = true;
+        queuePost(URL_CONFIRM_TRACKS, {
+            download_id: container.dataset.downloadId,
+            token: container.dataset.token,
+            selected: selected
+        }).then(refresh).catch(function (error) {
+            window.alert(error.message);
+            button.disabled = false;
+        });
+    });
+
 	function refresh() {
 		return fetch(URL_DOWNLOADS)
 			.then(function (r) { return r.json(); })
@@ -489,6 +564,7 @@
 				var active = data.active || [];
 				var queue  = data.scheduled || [];
 				var hist   = data.history || [];
+                renderPendingTracks(data.pending_tracks || []);
 				var clearQueue = document.getElementById("cn-clear-queue");
 
 				clearQueue.hidden = queue.length === 0;

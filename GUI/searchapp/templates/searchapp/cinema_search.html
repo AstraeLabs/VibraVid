@@ -49,6 +49,7 @@
 
 		<p class="cn-seek-hint" id="cn-scope-hint"></p>
 		<p class="cn-seek-hint cn-extra-line" id="cn-extra-line" hidden></p>
+		<p class="cn-seek-hint cn-extra-line" id="cn-login-line" hidden></p>
 
 		<div class="cn-opts cn-sitelist" id="cn-site-filter" hidden>
 			{% for s in sites %}
@@ -76,11 +77,13 @@
 
 	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
 	var extraLine = document.getElementById("cn-extra-line");
+	var loginLine = document.getElementById("cn-login-line");
 	var savedArgs = {};
 	try { savedArgs = JSON.parse(document.getElementById("cn-site-extra-args").textContent) || {}; }
 	catch (err) { savedArgs = {}; }
 	var schemaCache = {};
 	var shownSite = null;
+	var loginSeq = 0;
 
 	function describe(arg) {
 		if (arg.kind === "flag") return arg.flag;
@@ -104,9 +107,46 @@
 		extraLine.hidden = false;
 	}
 
+	function paintLogin(login) {
+		loginLine.textContent = "";
+		loginLine.classList.remove("is-ok", "is-missing");
+
+		if (!login) { loginLine.hidden = true; return; }
+		var needed = login.need === "required";
+		var label = needed ? "Need key for login: " : "Login (optional, works anonymous): ";
+		loginLine.appendChild(document.createTextNode(label));
+		var strong = document.createElement("b");
+		strong.textContent = needed ? "yes" : "no";
+		loginLine.appendChild(strong);
+		loginLine.appendChild(document.createTextNode(" · Present: "));
+		var state = document.createElement("b");
+		state.textContent = login.present ? "yes" : "no";
+		loginLine.appendChild(state);
+
+		if (!login.present && login.missing && login.missing.length)
+			loginLine.appendChild(document.createTextNode("  (missing: " + login.missing.join(", ") + ")"));
+
+		loginLine.title = (login.keys || []).map(function (k) {
+			return (k.present ? "✓ " : "✗ ") + k.key + (k.optional ? " (optional)" : "");
+		}).join("\n");
+
+		loginLine.classList.add(login.present ? "is-ok" : "is-missing");
+		loginLine.hidden = false;
+	}
+
+	function showLogin(site) {
+		var seq = ++loginSeq;
+		if (!site) { paintLogin(null); return; }
+		fetch(URL_CLI_OPTIONS + "?site=" + encodeURIComponent(site))
+			.then(function (r) { return r.json(); })
+			.then(function (data) { if (seq === loginSeq && shownSite === site) paintLogin(data && data.login); })
+			.catch(function () { if (seq === loginSeq) paintLogin(null); });
+	}
+
 	// Info only: the options this provider's CLI accepts (the same list as Settings -> Custom CLI options).
 	function showExtra(site) {
 		shownSite = site;
+		showLogin(site);
 		if (!site) { extraLine.hidden = true; extraLine.textContent = ""; return; }
 		if (schemaCache[site]) { paint(site, schemaCache[site]); return; }
 		extraLine.textContent = "Custom arguments: …";

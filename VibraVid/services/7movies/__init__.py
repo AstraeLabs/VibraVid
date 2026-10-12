@@ -11,7 +11,7 @@ from VibraVid.utils import TVShowManager
 from .client import base_url
 from .downloader import download_film, download_series
 
-indice = 17
+indice = 16
 _useFor = "Film_Serie"
 
 msg = Prompt()

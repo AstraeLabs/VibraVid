@@ -67,6 +67,7 @@ class DownloadForm(forms.Form):
     episode = forms.CharField(max_length=1000, required=False, label="Episodio (es: 1-3)")
     quality = forms.RegexField(regex=r"^(?:[1-9][0-9]{1,3}p)?$", max_length=5, required=False)
     audio_format = forms.CharField(max_length=16, required=False, label="Formato audio")
+    manual_tracks = forms.BooleanField(required=False)
 
     def clean_quality(self):
         from VibraVid.core.utils.quality import normalize_quality

@@ -94,8 +94,10 @@
         if (!picker) return;
         const data = new FormData(form);
         if (!data.has("item_payload")) return;
-        const quality = picker.querySelector("select").value;
+        const manual = !!picker.querySelector(".cn-manual-tracks")?.checked;
+        const quality = manual ? "" : picker.querySelector("select").value;
         field(form, "quality", quality);
+        field(form, "manual_tracks", manual ? "on" : "");
         const action = new URL(form.action, location.href).pathname;
         const watchlist = action === config.watchlistUrl;
         if (watchlist) { field(form, "auto_enabled", "on"); return; }
@@ -104,7 +106,7 @@
             try { sessionStorage.setItem(key(form), quality); } catch (_) {}
             return;
         }
-        if (!quality) return;
+        if (manual || !quality) return;
         event.preventDefault();
         form.dataset.qualityPending = "1";
         const submitter = event.submitter;

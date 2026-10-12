@@ -5,12 +5,12 @@ import json
 import time
 import uuid
 
-from VibraVid.services._base.login_status import ACCOUNT, print_login
+from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
 
-tubi_email = config_manager.login.get("tubi", "email")
-tubi_password = config_manager.login.get("tubi", "password")
+tubi_email = config_manager.login.get("tubitv", "email")
+tubi_password = config_manager.login.get("tubitv", "password")
 
 _cached_token = None
 _FALLBACK_TTL_SECONDS = 3600
@@ -41,9 +41,10 @@ def get_bearer_token():
         return _cached_token
 
     # Try disk cache
-    data = disk_cache.load("tubitv", "token")
-    if data and data.get("access_token") and disk_cache.is_fresh(data, buffer_seconds=60):
+    data = disk_cache.load_fresh("tubitv", "token", buffer_seconds=60)
+    if data and data.get("access_token"):
         _cached_token = data["access_token"]
+        Login.refresh_cached(disk_cache.cache_path("tubitv", "token"))
         return _cached_token
 
     if not tubi_email or not tubi_password:
@@ -63,12 +64,7 @@ def get_bearer_token():
         raise Exception("Service Unavailable: Set VPN to America.")
 
     login_data = response.json()
-
-    # Tubi is credentials-only (it raises above without them), so the session is always an account.
-    # The login response already names it, and the configured email is the guaranteed fallback -
-    # either way no extra lookup is needed. /oz/user would need the browser connect.sid cookie,
-    # which this bearer-based flow never has.
-    print_login(ACCOUNT, user=login_data.get("name") or login_data.get("email") or str(tubi_email).strip())
+    Login.show(Login.ACCOUNT, user=login_data.get("name") or login_data.get("email") or str(tubi_email).strip())
 
     _cached_token = login_data["access_token"]
     expiry = _jwt_expiry(_cached_token) or (time.time() + _FALLBACK_TTL_SECONDS)

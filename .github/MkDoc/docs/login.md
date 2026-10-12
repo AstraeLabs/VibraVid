@@ -135,7 +135,7 @@ Unlike the cookie-based services above, Tubi TV authenticates with a plain email
 
 1. Add your Tubi TV account credentials to `Conf/login.json`:
    ```json
-   "tubi": {
+   "tubitv": {
      "email": "your@email.com",
      "password": "your-password"
    }

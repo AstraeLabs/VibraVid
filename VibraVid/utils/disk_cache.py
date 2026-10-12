@@ -1,5 +1,6 @@
 # 17.07.26
 
+import contextlib
 import json
 import logging
 import os
@@ -39,8 +40,11 @@ def load(service: str, name: str):
             return None
 
 
-def save(service: str, name: str, data: dict) -> None:
-    """Persist a service's cache dict to disk, creating the service folder if needed."""
+def save(service: str, name: str, data, ttl: float | None = None) -> None:
+    """Persist a service's cache value (any JSON type) to disk, optionally with a TTL in seconds."""
+    if ttl is not None and isinstance(data, dict):
+        data = {**data, "expiry": time.time() + ttl}
+
     path = cache_path(service, name)
     with _lock_for(path):
         try:
@@ -49,6 +53,41 @@ def save(service: str, name: str, data: dict) -> None:
                 json.dump(data, fh)
         except Exception as e:
             logger.warning(f"[disk_cache] could not persist {service}/{name}: {e}")
+
+
+def load_fresh(service: str, name: str, expiry_key: str = "expiry", buffer_seconds: float = 0):
+    """`load`, but None unless the value is a dict whose `expiry_key` timestamp is still valid (with a safety buffer)."""
+    data = load(service, name)
+    return data if isinstance(data, dict) and is_fresh(data, expiry_key, buffer_seconds) else None
+
+
+@contextlib.contextmanager
+def lock(service: str, name: str, timeout: float = 45.0, stale_after: float = 90.0, poll: float = 0.1):
+    """Exclusive lock across threads and processes for a cache entry, for read-then-write sequences such as a rotating refresh token."""
+    path = os.path.splitext(cache_path(service, name))[0] + ".lock"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(path) > stale_after:
+                    os.remove(path)
+                    continue
+            except OSError:
+                continue  # released between the check and the stat/remove: try again
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"cache lock {service}/{name} busy for {timeout:.0f}s") from None
+            time.sleep(poll)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def invalidate(service: str, name: str) -> None:

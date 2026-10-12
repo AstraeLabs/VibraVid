@@ -459,6 +459,38 @@ class ContextTracker:
         self.local.download_id = value
 
     @property
+    def manual_tracks(self) -> bool:
+        return bool(getattr(self.local, "manual_tracks", False))
+
+    @manual_tracks.setter
+    def manual_tracks(self, value):
+        self.local.manual_tracks = bool(value)
+
+    @property
+    def defer_manual_tracks(self) -> bool:
+        return bool(getattr(self.local, "defer_manual_tracks", False))
+
+    @defer_manual_tracks.setter
+    def defer_manual_tracks(self, value):
+        self.local.defer_manual_tracks = bool(value)
+
+    @property
+    def manual_track_on_wait(self):
+        return getattr(self.local, "manual_track_on_wait", None)
+
+    @manual_track_on_wait.setter
+    def manual_track_on_wait(self, value):
+        self.local.manual_track_on_wait = value
+
+    @property
+    def manual_track_on_confirm(self):
+        return getattr(self.local, "manual_track_on_confirm", None)
+
+    @manual_track_on_confirm.setter
+    def manual_track_on_confirm(self, value):
+        self.local.manual_track_on_confirm = value
+
+    @property
     def video_quality(self):
         return getattr(self.local, "video_quality", None)
 
