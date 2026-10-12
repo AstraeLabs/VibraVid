@@ -311,6 +311,10 @@ class BaseDownloader:
         return title, media_type, site, name
 
     def _log_tracks_json(self, streams: list, keys: list, manifest_url: str) -> None:
+        if context_tracker.capture_keys is not None:
+            context_tracker.capture_keys.extend(self._format_keys(keys))
+            return
+
         if not DEBUG_TRACK_JSON:
             return
 
@@ -341,7 +345,15 @@ class BaseDownloader:
         Returns a terminal :class:`DownloadResult` to hand straight back, or
         ``None`` to signal "keep going". Also creates the output directory.
         """
-        if self.file_already_exists:
+        capture = context_tracker.capture
+        if capture is not None:
+            from VibraVid.remote.capture import record_downloader
+
+            record_downloader(self, capture)
+            return DownloadResult(self.output_path, False, None)
+
+        # Key capture re-runs a download that may already exist on the server's disk: never short-circuit it.
+        if self.file_already_exists and context_tracker.capture_keys is None:
             console.print("[yellow]File already exists.")
             return DownloadResult(self.output_path, False, None)
 
@@ -392,7 +404,7 @@ class BaseDownloader:
 
     def _skip_download_result(self) -> "DownloadResult":
         """Result of the ``DOWNLOAD.skip_download`` switch: optional pause, then the (never downloaded) output path."""
-        if DELAY_SS > 0:
+        if DELAY_SS > 0 and context_tracker.capture_keys is None:
             console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
             time.sleep(DELAY_SS)
         return DownloadResult(self.output_path, False, None)

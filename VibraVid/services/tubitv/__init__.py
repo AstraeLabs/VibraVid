@@ -9,7 +9,7 @@ from VibraVid.services._base.site_search_manager import make_search_entrypoints
 from VibraVid.utils import TVShowManager
 from VibraVid.utils.http_client import check_region_availability, create_client, get_userAgent
 
-from .client import get_bearer_token, tubi_email, tubi_password
+from .client import get_bearer_token, tubi_credentials
 from .downloader import download_film, download_series
 
 indice = 8
@@ -60,6 +60,7 @@ def title_search(query: str) -> int:
     if not check_region_availability(_region, site_constants.SITE_NAME):
         return 0
 
+    tubi_email, tubi_password = tubi_credentials()
     if not tubi_email or not tubi_password:
         console.print(
             "[yellow]\nWarning: Tubi TV email/password are not set, search will return no results for this site.\n"

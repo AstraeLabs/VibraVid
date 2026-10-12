@@ -24,13 +24,31 @@ def _lock_for(path: str) -> threading.Lock:
         return lock
 
 
+def _remote(service: str) -> bool:
+    """True while serving a remote request: that service's cache is the calling client's, carried in memory (see utils.scope)."""
+    from VibraVid.utils.scope import cache_active
+    return cache_active(service)
+
+
+def _service_dir(service: str) -> str:
+    return os.path.join(config_manager.base_path, ".cache", "services", service)
+
+
 def cache_path(service: str, name: str) -> str:
-    """Resolve `.cache/services/<service>/<name>.json` under the app base path."""
-    return os.path.join(config_manager.base_path, ".cache", "services", service, f"{name}.json")
+    """Path to a service's disk-persisted cache value (any JSON type)."""
+    if _remote(service):
+        from VibraVid.utils.scope import CACHE_PATH_PREFIX
+
+        return f"{CACHE_PATH_PREFIX}{service}/{name}.json"
+    return os.path.join(_service_dir(service), f"{name}.json")
 
 
 def load(service: str, name: str):
     """Load a service's disk-persisted cache value (any JSON type). None if missing/corrupt."""
+    if _remote(service):
+        from VibraVid.utils.scope import cache_get
+
+        return cache_get(service, name)
     path = cache_path(service, name)
     with _lock_for(path):
         try:
@@ -44,6 +62,15 @@ def save(service: str, name: str, data, ttl: float | None = None) -> None:
     """Persist a service's cache value (any JSON type) to disk, optionally with a TTL in seconds."""
     if ttl is not None and isinstance(data, dict):
         data = {**data, "expiry": time.time() + ttl}
+
+    if _remote(service):
+        from VibraVid.utils.scope import cache_put
+
+        try:
+            cache_put(service, name, data)
+        except (TypeError, ValueError) as e:
+            logger.warning(f"[disk_cache] could not keep {service}/{name} for the client: {e}")
+        return
 
     path = cache_path(service, name)
     with _lock_for(path):
@@ -64,6 +91,10 @@ def load_fresh(service: str, name: str, expiry_key: str = "expiry", buffer_secon
 @contextlib.contextmanager
 def lock(service: str, name: str, timeout: float = 45.0, stale_after: float = 90.0, poll: float = 0.1):
     """Exclusive lock across threads and processes for a cache entry, for read-then-write sequences such as a rotating refresh token."""
+    if _remote(service):  # one request, one thread, an in-memory cache: nothing to lock
+        yield
+        return
+    
     path = os.path.splitext(cache_path(service, name))[0] + ".lock"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     deadline = time.monotonic() + timeout
@@ -92,6 +123,11 @@ def lock(service: str, name: str, timeout: float = 45.0, stale_after: float = 90
 
 def invalidate(service: str, name: str) -> None:
     """Delete a service's cache file (e.g. after it's proven invalid server-side)."""
+    if _remote(service):
+        from VibraVid.utils.scope import cache_remove
+
+        cache_remove(service, name)
+        return
     path = cache_path(service, name)
     with _lock_for(path):
         try:
@@ -107,7 +143,15 @@ def clear_service(service: str) -> int:
 
     Returns the number of files removed.
     """
-    service_dir = os.path.join(config_manager.base_path, ".cache", "services", service)
+    if _remote(service):
+        from VibraVid.utils.scope import cache_names, cache_remove
+
+        names = cache_names(service)
+        for name in names:
+            cache_remove(service, name)
+        return len(names)
+    
+    service_dir = _service_dir(service)
     removed = 0
     try:
         entries = os.listdir(service_dir)

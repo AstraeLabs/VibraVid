@@ -272,7 +272,7 @@ class ISM_Downloader(BaseDownloader):
         # ── Download ──────────────────────────────────────────────────────────
         self._log_tracks_json(streams, keys, self.ism_url)
 
-        if SKIP_DOWNLOAD:
+        if SKIP_DOWNLOAD or context_tracker.capture_keys is not None:
             return self._skip_download_result()
 
         self._create_media_players()

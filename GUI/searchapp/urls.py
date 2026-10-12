@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from . import api_bot, views
+from . import api_bot, api_remote, views
 
 urlpatterns = [
     # Search is the home page.
@@ -76,4 +76,19 @@ urlpatterns = [
     path("api/bot/cancel/", api_bot.bot_cancel, name="bot_cancel"),
     path("api/bot/status/", api_bot.bot_status, name="bot_status"),
     path("api/bot/logs/", api_bot.bot_logs, name="bot_logs"),
+
+    # Remote server mode (resolve on the server, download on the client — see api_remote.py)
+    path("api/remote/health/", api_remote.remote_health, name="remote_health"),
+    path("api/remote/sites/", api_remote.remote_sites, name="remote_sites"),
+    path("api/remote/sites/<str:site>/info/", api_remote.remote_site_info, name="remote_site_info"),
+    path("api/remote/search/", api_remote.remote_search, name="remote_search"),
+    path("api/remote/seasons/", api_remote.remote_seasons, name="remote_seasons"),
+    path("api/remote/resolve/", api_remote.remote_resolve, name="remote_resolve"),
+    path("api/remote/login/", api_remote.remote_login_start, name="remote_login_start"),
+    path("api/remote/login/<str:job_id>/", api_remote.remote_login, name="remote_login"),
+    path("api/remote/login/<str:job_id>/answer/", api_remote.remote_login_answer, name="remote_login_answer"),
+    path("api/remote/session/<str:session_id>/license/", api_remote.remote_license, name="remote_license"),
+    path("api/remote/session/<str:session_id>/keys/", api_remote.remote_keys, name="remote_keys"),
+    path("api/remote/session/<str:session_id>/refresh/", api_remote.remote_refresh, name="remote_refresh"),
+    path("api/remote/session/<str:session_id>/", api_remote.remote_close, name="remote_close"),
 ]

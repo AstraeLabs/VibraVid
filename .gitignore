@@ -52,6 +52,7 @@ start.sh
 GUI/db.sqlite3
 Conf/domains.json
 Conf/login.json
+Conf/remote.json
 Conf/config.json.backup
 /.cache
 !/.cache/arr

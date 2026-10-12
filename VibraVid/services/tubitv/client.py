@@ -9,11 +9,22 @@ from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
 
-tubi_email = config_manager.login.get("tubitv", "email")
-tubi_password = config_manager.login.get("tubitv", "password")
+
+
+
 
 _cached_token = None
 _FALLBACK_TTL_SECONDS = 3600
+
+
+def tubi_credentials() -> tuple[str | None, str | None]:
+    """Return the Tubi TV email and password from the config, or (None, None) if not set."""
+    for section in ("tubitv", "tubi"):
+        email = config_manager.login.get(section, "email", default=None)
+        password = config_manager.login.get(section, "password", default=None)
+        if email or password:
+            return email, password
+    return None, None
 
 
 def generate_device_id():
@@ -47,6 +58,7 @@ def get_bearer_token():
         Login.refresh_cached(disk_cache.cache_path("tubitv", "token"))
         return _cached_token
 
+    tubi_email, tubi_password = tubi_credentials()
     if not tubi_email or not tubi_password:
         raise Exception("Email or Password not set in configuration.")
 

@@ -63,6 +63,12 @@ class YTDLPDownloader:
         self.extra_args = kwargs
 
     def start(self) -> tuple[Path | None, bool, str | None]:
+        from VibraVid.remote.capture import reject_if_capturing
+
+        rejected = reject_if_capturing("yt-dlp")
+        if rejected:
+            return None, True, rejected
+
         yt_dlp = get_yt_dlp_path()
         if not yt_dlp:
             return None, False, "yt-dlp binary not found. Run with --binary-update or --dep to check."

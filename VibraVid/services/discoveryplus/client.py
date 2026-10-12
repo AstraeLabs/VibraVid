@@ -11,7 +11,10 @@ from VibraVid.utils.http_client import create_client
 logger = logging.getLogger(__name__)
 
 _discovery_client = None
-cookie_st = config_manager.login.get("discoveryplus", "st")
+
+
+def _stored_session_cookie() -> str | None:
+    return config_manager.login.get("discoveryplus", "st", default=None)
 
 
 class DiscoveryPlus:
@@ -165,6 +168,7 @@ def get_client():
     """Get or create DiscoveryPlus client instance."""
     global _discovery_client
     if _discovery_client is None:
+        cookie_st = _stored_session_cookie()
         cookies = {"st": cookie_st} if cookie_st else None
         _discovery_client = DiscoveryPlus(cookies)
     return _discovery_client

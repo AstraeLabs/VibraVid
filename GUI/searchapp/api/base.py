@@ -88,7 +88,12 @@ class BaseStreamingAPI(ABC):
 
     def _get_cache_key(self, media_item: Entries) -> str:
         """Generate a unique key for the scraper cache."""
-        return f"{self.site_name}_{media_item.url or media_item.path_id or media_item.id or media_item.slug}"
+        from VibraVid.utils.scope import current_scope
+
+        # A scraper carries the identity it was built with: on a remote server it must never be handed to another client.
+        scope = current_scope()
+        prefix = f"{scope}:" if scope else ""
+        return f"{prefix}{self.site_name}_{media_item.url or media_item.path_id or media_item.id or media_item.slug}"
 
     def _scraper_cache_enabled(self) -> bool:
         return not bool(config_manager.config.get_bool("DEFAULT", "disable_scraper_cache", default=False))

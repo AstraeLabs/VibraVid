@@ -14,6 +14,7 @@ from rich.console import Console
 from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
+from VibraVid.utils.scope import current_scope
 
 from .regions import get_region, region_conf
 
@@ -250,8 +251,8 @@ class MediasetAPI:
 
 
 def get_client():
-    """Get or create the region-specific MediasetAPI singleton."""
-    region = get_region()
+    """Get or create the MediasetAPI singleton."""
+    region = (get_region(), current_scope())
     api = _api_by_region.get(region)
     if api is None or not _is_token_valid(api.getBearerToken()):
         if api is not None:

@@ -1857,6 +1857,12 @@ class Generic_Downloader(BaseDownloader):
             self._restore_interrupt_handler()
 
     def _start(self) -> DownloadResult:
+        from VibraVid.remote.capture import reject_if_capturing
+
+        rejected = reject_if_capturing("a multi-source download")
+        if rejected:
+            return DownloadResult(None, True, rejected)
+
         if self.file_already_exists:
             console.print("[yellow]File already exists.")
             return DownloadResult(self.output_path, False, None)

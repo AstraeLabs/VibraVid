@@ -34,6 +34,7 @@ nav:
   - Web GUI: gui.md
   - TUI: tui.md
   - Telegram Bot: telegram.md
+  - Remote Server: remote.md
   - ARR Integration: arr.md
   - Hooks: hooks.md
   - Docker: docker.md

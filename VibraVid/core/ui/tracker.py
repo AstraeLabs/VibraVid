@@ -725,6 +725,24 @@ class ContextTracker:
         self.local.resolve_only = value
 
     @property
+    def capture(self):
+        """Per-thread list collecting ``ResolvedMedia`` instead of downloading (remote server ``resolve``), else ``None``."""
+        return getattr(self.local, "capture", None)
+
+    @capture.setter
+    def capture(self, value):
+        self.local.capture = value
+
+    @property
+    def capture_keys(self):
+        """Per-thread list collecting ``kid:key`` strings; the downloader stops right after the key fetch (remote ``server_cdm``)."""
+        return getattr(self.local, "capture_keys", None)
+
+    @capture_keys.setter
+    def capture_keys(self, value):
+        self.local.capture_keys = value
+
+    @property
     def site_options(self):
         return getattr(self.local, "site_options", None) or {}
 

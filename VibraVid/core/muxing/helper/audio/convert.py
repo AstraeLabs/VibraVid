@@ -79,6 +79,14 @@ def process_song(
     Returns:
         - str: Final file path (converted path, or original if no conversion).
     """
+    from VibraVid.remote.capture import record_post_process
+
+    if record_post_process("song", {
+        "title": title, "artist": artist, "album": album, "year": year, "track_number": track_number,
+        "genre": genre, "cover_url": cover_url, "album_artist": album_artist, "lyrics": lyrics,
+    }):
+        return file_path
+
     path = file_path
 
     # Step 1 — tag the downloaded file

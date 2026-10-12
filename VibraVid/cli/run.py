@@ -174,6 +174,11 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
 
+    # ── Remote server
+    remote_group = parser.add_argument_group("Remote server")
+    remote_group.add_argument("--server", dest="server", nargs="?", const="", default=None, metavar="NAME", help="Resolve on a remote VibraVid server (Conf/remote.json -> remote_services) and download locally. NAME may be omitted when only one server is configured. Needs -i SITE and -s QUERY")
+    remote_group.add_argument("--server-opt", dest="server_opt", action="append", metavar="KEY=VALUE", help="Service option forwarded to the server (e.g. drm=playready, store=US, atmos=true). Repeatable")
+
     # ── Direct download
     dl_group = parser.add_argument_group("Direct download (--down)")
     dl_group.add_argument("--down", metavar="URL", help="Stream URL to download directly (MP4 / HLS / DASH / ISM)")
@@ -575,6 +580,10 @@ def main():
         parser, site_option_dests = setup_argument_parser(
             search_functions, site_module=site_module, extra_site_modules=extra_site_modules
         )
+        if any(a == "--server" or a.startswith("--server=") for a in argv):
+            from VibraVid.remote.cli import add_remote_site_options
+            add_remote_site_options(parser, argv, prescanned_site)  # --url, --store... of a service that lives on the server
+            
         args = parser.parse_args()
         setup_logger(no_log=getattr(args, "no_log", False))
         context_tracker.hide_manifest_info = getattr(args, "no_manifest_info", False)
@@ -698,6 +707,13 @@ def main():
         down_handled, down_ok = handle_direct_download(args)
         if down_handled:
             sys.exit(0 if down_ok else 1)
+
+        # ── Remote server (--server): resolve there, download here
+        from VibraVid.remote.cli import handle_remote_download
+
+        remote_handled, remote_ok = handle_remote_download(args)
+        if remote_handled:
+            sys.exit(0 if remote_ok else 1)
 
         # If we reach this point, we're in interactive mode (either normal or with -i specified)
         close_console_flag = None

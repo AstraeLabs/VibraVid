@@ -41,6 +41,21 @@ class ConfigAccessor:
         self._cache_enabled = cache_enabled
         self._repair_callback = repair_callback
         self._repair_attempted = False
+        self.honors_scope = False
+
+    def _scoped_section(self, section: str):
+        """The forwarded section for this thread's remote request, or ``None`` when the stored config applies."""
+        if not self.honors_scope:
+            return None
+        from VibraVid.utils.scope import PASSTHROUGH_SECTIONS, current_overlay, note_wanted
+
+        overlay = current_overlay()
+        if overlay is None or section in PASSTHROUGH_SECTIONS:
+            return None
+        if section not in overlay:
+            note_wanted(section)  # never fall back to the server's own account: act as if the section did not exist
+            return {}
+        return overlay[section]
 
     def get(self, section: str, key: str, data_type: type = str, default: Any = _MISSING) -> Any:
         """
@@ -59,6 +74,14 @@ class ConfigAccessor:
             Any: The key value converted to the specified data type, or default if not found
         """
         cache_key = f"{self._cache_prefix}.{section}.{key}"
+
+        scoped = self._scoped_section(section)
+        if scoped is not None:  # never through the shared cache: it would hand one client's value to the next
+            if key in scoped:
+                return self._convert_to_data_type(scoped[key], data_type)
+            if default is not _MISSING:
+                return default
+            raise ValueError(f"Key '{key}' not found in section '{section}' of {self._cache_prefix} configuration")
 
         # Check if the value is in the cache
         if self._cache_enabled and cache_key in self._cache:
@@ -182,10 +205,16 @@ class ConfigAccessor:
 
     def get_section(self, section: str, default: dict | None = None) -> dict:
         """Return the entire section as a dict (e.g. all cookies/keys for a service's login block), uncached and un-typed."""
+        scoped = self._scoped_section(section)
+        if scoped is not None:
+            return dict(scoped)
         return dict(self._config_dict.get(section) or (default or {}))
 
     def has_section(self, section: str) -> bool:
         """True if the section exists, even when empty (get_section cannot tell an empty section from a missing one)."""
+        scoped = self._scoped_section(section)
+        if scoped is not None:
+            return bool(scoped)
         return isinstance(self._config_dict.get(section), dict)
 
     def set_key(self, section: str, key: str, value: Any) -> None:
@@ -197,7 +226,15 @@ class ConfigAccessor:
             key (str): Key to set
             value (Any): Value to associate with the key
         """
-        logger.info(f"Setting config: section='{section}', key='{key}', value='{value}'")
+        scoped = self._scoped_section(section)
+        if scoped is not None:  # a remote request: the new value belongs to the client, never to the server's login.json
+            from VibraVid.utils.scope import current_overlay, mark_changed
+
+            current_overlay().setdefault(section, scoped)[key] = value
+            mark_changed(section)
+            return
+
+        logger.info(f"Setting config: section='{section}', key='{key}', value='<hidden>'")
         try:
             if section not in self._config_dict:
                 self._config_dict[section] = {}
@@ -289,6 +326,7 @@ class ConfigManager:
             repair_callback=self._repair_missing_config_keys,
         )
         self.login = ConfigAccessor(self._login_data, self.cache, "login", self._cache_enabled)
+        self.login.honors_scope = True
         self.domain = ConfigAccessor(self._domains_data, self.cache, "domain", self._cache_enabled)
 
         # Load the configuration
@@ -639,6 +677,11 @@ class ConfigManager:
 
     def save_login(self) -> None:
         """Save the login configuration to file."""
+        from VibraVid.utils.scope import current_overlay
+
+        if current_overlay() is not None:
+            return
+        
         logger.info("Saving login configuration to file")
         try:
             with open(self.login_file_path, "w") as f:

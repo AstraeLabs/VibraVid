@@ -849,6 +849,12 @@ def MP4_Downloader(
     on_clear_abandon: "Callable[[], None] | None" = None,
 ) -> tuple:
     """Backward-compatible entry point — wraps ``MP4FileDownloader.download()``."""
+    if context_tracker.capture is not None:
+        from VibraVid.remote.capture import record_mp4
+
+        record_mp4(url, headers, key, chapters, poster_url, context_tracker.capture)
+        return path, False, None
+
     if context_tracker.resolve_only:
         from VibraVid.cli.command.queue import enqueue_down_from_context
 
