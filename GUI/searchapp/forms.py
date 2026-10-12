@@ -60,31 +60,14 @@ class SearchForm(forms.Form):
         self.fields["site"].choices = get_site_choices()
 
 
-class TrackSelectionForm(forms.Form):
-    """Per-download overrides using the same filter expressions as the CLI."""
-
-    video_filter = forms.RegexField(
-        regex=r"^[A-Za-z0-9][A-Za-z0-9_:=|.,+\- ]{0,159}$",
-        max_length=160, required=False,
-    )
-    audio_filter = forms.RegexField(
-        regex=r"^[A-Za-z0-9][A-Za-z0-9_:=|.,+\- ]{0,159}$",
-        max_length=160, required=False,
-    )
-    subtitle_filter = forms.RegexField(
-        regex=r"^[A-Za-z0-9][A-Za-z0-9_:=|.,+\- ]{0,159}$",
-        max_length=160, required=False,
-    )
-    skip_no_match = forms.BooleanField(required=False)
-
-
-class DownloadForm(TrackSelectionForm):
+class DownloadForm(forms.Form):
     source_alias = forms.CharField(widget=forms.HiddenInput)
     item_payload = forms.CharField(widget=forms.HiddenInput, required=False)
     season = forms.CharField(max_length=100, required=False, label="Stagione")
     episode = forms.CharField(max_length=1000, required=False, label="Episodio (es: 1-3)")
     quality = forms.RegexField(regex=r"^(?:[1-9][0-9]{1,3}p)?$", max_length=5, required=False)
     audio_format = forms.CharField(max_length=16, required=False, label="Formato audio")
+    manual_tracks = forms.BooleanField(required=False)
 
     def clean_quality(self):
         from VibraVid.core.utils.quality import normalize_quality

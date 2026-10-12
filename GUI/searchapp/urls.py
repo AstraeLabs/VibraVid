@@ -18,6 +18,7 @@ urlpatterns = [
     # Download (formerly the home dashboard)
     path("downloads/", views.cinema_download, name="download_dashboard"),
     path("api/get-downloads/", views.get_downloads_json, name="get_downloads_json"),
+    path("api/confirm-manual-tracks/", views.confirm_manual_tracks, name="confirm_manual_tracks"),
     path("api/downloads-summary/", views.get_downloads_summary, name="get_downloads_summary"),
     path("api/kill-download/", views.kill_download, name="kill_download"),
     path("api/remove-queued-download/", views.remove_queued_download, name="remove_queued_download"),

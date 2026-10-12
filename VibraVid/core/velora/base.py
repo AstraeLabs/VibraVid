@@ -17,6 +17,7 @@ from VibraVid.core.manifest.m3u8 import HLSParser
 from VibraVid.core.manifest.mpd import DashParser
 from VibraVid.core.manifest.stream import Stream
 from VibraVid.core.ui.bar_manager import DownloadBarManager
+from VibraVid.core.ui.manual_tracks import manual_track_broker
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import (
@@ -196,13 +197,17 @@ class BaseMediaDownloader:
 
         self.streams = [s for s in parser.parse_streams() if s.type != "image"]
 
-        if auto_select or context_tracker.video_quality or context_tracker.track_filters:
+        manual_choice = bool(
+            context_tracker.is_gui and context_tracker.manual_tracks and not context_tracker.defer_manual_tracks
+        )
+        if manual_choice or auto_select or context_tracker.video_quality or context_tracker.is_gui:
             self._apply_selection()
         else:
             selector = InteractiveStreamSelector(self.streams, window_size=15)
             selector.run()
 
-        self._register_dv_companion()
+        # Register the DV companion only after the user's final selection.
+        # External audio and subtitle entries are appended below first.
 
         for ext in self.external_subtitles:
             lang = ext.get("language", "")
@@ -216,6 +221,7 @@ class BaseMediaDownloader:
                 is_external=True,
             )
             fake.id = "EXT"
+            fake._manual_external_entry = ext
             self.streams.append(fake)
 
         for ext in self.external_audios:
@@ -230,6 +236,7 @@ class BaseMediaDownloader:
                 is_external=True,
             )
             fake.id = "EXT"
+            fake._manual_external_entry = ext
             self.streams.append(fake)
 
         for ext in self.external_other_tracks:
@@ -260,6 +267,34 @@ class BaseMediaDownloader:
                     fake.video_range = "HDR10+"
 
             self.streams.append(fake)
+
+        if manual_choice:
+            selection_id = context_tracker.download_id
+            # Only offer entries whose underlying download selection we can control.
+            # Other externally-injected video/audio tracks are not managed by
+            # the same _selected mechanism and must not be misrepresented.
+            selectable = [
+                stream for stream in self.streams
+                if not stream.is_external or getattr(stream, "_manual_external_entry", None) is not None
+            ]
+            download_tracker.update_status(selection_id, "Waiting for track selection")
+            manual_track_broker.choose(
+                selection_id,
+                selectable,
+                cancelled=lambda: download_tracker.is_stopped(selection_id),
+                on_wait=context_tracker.manual_track_on_wait,
+                on_confirm=context_tracker.manual_track_on_confirm,
+            )
+            for stream in selectable:
+                entry = getattr(stream, "_manual_external_entry", None)
+                if entry is not None:
+                    entry["_selected"] = bool(stream.selected)
+                if getattr(stream, "dv_companion", False) and not stream.selected:
+                    stream.dv_companion = False
+            self.no_match_skip = False
+            download_tracker.update_status(selection_id, "Preparing selected tracks")
+
+        self._register_dv_companion()
 
         if show_table and self.streams:
             console = Console(force_terminal=True if platform.system().lower() != "windows" else None)
@@ -305,10 +340,9 @@ class BaseMediaDownloader:
     def _apply_selection(self) -> None:
         f = self.custom_filters or {}
         requested_quality = context_tracker.video_quality
-        overrides = context_tracker.track_filters
-        v_cfg = overrides.get("video") or ("best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video"))
-        a_cfg = overrides.get("audio") or f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
-        s_cfg = overrides.get("subtitle") or f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+        v_cfg = "best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
+        a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         def _pref(key: str, default: bool = False, section: str = "DOWNLOAD") -> bool:
             return bool(f.get(key, config_manager.config.get_bool(section, key, default=default)))
@@ -347,7 +381,7 @@ class BaseMediaDownloader:
         """Return the active selection filter for *track_type*, preferring custom_filters over config."""
         cf_key = "subtitle" if track_type == "subtitle" else "audio"
         cfg_key = "select_subtitle" if track_type == "subtitle" else "select_audio"
-        return context_tracker.track_filters.get(cf_key) or (self.custom_filters or {}).get(cf_key) or config_manager.config.get("DOWNLOAD", cfg_key) or ""
+        return (self.custom_filters or {}).get(cf_key) or config_manager.config.get("DOWNLOAD", cfg_key) or ""
 
     @staticmethod
     def _ext_filter_tokens(cfg: str, track_type: str) -> list[str]:

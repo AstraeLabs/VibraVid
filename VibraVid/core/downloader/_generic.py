@@ -26,6 +26,7 @@ from VibraVid.core.muxing.helper.sub.disposition import (
 from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
 from VibraVid.core.muxing.streaming_mux import ChunkRelay, NamedPipeMuxer, StreamingMuxFeeder
 from VibraVid.core.ui.bar_manager import DownloadBarManager
+from VibraVid.core.ui.manual_tracks import manual_track_broker
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES
@@ -372,7 +373,12 @@ class Generic_Downloader(BaseDownloader):
             )
 
             md.custom_filters = {"dv_auto": False}
-            md.parse_stream(show_table=False)
+            previous_defer = context_tracker.defer_manual_tracks
+            context_tracker.defer_manual_tracks = True
+            try:
+                md.parse_stream(show_table=False)
+            finally:
+                context_tracker.defer_manual_tracks = previous_defer
             for s in md.streams:
                 s._src_label = label
                 _normalize_lang(s)
@@ -1077,10 +1083,9 @@ class Generic_Downloader(BaseDownloader):
 
     def _select(self, parsed: list[tuple[MediaDownloader, dict[str, Any]]]) -> list:
         f = self.custom_filters
-        overrides = context_tracker.track_filters
-        v = overrides.get("video") or f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a = overrides.get("audio") or f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
-        sub = overrides.get("subtitle") or f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+        v = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
+        a = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        sub = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         # Sources with an explicit role bypass attribute-based dedup/selection,
         # but _apply_explicit_roles still narrows each source by the same filters.
@@ -1122,15 +1127,28 @@ class Generic_Downloader(BaseDownloader):
         selector = self._build_selector(v, a, sub)
         selector.apply(pool)
         self._no_match = selector.no_match
+        manual = context_tracker.is_gui and context_tracker.manual_tracks
+        if manual:
+            selection_id = context_tracker.download_id
+            download_tracker.update_status(selection_id, "Waiting for track selection")
+            manual_track_broker.choose(
+                selection_id,
+                role_streams + pool,
+                cancelled=lambda: download_tracker.is_stopped(selection_id),
+                on_wait=context_tracker.manual_track_on_wait,
+                on_confirm=context_tracker.manual_track_on_confirm,
+            )
+            self._no_match = False
+            download_tracker.update_status(selection_id, "Preparing selected tracks")
 
         # If a DV companion was selected (select_video="hybrid" or CODEC.dv_auto),
         # keep a reference to it for special handling in the download/muxing phases.
-        self._dv_stream = next((s for s in pool if getattr(s, "dv_companion", False)), None)
+        self._dv_stream = None if manual else next((s for s in pool if getattr(s, "dv_companion", False)), None)
         if self._dv_stream is not None:
             self._dv_stream.selected = True
             logger.info(f"hybrid: companion selected -> {self._dv_stream}")
 
-        return role_streams + [s for s in pool if s.selected]
+        return [s for s in role_streams if s.selected] + [s for s in pool if s.selected]
 
     def _dv_companion_possible(self, video_filter: str) -> bool:
         """True when a Dolby Vision stream may still be needed as RPU companion: ``select_video="hybrid"`` or ``CODEC.dv_auto`` (a per-run override wins)."""

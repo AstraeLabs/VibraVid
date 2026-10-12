@@ -5,7 +5,9 @@ import logging
 from datetime import datetime, timezone
 
 from django.http import HttpRequest, JsonResponse
+from django.views.decorators.http import require_POST
 
+from VibraVid.core.ui.manual_tracks import TrackSelectionError, manual_track_broker
 from VibraVid.core.ui.tracker import download_tracker
 
 from .._download_infra import (
@@ -42,8 +44,27 @@ def get_downloads_json(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "active": _tag_anime_entries(active_downloads),
         "scheduled": _tag_anime_entries(scheduled),
-        "history": _tag_anime_entries(history)
+        "history": _tag_anime_entries(history),
+        "pending_tracks": [
+            {**req, "title": next(
+                (item.get("title") for item in active_downloads if item.get("id") == req["download_id"]),
+                req["download_id"],
+            )} for req in manual_track_broker.list_pending()
+        ],
     })
+
+
+@require_POST
+def confirm_manual_tracks(request: HttpRequest) -> JsonResponse:
+    """Confirm exact stream indices for one pending GUI download."""
+    try:
+        payload = json.loads(request.body)
+        manual_track_broker.submit(
+            payload.get("download_id"), payload.get("token"), payload.get("selected")
+        )
+    except (TypeError, ValueError, json.JSONDecodeError, AttributeError, TrackSelectionError) as exc:
+        return JsonResponse({"status": "error", "message": str(exc)}, status=400)
+    return JsonResponse({"status": "success"})
 
 
 def get_downloads_summary(request: HttpRequest) -> JsonResponse:
@@ -265,6 +286,7 @@ def clear_download_history(request: HttpRequest) -> JsonResponse:
 
 __all__ = [
     'get_downloads_json',
+    'confirm_manual_tracks',
     'get_downloads_summary',
     'kill_download',
     'remove_queued_download',

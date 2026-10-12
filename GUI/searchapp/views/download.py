@@ -89,10 +89,7 @@ def start_download(request: HttpRequest) -> HttpResponse:
     season = form.cleaned_data.get("season") or None
     episode = form.cleaned_data.get("episode") or None
     audio_format = form.cleaned_data.get("audio_format") or None
-    video_filter = form.cleaned_data["video_filter"]
-    audio_filter = form.cleaned_data["audio_filter"]
-    subtitle_filter = form.cleaned_data["subtitle_filter"]
-    skip_no_match = form.cleaned_data["skip_no_match"]
+    manual_tracks = form.cleaned_data["manual_tracks"]
 
     # Normalize
     if season:
@@ -125,19 +122,10 @@ def start_download(request: HttpRequest) -> HttpResponse:
 
     quality = form.cleaned_data.get("quality") or None
 
-    # Preserve the original dispatch contract when no advanced options were set.
-    track_options = {
-        key: value for key, value in (
-            ("video_filter", video_filter),
-            ("audio_filter", audio_filter),
-            ("subtitle_filter", subtitle_filter),
-            ("skip_no_match", skip_no_match),
-        ) if value
-    }
-    _run_download_in_thread(
-        source_alias, item_payload, season, episode, media_type,
-        audio_format=audio_format, quality=quality, **track_options,
-    )
+    # Run download
+    options = {"manual_tracks": True} if manual_tracks else {}
+    _run_download_in_thread(source_alias, item_payload, season, episode, media_type,
+                            audio_format=audio_format, quality=quality, **options)
     return redirect("download_dashboard")
 
 @require_http_methods(["POST"])
