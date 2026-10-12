@@ -125,12 +125,18 @@ def start_download(request: HttpRequest) -> HttpResponse:
 
     quality = form.cleaned_data.get("quality") or None
 
-    # Run download
+    # Preserve the original dispatch contract when no advanced options were set.
+    track_options = {
+        key: value for key, value in (
+            ("video_filter", video_filter),
+            ("audio_filter", audio_filter),
+            ("subtitle_filter", subtitle_filter),
+            ("skip_no_match", skip_no_match),
+        ) if value
+    }
     _run_download_in_thread(
         source_alias, item_payload, season, episode, media_type,
-        audio_format=audio_format, quality=quality, video_filter=video_filter,
-        audio_filter=audio_filter, subtitle_filter=subtitle_filter,
-        skip_no_match=skip_no_match,
+        audio_format=audio_format, quality=quality, **track_options,
     )
     return redirect("download_dashboard")
 

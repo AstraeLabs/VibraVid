@@ -419,10 +419,12 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
         return redirect("search_home")
     choices = selection_form.cleaned_data
     track_options = {
-        "video_filter": choices["video_filter"],
-        "audio_filter": choices["audio_filter"],
-        "subtitle_filter": choices["subtitle_filter"],
-        "skip_no_match": choices["skip_no_match"],
+        key: value for key, value in (
+            ("video_filter", choices["video_filter"]),
+            ("audio_filter", choices["audio_filter"]),
+            ("subtitle_filter", choices["subtitle_filter"]),
+            ("skip_no_match", choices["skip_no_match"]),
+        ) if value
     }
     from VibraVid.core.utils.quality import normalize_quality
     try:
