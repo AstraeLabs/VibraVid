@@ -29,10 +29,10 @@ from VibraVid.setup.system import (
     get_ffmpeg_path,
     get_ffprobe_path,
 )
-from VibraVid.utils import config_manager, disk_cache, get_log_file_path, setup_logger, start_message
+from VibraVid.utils import _startup_prefetch, config_manager, disk_cache, get_log_file_path, setup_logger, start_message
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
-from VibraVid.utils.upload.update import check_for_updates, download_release_asset
+from VibraVid.utils.upload.update import check_for_updates, update_command
 from VibraVid.utils.upload.version import __title__, __version__
 
 console = Console()
@@ -411,43 +411,17 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
 
 
 def _show_update_notice(info: dict) -> None:
-    if info["available"]:
-        console.print(f"\n[bold yellow]New VibraVid release: {info['latest']} (installed: {info['current']}).[/]")
-        if info["mode"] == "installer" and info["asset"]:
-            console.print("[cyan]Press U in the menu to download the compatible executable (no installation).[/]")
-        elif info["mode"] == "installer":
-            console.print("[yellow]No compatible binary is published for this OS/architecture.[/]")
-        else:
-            console.print(f"[yellow]Installed via {info['mode']}: update using your package/image/source workflow.[/]")
-
-
-def _download_update_from_menu(info: dict | None) -> None:
-    """The explicit U selection downloads only; it never replaces the current binary."""
-    if info is None or info["error"]:
-        info = check_for_updates(force=True)
-    if info["error"]:
-        console.print(f"[yellow]Update check unavailable: {info['error']}[/]")
-    elif not info["available"]:
-        console.print(f"[green]Already up to date: {info['current']}[/]")
-    elif info["mode"] != "installer":
-        console.print(f"[yellow]This is a {info['mode']} installation. Update through its original installation method.[/]")
-    elif not info["asset"]:
-        console.print("[yellow]No compatible executable available for this platform.[/]")
+    if not info["available"]:
+        return
+    
+    tag = info["latest"]
+    tag_url = tag if str(tag).startswith("v") else f"v{tag}"
+    link = f"[link=https://github.com/AstraeLabs/VibraVid/releases/tag/{tag_url}]{tag}[/link]"
+    if info["mode"] == "installer":
+        hint = "Run with [#FFD60A]-UP [#00BCD4]to auto-update"
     else:
-        try:
-            path = download_release_asset(info["asset"])
-            console.print(f"[bold green]Downloaded: {path}[/] (current executable unchanged)")
-        except Exception as exc:
-            logger.warning("Release download failed: %s", exc)
-            console.print(f"[red]Update download failed: {exc}[/]")
-
-
-def _choose_site_or_update(args, choice_labels, update_info: dict | None):
-    while True:
-        selection = get_user_site_selection(args, choice_labels)
-        if selection.lower() != "u":
-            return selection
-        _download_update_from_menu(update_info)
+        hint = f"Update with: [#FFD60A]{update_command(info['mode'])}"
+    console.print(f"\n[red]   New [#00BCD4]version available: [#FFD60A]{link} [dim]·[/] [#00BCD4]{hint}\n")
 
 
 def get_user_site_selection(args, choice_labels):
@@ -462,13 +436,13 @@ def get_user_site_selection(args, choice_labels):
     console.print(f"\n  [cyan]Category: {legend_text}")
     console.print()
 
-    choice_keys = list(choice_labels.keys()) + ["global", "u", "U"]
+    choice_keys = list(choice_labels.keys()) + ["global"]
     name_width = max([len(label[0]) for label in choice_labels.values()] + [len("(global) Global")])
     cell_width = name_width + 4  # "12:" + space + name
     site_entries = [
         f"[dim]{key:>2}:[/dim] [{COLOR_MAP.get(label[1], 'white')}]{label[0]:<{name_width}}[/{COLOR_MAP.get(label[1], 'white')}]"
         for key, label in choice_labels.items()
-    ] + [f"[magenta]{'(global) Global':<{cell_width}}[/magenta]", "[bold cyan]U: Download update[/]"]
+    ] + [f"[magenta]{'(global) Global':<{cell_width}}[/magenta]"]
 
     site_rows = [" ".join(site_entries[i : i + 6]) for i in range(0, len(site_entries), 6)]
     for row in site_rows:
@@ -615,6 +589,9 @@ def main():
                 _show_update_notice(info)
             return
 
+        if not args.skip_update_check and sys.stdin.isatty() and sys.stdout.isatty() and not getattr(args, "tui", False):
+            _startup_prefetch.start_update_check()
+
         if getattr(args, "tui", False):
             from VibraVid.tui.app import main as tui_main
 
@@ -750,14 +727,13 @@ def main():
             equivalent_command_builder.log_equivalent_command(args, parser, context_tracker, site_option_dests)
             return
 
-        update_info = None
-        if not args.skip_update_check and sys.stdin.isatty() and sys.stdout.isatty():
-            update_info = check_for_updates()
+        update_info = _startup_prefetch.collect("update", timeout=1)
+        if update_info is not None:
             _show_update_notice(update_info)
 
         if not close_console_flag:
             while True:
-                category = _choose_site_or_update(args, choice_labels, update_info)
+                category = get_user_site_selection(args, choice_labels)
 
                 if category == "global":
                     logger.info("User selected global search from interactive menu.")
@@ -777,7 +753,7 @@ def main():
             force_exit()
 
         else:
-            category = _choose_site_or_update(args, choice_labels, update_info)
+            category = get_user_site_selection(args, choice_labels)
 
             if category == "global":
                 call_global_search(args.search)

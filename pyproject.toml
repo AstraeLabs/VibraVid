@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-requirements-txt"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,6 +8,7 @@ version = "1.4.6"
 description = "Media downloader and streaming utility with ARR integration, GUI support, and DRM handling"
 authors = [{ name = "AstraeLabs" }]
 requires-python = ">=3.10,<3.15"
+dynamic = ["dependencies", "optional-dependencies"]
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 keywords = [
@@ -29,6 +30,12 @@ classifiers = [
 Homepage = "https://github.com/AstraeLabs/VibraVid"
 Repository = "https://github.com/AstraeLabs/VibraVid"
 Issues = "https://github.com/AstraeLabs/VibraVid/issues"
+
+[tool.hatch.metadata.hooks.requirements_txt]
+files = ["requirements.txt"]
+
+[tool.hatch.metadata.hooks.requirements_txt.optional-dependencies]
+gui = ["GUI/requirements.txt"]
 
 [project.scripts]
 vibravid = "VibraVid.cli.bootstrap:main"

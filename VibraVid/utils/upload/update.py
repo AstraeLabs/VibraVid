@@ -18,7 +18,7 @@ from rich.console import Console
 from VibraVid.setup import get_is_binary_installation
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.http_client import create_client
 
 from .version import __author__, __title__
 from .version import __version__ as source_code_version
@@ -42,7 +42,8 @@ _GENERIC_UPDATABLE_TOOLS = {
     "deno": ["deno"],
 }
 _RELEASE_URL = f"https://api.github.com/repos/{__author__}/{__title__}/releases/latest"
-_RELEASE_CACHE_TTL = 6 * 60 * 60
+_RELEASE_CACHE_TTL = 24 * 60 * 60
+_RELEASE_ERROR_TTL = 30 * 60
 _CHECK_TIMEOUT = 4
 
 
@@ -75,7 +76,7 @@ def _os_release_version() -> str | None:
 
 
 def _compatible_asset_names(system: str, arch: str, os_version: str | None) -> list[str]:
-    """Exact CI build targets, in priority order. Unknown targets are intentionally unsupported."""
+    """CI build targets in priority order. Linux falls back to the oldest build (most compatible) on other distros."""
     prefix = "VibraVid"
     if system == "windows" and arch == "x64":
         if os_version == "2025":
@@ -85,8 +86,7 @@ def _compatible_asset_names(system: str, arch: str, os_version: str | None) -> l
     if system == "linux" and arch == "x64":
         if os_version == "24.04":
             return [f"{prefix}_linux_24_04_x64", f"{prefix}_linux_22_04_x64"]
-        if os_version == "22.04":
-            return [f"{prefix}_linux_22_04_x64"]
+        return [f"{prefix}_linux_22_04_x64"]
     if system == "darwin":
         if not os_version or not os_version.split(".")[0].isdigit():
             return []
@@ -127,30 +127,33 @@ def pick_release_asset(assets: list[dict], system: str, arch: str, os_version: s
     return None
 
 
-def fetch_github_releases():
-    """Legacy release listing for other callers; bounded request."""
-    url = f"https://api.github.com/repos/{__author__}/{__title__}/releases"
-    logger.info(f"Checking latest {__title__} release: {url}")
-    with create_client(headers=get_headers(), timeout=_CHECK_TIMEOUT) as client:
-        response = client.get(url)
-        response.raise_for_status()
-    return response.json()
-
-
 def get_execution_mode():
     """Get the execution mode of the application"""
-    if os.environ.get("VIBRAVID_RUNNING_IN_DOCKER") or (sys.platform.startswith("linux") and Path("/.dockerenv").exists()):
+    if sys.platform.startswith("linux") and Path("/.dockerenv").exists():
         return "docker"
     if get_is_binary_installation():
         return "installer"
 
     try:
-        importlib.metadata.distribution(__title__)
-        return "pip"
+        package_location = importlib.metadata.files(__title__)
+        if any("site-packages" in str(path) for path in package_location):
+            return "pip"
     except importlib.metadata.PackageNotFoundError:
         pass
 
     return "source_code"
+
+
+_UPDATE_COMMANDS = {
+    "installer": "VibraVid -UP",
+    "source_code": "git pull && pip install -r requirements.txt --upgrade  (uv: uv sync --upgrade)",
+    "docker": "docker compose pull && docker compose up -d",
+}
+
+
+def update_command(mode: str) -> str:
+    """How to update for the given execution mode (see get_execution_mode)."""
+    return _UPDATE_COMMANDS.get(mode) or _UPDATE_COMMANDS["source_code"]
 
 
 def _current_version() -> str:
@@ -163,7 +166,9 @@ def _current_version() -> str:
 
 
 def _latest_release(*, force: bool = False, timeout: float = _CHECK_TIMEOUT) -> dict:
-    cache_path = Path(config_manager.base_path) / ".cache" / "vibravid_latest_release.json"
+    cache_dir = Path(config_manager.base_path) / ".cache"
+    cache_path = cache_dir / "vibravid_latest_release.json"
+    error_path = cache_dir / "vibravid_latest_release_error.json"
     if not force:
         try:
             if time.time() - cache_path.stat().st_mtime < _RELEASE_CACHE_TTL:
@@ -172,10 +177,24 @@ def _latest_release(*, force: bool = False, timeout: float = _CHECK_TIMEOUT) -> 
                     return cached
         except (OSError, ValueError, TypeError):
             pass
-    with create_client(headers={"Accept": "application/vnd.github+json", "User-Agent": "VibraVid-Updater"}, timeout=timeout) as client:
-        response = client.get(_RELEASE_URL, timeout=timeout)
-        response.raise_for_status()
-        release = response.json()
+        try:
+            if time.time() - error_path.stat().st_mtime < _RELEASE_ERROR_TTL:
+                raise RuntimeError(json.loads(error_path.read_text(encoding="utf-8")).get("error", "GitHub unreachable"))
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    try:
+        with create_client(headers={"Accept": "application/vnd.github+json", "User-Agent": "VibraVid-Updater"}, timeout=timeout) as client:
+            response = client.get(_RELEASE_URL, timeout=timeout)
+            response.raise_for_status()
+            release = response.json()
+    except Exception as exc:
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            error_path.write_text(json.dumps({"error": str(exc)}), encoding="utf-8")
+        except OSError:
+            pass
+        raise
+    error_path.unlink(missing_ok=True)
     if not isinstance(release, dict) or not release.get("tag_name") or not isinstance(release.get("assets"), list):
         raise ValueError("Invalid GitHub release metadata")
     try:
@@ -229,6 +248,8 @@ def download_release_asset(asset: dict, *, destination: str | Path | None = None
     digest = asset.get("digest") or ""
     if digest and not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest):
         raise ValueError("Unsupported release digest")
+    if not digest:
+        logger.warning("Release asset %s has no published SHA-256 digest; integrity not verified", name)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:

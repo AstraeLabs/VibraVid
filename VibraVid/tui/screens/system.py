@@ -10,6 +10,7 @@ from pathlib import Path
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import (
     Button,
@@ -37,7 +38,7 @@ from VibraVid.setup.system import (
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.utils import config_manager, get_log_file_path
-from VibraVid.utils.upload.update import check_for_updates, download_release_asset, get_execution_mode
+from VibraVid.utils.upload.update import check_for_updates, download_release_asset, get_execution_mode, update_command
 from VibraVid.utils.upload.version import __title__, __version__
 
 logger = logging.getLogger(__name__)
@@ -241,16 +242,19 @@ class SystemScreen(Screen):
         elif not result["available"]:
             status.update(f"[bold green]You are running the latest version ({result['current']}).[/]")
         elif result["mode"] != "installer":
-            status.update(f"[yellow]New version {result['latest']}. Update via {result['mode']} installation workflow.[/]")
+            status.update(f"[bold yellow]New version {result['latest']} (current {result['current']}) · Update with: [white]{update_command(result['mode'])}[/white][/]")
         elif not result["asset"]:
             status.update(f"[yellow]New version {result['latest']}, but no compatible binary was found.[/]")
         else:
-            status.update(f"[bold yellow]Update available: {result['current']} → {result['latest']}[/]")
+            status.update(f"[bold yellow]Update available: {result['current']} → {result['latest']} · Run with [white]-UP[/white] to auto-update, or download it here[/]")
 
     @work(thread=True, exclusive=True, group="release-check")
     def _run_update_check(self, force: bool = False) -> None:
         result = check_for_updates(force=force)
-        self.app.call_from_thread(self._display_update_result, result)
+        try:
+            self.app.call_from_thread(self._display_update_result, result)
+        except (NoMatches, RuntimeError):
+            logger.debug("Update check finished after the System screen was closed")
 
     @on(Button.Pressed, "#btn-download-update")
     def action_download_update(self) -> None:
@@ -265,6 +269,9 @@ class SystemScreen(Screen):
 
     def _display_download_result(self, message: str) -> None:
         self._update_downloading = False
+        if not self.is_attached:
+            return
+        
         self.query_one("#btn-check-update", Button).disabled = False
         self.query_one("#update-status", Static).update(message)
         info = self._update_info
@@ -276,8 +283,11 @@ class SystemScreen(Screen):
     def _run_update_download(self, asset: dict) -> None:
         try:
             downloaded = download_release_asset(asset)
-            message = f"[green]Downloaded to {downloaded}. Current executable was not changed.[/]"
+            message = f"[green]Downloaded to {downloaded}. Current executable was not changed: replace it manually or use -UP.[/]"
         except Exception as e:
-            logger.error(f"Error checking updates: {e}")
+            logger.error(f"Error downloading update: {e}")
             message = f"[bold red]Update download failed: {e}[/]"
-        self.app.call_from_thread(self._display_download_result, message)
+        try:
+            self.app.call_from_thread(self._display_download_result, message)
+        except RuntimeError:
+            logger.debug("Update download finished after the System screen was closed")

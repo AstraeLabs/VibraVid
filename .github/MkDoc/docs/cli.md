@@ -325,6 +325,8 @@ python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist
 | `--resolve-only` | Resolve and cache the manifest (keys, license, playlist) without actually downloading — pairs with `--down-json`/the queue to download later without re-resolving |
 | `--tui` | Launch the Textual terminal UI instead of the plain CLI flow |
 | `-UP`, `--update` | Auto-update to the latest release (binary builds only) |
+| `--check-update` | Check GitHub Releases for a newer version, print how to update for your installation (binary, source, Docker) and exit — no download |
+| `--skip-update-check` | Skip the background update check run at interactive CLI startup (the result is cached for 24 hours; failed checks are retried after 30 minutes) |
 | `--version` | Print the installed version and exit |
 
 ```bash

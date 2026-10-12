@@ -50,7 +50,8 @@ def test_asset_fallback_only_to_compatible_older_runtime():
     assets = [{"name": "VibraVid_linux_22_04_x64"}]
     assert updater.pick_release_asset(assets, "linux", "x64", "24.04") == assets[0]
     assert updater.pick_release_asset(assets, "linux", "arm64", "24.04") is None
-    assert updater.pick_release_asset(assets, "linux", "x64", "26.04") is None
+    assert updater.pick_release_asset(assets, "linux", "x64", "26.04") == assets[0]
+    assert updater.pick_release_asset(assets, "linux", "x64", None) == assets[0]
     assert updater.pick_release_asset(assets, "windows", "x64", "2025") is None
 
 
@@ -198,17 +199,49 @@ def test_download_rejects_unsafe_asset_name(unsafe_name):
         updater.download_release_asset(asset)
 
 
-def test_menu_u_downloads_only_after_selection(monkeypatch, tmp_path):
+def test_update_notice_suggests_original_commands(capsys):
     from VibraVid.cli import run as cli
 
-    info = {"available": True, "mode": "installer", "asset": _asset(b"exe"), "error": None}
-    chosen = iter(["u", "0"])
-    download_calls = []
-    monkeypatch.setattr(cli, "get_user_site_selection", lambda *_: next(chosen))
-    monkeypatch.setattr(cli, "download_release_asset", lambda asset: download_calls.append(asset) or tmp_path / "app.exe")
+    base = {"available": True, "latest": "1.4.7", "current": "1.4.6", "asset": None}
+    cli._show_update_notice({**base, "mode": "installer"})
+    assert "-UP" in capsys.readouterr().out
+    cli._show_update_notice({**base, "mode": "source_code"})
+    assert "git pull" in capsys.readouterr().out
+    cli._show_update_notice({**base, "mode": "docker"})
+    assert "docker compose pull" in capsys.readouterr().out
+    cli._show_update_notice({**base, "mode": "pip"})
+    assert "git pull" in capsys.readouterr().out
+    cli._show_update_notice({**base, "mode": "installer", "available": False})
+    assert capsys.readouterr().out == ""
 
-    assert cli._choose_site_or_update(SimpleNamespace(), {}, info) == "0"
-    assert download_calls == [info["asset"]]
+
+def test_release_cache_lasts_24_hours_and_errors_are_cached(monkeypatch, tmp_path):
+    monkeypatch.setattr(updater.config_manager, "base_path", str(tmp_path))
+    assert updater._RELEASE_CACHE_TTL == 24 * 60 * 60
+
+    def broken(**kwargs):
+        raise TimeoutError("offline")
+
+    monkeypatch.setattr(updater, "create_client", broken)
+    with pytest.raises(TimeoutError):
+        updater._latest_release()
+
+    def must_not_be_called(**kwargs):
+        raise AssertionError("network used during negative cache window")
+
+    monkeypatch.setattr(updater, "create_client", must_not_be_called)
+    with pytest.raises(RuntimeError, match="offline"):
+        updater._latest_release()
+
+
+def test_startup_prefetch_update_job_runs_in_background(monkeypatch):
+    from VibraVid.utils import _startup_prefetch as prefetch
+
+    monkeypatch.setattr(prefetch, "_futures", {})
+    assert prefetch.collect("update", timeout=0) is None
+    monkeypatch.setattr(prefetch, "_check_update", lambda: {"available": False})
+    prefetch.start_update_check()
+    assert prefetch.collect("update", timeout=5) == {"available": False}
 
 
 def test_enter_keeps_original_default_menu_selection(monkeypatch):
@@ -222,7 +255,7 @@ def test_enter_keeps_original_default_menu_selection(monkeypatch):
 
     monkeypatch.setattr(cli.msg, "ask", ask)
     assert cli.get_user_site_selection(SimpleNamespace(), {"0": ("Example", "anime")}) == "0"
-    assert calls[0]["default"] == "0" and "u" in calls[0]["choices"]
+    assert calls[0]["default"] == "0" and "u" not in calls[0]["choices"]
 
 
 def test_update_cli_flags_are_exposed():
