@@ -37,7 +37,7 @@ from VibraVid.setup.system import (
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.utils import config_manager, get_log_file_path
-from VibraVid.utils.upload.update import fetch_github_releases, get_execution_mode
+from VibraVid.utils.upload.update import check_for_updates, download_release_asset, get_execution_mode
 from VibraVid.utils.upload.version import __title__, __version__
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,8 @@ class SystemScreen(Screen):
     def __init__(self) -> None:
         super().__init__()
         self._log_files: list[Path] = []
+        self._update_info: dict | None = None
+        self._update_downloading = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -76,6 +78,7 @@ class SystemScreen(Screen):
                     yield Static(t("system_app_info"), classes="panel-title")
                     yield Static(id="system-info-text")
                     yield Button(t("check_for_updates"), variant="primary", id="btn-check-update")
+                    yield Button(t("download_update"), variant="success", id="btn-download-update", disabled=True)
                     yield Static("", id="update-status")
         yield CustomFooter()
 
@@ -91,6 +94,7 @@ class SystemScreen(Screen):
         self._load_drm_status()
         self._load_log_files()
         self._load_system_info()
+        self._run_update_check()
 
     def action_refresh_all(self) -> None:
         self._load_dependencies()
@@ -218,31 +222,62 @@ class SystemScreen(Screen):
 
     @on(Button.Pressed, "#btn-check-update")
     def action_check_update(self) -> None:
+        if self._update_downloading:
+            return
         status = self.query_one("#update-status", Static)
         status.update("[bold yellow]Checking GitHub for updates...[/]")
-        self._run_update_check()
+        self.query_one("#btn-download-update", Button).disabled = True
+        self._run_update_check(force=True)
 
-    @work(exclusive=True)
-    async def _run_update_check(self) -> None:
+    def _display_update_result(self, result: dict) -> None:
+        self._update_info = result
+        if self._update_downloading:
+            return
         status = self.query_one("#update-status", Static)
+        button = self.query_one("#btn-download-update", Button)
+        button.disabled = not (result["available"] and result["mode"] == "installer" and result["asset"])
+        if result["error"]:
+            status.update(f"[yellow]GitHub check unavailable: {result['error']}[/]")
+        elif not result["available"]:
+            status.update(f"[bold green]You are running the latest version ({result['current']}).[/]")
+        elif result["mode"] != "installer":
+            status.update(f"[yellow]New version {result['latest']}. Update via {result['mode']} installation workflow.[/]")
+        elif not result["asset"]:
+            status.update(f"[yellow]New version {result['latest']}, but no compatible binary was found.[/]")
+        else:
+            status.update(f"[bold yellow]Update available: {result['current']} → {result['latest']}[/]")
+
+    @work(thread=True, exclusive=True, group="release-check")
+    def _run_update_check(self, force: bool = False) -> None:
+        result = check_for_updates(force=force)
+        self.app.call_from_thread(self._display_update_result, result)
+
+    @on(Button.Pressed, "#btn-download-update")
+    def action_download_update(self) -> None:
+        info = self._update_info
+        if self._update_downloading or not info or not info["available"] or info["mode"] != "installer" or not info["asset"]:
+            return
+        self._update_downloading = True
+        self.query_one("#btn-check-update", Button).disabled = True
+        self.query_one("#btn-download-update", Button).disabled = True
+        self.query_one("#update-status", Static).update("[cyan]Downloading release and verifying SHA-256...[/]")
+        self._run_update_download(info["asset"])
+
+    def _display_download_result(self, message: str) -> None:
+        self._update_downloading = False
+        self.query_one("#btn-check-update", Button).disabled = False
+        self.query_one("#update-status", Static).update(message)
+        info = self._update_info
+        self.query_one("#btn-download-update", Button).disabled = not bool(
+            info and info["available"] and info["mode"] == "installer" and info["asset"]
+        )
+
+    @work(thread=True, exclusive=True, group="release-download")
+    def _run_update_download(self, asset: dict) -> None:
         try:
-            releases = fetch_github_releases()
-            if not releases or not isinstance(releases, list):
-                status.update("[bold red]Could not fetch release information from GitHub.[/]")
-                return
-
-            latest = releases[0]
-            tag_name = latest.get("tag_name") or latest.get("name", "Unknown")
-            clean_latest = tag_name.lstrip("v")
-            clean_current = __version__.lstrip("v")
-
-            if clean_current == clean_latest:
-                status.update(f"[bold green]✓ You are running the latest version (v{__version__}).[/]")
-                self.notify("VibraVid is up to date!", severity="information")
-            else:
-                msg = f"[bold yellow]⚡ Update available! Latest: {tag_name} (Current: v{__version__})[/]"
-                status.update(msg)
-                self.notify(f"New update available: {tag_name}", severity="warning")
+            downloaded = download_release_asset(asset)
+            message = f"[green]Downloaded to {downloaded}. Current executable was not changed.[/]"
         except Exception as e:
             logger.error(f"Error checking updates: {e}")
-            status.update(f"[bold red]Update check failed: {e}[/]")
+            message = f"[bold red]Update download failed: {e}[/]"
+        self.app.call_from_thread(self._display_download_result, message)

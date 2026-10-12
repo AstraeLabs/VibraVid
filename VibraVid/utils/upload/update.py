@@ -1,11 +1,17 @@
 # 01.03.23
 
+import hashlib
 import importlib.metadata
 import json
 import logging
 import os
+import platform
+import re
 import stat
 import sys
+import tempfile
+import time
+from pathlib import Path
 
 from rich.console import Console
 
@@ -35,101 +41,251 @@ _GENERIC_UPDATABLE_TOOLS = {
     "yt-dlp": ["yt-dlp"],
     "deno": ["deno"],
 }
-_ASSET_SYSTEM_MARKERS = {"windows": ".exe", "linux": "linux", "darwin": "_mac_"}
+_RELEASE_URL = f"https://api.github.com/repos/{__author__}/{__title__}/releases/latest"
+_RELEASE_CACHE_TTL = 6 * 60 * 60
+_CHECK_TIMEOUT = 4
 
 
-def _asset_arch(name: str) -> str | None:
-    """Architecture suffix of a release asset name (``..._x64``, ``..._arm64``), or None when it has none."""
-    stem = name.lower().removesuffix(".exe")
-    for token in ("arm64", "x64"):
-        if stem.endswith(f"_{token}"):
-            return token
+def _numeric_version(value: str) -> tuple[int, ...] | None:
+    """Only compare stable numeric release tags; never compare flattened strings."""
+    match = re.fullmatch(r"v?(\d+(?:\.\d+)*)", str(value).strip(), re.IGNORECASE)
+    return tuple(map(int, match.group(1).split("."))) if match else None
+
+
+def _newer_version(latest: str, current: str) -> bool:
+    left, right = _numeric_version(latest), _numeric_version(current)
+    if left is None or right is None:
+        return False
+    width = max(len(left), len(right))
+    return left + (0,) * (width - len(left)) > right + (0,) * (width - len(right))
+
+
+def _os_release_version() -> str | None:
+    try:
+        values = {}
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value.strip().strip('"')
+        if values.get("ID") == "ubuntu":
+            return values.get("VERSION_ID")
+    except OSError:
+        pass
     return None
 
 
-def pick_release_asset(assets: list[dict], system: str, arch: str) -> dict | None:
-    """First release asset built for *system* that runs on *arch* (an asset without an arch suffix is accepted)."""
-    marker = _ASSET_SYSTEM_MARKERS.get(system, "")
-    for asset in assets:
-        name = asset.get("name", "").lower()
-        if marker not in name:
-            continue
-        asset_arch = _asset_arch(name)
-        if asset_arch is None or asset_arch == arch:
-            return asset
+def _compatible_asset_names(system: str, arch: str, os_version: str | None) -> list[str]:
+    """Exact CI build targets, in priority order. Unknown targets are intentionally unsupported."""
+    prefix = "VibraVid"
+    if system == "windows" and arch == "x64":
+        if os_version == "2025":
+            return [f"{prefix}_win_2025_x64.exe", f"{prefix}_win_2022_x64.exe"]
+        if os_version == "2022":
+            return [f"{prefix}_win_2022_x64.exe"]
+    if system == "linux" and arch == "x64":
+        if os_version == "24.04":
+            return [f"{prefix}_linux_24_04_x64", f"{prefix}_linux_22_04_x64"]
+        if os_version == "22.04":
+            return [f"{prefix}_linux_22_04_x64"]
+    if system == "darwin":
+        if not os_version or not os_version.split(".")[0].isdigit():
+            return []
+        if arch == "x64" and os_version and int(os_version.split(".")[0]) >= 15:
+            return [f"{prefix}_mac_15_x64"]
+        if arch == "arm64" and os_version:
+            major = int(os_version.split(".")[0])
+            if major >= 26:
+                return [f"{prefix}_mac_26_arm64", f"{prefix}_mac_15_arm64"]
+            if major >= 15:
+                return [f"{prefix}_mac_15_arm64"]
+    return []
+
+
+def _local_platform() -> tuple[str, str, str | None]:
+    system, arch = binary_paths._detect_system(), binary_paths.arch
+    if system == "windows":
+        # Windows Server 2022 = 20348; Server 2025 = 26100. Also cover desktop Windows.
+        build = sys.getwindowsversion().build if hasattr(sys, "getwindowsversion") else 0
+        version = "2025" if build >= 26100 else "2022"
+    elif system == "linux":
+        version = _os_release_version()
+    else:
+        version = platform.mac_ver()[0] or None
+    return system, arch, version
+
+
+def pick_release_asset(assets: list[dict], system: str, arch: str, os_version: str | None = None) -> dict | None:
+    """Match the release's exact OS version and CPU architecture."""
+    if os_version is None:
+        detected_system, detected_arch, detected_version = _local_platform()
+        if system == detected_system and arch == detected_arch:
+            os_version = detected_version
+    by_name = {asset.get("name", "").lower(): asset for asset in assets}
+    for name in _compatible_asset_names(system, arch, os_version):
+        if name.lower() in by_name:
+            return by_name[name.lower()]
     return None
 
 
 def fetch_github_releases():
-    """Fetch releases data from GitHub API (sync)"""
+    """Legacy release listing for other callers; bounded request."""
     url = f"https://api.github.com/repos/{__author__}/{__title__}/releases"
     logger.info(f"Checking latest {__title__} release: {url}")
-    with create_client(headers=get_headers()) as client:
+    with create_client(headers=get_headers(), timeout=_CHECK_TIMEOUT) as client:
         response = client.get(url)
+        response.raise_for_status()
     return response.json()
 
 
 def get_execution_mode():
     """Get the execution mode of the application"""
+    if os.environ.get("VIBRAVID_RUNNING_IN_DOCKER") or (sys.platform.startswith("linux") and Path("/.dockerenv").exists()):
+        return "docker"
     if get_is_binary_installation():
         return "installer"
 
     try:
-        package_location = importlib.metadata.files(__title__)
-        if any("site-packages" in str(path) for path in package_location):
-            return "pip"
+        importlib.metadata.distribution(__title__)
+        return "pip"
     except importlib.metadata.PackageNotFoundError:
         pass
 
     return "source_code"
 
 
+def _current_version() -> str:
+    if get_is_binary_installation():
+        return source_code_version
+    try:
+        return importlib.metadata.version(__title__)
+    except importlib.metadata.PackageNotFoundError:
+        return source_code_version
+
+
+def _latest_release(*, force: bool = False, timeout: float = _CHECK_TIMEOUT) -> dict:
+    cache_path = Path(config_manager.base_path) / ".cache" / "vibravid_latest_release.json"
+    if not force:
+        try:
+            if time.time() - cache_path.stat().st_mtime < _RELEASE_CACHE_TTL:
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                if isinstance(cached, dict) and cached.get("tag_name"):
+                    return cached
+        except (OSError, ValueError, TypeError):
+            pass
+    with create_client(headers={"Accept": "application/vnd.github+json", "User-Agent": "VibraVid-Updater"}, timeout=timeout) as client:
+        response = client.get(_RELEASE_URL, timeout=timeout)
+        response.raise_for_status()
+        release = response.json()
+    if not isinstance(release, dict) or not release.get("tag_name") or not isinstance(release.get("assets"), list):
+        raise ValueError("Invalid GitHub release metadata")
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache_path.parent, delete=False) as f:
+            temporary = Path(f.name)
+            json.dump(release, f)
+        os.replace(temporary, cache_path)
+    except OSError as exc:
+        logger.debug("Release cache could not be saved: %s", exc)
+    return release
+
+
+def check_for_updates(*, force: bool = False, timeout: float = _CHECK_TIMEOUT) -> dict:
+    """Read-only update check. Never downloads a release asset or changes the running app."""
+    mode = get_execution_mode()
+    current = _current_version()
+    result = {"available": False, "current": current, "latest": None, "release": None,
+              "asset": None, "mode": mode, "error": None}
+    try:
+        release = _latest_release(force=force, timeout=timeout)
+        latest = release["tag_name"]
+        result.update(latest=latest, release=release, available=_newer_version(latest, current))
+        if result["available"] and mode == "installer":
+            result["asset"] = pick_release_asset(release["assets"], *_local_platform())
+    except Exception as exc:
+        logger.debug("Update check unavailable: %s", exc)
+        result["error"] = str(exc)
+    return result
+
+
+def download_release_asset(asset: dict, *, destination: str | Path | None = None, timeout: float = 60) -> Path:
+    """Download to an adjacent .part file, verify GitHub's SHA-256 digest, then atomically rename.
+
+    Explicit caller action is required; this function never executes or installs the download.
+    """
+    from urllib.parse import urlparse
+
+    name = asset.get("name", "")
+    url = asset.get("browser_download_url", "")
+    parsed = urlparse(url)
+    if not name or name in {".", ".."} or name != Path(name).name or not re.fullmatch(r"[\w.\-]+", name):
+        raise ValueError("Unsafe release asset name")
+    if (parsed.scheme, parsed.netloc) != ("https", "github.com") or not parsed.path.startswith(
+        f"/{__author__}/{__title__}/releases/download/"
+    ):
+        raise ValueError("Unexpected release asset URL")
+    target = Path(destination) if destination is not None else Path.home() / "Downloads" / "VibraVid" / name
+    if target.resolve() == Path(sys.executable).resolve():
+        raise ValueError("Cannot overwrite the running executable")
+    digest = asset.get("digest") or ""
+    if digest and not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest):
+        raise ValueError("Unsupported release digest")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", prefix=target.name + ".", suffix=".part", dir=target.parent, delete=False) as file:
+            temporary = Path(file.name)
+            sha256 = hashlib.sha256()
+            downloaded_bytes = 0
+            with create_client(headers={"User-Agent": "VibraVid-Updater"}, timeout=timeout, follow_redirects=True) as client:
+                response = client.get(url, stream=True, timeout=timeout)
+                try:
+                    response.raise_for_status()
+                    for chunk in response.iter_content(chunk_size=256 * 1024):
+                        if chunk:
+                            file.write(chunk)
+                            sha256.update(chunk)
+                            downloaded_bytes += len(chunk)
+                finally:
+                    response.close()
+            if not downloaded_bytes or (asset.get("size") and downloaded_bytes != asset["size"]):
+                raise ValueError("Incomplete release asset download")
+            if digest and sha256.hexdigest().lower() != digest.split(":", 1)[1].lower():
+                raise ValueError("SHA-256 mismatch for downloaded release asset")
+        if os.name != "nt":
+            temporary.chmod(0o755)
+        os.replace(temporary, target)
+        return target
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def auto_update():
-    """Automatically update the binary to latest version"""
-    if not get_is_binary_installation():
+    """Explicit --update legacy behavior: download, then replace after process exit."""
+    if get_execution_mode() != "installer":
         console.print("[#E63946]Auto-update works only for binary installations")
         return False
 
     try:
         console.print("[#00BCD4]Checking for updates...")
-        releases = fetch_github_releases()
-        latest = releases[0]
-        latest_version = latest.get("name", "").replace("v", "").replace(".", "")
-
-        # Current version
-        try:
-            current = importlib.metadata.version(__title__)
-        except Exception:
-            current = source_code_version
-        current_version = str(current).replace("v", "").replace(".", "")
-
-        # Version comparison
-        if current_version == latest_version:
-            console.print(f"[#06A77D]Already on latest version: {current}")
+        check = check_for_updates(force=True)
+        if check["error"]:
+            raise RuntimeError(check["error"])
+        if not check["available"]:
+            console.print(f"[#06A77D]Already on latest version: {check['current']}")
             return False
-        console.print(f"[#FFD60A]Current: {current} -> Latest: {latest.get('name')}")
+        console.print(f"[#FFD60A]Current: {check['current']} -> Latest: {check['latest']}")
 
         # Find appropriate asset
         system = binary_paths._detect_system()
-        asset = pick_release_asset(latest.get("assets", []), system, binary_paths.arch)
+        asset = check["asset"]
         if asset is None:
             console.print(f"[#E63946]No release asset found for {system} {binary_paths.arch}")
             return False
         console.print(f"[#00BCD4]Downloading {asset['name']}...")
-
-        # Download
-        with create_client(headers=get_headers(), timeout=300, follow_redirects=True) as client:
-            response = client.get(asset["browser_download_url"])
-
-        if response.status_code != 200:
-            console.print("[#E63946]Download failed")
-            return False
-
-        # Save new executable
         current_exe = sys.executable
         new_exe = current_exe + ".new"
-        with open(new_exe, "wb") as f:
-            f.write(response.content)
+        download_release_asset(asset, destination=new_exe)
         console.print("[#06A77D]Download completed!")
 
         # Write update script

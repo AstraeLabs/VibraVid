@@ -32,6 +32,7 @@ from VibraVid.setup.system import (
 from VibraVid.utils import config_manager, disk_cache, get_log_file_path, setup_logger, start_message
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
+from VibraVid.utils.upload.update import check_for_updates, download_release_asset
 from VibraVid.utils.upload.version import __title__, __version__
 
 console = Console()
@@ -214,6 +215,8 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("--no-log", action="store_true", help="Disable log file for this run")
     util_group.add_argument("--no-manifest-info", action="store_true", help="Don't print the parsed manifest/streams table")
     util_group.add_argument("-UP", "--update", action="store_true", help="Auto-update to latest version (binary only)")
+    util_group.add_argument("--skip-update-check", action="store_true", help="Skip the automatic interactive CLI update check")
+    util_group.add_argument("--check-update", action="store_true", help="Check GitHub Releases for a newer version and exit (no download)")
     util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
     util_group.add_argument("--amazon-music-login", dest="amazon_music_login", action="store_true", help="Log in to Amazon Music via direct API device registration (no proxy/CA needed).")
@@ -407,6 +410,46 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
     return True
 
 
+def _show_update_notice(info: dict) -> None:
+    if info["available"]:
+        console.print(f"\n[bold yellow]New VibraVid release: {info['latest']} (installed: {info['current']}).[/]")
+        if info["mode"] == "installer" and info["asset"]:
+            console.print("[cyan]Press U in the menu to download the compatible executable (no installation).[/]")
+        elif info["mode"] == "installer":
+            console.print("[yellow]No compatible binary is published for this OS/architecture.[/]")
+        else:
+            console.print(f"[yellow]Installed via {info['mode']}: update using your package/image/source workflow.[/]")
+
+
+def _download_update_from_menu(info: dict | None) -> None:
+    """The explicit U selection downloads only; it never replaces the current binary."""
+    if info is None or info["error"]:
+        info = check_for_updates(force=True)
+    if info["error"]:
+        console.print(f"[yellow]Update check unavailable: {info['error']}[/]")
+    elif not info["available"]:
+        console.print(f"[green]Already up to date: {info['current']}[/]")
+    elif info["mode"] != "installer":
+        console.print(f"[yellow]This is a {info['mode']} installation. Update through its original installation method.[/]")
+    elif not info["asset"]:
+        console.print("[yellow]No compatible executable available for this platform.[/]")
+    else:
+        try:
+            path = download_release_asset(info["asset"])
+            console.print(f"[bold green]Downloaded: {path}[/] (current executable unchanged)")
+        except Exception as exc:
+            logger.warning("Release download failed: %s", exc)
+            console.print(f"[red]Update download failed: {exc}[/]")
+
+
+def _choose_site_or_update(args, choice_labels, update_info: dict | None):
+    while True:
+        selection = get_user_site_selection(args, choice_labels)
+        if selection.lower() != "u":
+            return selection
+        _download_update_from_menu(update_info)
+
+
 def get_user_site_selection(args, choice_labels):
     """Get site selection from user (interactive or category-based)."""
     counts: dict[str, int] = {}
@@ -419,13 +462,13 @@ def get_user_site_selection(args, choice_labels):
     console.print(f"\n  [cyan]Category: {legend_text}")
     console.print()
 
-    choice_keys = list(choice_labels.keys()) + ["global"]
+    choice_keys = list(choice_labels.keys()) + ["global", "u", "U"]
     name_width = max([len(label[0]) for label in choice_labels.values()] + [len("(global) Global")])
     cell_width = name_width + 4  # "12:" + space + name
     site_entries = [
         f"[dim]{key:>2}:[/dim] [{COLOR_MAP.get(label[1], 'white')}]{label[0]:<{name_width}}[/{COLOR_MAP.get(label[1], 'white')}]"
         for key, label in choice_labels.items()
-    ] + [f"[magenta]{'(global) Global':<{cell_width}}[/magenta]"]
+    ] + [f"[magenta]{'(global) Global':<{cell_width}}[/magenta]", "[bold cyan]U: Download update[/]"]
 
     site_rows = [" ".join(site_entries[i : i + 6]) for i in range(0, len(site_entries), 6)]
     for row in site_rows:
@@ -562,6 +605,16 @@ def main():
         setup_logger(no_log=getattr(args, "no_log", False))
         context_tracker.hide_manifest_info = getattr(args, "no_manifest_info", False)
 
+        if args.check_update:
+            info = check_for_updates(force=True)
+            if info["error"]:
+                console.print(f"[yellow]Update check unavailable: {info['error']}[/]")
+            elif not info["available"]:
+                console.print(f"[green]VibraVid is up to date ({info['current']}).[/]")
+            else:
+                _show_update_notice(info)
+            return
+
         if getattr(args, "tui", False):
             from VibraVid.tui.app import main as tui_main
 
@@ -697,9 +750,14 @@ def main():
             equivalent_command_builder.log_equivalent_command(args, parser, context_tracker, site_option_dests)
             return
 
+        update_info = None
+        if not args.skip_update_check and sys.stdin.isatty() and sys.stdout.isatty():
+            update_info = check_for_updates()
+            _show_update_notice(update_info)
+
         if not close_console_flag:
             while True:
-                category = get_user_site_selection(args, choice_labels)
+                category = _choose_site_or_update(args, choice_labels, update_info)
 
                 if category == "global":
                     logger.info("User selected global search from interactive menu.")
@@ -719,7 +777,7 @@ def main():
             force_exit()
 
         else:
-            category = get_user_site_selection(args, choice_labels)
+            category = _choose_site_or_update(args, choice_labels, update_info)
 
             if category == "global":
                 call_global_search(args.search)
