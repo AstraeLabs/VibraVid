@@ -1,5 +1,5 @@
 # 13.10.26
-# timvision.scrapper - Search and parsing
+# By @Syncs-Luca98
 
 import logging
 
@@ -157,13 +157,15 @@ class GetSerieInfo:
     def _load_episodes(self) -> None:
         if self._loaded:
             return
+        
         episodes = _get_client().get_episodes(self.brand_id)
+        by_number: dict[int, Season] = {}
         for ep in episodes:
             season_number = ep.get("season") or 1
             episode_number = ep.get("episode") or 0
-            season = self.seasons_manager.get_season_by_number(season_number)
+            season = by_number.get(season_number)
             if season is None:
-                season = self.seasons_manager.add(
+                season = by_number[season_number] = self.seasons_manager.add(
                     Season(
                         id=self.brand_id,
                         number=season_number,

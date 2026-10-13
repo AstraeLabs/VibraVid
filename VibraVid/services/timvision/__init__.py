@@ -1,5 +1,5 @@
 # 13.10.26
-# timvision service for VibraVid - Italian streaming with 1080p
+# By @Syncs-Luca98
 
 import logging
 import re

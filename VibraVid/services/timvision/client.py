@@ -1,5 +1,5 @@
 # 13.10.26
-# timvision.client - Authentication and API client (cookie + passToken based)
+# By @Syncs-Luca98
 
 import base64
 import json
@@ -10,7 +10,8 @@ from urllib.parse import quote
 
 from rich.console import Console
 
-from VibraVid.utils import disk_cache, config_manager
+from VibraVid.services._base.login_status import Login
+from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def _load_login() -> dict:
 
 
 class TimvisionClient:
-    """TIMvision API client with browser cookie authentication."""
+    _login_shown = False
 
     def __init__(self):
         self.cookies: dict = {}
@@ -55,34 +56,15 @@ class TimvisionClient:
         )
         self._apply_cookies()
         self._authenticate()
+        if self.cookies and not TimvisionClient._login_shown:
+            TimvisionClient._login_shown = True
+            Login.show(Login.ACCOUNT)
 
     def _load_credentials(self):
         creds = _load_login()
         self.cookies = creds
         cookie_token = self.cookies.get("tokenCMS", "")
         self.token = cookie_token if re.fullmatch(r"[0-9a-fA-F]{32}", cookie_token) else ""
-
-
-    def _load_browser_cookies(self) -> dict:
-        """Attempt to read cookies from Chrome/Edge via browser_cookie3."""
-        try:
-            import browser_cookie3
-        except ImportError:
-            return {}
-        for loader in (browser_cookie3.chrome, browser_cookie3.edge):
-            try:
-                cj = loader(domain_name="tim.it")
-                cookies = {}
-                for cookie in cj:
-                    if not cookie.value:
-                        continue
-                    if cookie.name != "tokenCMS" or cookie.domain.lstrip(".") == "tim.it":
-                        cookies[cookie.name] = cookie.value
-                if cookies:
-                    return cookies
-            except Exception:
-                continue
-        return {}
 
     def _apply_cookies(self):
         """Set cookies on the session for all TIMvision domains."""
@@ -126,16 +108,11 @@ class TimvisionClient:
         return False
 
     def login(self) -> bool:
-        """Login with browser cookies."""
-        if not self.cookies:
-            self.cookies = self._load_browser_cookies()
+        """Login with the browser cookies from login.json."""
         if self.cookies:
-            self._apply_cookies()
-            self._authenticate()
-            console.print("[green]TIMvision: using browser cookies for authentication")
             return True
+        
         console.print("[red]TIMvision: no credentials available")
-        console.print("[yellow]Add cookies via: python -m VibraVid.utils.cookie_helper timvision")
         return False
 
     def _auth_headers(self) -> dict:
@@ -149,27 +126,30 @@ class TimvisionClient:
     # ------------------------------------------------------------------
 
     def _load_config(self) -> dict:
-        cached = disk_cache.load("timvision", "player_config")
-        if cached and disk_cache.is_fresh(cached):
+        cached = disk_cache.load_fresh("timvision", "player_config")
+        if cached:
             return cached.get("config", {})
+        
         try:
             resp = self._session.get(TIMVISION_PLAYER_CONFIG, timeout=30)
             if resp.status_code == 200:
                 config = resp.json()
-                disk_cache.save("timvision", "player_config", {"config": config, "expiry": time.time() + _CONFIG_TTL})
+                disk_cache.save("timvision", "player_config", {"config": config}, ttl=_CONFIG_TTL)
                 return config
             logger.warning(f"TIMvision config fetch failed: {resp.status_code}")
         except Exception as e:
             logger.error(f"TIMvision config error: {e}")
-        return cached.get("config", {}) if cached else {}
+
+        stale = disk_cache.load("timvision", "player_config")
+        return stale.get("config", {}) if isinstance(stale, dict) else {}
 
     # ------------------------------------------------------------------
     # Pass token (required by the hapi stream API)
     # ------------------------------------------------------------------
-
     def get_pass_token(self) -> str:
-        cached = disk_cache.load("timvision", "pass_token")
-        if cached and disk_cache.is_fresh(cached, buffer_seconds=300) and cached.get("token"):
+        cached = disk_cache.load_fresh("timvision", "pass_token", buffer_seconds=300)
+        if cached and cached.get("token"):
+            Login.refresh_cached(disk_cache.cache_path("timvision", "pass_token"))
             return cached["token"]
 
         config = self._load_config()
@@ -191,6 +171,7 @@ class TimvisionClient:
             "noCache": "false",
             "passId": pass_id,
         }
+        Login.refresh_try()
         try:
             resp = self._session.post(
                 url,
@@ -208,18 +189,18 @@ class TimvisionClient:
                 response = result.get("response", {})
                 if response.get("errorCode") == 0 and response.get("passToken"):
                     token = response["passToken"]
-                    timeout_ms = pass_cfg.get("passTimeout", 28800000)
-                    disk_cache.save(
-                        "timvision", "pass_token",
-                        {"token": token, "expiry": time.time() + timeout_ms / 1000},
-                    )
-                    logger.debug("TIMvision pass token acquired")
+                    ttl = pass_cfg.get("passTimeout", 28800000) / 1000
+                    disk_cache.save("timvision", "pass_token", {"token": token}, ttl=ttl)
+                    Login.refresh_ok(time.time() + ttl)
                     return token
                 logger.warning(f"TIMvision createToken error: {response.get('errorMessage')}")
+                Login.refresh_failed(str(response.get("errorMessage") or "createToken error"))
             else:
                 logger.warning(f"TIMvision createToken failed: {resp.status_code} - {resp.text[:200]}")
+                Login.refresh_failed(f"HTTP {resp.status_code}")
         except Exception as e:
             logger.error(f"TIMvision createToken error: {e}")
+            Login.refresh_failed(e.__class__.__name__)
         return ""
 
     def _hapi_headers(self, pass_token: str) -> dict:
@@ -242,12 +223,12 @@ class TimvisionClient:
     # ------------------------------------------------------------------
     # Stream playback
     # ------------------------------------------------------------------
-
     @staticmethod
     def _pick_best_stream(available: list) -> dict | None:
         """Prefer PlayReady DASH, then Widevine, then HD over SD."""
         if not available:
             return None
+        
         pr = [a for a in available if "PLAYREADY" in str(a.get("drmType", ""))]
         wv = [a for a in available if "WIDEVINE" in str(a.get("drmType", ""))]
         pool = pr or wv or available
@@ -363,6 +344,7 @@ class TimvisionClient:
                 info["license_request_fn"] = self._make_license_request_fn(license_url, drm_id)
                 info["license_headers"] = {"Content-Type": "text/plain", **self._hapi_headers(self.get_pass_token())}
                 info["license_data"] = {"drmConfig": "mkpl::true", "drmId": drm_id}
+        
         return info
 
     def _make_playready_license_request_fn(self, license_url: str, drm_id: str):
@@ -510,7 +492,6 @@ class TimvisionClient:
     # ------------------------------------------------------------------
     # Episodes (series)
     # ------------------------------------------------------------------
-
     def get_episodes(self, brand_id: str) -> list[dict]:
         """Get all episodes of a series brand ID with season/episode numbers."""
         if not self.token:
@@ -526,6 +507,7 @@ class TimvisionClient:
             if resp.status_code != 200:
                 logger.warning(f"TIMvision episodes failed: {resp.status_code}")
                 return []
+            
             episodes = resp.json().get("episodes", {}).get("contents", [])
             processed = []
             for ep in episodes:

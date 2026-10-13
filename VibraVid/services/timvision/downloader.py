@@ -1,5 +1,5 @@
 # 13.10.26
-# timvision.downloader - Download via DASH (hapi playset/view)
+# By @Syncs-Luca98
 
 import logging
 import os
