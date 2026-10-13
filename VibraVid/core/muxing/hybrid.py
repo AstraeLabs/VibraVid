@@ -1,10 +1,13 @@
 # 16.04.24
 
 import asyncio
+import json
 import logging
+import math
 import re
 import subprocess
 from collections.abc import Iterable
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +48,65 @@ def _run_command(cmd: list[str], description: str) -> bool:
             logger.error(f"{description} failed with exit code {result.returncode}")
         return False
     return True
+
+
+def _video_timing(file_path: Path) -> tuple[int | None, str | None]:
+    """Read source video timing before conversion to raw HEVC drops its timestamps and frame rate."""
+    result = run_logged(
+        [
+            get_ffprobe_path(),
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=start_time,avg_frame_rate,r_frame_rate",
+            "-of",
+            "json",
+            str(file_path),
+        ],
+        "ffprobe hybrid video timing",
+        log=logger,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        logger.warning(f"Could not read video start time from {file_path}: {(result.stderr or '').strip()}")
+        return None, None
+
+    try:
+        streams = json.loads(result.stdout or "{}").get("streams") or []
+        stream = streams[0]
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning(f"Could not parse video timing from {file_path}: {exc}")
+        return None, None
+
+    start_time_ms = None
+    try:
+        start_time = float(stream["start_time"])
+        if math.isfinite(start_time):
+            start_time_ms = round(start_time * 1000)
+        else:
+            logger.warning(f"Invalid video start time from {file_path}: {start_time}")
+    except (KeyError, TypeError, ValueError):
+        logger.warning(f"Video start time unavailable from {file_path}")
+
+    frame_rate = None
+    for rate_key in ("avg_frame_rate", "r_frame_rate"):
+        try:
+            rate = Fraction(stream[rate_key])
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+        if rate > 0:
+            frame_rate = f"{rate.numerator}/{rate.denominator}fps"
+            break
+
+    if frame_rate is None:
+        logger.warning(f"Video frame rate unavailable from {file_path}")
+    return start_time_ms, frame_rate
 
 
 def _rpu_profile(dovi_tool: str, rpu_file: Path) -> int | None:
@@ -411,6 +473,7 @@ def build_hybrid_output(
         except OSError as exc:
             logger.warning(f"Could not remove existing hybrid output {output_file}: {exc}")
 
+    video_start_time_ms, video_frame_rate = _video_timing(actual_hdr_path)
     mux_cmd: list[str] = [
         mkvmerge,
         "-o",
@@ -429,8 +492,14 @@ def build_hybrid_output(
         "0:Hybrid DV+HDR10",
         "--compression",
         "0:none",
-        str(hybrid_hevc),
     ]
+    if video_frame_rate:
+        mux_cmd.extend(["--default-duration", f"0:{video_frame_rate}"])
+        logger.info(f"Hybrid: preserving source video frame rate ({video_frame_rate})")
+    if video_start_time_ms:
+        mux_cmd.extend(["--sync", f"0:{video_start_time_ms}"])
+        logger.info(f"Hybrid: restoring source video start-time offset ({video_start_time_ms} ms)")
+    mux_cmd.append(str(hybrid_hevc))
 
     for idx, track in enumerate(audio_tracks):
         track_path_str = str(track.get("path") or "").strip()

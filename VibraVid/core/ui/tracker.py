@@ -161,6 +161,7 @@ class DownloadTracker(metaclass=SingletonMeta):
                 "segments": "0/0",
                 "quality": "",
                 "language": "",
+                "selected_tracks": [],
                 "start_time": time.time(),
                 "last_update": time.time(),
                 "tasks": {},  # For multi-stream downloads (video, audio, etc)
@@ -271,6 +272,16 @@ class DownloadTracker(metaclass=SingletonMeta):
                     dl["quality"] = quality
                 if language:
                     dl["language"] = language
+
+    def update_selected_tracks(self, download_id: str, streams) -> None:
+        """Publish only selected track metadata for active jobs and persisted history."""
+        from VibraVid.core.ui.manual_tracks import selected_track_metadata
+
+        tracks = selected_track_metadata(streams)
+        with self._lock:
+            dl = self.downloads.get(download_id)
+            if dl is not None:
+                dl["selected_tracks"] = tracks
 
     def update_status(self, download_id: str, status: str):
         with self._lock:

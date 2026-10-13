@@ -217,6 +217,8 @@ class MediaDownloader(
 
         self._promote_hls_subtitles_to_external()
         self._prepare_labels()
+        if self.download_id:
+            download_tracker.update_selected_tracks(self.download_id, self.streams)
 
         selected_media = [
             s

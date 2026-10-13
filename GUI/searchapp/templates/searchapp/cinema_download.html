@@ -166,6 +166,7 @@
 			poster(item, opts) +
 			(opts.cap ? '<span class="cn-cap">' + esc(titleize(opts.cap)) + "</span>" : "") +
 			(opts.sub ? '<span class="cn-sub">' + esc(opts.sub) + "</span>" : "") +
+                (opts.trackInfo || "") +
 			(opts.action || "") +
 			"</article>";
 	}
@@ -185,6 +186,55 @@
     }
     function stopLabel(item) {
         return {episode: "Stop episode", season: "Stop season", seasons: "Stop seasons"}[item.stop_scope] || "Stop";
+    }
+
+    function readableLanguage(value) {
+        var raw = String(value || "").trim();
+        if (!raw || raw.toLowerCase() === "und") return "Unknown";
+        var iso = raw.toLowerCase().split(/[-_]/)[0];
+        var names = {
+            it: "Italian", ita: "Italian", en: "English", eng: "English",
+            fr: "French", fra: "French", fre: "French", de: "German", deu: "German",
+            ger: "German", es: "Spanish", spa: "Spanish", pt: "Portuguese",
+            por: "Portuguese", ja: "Japanese", jpn: "Japanese",
+        };
+        return names[iso] || raw;
+    }
+
+    function selectedTrackFacts(item) {
+        var tracks = Array.isArray(item.selected_tracks) ? item.selected_tracks : [];
+        if (!tracks.length) return "";
+        var groups = {video: [], audio: [], subtitle: []};
+        tracks.forEach(function (track) {
+            if (!track || !Object.prototype.hasOwnProperty.call(groups, track.type)) return;
+            var label = "";
+            if (track.type === "video") {
+                label = (track.height ? track.height + "p" : track.resolution || "Video");
+                if (track.codecs) label += " " + track.codecs;
+                if (track.video_range) label += " " + track.video_range;
+            } else if (track.type === "audio") {
+                label = readableLanguage(track.language);
+                if (track.codecs) label += " " + track.codecs;
+                if (track.channels) label += " " + track.channels + "ch";
+            } else {
+                label = readableLanguage(track.language);
+                if (track.forced) label += " (forced)";
+                if (track.sdh) label += " (SDH)";
+                if (track.cc) label += " (CC)";
+            }
+            if (!groups[track.type].includes(label)) groups[track.type].push(label);
+        });
+        var out = [];
+        [["video", "Video"], ["audio", "Audio"], ["subtitle", "Subs"]].forEach(function (entry) {
+            var values = groups[entry[0]];
+            if (!values.length) return;
+            var short = values.slice(0, 2).join(", ");
+            if (values.length > 2) short += " +" + (values.length - 2);
+            out.push('<span class="cn-track-spec" title="' + esc(values.join(" | ")) + '"><b>' +
+                entry[1] + ':</b> ' + esc(short) + '</span>');
+        });
+        return out.length ? '<div class="cn-selected-tracks" aria-label="Selected media tracks">' +
+            out.join("") + '</div>' : "";
     }
 
 	function activeRowInner(item, downloadId) {
@@ -219,6 +269,7 @@
 				(item.path ? '<span class="cn-s cn-ln-path">' + esc(item.path) + '</span>' : "") +
 				'<span class="cn-ln-bar"><i style="width:' + item.pctText + '%"></i></span>' +
 				(streams ? '<span class="cn-s">' + streams + '</span>' : "") +
+                selectedTrackFacts(item) +
 			'</span>' +
 			'<span class="cn-r">' + (item.size ? esc(item.size) + ' · ' : '') + esc(item.speed || '') + ' · ' + item.pctText + '%</span>' +
 			'<button class="cn-cta is-ghost" type="button" data-stop="' + esc(downloadId) + '" ' +
@@ -394,8 +445,9 @@
 
 		var facts = [];
 		if (d.speed) facts.push("<span><b>" + esc(d.speed) + "</b></span>");
-		if (d.language) facts.push("<span>audio <b>" + esc(d.language) + "</b></span>");
-		document.getElementById("cn-hero-facts").innerHTML = facts.join("");
+        if (d.language && !(d.selected_tracks || []).length)
+            facts.push("<span>audio <b>" + esc(d.language) + "</b></span>");
+        document.getElementById("cn-hero-facts").innerHTML = facts.join("");
 
 		heroEntry = d;
 		askBackdrop(d);
@@ -516,11 +568,14 @@
                 checkbox.checked = !!track.selected;
                 var resolution = track.height ? track.height + "p" : track.resolution;
                 var bitrate = track.bitrate ? (track.bitrate / 1000000).toFixed(2) + " Mbps" : "";
-                var details = [track.type, resolution, track.language, track.codecs,
-                    track.channels, bitrate, track.forced ? "forced" : "",
-                    track.sdh ? "SDH" : "", track.cc ? "CC" : ""].filter(Boolean).join(" | ");
+                var details = [String(track.type || "").toUpperCase(),
+                    resolution, track.type !== "video" ? readableLanguage(track.language) : "",
+                    track.codecs, track.channels ? track.channels + "ch" : "", bitrate,
+                    track.forced ? "forced" : "", track.sdh ? "SDH" : "",
+                    track.cc ? "CC" : ""].filter(Boolean).join(" · ");
                 var caption = document.createElement("span");
                 caption.textContent = details || "Track " + (track.index + 1);
+                caption.title = track.language ? "Original language code: " + track.language : "";
                 row.append(checkbox, caption);
                 list.appendChild(row);
             });
@@ -581,7 +636,7 @@
 					var downloadId = d.id || tileId(d, "a", i);
 					return {
 						id: tileId(d, "a", i),
-						sig: status + "|" + !!isStopping(d) + "|" + stopLabel(d) + "|" + (d.quality || "") + "|" + p.toFixed(0) + "|" + (d.speed || "") + "|" + elapsedText(d.start_time) + "|" + JSON.stringify(d.tasks || {}),
+						sig: status + "|" + !!isStopping(d) + "|" + stopLabel(d) + "|" + (d.quality || "") + "|" + p.toFixed(0) + "|" + (d.speed || "") + "|" + elapsedText(d.start_time) + "|" + JSON.stringify(d.tasks || {}) + "|" + JSON.stringify(d.selected_tracks || []),
 						html: function () {
 							return activeRow(d, downloadId);
 						},
@@ -639,14 +694,15 @@
 					var sub = e.note ? (d.site ? d.site + " · " + e.note : e.note) : d.site;
 					return {
 						id: tileId(d, "h", i) + ":" + (d.start_time || i),
-						sig: e.label + "|" + sub,
+						sig: e.label + "|" + sub + "|" + JSON.stringify(d.selected_tracks || []),
 						html: function () {
 							return tile(d, {
 								flag: '<span class="cn-flag cn-st ' + e.badge + '">' + e.label + "</span>",
 								ruleColor: e.rule,
 								posterMeta: d.site,
 								cap: d.title,
-								sub: sub
+								sub: sub,
+                                trackInfo: selectedTrackFacts(d)
 							});
 						},
 						patch: function (node) {
@@ -656,6 +712,8 @@
 								flag.textContent = e.label;
 							}
 							setText(node, ".cn-sub", sub);
+                        var details = node.querySelector(".cn-selected-tracks");
+                        if (details) details.outerHTML = selectedTrackFacts(d);
 						}
 					};
 				}));

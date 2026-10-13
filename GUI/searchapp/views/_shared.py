@@ -152,6 +152,7 @@ def _media_item_to_display_dict(item: Entries, source_alias: str) -> dict[str, A
         'slug': item.slug,
         'tmdb_id': item.tmdb_id,
         'availability': item.desc,
+        'catalog_language': item.provider_language,
     }
 
     # Ensure payload reflects the GUI behaviour (so start_download treats songs like single-item downloads)
