@@ -378,7 +378,7 @@ def get_userAgent() -> str:
 
 
 def get_headers() -> dict:
-    return ua.headers.get()
+    return dict(ua.headers.get())
 
 
 def get_my_location() -> dict:

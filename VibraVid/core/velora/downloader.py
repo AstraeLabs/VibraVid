@@ -124,7 +124,7 @@ class MediaDownloader(
         # Set by the video stream's own _download_stream_generic() call if the fast path
         # actually completed successfully.
         self.streaming_mux_result: str | None = None
-        
+
         # Set True by _try_start_streaming_mux_inner() if it injected the downloader's
         # queued chapters into the same ffmpeg pass -- lets the caller (BaseDownloader._merge_files)
         # skip the separate mkvmerge/ffmpeg _inject_chapters() post-processing step.
@@ -172,11 +172,11 @@ class MediaDownloader(
         kids = {str(k).lower() for k in (kids or []) if k}
         if not kids:
             return
-        
+
         with self._wrong_key_kids_lock:
             new = kids - self._wrong_key_kids
             self._wrong_key_kids |= kids
-        
+
         if new:
             logger.error(f"Wrong key confirmed for KID(s) {sorted(new)} -- terminating download/decrypt for all tracks sharing them")
             self._report_wrong_key_to_vaults(new, license_url, pssh)
@@ -530,17 +530,17 @@ class MediaDownloader(
             use_curl_cffi = config_manager.config.get_bool("DOWNLOAD", "use_curl_cffi_segments")
             max_speed_bps = int(config_manager.config.get_float("DOWNLOAD", "max_speed_mbps", default=0.0) * 1_000_000)
             if max_speed_bps > 0:
-                
+
                 # Older Velora builds reject plan fields they don't know, so only send it to one that supports it
                 if use_curl_cffi or velora_supports_max_speed():
                     plan["max_speed_bytes_per_sec"] = max_speed_bps
                 elif not MediaDownloader._max_speed_warned:
                     MediaDownloader._max_speed_warned = True
                     console.print("[yellow]--max-speed ignored: the installed Velora is older than 2.2.0 (update it with --binary-update). Downloading without a speed limit.")
-            
+
             if stream is not None and not stream.estimated_size:
                 stream.compute_estimated_size()
-            
+
             known_total = int(getattr(stream, "estimated_size", 0) or 0) if stream else 0
             known_exact = bool(getattr(stream, "estimated_size_exact", False)) if stream else True
             backend = run_download_plan_curl_cffi if use_curl_cffi else run_download_plan

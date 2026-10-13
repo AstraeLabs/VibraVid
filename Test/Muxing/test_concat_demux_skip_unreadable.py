@@ -27,7 +27,7 @@ def have_ffmpeg():
 def _make_ts(path: Path, seed: int) -> None:
     subprocess.run(
         [get_ffmpeg_path(), "-y", "-loglevel", "error",
-         "-f", "lavfi", "-i", f"testsrc=size=160x90:rate=10:duration=1",
+         "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=1",
          "-f", "lavfi", "-i", f"sine=frequency={440 + seed}:duration=1",
          "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
          "-f", "mpegts", str(path)],
@@ -65,3 +65,18 @@ def test_concat_demux_all_good_needs_no_retry(have_ffmpeg, tmp_path):
     out = tmp_path / "merged.ts"
     assert concat_demux_merge_segments([good1, good2], out, expected_duration=2.0) is True
     assert 1.5 < _duration(out) < 2.5
+
+
+def test_concat_demux_failure_with_nothing_to_prune_reports_false(have_ffmpeg, tmp_path, monkeypatch):
+    """A failed re-merge must not report success just because the caller's previous output still exists."""
+    from VibraVid.core.muxing.helper.video import merge
+
+    good1, good2 = tmp_path / "seg_00000.ts", tmp_path / "seg_00001.ts"
+    _make_ts(good1, 0)
+    _make_ts(good2, 1)
+    out = tmp_path / "merged.ts"
+    out.write_bytes(b"previous binary merge")
+
+    monkeypatch.setattr(merge, "_run_concat_demuxer", lambda *a, **k: False)
+    assert concat_demux_merge_segments([good1, good2], out) is False
+    assert out.read_bytes() == b"previous binary merge"

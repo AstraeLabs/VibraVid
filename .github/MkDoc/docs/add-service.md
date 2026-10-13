@@ -316,25 +316,12 @@ Decision shapes (all optional, `{}` means keep everything):
 - HLS: `{"keep_init_urls": [...]}` (MAP-block level) and/or `{"drop_seg_idx": [...]}` (segment indices in playlist order, applied per rendition).
 - ISM: `{"drop_url_substrings": [...]}` (matched against segment URLs) and/or `{"drop_seg_idx": [...]}` (timeline indices).
 
-Wire it with a per-service flag (same pattern as `--skip-ts`) so it stays opt-in per site
-instead of becoming global behaviour:
-
-```python
-def register_cli_args(parser) -> list:
-    group = parser.add_argument_group("MyService options (-i <n>)")
-    group.add_argument("--skip-ads", dest="skip_ads", action="store_true", help="Drop stitched ad periods/blocks.")
-    return ["skip_ads", ...]
-```
+Pass it to the downloader only on the stitched path:
 
 ```python
 from .ads import my_ad_decision
 
-def _ad_decision_fn():
-    if (context_tracker.site_options or {}).get("skip_ads"):
-        return my_ad_decision
-    return None
-
-dl = DASH_Downloader(mpd_url, ..., ad_decision_fn=_ad_decision_fn())
+dl = DASH_Downloader(mpd_url, ..., ad_decision_fn=my_ad_decision)
 dl.start()
 ```
 

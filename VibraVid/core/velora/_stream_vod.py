@@ -74,7 +74,7 @@ class VodStreamMixin:
     _SIZE_PROBE_WORKERS = 4  # CDNs answer 503 to a burst of concurrent HEADs
     _SIZE_PROBE_TIMEOUT = 5
     _SIZE_PROBE_BUDGET = 10.0
-    
+
     def _apply_max_time(self, dl_segs: list[dict]) -> list[dict]:
         start, end = self.max_time if isinstance(self.max_time, tuple) else (0.0, self.max_time)
         if (not start or start <= 0) and end is None:
@@ -372,7 +372,7 @@ class VodStreamMixin:
                 return
             if not norm_keys:
                 return
-            
+
             keys_arg = [f"{str(k).lower()}:{str(v).lower()}" for k, v in norm_keys]
             try:
                 ffmpeg_path = get_ffmpeg_path()
@@ -409,7 +409,7 @@ class VodStreamMixin:
                         return
                     if self._kids_poisoned(kids) is not None:
                         return  # someone else already proved it
-                    
+
                     # velora writes to "<final>.part" and renames at the end.
                     size = 0
                     for p in (seg_path.with_name(seg_path.name + ".part"), seg_path):
@@ -417,7 +417,7 @@ class VodStreamMixin:
                             size = max(size, p.stat().st_size)
                         except OSError:
                             pass
-                        
+
                     if size == last_size:
                         stalled += 1
                         if stalled >= self._TRIAL_STALL_POLLS:
@@ -551,17 +551,17 @@ class VodStreamMixin:
         """Return a label for a skipped track's progress bar row, or "" if no label should be shown. The row is marked "Skipped" in the progress bar manager."""
         if stream.type == "video":
             return ""
-        
+
         label = self._stream_progress_label(stream, task_key)
         if label:
             return label
-        
+
         if stream.type == "audio":
             return f"[bold cyan]Aud[/bold cyan] {self._audio_stream_label(stream)}"
-        
+
         if stream.type == "subtitle":
             return f"[bold cyan]Sub[/bold cyan] {self._sub_stream_label(stream)}"
-        
+
         return ""
 
     @staticmethod
@@ -569,11 +569,11 @@ class VodStreamMixin:
         """Mark a track's progress-bar row terminal so it never freezes at 0B."""
         if bar_manager is None or not task_key:
             return
-        
+
         line = {"task_key": task_key, "pct": 100, "speed": status}
         if label:
             line["label"] = label
-        
+
         try:
             bar_manager.handle_progress_line(line)
         except Exception:
@@ -697,14 +697,14 @@ class VodStreamMixin:
             except Exception as exc:
                 logger.debug(f"HLS ad decision failed, keeping all blocks: {exc}")
                 return None
-            
+
             if decision.get("keep_init_urls") is not None:
                 return set(decision["keep_init_urls"])
-            
+
             drop = set(decision.get("drop_init_urls") or [])
             if not drop:
                 return None
-            
+
             return {b.get("init") for b in blocks if b.get("init") not in drop}
 
         media_segs, init_url = parse_hls_variant_playlist(
@@ -723,7 +723,7 @@ class VodStreamMixin:
                 seg_drop = {int(p) for p in (seg_decision.get("drop_seg_idx") or [])}
             except (TypeError, ValueError):
                 seg_drop = set()
-            
+
             if seg_drop:
                 kept_segs = [s for s in media_segs if s.get("playlist_idx", s.get("number", 0)) not in seg_drop]
                 if kept_segs:
@@ -806,7 +806,7 @@ class VodStreamMixin:
             # that all reference the exact same SegmentBase resource
             media_segs = [s for s in stream.segments if s.seg_type == "media"]
             unique_media = {(s.url, s.byte_range) for s in media_segs}
-            
+
             if len(unique_media) <= 1:
                 logger.info(f"DASH multi-period stream ({len(media_periods)} periods) but every Period shares the same media segment -- treating as single-period | {stream.type} {stream.resolution or stream.language}")
                 deduped_segments: list = []

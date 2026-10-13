@@ -223,10 +223,10 @@ class ISM_Downloader(BaseDownloader):
             return precheck
 
         self.media_downloader = self._new_media_downloader(
-            self.ism_url, 
-            self.headers, 
-            self.ism_content, 
-            "ism", 
+            self.ism_url,
+            self.headers,
+            self.ism_content,
+            "ism",
             ad_decision_fn=self.ad_decision_fn
         )
         self.media_downloader.other_tracks = self.other_tracks

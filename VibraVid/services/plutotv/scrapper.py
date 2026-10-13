@@ -156,18 +156,18 @@ class GetSerieInfoBySlug:
             key = query.get("queryKey") or []
             if not key or key[0] != "full-episodes-pagination":
                 continue
-            
+
             params = key[1] if len(key) > 1 and isinstance(key[1], dict) else {}
             if str(params.get("seasonNum", season_number)) != str(season_number):
                 continue
-            
+
             pages = query.get("state", {}).get("data", {}).get("pages", [])
             collected: list = []
             for page in pages:
                 collected.extend(((page or {}).get("fullEpisodes") or {}).get("episodes", []) or [])
             if collected:
                 return collected
-            
+
         return []
 
     def _get_series_info(self):

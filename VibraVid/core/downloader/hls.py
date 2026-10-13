@@ -360,10 +360,10 @@ class HLS_Downloader(BaseDownloader):
             return precheck
 
         self.media_downloader = self._new_media_downloader(
-            self.m3u8_url, 
-            self.headers, 
-            self.m3u8_content, 
-            "hls", 
+            self.m3u8_url,
+            self.headers,
+            self.m3u8_content,
+            "hls",
             has_drm=self.has_drm,
             ad_decision_fn=self.ad_decision_fn,
         )

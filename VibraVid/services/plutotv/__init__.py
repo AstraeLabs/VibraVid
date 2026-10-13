@@ -27,9 +27,8 @@ def register_cli_args(parser) -> list:
     """Register CLI options."""
     group = parser.add_argument_group("Pluto TV options")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Pluto TV title URL (show or movie page, e.g. https://pluto.tv/it/shows/the-jeffersons-it/).")
-    group.add_argument("--protocol", dest="protocol", default="dash", choices=["hls", "dash"], help="Streaming protocol to use (default: dash — the multi-period pipeline handles stitched timelines cleanly; DASH resolves DRM keys automatically via the Pluto PlayReady license server and needs a PlayReady CDM, otherwise use hls).")
-    group.add_argument("--skip-ads", dest="skip_ads", action="store_true", help="Drop stitched ad periods/blocks (decision by the Pluto service, enforced symmetrically on video+audio). Off by default.")
-    return ["url", "protocol", "skip_ads"]
+    group.add_argument("--protocol", dest="protocol", default="dash", choices=["hls", "dash"], help="Streaming protocol to use (default: dash, PlayReady keys resolved automatically via the Pluto license server, needs a PlayReady CDM; hls is AES-128 and needs no CDM). Ads are always skipped: the episode's content clip is downloaded directly.")
+    return ["url", "protocol"]
 
 
 def _resolve_url_to_item(url: str) -> dict | None:

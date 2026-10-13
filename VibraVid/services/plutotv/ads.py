@@ -67,7 +67,7 @@ def _period_ad_markers(period: ET.Element) -> list[str]:
             if re.search(r"\bad(s|vert)?\b|preroll|midroll|postroll|\bDAI\b|\bSSAI\b", blob, re.I):
                 markers.append("asset-ad")
                 break
-            
+
     return markers
 
 
@@ -102,7 +102,7 @@ def _decide_dash_periods(content: str) -> dict:
                 has_audio = True
                 if adapt.get("lang"):
                     langs.add(adapt.get("lang").lower())
-        
+
         info.append(
             {
                 "idx": idx,
@@ -212,7 +212,7 @@ def _split_hls_ranges(content: str) -> list[dict]:
                 current["cue_ad"] = True
             idx += 1
             pending_dur = 0.0
-        
+
     if current["seg_idx"]:
         ranges.append(current)
     return ranges
@@ -289,7 +289,7 @@ def _decide_hls_ranges(content: str) -> dict:
     total_segs = sum(len(r["seg_idx"]) for r in ranges)
     if not drop or len(drop) >= total_segs:
         return {}
-    
+
     logger.info(f"pluto ads: HLS drop {len(drop)}/{total_segs} ad segment(s)")
     return {"drop_seg_idx": drop}
 

@@ -59,7 +59,7 @@ def _filter_subtitles(sub_list: list, filter_str: str) -> list:
         token = token.strip()
         if not token:
             continue
-        
+
         token = token.lower()
         wanted_locales.add(token)
         iso2 = resolve_iso639_1(token)
@@ -230,7 +230,7 @@ class DASH_Downloader(BaseDownloader):
             max_segments if max_segments is not None else context_tracker.max_segments
         )
         self.max_time = _parse_max_time(max_time if max_time is not None else context_tracker.max_time)
-        
+
         self.drm_manager = DRMManager.for_site(context_tracker.site_name)
         super().__init__(output_path, "_dash_temp", sanitize_path=sanitize_path)
 

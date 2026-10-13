@@ -1,5 +1,6 @@
 # 26.11.2025
 
+import logging
 import os
 
 from rich.console import Console
@@ -17,9 +18,12 @@ from VibraVid.services._base import (
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, start_message
+from VibraVid.utils.http_client import create_client, get_headers
 
 from .ads import pluto_ad_decision
 from .client import (
+    clean_hls_master,
+    get_clip_sources,
     get_playback_dash_episode,
     get_playback_url_episode,
     get_playready_license,
@@ -30,11 +34,47 @@ console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 
-def _ad_decision_fn():
-    """Pluto ad decision callback for the generic downloaders (None = keep all)."""
-    if (context_tracker.site_options or {}).get("skip_ads"):
-        return pluto_ad_decision
-    return None
+def _download(content_id: str, content_ids: dict, output_path: str):
+    """Download the title's content clip directly (no ads); fall back to the ad-filtered stitcher stream."""
+    protocol = (context_tracker.site_options or {}).get("protocol") or "dash"
+    clip_url = (get_clip_sources(content_id) or {}).get(protocol)
+
+    if protocol == "dash":
+        mpd_url, mpd_headers = get_playback_dash_episode(content_id, content_ids)
+        license_url, license_headers = get_playready_license(mpd_headers)
+        if clip_url:
+            # The clip lives on S3: the bearer is only for the license server (S3 rejects foreign Authorization headers).
+            mpd_url, ad_decision_fn = clip_url, None
+            mpd_headers = {k: v for k, v in mpd_headers.items() if k.lower() != "authorization"}
+        else:
+            console.print("[yellow]Direct clip not available, using the stitcher stream (heuristic ad filter)")
+            ad_decision_fn = pluto_ad_decision
+
+        return DASH_Downloader(
+            mpd_url=mpd_url,
+            mpd_headers=mpd_headers,
+            license_url=license_url,
+            license_headers=license_headers,
+            output_path=output_path,
+            drm_preference=DRMType.PLAYREADY,
+            ad_decision_fn=ad_decision_fn,
+        ).start()
+
+    master = None
+    if clip_url:
+        try:
+            response = create_client(headers=get_headers()).get(clip_url)
+            response.raise_for_status()
+            master = clean_hls_master(response.text)
+        except Exception as e:
+            logging.warning(f"Pluto TV clip master fetch failed ({clip_url}): {e}")
+
+    if master:
+        return HLS_Downloader(m3u8_url=clip_url, m3u8_content=master, output_path=output_path).start()
+
+    console.print("[yellow]Direct clip not available, using the stitcher stream (heuristic ad filter)")
+    m3u8_url = get_playback_url_episode(content_id, content_ids)
+    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path, ad_decision_fn=pluto_ad_decision).start()
 
 
 def download_film(select_title: Entries):
@@ -46,24 +86,8 @@ def download_film(select_title: Entries):
     movie_path = movie_folder(*path_components)
     output_path = os.path.join(movie_path, f"{filename}.{extension_output}")
 
-    protocol = (context_tracker.site_options or {}).get("protocol") or "dash"
-    if protocol == "dash":
-        content_ids = {"movie_id": select_title.id, "regione": "IT"}
-        mpd_url, mpd_headers = get_playback_dash_episode(select_title.id, content_ids)
-        license_url, license_headers = get_playready_license(mpd_headers)
-        return DASH_Downloader(
-            mpd_url=mpd_url,
-            mpd_headers=mpd_headers,
-            license_url=license_url,
-            license_headers=license_headers,
-            output_path=output_path,
-            drm_preference=DRMType.PLAYREADY,
-            ad_decision_fn=_ad_decision_fn(),
-        ).start()
-
     content_ids = {"movie_id": select_title.id, "regione": "IT"}
-    m3u8_url = get_playback_url_episode(select_title.id, content_ids)
-    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path, ad_decision_fn=_ad_decision_fn()).start()
+    return _download(select_title.id, content_ids, output_path)
 
 
 def download_episode(obj_episode, index_season_selected, index_episode_selected, scrape_serie):
@@ -84,26 +108,9 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     episode_path = series_folder(*path_components)
     episode_name = f"{filename}.{extension_output}"
 
-    # Get playback information
     content_ids = {"episode_id": obj_episode.id, "regione": "IT"}
     output_path = os.path.join(episode_path, episode_name)
-
-    protocol = (context_tracker.site_options or {}).get("protocol") or "dash"
-    if protocol == "dash":
-        mpd_url, mpd_headers = get_playback_dash_episode(obj_episode.id, content_ids)
-        license_url, license_headers = get_playready_license(mpd_headers)
-        return DASH_Downloader(
-            mpd_url=mpd_url,
-            mpd_headers=mpd_headers,
-            license_url=license_url,
-            license_headers=license_headers,
-            output_path=output_path,
-            drm_preference=DRMType.PLAYREADY,
-            ad_decision_fn=_ad_decision_fn(),
-        ).start()
-
-    m3u8_url = get_playback_url_episode(obj_episode.id, content_ids)
-    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path, ad_decision_fn=_ad_decision_fn()).start()
+    return _download(obj_episode.id, content_ids, output_path)
 
 
 def download_series(

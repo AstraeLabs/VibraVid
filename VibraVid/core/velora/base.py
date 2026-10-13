@@ -336,18 +336,18 @@ class BaseMediaDownloader:
 
         if not drop:
             return streams
-        
+
         reason = decision.get("reason", "")
         filtered: list[tuple] = []
         for s in streams:
             kept_segs = [sg for sg in s.segments if getattr(sg, "period_idx", 0) not in drop]
             filtered.append((s, kept_segs, len(s.segments) - len(kept_segs)))
-        
+
         candidates = [(s, segs) for s, segs, _ in filtered if segs]
         if not any(s.type == "video" for s, _ in candidates):
             logger.warning("DASH ad decision would remove all video, keeping everything")
             return streams
-        
+
         for s, segs, removed in filtered:
             if removed and segs:
                 logger.info(
@@ -358,7 +358,7 @@ class BaseMediaDownloader:
             if not segs:
                 logger.info(f"DASH ad decision: stream dropped entirely (only ad segments) | id={s.id!r}")
             s.segments = segs
-        
+
         kept = [s for s, _ in candidates]
         total_dropped = sum(removed for _, _, removed in filtered)
         total_kept = sum(len(segs) for _, segs, _ in filtered)
@@ -400,7 +400,7 @@ class BaseMediaDownloader:
             if not segs:
                 logger.info(f"ISM ad decision: stream dropped entirely (only ad chunks) | id={s.id!r}")
             s.segments = segs
-        
+
         kept = [s for s, _ in candidates]
         total_dropped = sum(removed for _, _, removed in filtered)
         total_kept = sum(len(segs) for _, segs, _ in filtered)
@@ -437,7 +437,7 @@ class BaseMediaDownloader:
             for s in rest:
                 first.segments.extend(s.segments)
                 streams.remove(s)
-            
+
             first.segments.sort(key=lambda sg: (getattr(sg, "period_idx", 0), getattr(sg, "number", 0)))
             logger.info(
                 f"DASH ad decision: rejoined {len(rest) + 1} split audio continuations"
@@ -456,7 +456,7 @@ class BaseMediaDownloader:
         companion = self._dv_companion_stream()
         if companion is None:
             return
-        
+
         if any((t.get("type") or "").strip().lower() == "video:dv" for t in self.other_tracks):
             return
 

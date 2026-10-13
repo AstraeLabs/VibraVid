@@ -878,7 +878,7 @@ class DecryptPipelineMixin(
         try:
             out_path.unlink(missing_ok=True)
             post_merge_path.rename(out_path)
-            
+
             # Same fragmented-mp4 tfdt issue as the live-decrypt path above: defer the
             # -avoid_negative_ts/-fflags +genpts fix into the Join Media ffmpeg pass
             # instead of a second full-file remux here, when that pass can apply it.

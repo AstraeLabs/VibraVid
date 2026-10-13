@@ -17,6 +17,11 @@ BOOT_URL = "https://boot.pluto.tv/v4/start"
 STITCHER_HLS = "https://cfd-v4-service-channel-stitcher-use1-1.prd.pluto.tv"
 STITCHER_DASH = "https://ipv4.pluto.tv/api/tn/video/playout/v2/stitch"
 LICENSE_BASE = "https://service-concierge.clusters.pluto.tv/v1"
+CLIPS_URL = "http://api.pluto.tv/v2/episodes/{content_id}/clips.json"
+_SILO_HOST = "https://siloh.pluto.tv"
+_SILO_ORIGIN = "http://silo-hybrik.pluto.tv.s3.amazonaws.com"
+_BUMPER_MARKERS = ("Pluto_TV_OandO", "_ad", "creative", "Bumper", "Promo", "WarningCard")
+_FAIRPLAY_MARKER = '#PLUTO-DRM:ID="fairplay"'
 _pluto_api = None
 
 HUB_GRAPHQL_URL = "https://pluto.tv/api/tn/hubs/graphql/"
@@ -144,7 +149,7 @@ def hub_search(query: str) -> list[dict]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        
+
         content_type = item.get("contentType")
         item_id = item.get("id")
         slug = None
@@ -375,3 +380,64 @@ def get_playready_license(mpd_headers: dict):
         "soapaction": '"http://schemas.microsoft.com/DRM/2007/03/protocols/AcquireLicense"',
     }
     return license_url, license_headers
+
+
+def is_bumper(name: str) -> bool:
+    """True for Pluto bumper/promo/ad clips (matched on the clip name)."""
+    return any(marker in (name or "") for marker in _BUMPER_MARKERS)
+
+
+def _silo_origin(url: str | None) -> str | None:
+    return url.replace(_SILO_HOST, _SILO_ORIGIN, 1) if url else url
+
+
+def pick_clip_sources(clips: list) -> dict | None:
+    """First non-bumper clip of a clips.json payload -> ``{"dash": url|None, "hls": url|None}``."""
+    for clip in clips or []:
+        if not isinstance(clip, dict) or is_bumper(clip.get("name", "")):
+            continue
+
+        sources = {}
+        for source in clip.get("sources") or []:
+            kind = (source.get("type") or "").lower()
+            if kind in ("dash", "hls") and source.get("file") and kind not in sources:
+                sources[kind] = _silo_origin(source["file"])
+        if sources:
+            return {"dash": sources.get("dash"), "hls": sources.get("hls")}
+
+    return None
+
+
+def get_clip_sources(content_id: str) -> dict | None:
+    """Direct manifests of the title's content clip: the feature alone, without the stitcher's ads/bumpers."""
+    try:
+        response = create_client(headers=get_headers()).get(
+            CLIPS_URL.format(content_id=content_id), params=get_api()._get_base_params()
+        )
+        response.raise_for_status()
+        sources = pick_clip_sources(response.json())
+    except Exception as e:
+        logger.debug(f"Pluto TV clips.json failed for {content_id}: {e}")
+        return None
+
+    if not sources:
+        logger.debug(f"Pluto TV clips.json: no content clip for {content_id}")
+    return sources
+
+
+def clean_hls_master(text: str) -> str:
+    """Drop the FairPlay variants (``#PLUTO-DRM:ID="fairplay"`` + STREAM-INF + URI) from a clip master playlist."""
+    out: list[str] = []
+    skip = 0
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(_FAIRPLAY_MARKER):
+            skip = 2
+            continue
+
+        if skip and stripped:
+            skip -= 1
+            continue
+
+        out.append(line)
+    return "\n".join(out) + "\n"

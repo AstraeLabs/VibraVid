@@ -75,17 +75,17 @@ def _try_decode_stego_png(buf: bytes) -> bytes | None:
         img = Image.open(io.BytesIO(buf))
         if img.mode != "RGB":
             return None
-        
+
         pixels = img.tobytes()
         if pixels[:8] != _STEGO_PNG_MAGIC:
             return None
-        
+
         length = int.from_bytes(pixels[8:12], "big")
         d = zlib.decompressobj(16 + zlib.MAX_WBITS)
         data = d.decompress(pixels[12:12 + length]) + d.flush()
         if data[:1] != b"\x47" or _find_ts_start(data[:_PNG_SCAN_WINDOW]) != 0:
             return None
-        
+
         return data
     except Exception:
         return None
@@ -160,7 +160,7 @@ def _is_ffprobe_readable(path: Path) -> bool:
     ffprobe = get_ffprobe_path()
     if not ffprobe:
         return True
-    
+
     try:
         result = subprocess.run(
             [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv", str(path)],
@@ -180,7 +180,7 @@ def _drop_unreadable_segments(valid: list[Path], log: logging.Logger) -> list[Pa
     """Split *valid* into readable files, logging (not failing on) the rest."""
     if len(valid) < 2:
         return valid
-    
+
     with ThreadPoolExecutor(max_workers=_parallel_workers()) as pool:
         readable = list(pool.map(_is_ffprobe_readable, valid))
 
@@ -188,7 +188,7 @@ def _drop_unreadable_segments(valid: list[Path], log: logging.Logger) -> list[Pa
     bad = [p for p, ok in zip(valid, readable, strict=True) if not ok]
     for p in bad:
         log.warning(f"[concat_demux_merge] skipping unreadable segment (kept out of the merge): {p.name}")
-    
+
     return kept or valid
 
 
@@ -214,12 +214,15 @@ def concat_demux_merge_segments(
         log.warning("[concat_demux_merge] no valid segments found")
         return False
 
-    if _run_concat_demuxer(valid, output_path, log) and not _still_short(output_path, expected_duration):
+    first_ok = _run_concat_demuxer(valid, output_path, log)
+    if first_ok and not _still_short(output_path, expected_duration):
         return True
 
     pruned = _drop_unreadable_segments(valid, log)
     if len(pruned) == len(valid):
-        return output_path.exists() and output_path.stat().st_size > 0
+        # Nothing to prune: a short-but-successful re-merge still replaced output_path; a failed one left
+        # the caller's previous (binary-merged) file untouched, which must not be reported as a re-merge.
+        return first_ok
     log.warning(f"[concat_demux_merge] retrying without {len(valid) - len(pruned)} unreadable segment(s)")
     return _run_concat_demuxer(pruned, output_path, log)
 
@@ -227,7 +230,7 @@ def concat_demux_merge_segments(
 def _still_short(output_path: Path, expected_duration: float | None) -> bool:
     if not expected_duration or expected_duration <= 0:
         return False
-    
+
     duration = _output_duration(output_path)
     return duration is not None and duration < expected_duration * 0.95
 

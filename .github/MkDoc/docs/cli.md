@@ -25,9 +25,6 @@ python manual.py -i 0 --search "interstellar"
 # Skip TS/CAM releases (StreamingCommunity only)
 python manual.py -i streamingcommunity --search "interstellar" --skip-ts
 
-# Drop stitched ads (Pluto TV only, off by default)
-python manual.py -i plutotv --search "i jefferson" --item 0 --season 1 --episode 1 --skip-ads
-
 # Disable the log file for this run
 python manual.py -i streamingcommunity --search "interstellar" --no-log
 ```
