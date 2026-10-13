@@ -49,14 +49,17 @@ class GetSerieInfo:
             self.all_seasons_data = []
             blocks_found = {}
 
+            # Block names to skip (supplementary content, not main seasons)
+            skip_blocks = {"clip", "extra", "highlights", "anticipazioni", "speciale", "backstage"}
+
             for block in json_data.get("blocks", []):
                 block_type = block.get("type", "")
                 block_name = block.get("name", "N/A")
                 block_id = block.get("id", "")
 
-                # Skip Clip and Extra blocks
-                if block_name.lower() == "clip" or block_name.lower() == "extra":
-                    logger.debug(" - Skipping Clip or Extra block")
+                # Skip supplementary blocks
+                if block_name.lower() in skip_blocks:
+                    logger.debug(f" - Skipping {block_name} block")
                     continue
 
                 # Only process multimedia blocks with sets
@@ -66,6 +69,20 @@ class GetSerieInfo:
                     for season_set in sets:
                         episode_size = season_set.get("episode_size", {})
                         episode_count = episode_size.get("number", 0)
+                        set_name = season_set.get("name", "")
+
+                        # Skip Clip sets
+                        if set_name.lower() == "clip":
+                            logger.debug(" - Skipping Clip set")
+                            continue
+
+                        # Skip sets that don't look like seasons (no number, not "stagione")
+                        # unless the block_name has a season number
+                        has_season_number = bool(re.search(r"(\d+)", set_name)) or bool(re.search(r"(\d+)", block_name))
+                        is_season_like = "stagione" in set_name.lower() or "stagione" in block_name.lower()
+                        if not has_season_number and not is_season_like:
+                            logger.debug(f" - Skipping non-season set: {set_name} in block {block_name}")
+                            continue
 
                         # Only add sets with episodes
                         if episode_count > 0:
@@ -78,8 +95,23 @@ class GetSerieInfo:
                                 blocks_found[block_name] = 0
                             blocks_found[block_name] += 1
 
-            # Add all collected seasons without any filtering (oldest first)
+            # Add all collected seasons, but avoid duplicates by season number
+            # Keep only the first occurrence of each season number (from main block)
+            seen_seasons = set()
             for season_data in self.all_seasons_data:
+                set_name = season_data["season_set"].get("name", "")
+                block_name = season_data["block_name"]
+                # Extract season number to check for duplicates
+                match = re.search(r"(\d+)", block_name)
+                if not match:
+                    match = re.search(r"(\d+)", set_name)
+                if match:
+                    season_num = int(match.group(1))
+                    if season_num in seen_seasons:
+                        logger.debug(f" - Skipping duplicate season {season_num} from block {block_name}")
+                        continue
+                    seen_seasons.add(season_num)
+
                 self._add_season(season_data["season_set"], season_data["block_id"], season_data["block_name"])
 
         except Exception as e:
@@ -88,17 +120,35 @@ class GetSerieInfo:
     def _add_season(self, season_set: dict, block_id: str, block_name: str):
         """Add a season combining set name and block name."""
         set_name = season_set.get("name", "")
-        match = re.search(r"(\d+)", set_name)
+
+        # Try to extract season number from block_name first (e.g., "Stagione 4")
+        match = re.search(r"(\d+)", block_name)
         if match:
             season_number = int(match.group(1))
         else:
-            season_number = len(self.seasons_manager.seasons) + 1
+            # Fallback to set_name if block_name doesn't have a number
+            match = re.search(r"(\d+)", set_name)
+            if match:
+                season_number = int(match.group(1))
+            else:
+                season_number = len(self.seasons_manager.seasons) + 1
+
+        # Determine season name: prefer the one containing "Stagione" or the block_name
+        if "stagione" in block_name.lower():
+            season_name = block_name
+            season_type = set_name
+        elif "stagione" in set_name.lower():
+            season_name = set_name
+            season_type = block_name
+        else:
+            season_name = block_name
+            season_type = set_name
 
         # Store block_id mapping
         self.season_block_mapping[season_number] = {"block_id": block_id, "set_id": season_set.get("id")}
 
         self.seasons_manager.add(
-            Season(id=season_set.get("id"), number=int(season_number), name=set_name, type=block_name)
+            Season(id=season_set.get("id"), number=int(season_number), name=season_name, type=season_type)
         )
 
     def collect_info_season(self, number_season: int) -> None:
