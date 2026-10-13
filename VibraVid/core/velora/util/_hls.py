@@ -15,7 +15,7 @@ def hls_base_url(playlist_url: str) -> str:
 
 
 def parse_hls_variant_playlist(
-    content: str, base_url: str, enc_override: dict | None = None
+    content: str, base_url: str, enc_override: dict | None = None, ad_block_filter=None,
 ) -> tuple[list[dict], str | None]:
     """
     Parse an HLS *variant* (media) playlist.
@@ -23,6 +23,12 @@ def parse_hls_variant_playlist(
     Returns a tuple of:
         - List of segment dicts: {"url", "number", "enc"}
         - Optional init segment URL (from EXT-X-MAP)
+
+    ``ad_block_filter`` is an optional service-provided callback
+    ``fn(blocks, content) -> set[str|None] | None`` receiving the parsed
+    EXT-X-MAP blocks (``{"init", "segments"}``) plus the raw playlist and
+    returning the init URLs to keep (``None`` = keep all). The core only
+    enforces; the service decides.
     """
     # Each block: {"init": Optional[str], "segments": List[Dict]}
     blocks: list[dict] = []
@@ -39,6 +45,7 @@ def parse_hls_variant_playlist(
 
     lines = content.splitlines()
     i = 0
+    playlist_idx = 0
     while i < len(lines):
         line = lines[i].strip()
 
@@ -104,7 +111,9 @@ def parse_hls_variant_playlist(
                         "url": resolved_url,
                         "enc": seg_enc,
                         "duration": seg_duration,
+                        "playlist_idx": playlist_idx,
                     }
+                    playlist_idx += 1
                     if pending_byterange is not None:
                         start, end = pending_byterange
                         seg_dict["headers"] = {"Range": f"bytes={start}-{end}"}
@@ -119,6 +128,23 @@ def parse_hls_variant_playlist(
     if not blocks:
         return [], None
 
+    if ad_block_filter is not None:
+        try:
+            keep = ad_block_filter(blocks, content)
+        except Exception as exc:
+            logger.debug(f"HLS ad block filter failed, keeping all blocks: {exc}")
+            keep = None
+        if keep is not None:
+            keep_set = set(keep)
+            filtered = [b for b in blocks if b["init"] in keep_set]
+            if filtered:
+                dropped = len(blocks) - len(filtered)
+                if dropped:
+                    logger.info(f"HLS ad decision: dropped {dropped} ad block(s), keeping {len(filtered)}")
+                blocks = filtered
+            else:
+                logger.warning("HLS ad decision would drop all blocks, keeping everything")
+
     # Pick the dominant block (the feature), tie-broken by total duration.
     best = max(blocks, key=lambda b: (len(b["segments"]), sum(s["duration"] for s in b["segments"])))
     if len(blocks) > 1:
@@ -132,10 +158,10 @@ def parse_hls_variant_playlist(
 
 
 def parse_hls_live_playlist(
-    content: str, base_url: str, enc_override: dict | None = None
+    content: str, base_url: str, enc_override: dict | None = None, ad_block_filter=None
 ) -> tuple[list[dict], str | None, int, int, bool]:
     """Parse a live HLS playlist and return all relevant scheduling metadata."""
-    segments, init_url = parse_hls_variant_playlist(content, base_url, enc_override)
+    segments, init_url = parse_hls_variant_playlist(content, base_url, enc_override, ad_block_filter)
 
     td_m = re.search(r"#EXT-X-TARGETDURATION:(\d+)", content)
     target_duration: int = int(td_m.group(1)) if td_m else 6

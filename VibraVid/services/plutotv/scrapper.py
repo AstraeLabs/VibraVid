@@ -108,12 +108,24 @@ class GetSerieInfoBySlug:
         return match.group(1)
 
     def _fetch_season_page(self, build_id: str, season_number: int) -> dict:
+        from VibraVid.utils import disk_cache
+
+        cache_name = f"slugpage_{self.slug}_s{season_number}_{build_id}"
+        cached = disk_cache.load("plutotv", cache_name)
+        if isinstance(cached, dict) and cached.get("pageProps"):
+            return cached["pageProps"]
+
         url = f"https://pluto.tv/_next/data/{build_id}/it/shows/{self.slug}/season/{season_number}.json"
         params = {"path": ["it", "shows", self.slug, "season", str(season_number)]}
         response = create_client(headers=get_headers()).get(url, params=params)
         response.raise_for_status()
 
-        return response.json().get("pageProps", {})
+        page_props = response.json().get("pageProps", {})
+        try:
+            disk_cache.save("plutotv", cache_name, {"pageProps": page_props}, ttl=12 * 3600)
+        except Exception as e:
+            logging.debug(f"Pluto TV season page cache save failed: {e}")
+        return page_props
 
     def _get_num_seasons(self, page_props: dict) -> int:
         queries = (page_props.get("dehydratedState") or {}).get("queries", [])
@@ -124,21 +136,57 @@ class GetSerieInfoBySlug:
 
         return 1
 
+    def _get_show_title(self, page_props: dict) -> str:
+        queries = (page_props.get("dehydratedState") or {}).get("queries", [])
+        for query in queries:
+            if query.get("queryKey", [None])[0] == "show-home":
+                show = query.get("state", {}).get("data", {}).get("showHome", {}).get("show", {})
+                if show.get("title"):
+                    return show["title"]
+        return self.slug
+
+    def _extract_episodes(self, page_props: dict, season_number: int) -> list:
+        """Extract episodes for a given season from the page properties."""
+        legacy = page_props.get("initialEpisodes") or []
+        if legacy:
+            return legacy
+
+        queries = (page_props.get("dehydratedState") or {}).get("queries", [])
+        for query in queries:
+            key = query.get("queryKey") or []
+            if not key or key[0] != "full-episodes-pagination":
+                continue
+            
+            params = key[1] if len(key) > 1 and isinstance(key[1], dict) else {}
+            if str(params.get("seasonNum", season_number)) != str(season_number):
+                continue
+            
+            pages = query.get("state", {}).get("data", {}).get("pages", [])
+            collected: list = []
+            for page in pages:
+                collected.extend(((page or {}).get("fullEpisodes") or {}).get("episodes", []) or [])
+            if collected:
+                return collected
+            
+        return []
+
     def _get_series_info(self):
         try:
             build_id = self._get_build_id()
 
             page_props = self._fetch_season_page(build_id, 1)
-            episodes = page_props.get("initialEpisodes") or []
-            if episodes:
-                self.series_name = episodes[0].get("seriesTitle", self.slug)
+            self.series_name = self._get_show_title(page_props) or self.slug
+
+            legacy_first = page_props.get("initialEpisodes") or []
+            if legacy_first and not self.series_name:
+                self.series_name = legacy_first[0].get("seriesTitle", self.slug)
 
             num_seasons = self._get_num_seasons(page_props)
 
             for season_number in range(1, num_seasons + 1):
                 if season_number != 1:
                     page_props = self._fetch_season_page(build_id, season_number)
-                    episodes = page_props.get("initialEpisodes") or []
+                episodes = self._extract_episodes(page_props, season_number)
 
                 season = self.seasons_manager.add(
                     Season(number=season_number, name=f"Season {season_number}", id=f"season-{season_number}")
@@ -149,7 +197,7 @@ class GetSerieInfoBySlug:
                         Episode(
                             id=episode.get("contentId"),
                             video_id=episode.get("contentId"),
-                            name=episode.get("label") or f"Episode {index}",
+                            name=episode.get("label") or episode.get("title") or f"Episode {index}",
                             number=index,
                             duration=round(episode.get("duration", 0) / 60) if episode.get("duration") else 0,
                         )

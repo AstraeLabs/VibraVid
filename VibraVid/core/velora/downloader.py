@@ -66,6 +66,7 @@ class MediaDownloader(
         manifest_refresh_fn=None,
         has_drm: bool = False,
         display_selected_only: bool = False,
+        ad_decision_fn=None,
     ) -> None:
         super().__init__(
             url=url,
@@ -81,6 +82,7 @@ class MediaDownloader(
             manifest_refresh_fn=manifest_refresh_fn,
             has_drm=has_drm,
             display_selected_only=display_selected_only,
+            ad_decision_fn=ad_decision_fn,
         )
         self.max_segments = max_segments
         self.max_time = max_time

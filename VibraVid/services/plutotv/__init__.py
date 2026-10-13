@@ -1,5 +1,7 @@
 # 26.11.2025
 
+import re
+
 from rich.console import Console
 
 from VibraVid.services._base import Entries, EntriesManager, site_constants
@@ -17,12 +19,38 @@ console = Console()
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()
 
+_SHOW_URL_RE = re.compile(r"pluto\.tv/(?:[a-z]{2}/)?shows/(?P<slug>[^/?#]+)", re.I)
+_MOVIE_URL_RE = re.compile(r"pluto\.tv/(?:[a-z]{2}/)?movies/(?P<id>[^/?#]+)", re.I)
+
 
 def register_cli_args(parser) -> list:
     """Register CLI options."""
     group = parser.add_argument_group("Pluto TV options")
-    group.add_argument("--protocol", dest="protocol", default="hls", choices=["hls", "dash"], help="Streaming protocol to use (default: hls). DASH resolves DRM keys automatically via the Pluto PlayReady license server.")
-    return ["protocol"]
+    group.add_argument("--url", dest="url", default=None, metavar="URL", help="Pluto TV title URL (show or movie page, e.g. https://pluto.tv/it/shows/the-jeffersons-it/).")
+    group.add_argument("--protocol", dest="protocol", default="dash", choices=["hls", "dash"], help="Streaming protocol to use (default: dash — the multi-period pipeline handles stitched timelines cleanly; DASH resolves DRM keys automatically via the Pluto PlayReady license server and needs a PlayReady CDM, otherwise use hls).")
+    group.add_argument("--skip-ads", dest="skip_ads", action="store_true", help="Drop stitched ad periods/blocks (decision by the Pluto service, enforced symmetrically on video+audio). Off by default.")
+    return ["url", "protocol", "skip_ads"]
+
+
+def _resolve_url_to_item(url: str) -> dict | None:
+    """Resolve a Pluto TV show/movie page URL to a direct item dict (``--url``)."""
+    text = (url or "").strip()
+    if not text:
+        return None
+
+    show_match = _SHOW_URL_RE.search(text)
+    if show_match:
+        slug = show_match.group("slug").rstrip("/")
+        console.print(f"[cyan]Detected series from URL: [green]{slug}")
+        return {"id": slug, "name": slug, "type": "tv", "url": text, "year": None, "slug": slug}
+
+    movie_match = _MOVIE_URL_RE.search(text)
+    if movie_match:
+        movie_id = movie_match.group("id").rstrip("/")
+        console.print(f"[cyan]Detected movie from URL: [green]{movie_id}")
+        return {"id": movie_id, "name": movie_id, "type": "movie", "url": text, "year": None}
+
+    return None
 
 
 def title_search(query: str) -> int:
@@ -37,6 +65,13 @@ def title_search(query: str) -> int:
     """
     entries_manager.clear()
     table_show_manager.clear()
+
+    # Direct URL pasted as search text ("stringa o --url").
+    if "pluto.tv" in (query or ""):
+        direct = _resolve_url_to_item(query)
+        if direct:
+            entries_manager.add(Entries(**direct))
+            return len(entries_manager)
 
     search_url = f"https://service-media-search.clusters.pluto.tv/v1/search?q={query}&limit=10"
     console.print(f"[cyan]Search url: [yellow]{search_url}")
@@ -97,4 +132,5 @@ search, process_search_result = make_search_entrypoints(
     table_show_manager=table_show_manager,
     download_film=download_film,
     download_series=download_series,
+    resolve_url=_resolve_url_to_item,
 )

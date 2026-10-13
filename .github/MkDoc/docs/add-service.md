@@ -286,6 +286,58 @@ dl.custom_filters = {"audio": config_manager.config.get("DOWNLOAD", "select_audi
 dl.start()
 ```
 
+### Custom ad-skip (`ad_decision_fn`)
+
+If the site stitches ads into the manifest (SSAI bumpers/creatives alongside the real
+content), don't teach the core what that site's ads look like — keep the knowledge in the
+service and let the core only enforce it. The service provides a decision callback,
+`DASH_Downloader`/`HLS_Downloader`/`ISM_Downloader` take it as `ad_decision_fn`, and the
+generic pipeline applies whatever it returns, symmetrically across video/audio (so tracks
+can't desync), with "keep everything" as the answer on any doubt:
+
+```python
+# VibraVid/services/<name>/ads.py (stdlib only — no core imports, unit-testable)
+def my_ad_decision(manifest_kind: str, content: str | None, ctx: dict | None = None) -> dict:
+    if manifest_kind == "dash":
+        ...  # parse the MPD, find ad Periods
+        return {"drop_period_idx": [1, 3], "reason": "video-only bumpers"}
+    if manifest_kind == "hls":
+        ...  # parse the child playlist, find ad ranges/blocks
+        return {"drop_seg_idx": [133, 134], "keep_init_urls": ["https://cdn.../init-main.mp4"]}
+    if manifest_kind == "ism":
+        ...  # scan StreamIndex Name/Url for creative markers
+        return {"drop_url_substrings": ["preroll"]}
+    return {}
+```
+
+Decision shapes (all optional, `{}` means keep everything):
+
+- DASH: `{"drop_period_idx": [...], "reason": str}` — dropped from **every** stream; same-language audio continuations split across periods are rejoined automatically.
+- HLS: `{"keep_init_urls": [...]}` (MAP-block level) and/or `{"drop_seg_idx": [...]}` (segment indices in playlist order, applied per rendition).
+- ISM: `{"drop_url_substrings": [...]}` (matched against segment URLs) and/or `{"drop_seg_idx": [...]}` (timeline indices).
+
+Wire it with a per-service flag (same pattern as `--skip-ts`) so it stays opt-in per site
+instead of becoming global behaviour:
+
+```python
+def register_cli_args(parser) -> list:
+    group = parser.add_argument_group("MyService options (-i <n>)")
+    group.add_argument("--skip-ads", dest="skip_ads", action="store_true", help="Drop stitched ad periods/blocks.")
+    return ["skip_ads", ...]
+```
+
+```python
+from .ads import my_ad_decision
+
+def _ad_decision_fn():
+    if (context_tracker.site_options or {}).get("skip_ads"):
+        return my_ad_decision
+    return None
+
+dl = DASH_Downloader(mpd_url, ..., ad_decision_fn=_ad_decision_fn())
+dl.start()
+```
+
 ### Batch downloads (albums, season packs)
 
 If your service downloads multiple items in one run (an album, a season pack) and you don't want

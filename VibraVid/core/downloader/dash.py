@@ -170,6 +170,7 @@ class DASH_Downloader(BaseDownloader):
         poster_url: str | None = None,
         sanitize_path: bool = True,
         display_selected_only: bool = False,
+        ad_decision_fn: Callable[[str, str | None, dict | None], dict] | None = None,
     ):
         """
         Parameters:
@@ -198,6 +199,7 @@ class DASH_Downloader(BaseDownloader):
         self.mpd_content = mpd_content
         self.mpd_headers = mpd_headers or get_headers()
         self.manifest_refresh_fn = manifest_refresh_fn
+        self.ad_decision_fn = ad_decision_fn
         self.other_tracks = [dict(track or {}) for track in (other_tracks or [])]
 
         self._subtitle_tracks: list[dict] = []
@@ -636,6 +638,7 @@ class DASH_Downloader(BaseDownloader):
             self.mpd_headers,
             self.mpd_content,
             "custom" if is_custom_manifest(self.mpd_content or "") else "dash",
+            ad_decision_fn=self.ad_decision_fn,
         )
         self.media_downloader.other_tracks = self._merge_other_tracks
         self.media_downloader.license_url = self.license_url

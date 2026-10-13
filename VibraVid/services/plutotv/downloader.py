@@ -18,6 +18,7 @@ from VibraVid.services._base.tv_display_manager import map_episode_path, map_mov
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, start_message
 
+from .ads import pluto_ad_decision
 from .client import (
     get_playback_dash_episode,
     get_playback_url_episode,
@@ -29,6 +30,13 @@ console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 
+def _ad_decision_fn():
+    """Pluto ad decision callback for the generic downloaders (None = keep all)."""
+    if (context_tracker.site_options or {}).get("skip_ads"):
+        return pluto_ad_decision
+    return None
+
+
 def download_film(select_title: Entries):
     """Download a Pluto TV movie."""
     start_message()
@@ -38,7 +46,7 @@ def download_film(select_title: Entries):
     movie_path = movie_folder(*path_components)
     output_path = os.path.join(movie_path, f"{filename}.{extension_output}")
 
-    protocol = (context_tracker.site_options or {}).get("protocol") or "hls"
+    protocol = (context_tracker.site_options or {}).get("protocol") or "dash"
     if protocol == "dash":
         content_ids = {"movie_id": select_title.id, "regione": "IT"}
         mpd_url, mpd_headers = get_playback_dash_episode(select_title.id, content_ids)
@@ -50,11 +58,12 @@ def download_film(select_title: Entries):
             license_headers=license_headers,
             output_path=output_path,
             drm_preference=DRMType.PLAYREADY,
+            ad_decision_fn=_ad_decision_fn(),
         ).start()
 
     content_ids = {"movie_id": select_title.id, "regione": "IT"}
     m3u8_url = get_playback_url_episode(select_title.id, content_ids)
-    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path).start()
+    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path, ad_decision_fn=_ad_decision_fn()).start()
 
 
 def download_episode(obj_episode, index_season_selected, index_episode_selected, scrape_serie):
@@ -79,7 +88,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     content_ids = {"episode_id": obj_episode.id, "regione": "IT"}
     output_path = os.path.join(episode_path, episode_name)
 
-    protocol = (context_tracker.site_options or {}).get("protocol") or "hls"
+    protocol = (context_tracker.site_options or {}).get("protocol") or "dash"
     if protocol == "dash":
         mpd_url, mpd_headers = get_playback_dash_episode(obj_episode.id, content_ids)
         license_url, license_headers = get_playready_license(mpd_headers)
@@ -90,10 +99,11 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
             license_headers=license_headers,
             output_path=output_path,
             drm_preference=DRMType.PLAYREADY,
+            ad_decision_fn=_ad_decision_fn(),
         ).start()
 
     m3u8_url = get_playback_url_episode(obj_episode.id, content_ids)
-    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path).start()
+    return HLS_Downloader(m3u8_url=m3u8_url, output_path=output_path, ad_decision_fn=_ad_decision_fn()).start()
 
 
 def download_series(

@@ -153,15 +153,87 @@ def binary_merge_segments(paths: list[Path], output_path: Path, merge_logger: lo
         _binary_merge_segments_serial(valid, output_path, log)
 
 
-def concat_demux_merge_segments(paths: list[Path], output_path: Path, merge_logger: logging.Logger | None = None) -> bool:
-    """Merge MPEG-TS segments via ffmpeg's -f concat demuxer, treating each segment as its own input instead of raw-byte-appending them (binary_merge_segments())."""
-    from VibraVid.setup import get_ffmpeg_path
+def _is_ffprobe_readable(path: Path) -> bool:
+    """True when ffprobe can demux at least one stream (cheap corruption check)."""
+    from VibraVid.setup import get_ffprobe_path
 
+    ffprobe = get_ffprobe_path()
+    if not ffprobe:
+        return True
+    
+    try:
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+        )
+    except Exception:
+        return True
+    return result.returncode == 0 and bool((result.stdout or "").strip())
+
+
+def _drop_unreadable_segments(valid: list[Path], log: logging.Logger) -> list[Path]:
+    """Split *valid* into readable files, logging (not failing on) the rest."""
+    if len(valid) < 2:
+        return valid
+    
+    with ThreadPoolExecutor(max_workers=_parallel_workers()) as pool:
+        readable = list(pool.map(_is_ffprobe_readable, valid))
+
+    kept = [p for p, ok in zip(valid, readable, strict=True) if ok]
+    bad = [p for p, ok in zip(valid, readable, strict=True) if not ok]
+    for p in bad:
+        log.warning(f"[concat_demux_merge] skipping unreadable segment (kept out of the merge): {p.name}")
+    
+    return kept or valid
+
+
+def _output_duration(output_path: Path) -> float | None:
+    from VibraVid.core.muxing.helper.audio.probe import get_video_duration
+
+    try:
+        return get_video_duration(str(output_path))
+    except Exception:
+        return None
+
+
+def concat_demux_merge_segments(
+    paths: list[Path],
+    output_path: Path,
+    merge_logger: logging.Logger | None = None,
+    expected_duration: float | None = None,
+) -> bool:
+    """Merge MPEG-TS segments via ffmpeg's -f concat demuxer, treating each segment as its own input instead of raw-byte-appending them (binary_merge_segments())."""
     log = merge_logger or logger
     valid = sorted((p for p in paths if p.exists() and p.stat().st_size > 0), key=_segment_number)
     if not valid:
         log.warning("[concat_demux_merge] no valid segments found")
         return False
+
+    if _run_concat_demuxer(valid, output_path, log) and not _still_short(output_path, expected_duration):
+        return True
+
+    pruned = _drop_unreadable_segments(valid, log)
+    if len(pruned) == len(valid):
+        return output_path.exists() and output_path.stat().st_size > 0
+    log.warning(f"[concat_demux_merge] retrying without {len(valid) - len(pruned)} unreadable segment(s)")
+    return _run_concat_demuxer(pruned, output_path, log)
+
+
+def _still_short(output_path: Path, expected_duration: float | None) -> bool:
+    if not expected_duration or expected_duration <= 0:
+        return False
+    
+    duration = _output_duration(output_path)
+    return duration is not None and duration < expected_duration * 0.95
+
+
+def _run_concat_demuxer(valid: list[Path], output_path: Path, log: logging.Logger) -> bool:
+    from VibraVid.setup import get_ffmpeg_path
 
     list_path = output_path.with_suffix(output_path.suffix + ".concat_list.txt")
     try:

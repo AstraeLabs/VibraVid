@@ -756,7 +756,7 @@ class DecryptPipelineMixin(
             merged_duration = get_video_duration(str(out_path))
             if merged_duration and merged_duration < ctx.total_duration * 0.95:
                 logger.warning(f"{out_path.name}: merged duration {merged_duration:.1f}s is well short of the manifest's {ctx.total_duration:.1f}s -- likely a mid-stream splice the raw concat can't express. Re-merging via ffmpeg's concat demuxer.")
-                if concat_demux_merge_segments(paths, out_path, merge_logger=logger):
+                if concat_demux_merge_segments(paths, out_path, merge_logger=logger, expected_duration=ctx.total_duration):
                     _fixed_duration = get_video_duration(str(out_path))
                     logger.info(f"{out_path.name}: concat-demuxer re-merge -> {_fixed_duration:.1f}s" if _fixed_duration else f"{out_path.name}: concat-demuxer re-merge done")
 

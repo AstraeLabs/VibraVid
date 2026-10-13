@@ -60,6 +60,7 @@ class HLS_Downloader(BaseDownloader):
         has_drm: bool = False,
         custom_filters: dict | None = None,
         display_selected_only: bool = False,
+        ad_decision_fn: Callable[[str, str | None, dict | None], dict] | None = None,
     ):
         """
         Parameters:
@@ -87,6 +88,7 @@ class HLS_Downloader(BaseDownloader):
         self.m3u8_content = m3u8_content
         self.headers = headers or get_headers()
         self.manifest_refresh_fn = manifest_refresh_fn
+        self.ad_decision_fn = ad_decision_fn
 
         self.license_url = str(license_url).strip() if license_url else None
         self.license_headers = license_headers or self.headers
@@ -358,7 +360,12 @@ class HLS_Downloader(BaseDownloader):
             return precheck
 
         self.media_downloader = self._new_media_downloader(
-            self.m3u8_url, self.headers, self.m3u8_content, "hls", has_drm=self.has_drm
+            self.m3u8_url, 
+            self.headers, 
+            self.m3u8_content, 
+            "hls", 
+            has_drm=self.has_drm,
+            ad_decision_fn=self.ad_decision_fn,
         )
         self.media_downloader.other_tracks = self.other_tracks
         self.media_downloader.custom_filters = self.custom_filters

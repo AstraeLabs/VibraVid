@@ -54,6 +54,8 @@ def lang_variants(normalized_lang: str) -> set[str]:
 
 
 class BaseMediaDownloader:
+    ad_decision_fn = None
+
     def __init__(
         self,
         url: str,
@@ -69,12 +71,14 @@ class BaseMediaDownloader:
         manifest_refresh_fn=None,
         has_drm: bool = False,
         display_selected_only: bool = False,
+        ad_decision_fn=None,
     ) -> None:
         self.url = url
         self.output_dir = Path(output_dir)
         self.filename = filename
         self.headers = headers or {}
         self.manifest_refresh_fn = manifest_refresh_fn
+        self.ad_decision_fn = ad_decision_fn
         self.manifest_content = manifest_content
         self.manifest_protocol = (manifest_protocol or "").lower() or None
         self.key = key
@@ -196,6 +200,7 @@ class BaseMediaDownloader:
             self.manifest_type = "HLS"
 
         self.streams = [s for s in parser.parse_streams() if s.type != "image"]
+        self.streams = self._apply_ad_decision(effective, parser)
 
         manual_choice = bool(
             context_tracker.is_gui and context_tracker.manual_tracks and not context_tracker.defer_manual_tracks
@@ -301,6 +306,143 @@ class BaseMediaDownloader:
             console.print(build_table(self._streams_for_display()))
 
         return self.streams
+
+    def _apply_ad_decision(self, effective: str, parser) -> list[Stream]:
+        """Enforce a service-provided ad decision; the service decides, the core applies."""
+        streams: list[Stream] = self.streams
+        if self.ad_decision_fn is None or effective not in ("dash", "ism"):
+            return streams
+
+        try:
+            decision = self.ad_decision_fn(effective, getattr(parser, "raw_content", None), None) or {}
+        except Exception as exc:
+            logger.debug(f"ad decision failed, keeping everything: {exc}")
+            return streams
+
+        if not decision:
+            logger.debug(f"ad decision ({effective}): no ads flagged, keeping all {len(streams)} stream(s)")
+            return streams
+
+        if effective == "ism":
+            return BaseMediaDownloader._apply_ism_decision(streams, decision)
+        return BaseMediaDownloader._apply_dash_decision(streams, decision)
+
+    @staticmethod
+    def _apply_dash_decision(streams: list[Stream], decision: dict) -> list[Stream]:
+        try:
+            drop = {int(p) for p in (decision.get("drop_period_idx") or [])}
+        except (TypeError, ValueError):
+            return streams
+
+        if not drop:
+            return streams
+        
+        reason = decision.get("reason", "")
+        filtered: list[tuple] = []
+        for s in streams:
+            kept_segs = [sg for sg in s.segments if getattr(sg, "period_idx", 0) not in drop]
+            filtered.append((s, kept_segs, len(s.segments) - len(kept_segs)))
+        
+        candidates = [(s, segs) for s, segs, _ in filtered if segs]
+        if not any(s.type == "video" for s, _ in candidates):
+            logger.warning("DASH ad decision would remove all video, keeping everything")
+            return streams
+        
+        for s, segs, removed in filtered:
+            if removed and segs:
+                logger.info(
+                    f"DASH ad decision: dropped {removed} segment(s) period(s) {sorted(drop)}"
+                    f" | id={s.id!r} type={s.type} lang={s.language} ({reason})"
+                )
+
+            if not segs:
+                logger.info(f"DASH ad decision: stream dropped entirely (only ad segments) | id={s.id!r}")
+            s.segments = segs
+        
+        kept = [s for s, _ in candidates]
+        total_dropped = sum(removed for _, _, removed in filtered)
+        total_kept = sum(len(segs) for _, segs, _ in filtered)
+        logger.info(
+            f"DASH ad decision applied: dropped {total_dropped}/{total_dropped + total_kept} segment(s)"
+            f" from periods {sorted(drop)}, {len(kept)}/{len(streams)} stream(s) kept"
+        )
+        BaseMediaDownloader._rejoin_split_audio(kept)
+        return kept
+
+    @staticmethod
+    def _apply_ism_decision(streams: list[Stream], decision: dict) -> list[Stream]:
+        """Enforce an ISM decision: ad URL substrings and/or timeline indices."""
+        subs = [str(x) for x in (decision.get("drop_url_substrings") or []) if x]
+        try:
+            idx_drop = {int(p) for p in (decision.get("drop_seg_idx") or [])}
+        except (TypeError, ValueError):
+            idx_drop = set()
+        if not subs and not idx_drop:
+            return streams
+
+        filtered: list[tuple] = []
+        for s in streams:
+            kept_segs = [
+                sg for sg in s.segments
+                if not any(sub in (sg.url or "") for sub in subs)
+                and getattr(sg, "number", -1) not in idx_drop
+            ]
+            filtered.append((s, kept_segs, len(s.segments) - len(kept_segs)))
+
+        candidates = [(s, segs) for s, segs, _ in filtered if segs]
+        if not any(s.type == "video" for s, _ in candidates):
+            logger.warning("ISM ad decision would remove all video, keeping everything")
+            return streams
+
+        for s, segs, removed in filtered:
+            if removed and segs:
+                logger.info(f"ISM ad decision: dropped {removed} chunk(s) | id={s.id!r} type={s.type} lang={s.language}")
+            if not segs:
+                logger.info(f"ISM ad decision: stream dropped entirely (only ad chunks) | id={s.id!r}")
+            s.segments = segs
+        
+        kept = [s for s, _ in candidates]
+        total_dropped = sum(removed for _, _, removed in filtered)
+        total_kept = sum(len(segs) for _, segs, _ in filtered)
+        logger.info(
+            f"ISM ad decision applied: dropped {total_dropped}/{total_dropped + total_kept} chunk(s),"
+            f" {len(kept)}/{len(streams)} stream(s) kept"
+        )
+        return kept
+
+    @staticmethod
+    def _rejoin_split_audio(streams: list[Stream]) -> None:
+        """Join same-track audio continuations split by stitching (in place)"""
+        from collections import defaultdict
+
+        def _norm(v) -> str:
+            return (str(v) if v is not None else "").strip().lower()
+
+        groups: dict[tuple, list] = defaultdict(list)
+        for s in streams:
+            if s.type != "audio" or getattr(s, "is_external", False) or not s.segments:
+                continue
+            groups[(_norm(s.language), _norm(s.codecs).split(".")[0], _norm(s.channels), int(s.sample_rate or 0))].append(s)
+
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+
+            members.sort(key=lambda s: min(getattr(sg, "period_idx", 0) for sg in s.segments))
+            first, rest = members[0], members[1:]
+            seen = {getattr(sg, "period_idx", 0) for sg in first.segments}
+            if any(getattr(sg, "period_idx", 0) in seen for s in rest for sg in s.segments):
+                continue
+
+            for s in rest:
+                first.segments.extend(s.segments)
+                streams.remove(s)
+            
+            first.segments.sort(key=lambda sg: (getattr(sg, "period_idx", 0), getattr(sg, "number", 0)))
+            logger.info(
+                f"DASH ad decision: rejoined {len(rest) + 1} split audio continuations"
+                f" | lang={first.language} ({len(first.segments)} segments)"
+            )
 
     def _dv_companion_stream(self) -> "Stream | None":
         """The DV companion stream marked by the selector, downloaded alongside the other tracks."""

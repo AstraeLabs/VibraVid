@@ -52,6 +52,7 @@ class ISM_Downloader(BaseDownloader):
         poster_url: str | None = None,
         sanitize_path: bool = True,
         display_selected_only: bool = False,
+        ad_decision_fn: Callable[[str, str | None, dict | None], dict] | None = None,
     ):
         """
         Parameters:
@@ -76,6 +77,7 @@ class ISM_Downloader(BaseDownloader):
         self.ism_content = ism_content
         self.headers = headers or get_headers()
         self.manifest_refresh_fn = manifest_refresh_fn
+        self.ad_decision_fn = ad_decision_fn
 
         self.license_url = str(license_url).strip() if license_url else None
         self.license_headers = license_headers or self.headers
@@ -220,7 +222,13 @@ class ISM_Downloader(BaseDownloader):
         if precheck is not None:
             return precheck
 
-        self.media_downloader = self._new_media_downloader(self.ism_url, self.headers, self.ism_content, "ism")
+        self.media_downloader = self._new_media_downloader(
+            self.ism_url, 
+            self.headers, 
+            self.ism_content, 
+            "ism", 
+            ad_decision_fn=self.ad_decision_fn
+        )
         self.media_downloader.other_tracks = self.other_tracks
         self.media_downloader.display_selected_only = self.display_selected_only
 
