@@ -23,6 +23,7 @@ BUILTIN_SERVICES = frozenset({
     "rakutentv",
     "realtime",
     "streamingcommunity",
+    "timvision",
     "tubitv",
 })
 

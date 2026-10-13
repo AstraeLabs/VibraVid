@@ -47,6 +47,7 @@ _PREFERRED_ORDER = [
     "tubitv",
     "plutotv",
     "rakutentv",
+    "timvision",
     "amazon_music",
 ]
 _OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax", "nowtvit"}
