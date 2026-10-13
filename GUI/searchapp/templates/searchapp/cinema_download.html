@@ -447,7 +447,7 @@
 		if (d.speed) facts.push("<span><b>" + esc(d.speed) + "</b></span>");
         if (d.language && !(d.selected_tracks || []).length)
             facts.push("<span>audio <b>" + esc(d.language) + "</b></span>");
-        document.getElementById("cn-hero-facts").innerHTML = facts.join("") + selectedTrackFacts(d);
+        document.getElementById("cn-hero-facts").innerHTML = facts.join("");
 
 		heroEntry = d;
 		askBackdrop(d);
