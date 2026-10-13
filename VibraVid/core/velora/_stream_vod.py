@@ -687,9 +687,55 @@ class VodStreamMixin:
             return
 
         base_url = hls_base_url(playlist_url)
+        ad_fn = getattr(self, "ad_decision_fn", None)
+        rendition = getattr(stream, "language", "") or getattr(stream, "id", "")
+
+        def _ad_block_filter(blocks, content):
+            try:
+                summary = [{"init_url": b.get("init"), "n_seg": len(b.get("segments", []))} for b in blocks]
+                decision = ad_fn("hls", content, {"blocks": summary, "rendition": rendition}) or {}
+            except Exception as exc:
+                logger.debug(f"HLS ad decision failed, keeping all blocks: {exc}")
+                return None
+            
+            if decision.get("keep_init_urls") is not None:
+                return set(decision["keep_init_urls"])
+            
+            drop = set(decision.get("drop_init_urls") or [])
+            if not drop:
+                return None
+            
+            return {b.get("init") for b in blocks if b.get("init") not in drop}
+
         media_segs, init_url = parse_hls_variant_playlist(
-            playlist_content, base_url, enc_override=getattr(self, "hls_enc_override", None)
+            playlist_content, base_url, enc_override=getattr(self, "hls_enc_override", None),
+            ad_block_filter=_ad_block_filter if ad_fn is not None else None,
         )
+
+        if ad_fn is not None:
+            try:
+                seg_decision = ad_fn("hls", playlist_content, {"rendition": rendition, "n_seg": len(media_segs)}) or {}
+            except Exception as exc:
+                logger.debug(f"HLS ad decision failed, keeping all segments: {exc}")
+                seg_decision = {}
+
+            try:
+                seg_drop = {int(p) for p in (seg_decision.get("drop_seg_idx") or [])}
+            except (TypeError, ValueError):
+                seg_drop = set()
+            
+            if seg_drop:
+                kept_segs = [s for s in media_segs if s.get("playlist_idx", s.get("number", 0)) not in seg_drop]
+                if kept_segs:
+                    logger.info(
+                        f"HLS ad decision applied: dropped {len(media_segs) - len(kept_segs)}/{len(media_segs)}"
+                        f" ad segment(s), {len(kept_segs)} kept | rendition={rendition!r}"
+                    )
+                    media_segs = kept_segs
+                    for seg_num, seg in enumerate(media_segs):
+                        seg["number"] = seg_num
+                else:
+                    logger.warning("HLS ad decision would drop all segments, keeping everything")
 
         if not media_segs and not init_url:
             logger.error(f"HLS variant playlist has no segments: {playlist_url}")
