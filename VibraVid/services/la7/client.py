@@ -81,7 +81,10 @@ def get_playback_info(page_url: str) -> dict:
         with create_client(headers={"user-agent": get_userAgent(), "referer": page_url}) as client:
             manifest = client.get(dash_sources[0]).text
         protected = "contentprotection" in manifest.lower() or "cenc:default_kid" in manifest.lower()
-        if "mspr:pro" in manifest:
+        # Prefer Widevine over PlayReady (as per Kodi plugin approach)
+        if "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed" in manifest:
+            drm_type = "Widevine"
+        elif "mspr:pro" in manifest:
             drm_type = "PlayReady"
     if hls_sources:
         with create_client(headers={"user-agent": get_userAgent(), "referer": page_url}) as client:
