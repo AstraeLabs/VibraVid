@@ -342,15 +342,15 @@ class Decryptor:
         progress_cb: Callable[[dict[str, Any]], None] | None = None,
         status: str | None = None,
         stream_type: str = "video",
-    ) -> bool:
-        """Decrypt a non-live (static) encrypted file using `flux` (`-f progressive`) — subprocess only"""
+    ) -> tuple[bool, str | None]:
+        """Decrypt a non-live (static) encrypted file using `flux` (`-f progressive`) — subprocess only. Returns (ok, error_message)."""
         if not self.flux_path:
-            return False
+            return False, "flux not available"
 
         try:
             pairs = normalized_keys
             if not pairs:
-                return False
+                return False, "no usable keys"
 
             with _AnsiSafePathGuard(encrypted_path, output_path) as guard:
                 cmd = [
@@ -362,6 +362,10 @@ class Decryptor:
                     "-f",
                     "progressive"
                 ]
+                ffmpeg_path = get_ffmpeg_path()
+                if ffmpeg_path and os.path.exists(ffmpeg_path):
+                    cmd.extend(["--ffmpeg-path", ffmpeg_path])
+                
                 for kid, key in pairs:
                     cmd.extend(["--key", f"{kid.lower()}:{key.lower()}"])
 
@@ -392,19 +396,19 @@ class Decryptor:
                 if result is not True:
                     stderr_text = result[1] if isinstance(result, tuple) else str(result)
                     logger.debug(f"flux declined/failed after {time.monotonic() - _flux_t0:.1f}s: {stderr_text}")
-                    return False
+                    return False, stderr_text
 
                 if not os.path.exists(guard.safe_output_path) or os.path.getsize(guard.safe_output_path) <= 0:
                     logger.debug(f"flux reported success but output is missing/empty after {time.monotonic() - _flux_t0:.1f}s — falling back")
-                    return False
+                    return False, "output missing or empty"
 
                 guard.finalize()
                 logger.info(f"flux finished -> {os.path.basename(output_path)} in {time.monotonic() - _flux_t0:.1f}s ({os.path.getsize(output_path)} bytes)")
-                return True
+                return True, None
 
         except Exception as e:
             logger.warning(f"flux decrypt failed, falling back: {e}")
-            return False
+            return False, str(e)
 
     def _get_flux_daemon(self) -> "_FluxDaemon | None":
         """Get or start the persistent flux daemon for live decryption, if available."""
@@ -537,11 +541,13 @@ class Decryptor:
         stream_type: str = "video",
         progress_cb: Callable[[dict[str, Any]], None] | None = None,
         detected: "EncryptionInfo | None" = None,
+        key_fallback=None,
     ) -> bool:
         """Decrypt the given encrypted file using the provided keys and output to the specified path.
 
         ``detected`` allows callers that already ran encryption detection (e.g.
         ``PostDownloadDecryptor``) to skip a redundant ``flux -d -j`` scan.
+        ``key_fallback`` (core.drm.key_fallback.KeyFallback): when flux's key-sanity check proves the key wrong, retry with the other vaults' keys, then the CDM.
         """
         try:
             if detected is not None:
@@ -572,6 +578,8 @@ class Decryptor:
                 return False
 
             norm_keys = KeysManager.resolve_placeholder_kid(kid, norm_keys)
+            if key_fallback is not None:
+                norm_keys = KeysManager.normalize(key_fallback.apply([f"{k}:{v}" for k, v in norm_keys]))
 
             if kid and not KeysManager.is_zero_kid(kid):
                 available_kids = {k.lower() for k, _ in norm_keys}
@@ -583,13 +591,19 @@ class Decryptor:
             filename = os.path.basename(encrypted_path)
 
             label = f"[cyan]Dec[/cyan] [green]{filename}[/green] [[magenta]{method_display}[/magenta]] - [yellow]flux[/yellow]"
-            ok = self._decrypt_flux_nonlive(
-                encrypted_path, norm_keys, output_path, label,
-                progress_cb=progress_cb, status=method_display, stream_type=stream_type,
-            )
+            def _run(pairs: list[tuple[str, str]]) -> tuple[bool, str | None]:
+                return self._decrypt_flux_nonlive(
+                    encrypted_path, pairs, output_path, label,
+                    progress_cb=progress_cb, status=method_display, stream_type=stream_type,
+                )
 
+            ok, err = _run(norm_keys)
             if ok:
                 return True
+
+            if key_fallback is not None and err and "key is wrong" in err:
+                if key_fallback.recover([kid] if kid else [], [f"{k}:{v}" for k, v in norm_keys], lambda keys: _run(KeysManager.normalize(keys))):
+                    return True
 
             logger.warning(f"flux failed/produced unusable output for {filename}")
 

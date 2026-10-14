@@ -470,7 +470,7 @@ class LiveDownloadMixin:
             try:
                 decryptor = Decryptor()
                 if decryptor.decrypt(
-                    str(out_path), self.key, str(post_merge_path), stream_type=stream.type, progress_cb=bar_manager.decrypt_progress_cb(task_key)
+                    str(out_path), self.key, str(post_merge_path), stream_type=stream.type, progress_cb=bar_manager.decrypt_progress_cb(task_key), key_fallback=self.key_fallback
                 ):
                     try:
                         out_path.unlink(missing_ok=True)
@@ -551,6 +551,18 @@ class LiveDownloadMixin:
                     init_path=str(init_path) if init_path and init_path.exists() else None,
                     key_sanity=run_key_sanity,
                 )
+
+                if not ok and message and "key is wrong" in message and self._recover_wrong_key(
+                    self._stream_kids(stream),
+                    lambda keys: _decryptor.decrypt_segment_live(
+                        encrypted_path=str(fp),
+                        decrypted_path=str(dec_tmp),
+                        raw_keys=keys,
+                        init_path=str(init_path) if init_path and init_path.exists() else None,
+                        key_sanity=True,
+                    )[:2],
+                ):
+                    ok = True
 
                 if not ok:
                     logger.debug(f"Live DASH: decrypt failed for {fp.name}: {message}")

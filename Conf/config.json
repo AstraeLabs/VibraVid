@@ -81,7 +81,7 @@
         "bypass_vault_cache": false,
         "log_engine_output": false,
         "vault": {
-            "vault_1": {
+            "default": {
                 "url": "https://drm-db.server66.workers.dev",
                 "token": ""
             }

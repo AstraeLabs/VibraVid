@@ -564,6 +564,13 @@ class DASH_Downloader(BaseDownloader):
                     continue
 
                 audio_dl.set_key(audio_keys)
+                self._attach_key_fallback(
+                    self._collect_drm_from_streams(audio_streams),
+                    audio_dl,
+                    cross_drm_fallback=True,
+                    license_url=audio_license_url,
+                    license_headers=audio_license_headers,
+                )
 
                 if self.download_id:
                     download_tracker.update_status(self.download_id, f"Downloading audio {audio_language}...")
@@ -770,6 +777,7 @@ class DASH_Downloader(BaseDownloader):
                 if self.download_id:
                     download_tracker.complete_download(self.download_id, success=False, error=self.error)
                 return DownloadResult(None, True, self.error)
+            self._attach_key_fallback(drm_psshs, cross_drm_fallback=True)
 
         # ── Download
         self._log_tracks_json(streams, self.decryption_keys, self.mpd_url)

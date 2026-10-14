@@ -531,9 +531,16 @@ class VodStreamMixin:
                     return
 
                 if err and "key is wrong" in err:
+                    if self._recover_wrong_key(
+                        kids,
+                        lambda keys: daemon.decrypt(str(in_path), str(out_path), keys, None, key_sanity=True, ffmpeg_path=ffmpeg_path),
+                    ):
+                        logger.info(f"live key-trial: fallback key passed for {label} -- download continues")
+                        return
+
                     logger.error(f"live key-trial: stored key is wrong for {label} -- terminating mid-download")
                     console.print(f"[red]Terminating {label} (live key-trial):[/red] wrong key, stopping download")
-                    self._register_wrong_key(kids)
+                    self._register_wrong_key(kids, self.license_url, getattr(getattr(stream, "drm", None), "pssh", None))
                     return
 
                 logger.info(f"live key-trial inconclusive for {label} ({err or 'no verdict'}) -- download continues")

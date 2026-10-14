@@ -699,7 +699,7 @@ class DecryptPipelineMixin(
                 for p in existing:
                     dec_p = p.with_suffix(p.suffix + ".dec")
                     try:
-                        if Decryptor().decrypt(str(p), self.key, str(dec_p), stream_type=stream.type):
+                        if Decryptor().decrypt(str(p), self.key, str(dec_p), stream_type=stream.type, key_fallback=self.key_fallback):
                             decrypted_paths.append(dec_p)
                         else:
                             per_segment_ok = False
@@ -859,7 +859,7 @@ class DecryptPipelineMixin(
             try:
                 decryptor = Decryptor()
                 if decryptor.decrypt(
-                    str(out_path), self.key, str(post_merge_path), stream_type=stream.type, progress_cb=_decrypt_cb
+                    str(out_path), self.key, str(post_merge_path), stream_type=stream.type, progress_cb=_decrypt_cb, key_fallback=self.key_fallback
                 ):
                     decrypted_ok = True
                     logger.info(f"Decrypt finished -> {out_path.name} in {time.monotonic() - _decrypt_t0:.1f}s")

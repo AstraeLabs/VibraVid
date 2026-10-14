@@ -28,6 +28,8 @@ class LiveFragMp4Decryptor:
         self._decided: str | None = None  # None | "decrypt" | "abandon"
         self._decryptor: Decryptor | None = None
         self._resolved_key: Any = None
+        self._kid: str | None = None
+        self._key_fallback = None
         self._protected_init_path: Path | None = None
         self._frag_raw_path = tmp_dir / "live_frag_raw.bin"
         self._frag_dec_path = tmp_dir / "live_frag_dec.bin"
@@ -95,11 +97,15 @@ class LiveFragMp4Decryptor:
 
         resolved_key = None
         if kid and not KeysManager.is_zero_kid(kid):
+            from VibraVid.core.drm.key_fallback import KeyFallback
             from VibraVid.core.drm.manager import DRMManager
 
-            resolved = DRMManager().resolve_flat_key(kid, pssh, self._key, drm_type=scheme or "mp4")
+            mgr = DRMManager()
+            resolved = mgr.resolve_flat_key(kid, pssh, self._key, drm_type=scheme or "mp4")
             if resolved:
                 resolved_key = resolved[0]
+            self._kid = kid
+            self._key_fallback = KeyFallback.for_flat(kid, pssh, scheme or "mp4", drm_manager=mgr)
 
         if resolved_key is None and self._key:
             resolved_key = self._key
@@ -143,13 +149,25 @@ class LiveFragMp4Decryptor:
         run_key_sanity = self._key_sanity_pending
         self._key_sanity_pending = False
 
-        ok, message, _data = self._decryptor.decrypt_segment_live(
-            encrypted_path=str(self._frag_raw_path),
-            decrypted_path=str(self._frag_dec_path),
-            raw_keys=self._resolved_key,
-            init_path=str(self._protected_init_path),
-            key_sanity=run_key_sanity,
-        )
+        def _run(keys: Any, key_sanity: bool) -> tuple[bool, str | None]:
+            return self._decryptor.decrypt_segment_live(
+                encrypted_path=str(self._frag_raw_path),
+                decrypted_path=str(self._frag_dec_path),
+                raw_keys=keys,
+                init_path=str(self._protected_init_path),
+                key_sanity=key_sanity,
+            )[:2]
+
+        ok, message = _run(self._resolved_key, run_key_sanity)
+        if (
+            not ok
+            and message
+            and "key is wrong" in message
+            and self._key_fallback is not None
+            and self._key_fallback.recover([self._kid], self._resolved_key, lambda keys: _run(keys, True))
+        ):
+            self._resolved_key = self._key_fallback.apply(self._resolved_key)
+            ok = True
 
         if not ok or not self._frag_dec_path.exists():
             raise RuntimeError(f"live fragment decrypt failed: {message}")

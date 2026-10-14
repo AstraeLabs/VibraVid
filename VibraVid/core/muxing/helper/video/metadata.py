@@ -37,6 +37,12 @@ def _disposition_flags(disposition: dict) -> list:
     return [labels.get(name, name.upper()) for name in order if disposition.get(name)]
 
 
+def _known_language(stream: dict) -> str:
+    """Return the stream's language tag, or "" when missing or "und" (the caller lists it as UND)."""
+    lang = ((stream.get("tags") or {}).get("language") or "").strip()
+    return "" if lang.lower() == "und" else lang
+
+
 @ffprobe_cached
 def get_media_metadata(file_path: str) -> dict:
     """Extract quality (resolution), languages, codecs and flags from a media file using ffprobe."""
@@ -73,27 +79,26 @@ def get_media_metadata(file_path: str) -> dict:
         audio_flags_found = []
         for s in streams:
             if s.get("codec_type") == "audio":
-                lang = s.get("tags", {}).get("language") or ""
+                lang = _known_language(s)
                 raw_acodec = s.get("codec_name", "")
                 short_acodec = get_short_codec("audio", raw_acodec)
 
-                if lang:
-                    lang_up = lang.upper()
-                    if lang_up not in languages_found:
-                        languages_found.append(lang_up)
-                    if short_acodec and short_acodec not in acodecs_found:
-                        acodecs_found.append(short_acodec)
+                lang_up = lang.upper()
+                if lang_up and lang_up not in languages_found:
+                    languages_found.append(lang_up)
+                if short_acodec and short_acodec not in acodecs_found:
+                    acodecs_found.append(short_acodec)
 
-                    flags = _disposition_flags(s.get("disposition", {}) or {})
-                    audio_flags_found.extend(f for f in flags if f not in audio_flags_found)
-                    audio_tracks.append(
-                        {
-                            "language": lang_up,
-                            "codec": short_acodec,
-                            "flags": flags,
-                            **language_variants(lang),
-                        }
-                    )
+                flags = _disposition_flags(s.get("disposition", {}) or {})
+                audio_flags_found.extend(f for f in flags if f not in audio_flags_found)
+                audio_tracks.append(
+                    {
+                        "language": lang_up or "UND",
+                        "codec": short_acodec,
+                        "flags": flags,
+                        **language_variants(lang or "und"),
+                    }
+                )
 
         sub_languages_found = []
         sub_flags_found = []
@@ -104,12 +109,9 @@ def get_media_metadata(file_path: str) -> dict:
                 if not scodec_val:
                     scodec_val = get_short_codec("subtitle", s.get("codec_name", ""))
 
-                lang = s.get("tags", {}).get("language") or ""
-                if not lang:
-                    continue
-
+                lang = _known_language(s)
                 lang_up = lang.upper()
-                if lang_up not in sub_languages_found:
+                if lang_up and lang_up not in sub_languages_found:
                     sub_languages_found.append(lang_up)
 
                 disposition = s.get("disposition", {}) or {}
@@ -121,12 +123,12 @@ def get_media_metadata(file_path: str) -> dict:
 
                 subtitle_tracks.append(
                     {
-                        "language": lang_up,
+                        "language": lang_up or "UND",
                         "forced": forced,
                         "sdh": sdh,
                         "cc": cc,
                         "flags": flags,
-                        **language_variants(lang),
+                        **language_variants(lang or "und"),
                     }
                 )
 

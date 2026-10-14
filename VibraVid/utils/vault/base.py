@@ -19,6 +19,11 @@ class BaseVault:
     def is_connected(self) -> bool:
         return False
 
+    @property
+    def is_writable(self) -> bool:
+        """True if set_keys actually stores keys; read-only vaults are skipped when keys are written back."""
+        return False
+
     def close(self) -> None:
         """Close the HTTP session, if one was opened."""
         if self.session:

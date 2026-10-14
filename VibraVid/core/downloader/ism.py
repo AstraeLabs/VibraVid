@@ -272,6 +272,7 @@ class ISM_Downloader(BaseDownloader):
 
             if keys:
                 self.media_downloader.set_key(keys)
+                self._attach_key_fallback(drm_psshs, cross_drm_fallback=True)
             else:
                 console.print("[red]Warning: DRM detected but no decryption keys found")
         else:

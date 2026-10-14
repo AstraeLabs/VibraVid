@@ -198,6 +198,7 @@ class IsmPostprocMixin:
             str(out_path),
             stream_type=stream.type,
             progress_cb=bar_manager.decrypt_progress_cb(task_key),
+            key_fallback=self.key_fallback,
         )
 
         try:

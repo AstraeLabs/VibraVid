@@ -275,6 +275,9 @@ class StreamingMuxMixin:
             cmd += ["-f", "ffmetadata", "-i", self._streaming_mux_chapter_file]
 
         cmd += ["-map", "0:v:0"]
+        if not audio_paths:
+            cmd += ["-map", "0:a?"]
+        
         video_codecs = (getattr(video_stream, "codecs", "") or "").lower()
         if any(p in video_codecs for p in ("hev", "hvc", "dvh", "dvhe")):
             cmd += ["-tag:v", "hvc1"]

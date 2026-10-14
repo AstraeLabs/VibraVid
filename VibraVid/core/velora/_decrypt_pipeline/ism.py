@@ -54,6 +54,14 @@ class IsmDecryptMixin:
         if want_key_sanity:
             ctx.key_sanity_checked = True
 
+        if not ok and message and "key is wrong" in message and self._recover_wrong_key(
+            self._stream_kids(ctx.stream),
+            lambda keys: ism_decryptor.decrypt_segment_live(
+                encrypted_path=str(fp), decrypted_path=str(dec_tmp), raw_keys=keys, init_path=str(init_path), key_sanity=True
+            )[:2],
+        ):
+            ok, message = True, None
+
         if not ok:
             if message and "key is wrong" in message:
                 self._register_wrong_key(self._stream_kids(ctx.stream), self.license_url, getattr(ctx.stream.drm, "pssh", None))

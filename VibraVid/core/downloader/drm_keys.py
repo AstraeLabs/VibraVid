@@ -6,6 +6,7 @@ from typing import Any
 from VibraVid.core.drm.system import DRMType
 
 logger = logging.getLogger(__name__)
+_DRM_TYPE_NAMES = {DRMType.WIDEVINE: "widevine", DRMType.PLAYREADY: "playready", DRMType.FAIRPLAY: "fairplay"}
 
 
 def effective_manual_key(key: Any) -> Any:
@@ -52,11 +53,7 @@ def fetch_drm_keys(
     ===================================  =====  =====  =====  =================
     """
     keys = None
-    effective_pref = preference
-    if cross_drm_fallback and not drm_psshs.get(effective_pref):
-        other = DRMType.PLAYREADY if effective_pref == DRMType.WIDEVINE else DRMType.WIDEVINE
-        if drm_psshs.get(other):
-            effective_pref = other
+    effective_pref = _effective_preference(drm_psshs, preference, cross_drm_fallback)
 
     def _resolve(label: str, call):
         if not swallow_errors:
@@ -101,3 +98,43 @@ def fetch_drm_keys(
         keys = manual_keys(key)
 
     return keys or []
+
+def _effective_preference(drm_psshs: dict[str, list[dict]], preference: str, cross_drm_fallback: bool) -> str:
+    """*preference*, or the other of Widevine/PlayReady when the manifest only carries that one."""
+    if cross_drm_fallback and not drm_psshs.get(preference):
+        other = DRMType.PLAYREADY if preference == DRMType.WIDEVINE else DRMType.WIDEVINE
+        if drm_psshs.get(other):
+            return other
+    return preference
+
+
+def build_key_fallback(
+    drm_manager,
+    drm_psshs: dict[str, list[dict]],
+    *,
+    preference: str,
+    license_url: str | None,
+    license_headers: dict | None,
+    license_data: dict | None = None,
+    license_certificate: str | None = None,
+    license_request_fn=None,
+    cross_drm_fallback: bool = False,
+):
+    """KeyFallback for the same DRM type/license fetch_drm_keys resolved with, or None when there is nothing to fall back on."""
+    from VibraVid.core.drm.key_fallback import KeyFallback
+
+    effective_pref = _effective_preference(drm_psshs, preference, cross_drm_fallback)
+    pssh_list = drm_psshs.get(effective_pref) or []
+    if drm_manager is None or not pssh_list or effective_pref not in _DRM_TYPE_NAMES:
+        return None
+
+    return KeyFallback(
+        drm_manager,
+        _DRM_TYPE_NAMES[effective_pref],
+        pssh_list,
+        license_url=license_url,
+        license_headers=license_headers,
+        license_data=license_data,
+        license_certificate=license_certificate,
+        license_request_fn=license_request_fn,
+    )

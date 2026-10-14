@@ -668,6 +668,9 @@ class Generic_Downloader(BaseDownloader):
             cmd += ["-i", p]
 
         cmd += ["-map", "0:v:0"]
+        if not audio_paths:
+            cmd += ["-map", "0:a?"]
+        
         video_codecs = str(video_entry["source"].get("codecs") or "").lower()
         if any(p in video_codecs for p in ("hev", "hvc", "dvh", "dvhe")):
             cmd += ["-tag:v", "hvc1"]
@@ -1480,6 +1483,9 @@ class Generic_Downloader(BaseDownloader):
                 cmd += ["-i", p]
 
             cmd += ["-map", "0:v:0"]
+            if not audio_paths:
+                cmd += ["-map", "0:a?"]
+            
             for j in range(len(audio_paths)):
                 cmd += ["-map", f"{j + 1}:a"]
 

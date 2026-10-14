@@ -14,6 +14,7 @@ from typing import NamedTuple
 from rich.console import Console
 
 from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
+from VibraVid.core.downloader.drm_keys import build_key_fallback
 from VibraVid.core.muxing import (
     build_hybrid_output,
     embed_poster,
@@ -393,6 +394,32 @@ class BaseDownloader:
             manifest_content=manifest_content,
             manifest_protocol=manifest_protocol,
             **extra,
+        )
+
+    def _attach_key_fallback(
+        self,
+        drm_psshs: dict[str, list[dict]],
+        media_downloader: MediaDownloader | None = None,
+        *,
+        cross_drm_fallback: bool = False,
+        license_url: str | None = None,
+        license_headers: dict | None = None,
+    ) -> None:
+        """Give *media_downloader* (default: this download's) a KeyFallback over the same DRM context its keys were fetched with, so a key proven wrong mid-download is retried against the other vaults, then the CDM."""
+        md = media_downloader or getattr(self, "media_downloader", None)
+        if md is None:
+            return
+        
+        md.key_fallback = build_key_fallback(
+            self.drm_manager,
+            drm_psshs,
+            preference=self.drm_preference,
+            license_url=license_url or self.license_url,
+            license_headers=license_headers or self.license_headers,
+            license_data=self.license_data,
+            license_certificate=self.license_certificate,
+            license_request_fn=getattr(self, "license_request_fn", None),
+            cross_drm_fallback=cross_drm_fallback,
         )
 
     def _no_match_result(self) -> "DownloadResult | None":
@@ -982,8 +1009,8 @@ class BaseDownloader:
 
         if self.output_path and os.path.exists(self.output_path):
             title, media_type, site, _ = self._resolve_track_info()
-            from VibraVid.utils.vault.vault_1 import claudio_vault
-            claudio_vault.track_download_async(title=title, media_type=media_type, service=site)
+            from VibraVid.utils.vault.default import default_vault
+            default_vault.track_download_async(title=title, media_type=media_type, service=site)
 
         if self.download_id:
             download_tracker.complete_download(

@@ -417,6 +417,7 @@ class HLS_Downloader(BaseDownloader):
 
             if keys:
                 self.media_downloader.set_key(keys)
+                self._attach_key_fallback(drm_psshs)
             elif is_protected:
                 console.print("[red]Warning: DRM detected but no decryption keys found")
         else:

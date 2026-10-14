@@ -23,7 +23,7 @@ from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.utils import config_manager, internet_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
 from VibraVid.utils.http_client import create_client, get_userAgent
-from VibraVid.utils.vault.vault_1 import claudio_vault
+from VibraVid.utils.vault.default import default_vault
 
 from .drm_keys import effective_manual_key
 from .util._drm_probe import PROBE_BYTES, PROBE_BYTES_FAST, DRMProbe
@@ -735,7 +735,7 @@ class MP4FileDownloader:
             self._complete_tracking(success=True, path=os.path.abspath(self.path))
 
         # Analytics (fire-and-forget)
-        claudio_vault.track_download_async(
+        default_vault.track_download_async(
             title=context_tracker.title or os.path.basename(self.path),
             media_type=self.media_type or "Film",
             service=self.site_name or "",

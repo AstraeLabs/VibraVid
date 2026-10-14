@@ -1,6 +1,7 @@
 # 29.01.26
 
 import logging
+import threading
 from typing import Any
 
 from VibraVid.core.decryptor import KeysManager
@@ -8,8 +9,9 @@ from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.setup import binary_paths, get_prd_path, get_wvd_path, resolve_service_cdm
 from VibraVid.utils import config_manager
-from VibraVid.utils.vault import build_named_vault, claudio_vault, lab_vault
+from VibraVid.utils.vault import DEFAULT_VAULT_KEYS, build_named_vault, build_universal_vault, default_vault
 from VibraVid.utils.vault._url_utils import clean_license_url
+from VibraVid.utils.vault.universal import CUSTOM_PROTOCOL, resolve_vault_protocol
 
 from .playready import get_playready_keys
 from .system import normalize_kid
@@ -29,19 +31,36 @@ def _anonymize(value: str) -> str:
 class DRMManager:
     @staticmethod
     def _build_vaults() -> list[object]:
-        """Assemble the active vault list; each vault instance carries its own `.name`."""
-        vaults: list[object] = []
-        if lab_vault.is_connected:
-            vaults.append(lab_vault)
+        """Assemble the active vault list in DRM.vault declaration order; each vault instance carries its own `.name`.
 
-        for name, cfg in config_manager.config.get_dict("DRM", "vault", default={}).items():
-            if name == "vault_2":
-                continue  # reserved: always the JSON-RPC lab_vault singleton above, not a REST config entry
-            vdb = claudio_vault if name == "vault_1" else build_named_vault(name, cfg)
-            if vdb.is_connected:
+        - "default" (or its old name "vault_1"): the built-in default vault singleton.
+        - protocol "custom": your own vault speaking the default vault's REST contract (read + write).
+        - protocol "api" / "json" / "query": a third-party vault (read-only unless "save_keys": true).
+        An entry without "protocol" gets it auto-detected once and cached (see utils.vault.universal).
+        """
+        vaults: list[object] = []
+        entries = {name: cfg for name, cfg in config_manager.config.get_dict("DRM", "vault", default={}).items() if isinstance(cfg, dict)}
+        protocols = {name: CUSTOM_PROTOCOL if name in DEFAULT_VAULT_KEYS else resolve_vault_protocol(name, cfg) for name, cfg in entries.items()}
+        rest_urls = {str(cfg.get("url") or "") for name, cfg in entries.items() if protocols[name] == CUSTOM_PROTOCOL}
+
+        for position, (name, cfg) in enumerate(entries.items(), start=1):
+            if name in DEFAULT_VAULT_KEYS:
+                vdb = default_vault
+            elif protocols[name] == CUSTOM_PROTOCOL:
+                vdb = build_named_vault(name, cfg)
+            else:
+                vdb = build_universal_vault(name, cfg, known_urls=rest_urls)
+            if vdb is not None and vdb.is_connected and vdb not in vaults:  # "default" + "vault_1" both map to one singleton
+                vdb.position = position  # 1-based place in DRM.vault, shown next to the vault name
                 vaults.append(vdb)
 
         return vaults
+
+    def vault_label(self, name: str | None) -> str | None:
+        """*name* followed by its vault's position in DRM.vault, e.g. "claudio [1]"; unchanged for a non-vault source such as "cdm"."""
+        vdb = next((v for v in self._vaults if v.name == name), None)
+        position = getattr(vdb, "position", None)
+        return f"{name} [{position}]" if position else name
 
     def __init__(
         self,
@@ -121,7 +140,7 @@ class DRMManager:
             if anonymize:
                 kid_val, key_val = _anonymize(kid_val), _anonymize(key_val)
             if k in tagged:
-                tag = label
+                tag = self.vault_label(label)
             elif default_label:
                 tag = default_label
             else:
@@ -218,6 +237,58 @@ class DRMManager:
 
         return found_keys, source, kid_flags
 
+    def _db_lookup_all(self, kids: list[str], base_license_url: str, pssh_val: str | None = None) -> list[tuple[str, str]]:
+        """Like _db_lookup, but query every vault (no early stop) and return each "kid:key" with the vault it came from."""
+        found: list[tuple[str, str]] = []
+        if not kids or not base_license_url:
+            return found
+
+        for vdb in self._vaults:
+            try:
+                keys = list(vdb.get_keys_by_kids(base_license_url, kids, pssh_val) or [])
+            except Exception as e:
+                logger.debug(f"Fallback lookup failed for {vdb.name} vault (non-fatal): {e}")
+                continue
+            for k in keys:
+                if set(k.split(":", 1)[1] if ":" in k else "") <= {"0"}:
+                    continue
+                found.append((k, vdb.name))
+        return found
+
+    def _cdm_extract(self, pssh_list: list[dict], license_url: str, kids: list[str], cdm_fn, cdm_kwargs: dict, drm_type: str) -> list[str]:
+        """Call the CDM backend to extract keys for the given KID(s) from the PSSH(s)."""
+        missing_pssh_list = [item for item in pssh_list if normalize_kid(item.get("kid", "")) in kids] or pssh_list  # safety: if filtering gives empty, use full list
+        logger.info(f"{drm_type} CDM extraction for {len(kids)} missing KID(s): {kids}")
+        cdm_result = cdm_fn(missing_pssh_list, license_url, **cdm_kwargs)
+        if not cdm_result:
+            return []
+
+        # Keep only the KID(s) we actually asked the CDM to resolve for this PSSH.
+        cdm_keys = cdm_result.get_keys_list()
+        requested_kids = set(kids)
+        filtered_cdm_keys = [k for k in cdm_keys if k.split(":", 1)[0].strip().lower() in requested_kids]
+        dropped = len(cdm_keys) - len(filtered_cdm_keys)
+        if dropped:
+            logger.warning(f"{drm_type} CDM returned {dropped} extra key(s) not matching the requested KID(s) for this PSSH; discarding before store")
+        return filtered_cdm_keys
+
+    def report_wrong_keys(self, pairs: list[str], license_url: str | None, pssh: str | None = None) -> None:
+        """Fire-and-forget: tell each connected vault that these "kid:key" pairs are proven wrong."""
+        base_license_url = clean_license_url(license_url) if license_url else None
+        if not pairs or not base_license_url:
+            return
+
+        def _run():
+            for pair in pairs:
+                kid, _, key = pair.partition(":")
+                for vdb in self._vaults:
+                    try:
+                        vdb.report_wrong_key(kid, key, base_license_url, pssh)
+                    except Exception as e:
+                        logger.debug(f"report_wrong_key failed for {kid} on {vdb.name} (non-fatal): {e}")
+
+        threading.Thread(target=_run, daemon=True, name="report-wrong-key").start()
+
     def _store_keys(
         self,
         keys_list: list[str],
@@ -235,8 +306,8 @@ class DRMManager:
 
         for vdb in self._vaults:
             name = vdb.name
-            if name == source:
-                continue  # avoid writing back to the vault we just read from
+            if name == source or not vdb.is_writable:
+                continue  # avoid writing back to the vault we just read from, or to a read-only (universal) one
 
             # Idempotent: skip keys already present in this vault so re-resolving
             # the same key (e.g. preflight probe then post-download decrypt) does
@@ -396,29 +467,10 @@ class DRMManager:
                 vault_covered = {k.split(":")[0].strip().lower() for k in vault_keys}
                 missing_kids = [kid for kid in resolve_kids if kid not in vault_covered]
 
-                if missing_kids:
-                    # Filter pssh_list to only the PSSHs whose KID is still missing
-                    missing_pssh_list = [
-                        item for item in pssh_list if normalize_kid(item.get("kid", "")) in missing_kids
-                    ] or pssh_list  # safety: if filtering gives empty, use full list
-                    logger.info(f"{drm_type} CDM extraction for {len(missing_kids)} missing KID(s): {missing_kids}")
-                    cdm_kwargs = {**cdm_kwargs, "key": None} if manual_keys else cdm_kwargs
-                    cdm_result = cdm_fn(missing_pssh_list, license_url, **cdm_kwargs)
-
-                else:
-                    cdm_result = None
-
                 cdm_keys: list[str] = []
-                if cdm_result:
-                    cdm_keys = cdm_result.get_keys_list()
-
-                    # Keep only the KID(s) we actually asked the CDM to resolve for this PSSH. 
-                    requested_kids = set(missing_kids)
-                    filtered_cdm_keys = [k for k in cdm_keys if k.split(":", 1)[0].strip().lower() in requested_kids]
-                    dropped = len(cdm_keys) - len(filtered_cdm_keys)
-                    if dropped:
-                        logger.warning(f"{drm_type} CDM returned {dropped} extra key(s) not matching the requested KID(s) for this PSSH; discarding before store")
-                    cdm_keys = filtered_cdm_keys
+                if missing_kids:
+                    cdm_kwargs = {**cdm_kwargs, "key": None} if manual_keys else cdm_kwargs
+                    cdm_keys = self._cdm_extract(pssh_list, license_url, missing_kids, cdm_fn, cdm_kwargs, drm_type)
 
                 if cdm_keys:
                     # Merge: vault keys + CDM keys
@@ -521,12 +573,21 @@ class DRMManager:
         license_request_fn=None,
     ):
         """Get Widevine keys."""
-        return self._resolve_keys(
-            pssh_list,
-            license_url,
-            "widevine",
-            cdm_fn=get_widevine_keys,
-            cdm_kwargs=dict(
+        cdm_fn, cdm_kwargs = self.cdm_spec("widevine", headers=headers, key=key, license_data=license_data, license_certificate=license_certificate, license_request_fn=license_request_fn)
+        return self._resolve_keys(pssh_list, license_url, "widevine", cdm_fn=cdm_fn, cdm_kwargs=cdm_kwargs, key=key)
+
+    def cdm_spec(
+        self,
+        drm_type: str,
+        headers: dict = None,
+        key: str = None,
+        license_data: dict = None,
+        license_certificate: str = None,
+        license_request_fn=None,
+    ):
+        """(cdm_fn, cdm_kwargs) for *drm_type*; FairPlay has no CDM backend, so its cdm_fn returns nothing."""
+        if drm_type == "widevine":
+            return get_widevine_keys, dict(
                 cdm_device_path=self.widevine_device_path,
                 cdm_remote_api=self.widevine_remote_cdm_api,
                 headers=headers,
@@ -535,9 +596,18 @@ class DRMManager:
                 license_certificate=license_certificate,
                 prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_widevine is None else self.prefer_remote_widevine,
                 license_request_fn=license_request_fn,
-            ),
-            key=key,
-        )
+            )
+        if drm_type == "playready":
+            return get_playready_keys, dict(
+                cdm_device_path=self.playready_device_path,
+                cdm_remote_api=self.playready_remote_cdm_api,
+                headers=headers,
+                key=key,
+                license_data=license_data,
+                prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_playready is None else self.prefer_remote_playready,
+                license_request_fn=license_request_fn,
+            )
+        return (lambda *args, **kwargs: None), {}
 
     def get_fp_keys(
         self,
@@ -546,14 +616,8 @@ class DRMManager:
         key: str = None,
     ):
         """Get FairPlay keys — vault lookup only, no CDM (there is no FairPlay CDM backend)."""
-        return self._resolve_keys(
-            pssh_list,
-            license_url,
-            "fairplay",
-            cdm_fn=lambda *args, **kwargs: None,
-            cdm_kwargs={},
-            key=key,
-        )
+        cdm_fn, cdm_kwargs = self.cdm_spec("fairplay")
+        return self._resolve_keys(pssh_list, license_url, "fairplay", cdm_fn=cdm_fn, cdm_kwargs=cdm_kwargs, key=key)
 
     def get_pr_keys(
         self,
@@ -565,22 +629,8 @@ class DRMManager:
         license_request_fn=None,
     ):
         """Get PlayReady keys."""
-        return self._resolve_keys(
-            pssh_list,
-            license_url,
-            "playready",
-            cdm_fn=get_playready_keys,
-            cdm_kwargs=dict(
-                cdm_device_path=self.playready_device_path,
-                cdm_remote_api=self.playready_remote_cdm_api,
-                headers=headers,
-                key=key,
-                license_data=license_data,
-                prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_playready is None else self.prefer_remote_playready,
-                license_request_fn=license_request_fn,
-            ),
-            key=key,
-        )
+        cdm_fn, cdm_kwargs = self.cdm_spec("playready", headers=headers, key=key, license_data=license_data, license_request_fn=license_request_fn)
+        return self._resolve_keys(pssh_list, license_url, "playready", cdm_fn=cdm_fn, cdm_kwargs=cdm_kwargs, key=key)
 
     def add_keys(
         self, keys: list[str], license_url: str, pssh: str = None, kid_to_label: dict | None = None
@@ -607,7 +657,11 @@ class DRMManager:
         base_license_url = clean_license_url(license_url) if license_url else "generic"
         results: dict[str, int] = {}
 
-        for name, vdb in self._vaults:
+        for vdb in self._vaults:
+            name = vdb.name
+            if not vdb.is_writable:
+                continue
+            
             logger.info(f"[add_keys] Storing {len(valid_keys)} key(s) to {name}")
             try:
                 added = vdb.set_keys(valid_keys, base_license_url, pssh, kid_to_label)

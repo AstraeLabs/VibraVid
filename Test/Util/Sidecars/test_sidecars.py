@@ -519,7 +519,7 @@ def _finalize(tmp_path, monkeypatch):
     monkeypatch.setattr(base, "get_media_metadata", lambda p: {"height": 0})
     monkeypatch.setattr(base, "execute_hooks", lambda *a, **k: None)
     monkeypatch.setattr(base.download_tracker, "complete_download", lambda *a, **k: None)
-    monkeypatch.setattr("VibraVid.utils.vault.vault_1.claudio_vault.track_download_async", lambda **k: None)
+    monkeypatch.setattr("VibraVid.utils.vault.default.default_vault.track_download_async", lambda **k: None)
     dl._finalize(final_file=str(out))
     return out
 
@@ -547,7 +547,7 @@ def test_downloader_skips_sidecars_for_a_failed_download(tmp_path, tmdb, images,
     monkeypatch.setattr(dl, "_verify_output", lambda: False)
     monkeypatch.setattr(base, "execute_hooks", lambda *a, **k: None)
     monkeypatch.setattr(base.download_tracker, "complete_download", lambda *a, **k: None)
-    monkeypatch.setattr("VibraVid.utils.vault.vault_1.claudio_vault.track_download_async", lambda **k: None)
+    monkeypatch.setattr("VibraVid.utils.vault.default.default_vault.track_download_async", lambda **k: None)
 
     dl._finalize(final_file=str(out))
 
@@ -571,7 +571,7 @@ def test_downloader_uses_the_context_captured_at_creation(tmp_path, tmdb, images
     monkeypatch.setattr(base, "get_media_metadata", lambda p: {"height": 0})
     monkeypatch.setattr(base, "execute_hooks", lambda *a, **k: None)
     monkeypatch.setattr(base.download_tracker, "complete_download", lambda *a, **k: None)
-    monkeypatch.setattr("VibraVid.utils.vault.vault_1.claudio_vault.track_download_async", lambda **k: None)
+    monkeypatch.setattr("VibraVid.utils.vault.default.default_vault.track_download_async", lambda **k: None)
     dl._finalize(final_file=str(out))
 
     assert out.with_suffix(".nfo").exists()

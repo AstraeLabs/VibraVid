@@ -82,6 +82,10 @@ class BaseMediaDownloader:
         self.manifest_content = manifest_content
         self.manifest_protocol = (manifest_protocol or "").lower() or None
         self.key = key
+        
+        # KeyFallback (core.drm.key_fallback), set by the outer downloader after key fetch: replacement keys when a key-sanity check proves self.key wrong
+        self.key_fallback = None
+        self._key_swap_lock = threading.Lock()
         self.has_drm = has_drm
         self.cookies = cookies or {}
         self.download_id = download_id

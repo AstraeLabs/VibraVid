@@ -57,13 +57,17 @@ class PostDownloadDecryptor:
 
             logger.info(f"PostDownloadDecryptor: encryption found (scheme={scheme}, kid={kid}) — starting decryption.")
 
+            key_fallback = None
             if kid:
                 if not KeysManager.is_zero_kid(kid):
+                    from VibraVid.core.drm.key_fallback import KeyFallback
                     from VibraVid.core.drm.manager import DRMManager
 
-                    resolved = DRMManager().resolve_flat_key(kid, pssh, key, drm_type=scheme or "mp4")
+                    mgr = DRMManager()
+                    resolved = mgr.resolve_flat_key(kid, pssh, key, drm_type=scheme or "mp4")
                     if resolved:
                         key = resolved[0]
+                    key_fallback = KeyFallback.for_flat(kid, pssh, scheme or "mp4", drm_manager=mgr)
                 self._warn_if_kid_missing(kid, key)
 
             ok = decryptor.decrypt(
@@ -73,6 +77,7 @@ class PostDownloadDecryptor:
                 stream_type="video",
                 progress_cb=progress_cb,
                 detected=detected_info,
+                key_fallback=key_fallback,
             )
 
             if ok and os.path.exists(dec_path) and os.path.getsize(dec_path) > 0:

@@ -167,6 +167,16 @@ class MediaDownloader(
             return set()
         return {str(k).lower() for k in kids if k}
 
+    def _recover_wrong_key(self, kids, try_keys: Callable[[list[str]], tuple[bool, str | None]]) -> bool:
+        """After a "key is wrong" verdict: let key_fallback try the other vaults' keys, then the CDM, re-running *try_keys* on the same file. True (self.key updated) once one passes."""
+        if self.key_fallback is None:
+            return False
+        if not self.key_fallback.recover(kids, self.key, try_keys):
+            return False
+        with self._key_swap_lock:
+            self.key = self.key_fallback.apply(self.key)
+        return True
+
     def _register_wrong_key(self, kids, license_url: str | None = None, pssh: str | None = None) -> None:
         """Mark the given KID(s) as having been proven wrong-key, and notify all connected vaults."""
         kids = {str(k).lower() for k in (kids or []) if k}
@@ -179,7 +189,8 @@ class MediaDownloader(
 
         if new:
             logger.error(f"Wrong key confirmed for KID(s) {sorted(new)} -- terminating download/decrypt for all tracks sharing them")
-            self._report_wrong_key_to_vaults(new, license_url, pssh)
+            if self.key_fallback is None:
+                self._report_wrong_key_to_vaults(new, license_url, pssh)
 
     def _report_wrong_key_to_vaults(self, kids: set[str], license_url: str | None, pssh: str | None) -> None:
         """Fire-and-forget: tell each connected vault about the confirmed-wrong (kid, key) pairs."""

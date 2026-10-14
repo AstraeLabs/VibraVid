@@ -13,11 +13,12 @@ from VibraVid.utils.vault.base import BaseVault
 console = Console()
 logger = logging.getLogger(__name__)
 db_config = config_manager.config.get_dict("DRM", "vault")
-VAULT_URL = db_config.get("vault_1", {}).get("url", "")
-TOKEN = db_config.get("vault_1", {}).get("token", "")
+_default_cfg = db_config.get("default") or db_config.get("vault_1") or {}
+VAULT_URL = _default_cfg.get("url", "")
+TOKEN = _default_cfg.get("token", "")
 
 
-class Vault1Client(BaseVault):
+class Vault_di_default(BaseVault):
     def __init__(self, *, name: str, base_url: str | None = None, token: str | None = None):
         super().__init__(name=name)
         self.base_url = base_url if base_url is not None else VAULT_URL
@@ -34,8 +35,11 @@ class Vault1Client(BaseVault):
     def is_connected(self) -> bool:
         return bool(self.base_url)
 
+    @property
+    def is_writable(self) -> bool:
+        return True
+
     def _post(self, endpoint: str, payload: dict) -> dict | None:
-        """Internal helper: POST to an endpoint, return parsed JSON or None on error."""
         url = f"{self.base_url}/{endpoint}"
         try:
             logger.debug(f"Post to Claudio endpoint '{endpoint}' with payload: {payload}")
@@ -49,7 +53,6 @@ class Vault1Client(BaseVault):
             return None
 
     def track_download(self, title: str, media_type: str, service: str = None) -> bool:
-        """Notify Claudio about a completed download."""
         if not title or not media_type:
             return False
 
@@ -75,11 +78,10 @@ class Vault1Client(BaseVault):
             return False
 
     def track_download_async(self, title: str, media_type: str, service: str = None) -> None:
-        """Fire-and-forget: notify Claudio about a completed download in a background thread."""
         def _run():
             try:
                 if not self.is_connected:
-                    logger.warning("track_download_async: claudio_vault not configured")
+                    logger.warning("track_download_async: default_vault not configured")
                     return
 
                 title_str = (title or "").strip()
@@ -94,7 +96,6 @@ class Vault1Client(BaseVault):
         threading.Thread(target=_run, daemon=False).start()
 
     def set_keys(self, keys_list: list[str], license_url: str, pssh: str, kid_to_label: dict | None = None) -> int:
-        """Store a list of keys in the vault. Returns the number of keys successfully stored."""
         if not keys_list:
             return 0
 
@@ -136,7 +137,6 @@ class Vault1Client(BaseVault):
         return added
 
     def get_keys_by_pssh(self, license_url: str, pssh: str) -> list[str]:
-        """Retrieve keys for a given PSSH and license URL."""
         base_license_url = self._clean_license_url(license_url)
         payload = {
             "license_url": base_license_url,
@@ -155,7 +155,6 @@ class Vault1Client(BaseVault):
         return [k["kid_key"] for k in keys]
 
     def get_keys_by_kids(self, license_url: str | None, kids: list[str], pssh: str = None) -> list[str]:
-        """Retrieve keys for a list of KIDs, optionally filtered by license URL and PSSH."""
         if not kids:
             return []
 
@@ -178,7 +177,6 @@ class Vault1Client(BaseVault):
         return [k["kid_key"] for k in keys]
 
     def _flag_keys(self, keys: list[dict], requested_license_url: str | None) -> None:
-        """Check returned keys for any warnings or mismatches, and log them."""
         self.last_key_flags = {}
         requested_is_real_url = bool(requested_license_url) and requested_license_url.lower().startswith("http")
 
@@ -208,7 +206,6 @@ class Vault1Client(BaseVault):
         logger.warning(f"[{self.name}] {tag}: {kid_key} — {detail}")
 
     def report_wrong_key(self, kid: str, key: str, license_url: str, pssh: str | None = None) -> bool:
-        """Report a wrong key to the vault. Returns True if the vault acknowledged the report."""
         base_license_url = self._clean_license_url(license_url) if license_url else None
         if not base_license_url:
             return False
@@ -225,4 +222,4 @@ class Vault1Client(BaseVault):
         return bool(result and result.get("warnings_recorded", 0) > 0)
 
 
-claudio_vault = Vault1Client(name="claudio")
+default_vault = Vault_di_default(name="claudio")

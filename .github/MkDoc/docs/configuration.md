@@ -535,7 +535,7 @@ Any invalid value falls back to `scrap+down`. Override per run from the CLI with
     "bypass_vault_cache": false,
     "log_engine_output": false,
     "vault": {
-      "vault_1": {
+      "default": {
         "url": "https://drm-db.server66.workers.dev",
         "token": ""
       }
@@ -554,37 +554,37 @@ Any invalid value falls back to `scrap+down`. Override per run from the CLI with
 
 ### Multiple / self-hosted DRM vaults
 
-`vault` isn't limited to the single `vault_1` entry shown above — add as many named entries as
-you want. Each configured vault is queried in the order it's declared, stopping as soon as every
-requested KID has been resolved; when a key is found in one vault it's written back to every
-*other* configured vault (never back to the one it came from, to avoid a pointless round-trip):
+Add as many entries as you want under `vault`. They're queried in the order they're declared,
+stopping once every KID is resolved.
 
 ```json
 "vault": {
-  "vault_1": { "url": "https://drm-db.server66.workers.dev", "token": "" },
-  "myvault": { "url": "https://drm.example.com", "token": "my-secret-token" }
+  "default": { "url": "https://drm-db.server66.workers.dev", "token": "" },
+  "myvault": { "url": "https://drm.example.com", "token": "...", "protocol": "custom" },
+  "public":  { "url": "https://vault.example.org", "token": "...", "protocol": "api" },
+  "query":   { "url": "https://keys.example.net/", "username": "user", "password": "...", "protocol": "query" }
 }
 ```
 
-Any name other than `vault_1` and the reserved `vault_2` is treated as a self-hosted vault
-speaking the same simple REST contract as `vault_1` — implement these two Bearer-token-authenticated
-JSON endpoints and VibraVid can read/write keys from it, no code changes required on the VibraVid
-side:
+| `protocol` | Request | Writes |
+|---|---|---|
+| `custom` | `POST {url}/get-keys` / `POST {url}/save-keys` (the `default` vault's contract) | yes |
+| `api` | `GET {url}/{service}/{kid}`, Bearer token | only with `save_keys` |
+| `json` | `POST {url}` `{"method", "params", "token"}` (JSON-RPC) | only with `save_keys` |
+| `query` | `GET {url}?service=&kid=&username=&password=` | no |
 
-- `POST {url}/get-keys` — body `{"kids": ["<kid_hex>", ...], "license_url": "<optional>"}` (or
-  `{"license_url": ..., "pssh": ...}` for a PSSH-scoped lookup) → `{"keys": [{"kid_key": "<kid>:<key>"}, ...]}`
-- `POST {url}/save-keys` — body `{"license_url": ..., "pssh": ..., "keys": [{"kid": ..., "key": ..., "label": "<optional>"}, ...]}` → `{"added": <int>}`
+- `protocol` is optional: when it's missing it's auto-detected once and cached in
+  `.cache/services/vault/universal_<name>.json` (delete the file to detect it again).
+- `default` (or `vault_1`, its old name) is the built-in vault. It logs as `claudio`.
+- Resolved keys show the vault name and its position in `vault`, starting at 1: `kid:key | *claudio [1]`.
+- Newly extracted keys are written back to `custom` vaults, and to `api`/`json` ones only with
+  `"save_keys": true` (default `false`).
+- Vaults that publish their service list get queried under the service matching the platform, then
+  `generic`. The others are queried under `generic`.
+- A vault answering `429` is skipped for the `retry_after` it asks for.
+- Optional fields: `service` (force a namespace), `timeout` (seconds, default `10`).
 
-**Config key vs. console label**: `vault_1` and `vault_2` are the *config keys* (`vault_2` is
-reserved for a JSON-RPC-protocol vault, distinct from the `vault_1`/custom REST protocol above);
-each vault also carries its own internal name used in log/console output (`Bypassing cached key
-... from <name>`) — the `vault_1` entry logs as `claudio`, `vault_2` logs as `lab`. A custom
-entry (`myvault` above) logs under the same name you gave it in `DRM.vault`, so there's no
-separate label to know about for those.
-
-For a backend that doesn't speak this REST contract (a different transport, auth scheme, or
-response shape — like `vault_2`'s JSON-RPC), see [Adding a Vault](vault.md) for how to subclass
-`BaseVault` instead.
+`Conf/config.json` is tracked by git: don't commit third-party vault tokens.
 
 ### Remote CDM Services
 

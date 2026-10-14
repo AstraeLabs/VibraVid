@@ -356,7 +356,7 @@ class MultiPeriodMixin:
                 try:
                     if (
                         decryptor.decrypt(
-                            str(part_merged), self.key, str(dec_path), stream_type=stream.type, progress_cb=_dec_cb
+                            str(part_merged), self.key, str(dec_path), stream_type=stream.type, progress_cb=_dec_cb, key_fallback=self.key_fallback
                         )
                         and dec_path.exists()
                         and dec_path.stat().st_size > 0

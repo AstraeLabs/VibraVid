@@ -66,6 +66,14 @@ class DashDecryptMixin:
             ctx.key_sanity_checked = True
 
         wrong_key = not ok and message and "key is wrong" in message
+        if wrong_key and self._recover_wrong_key(
+            self._stream_kids(ctx.stream),
+            lambda keys: dash_decryptor.decrypt_segment_live(
+                encrypted_path=str(fp), decrypted_path=str(dec_tmp), raw_keys=keys, init_path=init_path_str, key_sanity=True
+            )[:2],
+        ):
+            ok, message, wrong_key = True, None, False
+
         if not ok and not wrong_key:
             # The bytes on disk decrypt-fail even though the download itself
             # reported success (e.g. a CDN response cut short mid-transfer
