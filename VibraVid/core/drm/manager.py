@@ -272,11 +272,11 @@ class DRMManager:
             logger.warning(f"{drm_type} CDM returned {dropped} extra key(s) not matching the requested KID(s) for this PSSH; discarding before store")
         return filtered_cdm_keys
 
-    def report_wrong_keys(self, pairs: list[str], license_url: str | None, pssh: str | None = None) -> None:
-        """Fire-and-forget: tell each connected vault that these "kid:key" pairs are proven wrong."""
+    def report_wrong_keys(self, pairs: list[str], license_url: str | None, pssh: str | None = None) -> threading.Thread | None:
+        """Fire-and-forget: tell each connected vault that these "kid:key" pairs are proven wrong. Returns the worker thread."""
         base_license_url = clean_license_url(license_url) if license_url else None
         if not pairs or not base_license_url:
-            return
+            return None
 
         def _run():
             for pair in pairs:
@@ -287,7 +287,37 @@ class DRMManager:
                     except Exception as e:
                         logger.debug(f"report_wrong_key failed for {kid} on {vdb.name} (non-fatal): {e}")
 
-        threading.Thread(target=_run, daemon=True, name="report-wrong-key").start()
+        thread = threading.Thread(target=_run, daemon=True, name="report-wrong-key")
+        thread.start()
+        return thread
+
+    def replace_wrong_key(
+        self,
+        kid: str,
+        old_key: str,
+        new_key: str,
+        source: str | None,
+        license_url: str | None,
+        pssh: str | None = None,
+        wait_for: threading.Thread | None = None,
+    ) -> threading.Thread:
+        """Fire-and-forget: tell each connected vault to replace a wrong key with a new one. Returns the worker thread."""
+        def _run():
+            if wait_for is not None:
+                wait_for.join(timeout=10)
+            for vdb in self._vaults:
+                if vdb.name == source or not vdb.is_writable:
+                    continue
+                try:
+                    logger.info(f"Replacing wrong key for KID {kid} on {vdb.name} database")
+                    if not vdb.replace_key(kid, new_key, old_key, license_url, pssh):
+                        logger.warning(f"{vdb.name} did not take the corrected key for KID {kid}")
+                except Exception as e:
+                    logger.error(f"Failed to replace wrong key on {vdb.name} (will continue): {e}")
+
+        thread = threading.Thread(target=_run, daemon=False, name="replace-wrong-key")
+        thread.start()
+        return thread
 
     def _store_keys(
         self,

@@ -48,6 +48,7 @@ class KeyFallback:
         self._resolved: dict[str, str] = {}         # kid -> key proven good
         self._tried: dict[str, set[str]] = {}       # kid -> "kid:key" pairs already tested
         self._exhausted: set[str] = set()
+        self._report_threads: dict[str, threading.Thread | None] = {}  # kid -> its wrong-key report in flight
         self._kid_locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
 
@@ -86,9 +87,9 @@ class KeyFallback:
             return keys
         return [f"{k}:{resolved.get(k, v)}" for k, v in pairs]
 
-    def _candidates(self, kid: str, tried: set[str]) -> Iterator[tuple[str, str]]:
-        """Lazily yield ("kid:key", source): every vault first, the CDM only once they are used up."""
-        for pair, source in self.drm_manager._db_lookup_all([kid], self.base_license_url, self.pssh):
+    def _candidates(self, kid: str, tried: set[str], found: list[tuple[str, str]]) -> Iterator[tuple[str, str]]:
+        """Yield ("kid:key", source): the keys *found* in the vaults first, the CDM only once they are used up."""
+        for pair, source in found:
             pair = self._norm_pair(pair)
             if pair not in tried:
                 yield pair, source
@@ -142,12 +143,15 @@ class KeyFallback:
                     bad_pair = f"{kid}:{bad}"
                     if bad_pair not in tried:
                         tried.add(bad_pair)
-                        self.drm_manager.report_wrong_keys([bad_pair], self.license_url, self.pssh)
+                        self._report_threads[kid] = self.drm_manager.report_wrong_keys([bad_pair], self.license_url, self.pssh)
 
+                found = self.drm_manager._db_lookup_all([kid], self.base_license_url, self.pssh)
+                holders = [source for pair, source in found if bad and self._norm_pair(pair) == f"{kid}:{bad}"]
+                holder_label = ", ".join(self.drm_manager.vault_label(s) for s in dict.fromkeys(holders))
                 logger.warning(f"Key fallback: key for KID {kid} proven wrong -- trying the other vaults' keys, then the CDM")
-                console.print(f"[yellow]Wrong key for KID [red]{kid}[/red] -- trying fallback keys (vaults, then CDM)")
+                console.print(f"[red]\\[-][/red] Wrong key for KID [red]{kid}[/red]" + (f" [cyan]| [#a855f7]{holder_label}" if holder_label else ""))
 
-                for pair, source in self._candidates(kid, tried):
+                for pair, source in self._candidates(kid, tried, found):
                     tried.add(pair)
                     key = pair.split(":", 1)[1]
                     ok, message = self._try(kid, key, current, try_keys)
@@ -155,8 +159,12 @@ class KeyFallback:
                         with self._guard:
                             self._resolved[kid] = key
                         logger.info(f"Key fallback: KID {kid} recovered with the key from {source}")
-                        console.print(f"[green]Fallback key OK[/green] for KID [red]{kid}[/red] [cyan]| [#a855f7]{self.drm_manager.vault_label(source)}")
-                        self.drm_manager._store_keys([pair], self.drm_type, self.base_license_url, self.pssh, source=None if source == "cdm" else source)
+                        console.print(f"[green]\\[+][/green] Right key for KID [red]{kid}[/red] [cyan]| [#a855f7]{self.drm_manager.vault_label(source)}")
+                        origin = None if source == "cdm" else source
+                        if bad:
+                            self.drm_manager.replace_wrong_key(kid, bad, key, origin, self.base_license_url, self.pssh, wait_for=self._report_threads.get(kid))
+                        else:
+                            self.drm_manager._store_keys([pair], self.drm_type, self.base_license_url, self.pssh, source=origin)
                         return True
 
                     logger.warning(f"Key fallback: key for KID {kid} from {source} rejected: {message}")
@@ -165,6 +173,6 @@ class KeyFallback:
 
                 self._exhausted.add(kid)
                 logger.error(f"Key fallback: no working key for KID {kid} in any vault or the CDM")
-                console.print(f"[red]No working fallback key for KID {kid}")
+                console.print(f"[red]\\[-][/red] No working fallback key for KID [red]{kid}[/red]")
 
         return False

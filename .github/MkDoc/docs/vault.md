@@ -36,5 +36,6 @@ class MyVault(BaseVault):
 - `get_keys_by_kids()` is the lookup `DRMManager` uses.
 - `is_writable` + `set_keys()`: only if the vault should receive newly extracted keys (default: read-only).
 - `report_wrong_key()`: only if the backend can record a key proven wrong by flux's key-sanity check.
+- `replace_key()`: swaps a reported key for the corrected one (the default just calls `set_keys()`).
 
 Then return your instance for its config key in `DRMManager._build_vaults()` (`VibraVid/core/drm/manager.py`).

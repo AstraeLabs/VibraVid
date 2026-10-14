@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from rich.console import Console
 
 from VibraVid.services._base import Entries, EntriesManager, site_constants
+from VibraVid.services._base.object import Episode, Season, SeasonManager
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
-from VibraVid.services._base.object import Season, SeasonManager, Episode
 from VibraVid.utils import TVShowManager
 
-from .downloader import download_song, download_album_tracks
+from .downloader import download_album_tracks, download_song
 
 indice = 20
 _useFor = "Song"
@@ -346,9 +346,9 @@ def _build_album_scraper_ytdlp(select_title: Entries):
     if not entries:
         return None
 
-    scraper_title = info.get("title", "Unknown Album")
-    scraper_artist = info.get("uploader", "") or (entries[0].get("artist", "") if entries else "")
-    scraper_cover = info.get("thumbnail", "") or (entries[0].get("thumbnail", "") if entries else "")
+    scraper_title = result.get("title", "Unknown Album")
+    scraper_artist = result.get("uploader", "") or (entries[0].get("artist", "") if entries else "")
+    scraper_cover = result.get("thumbnail", "") or (entries[0].get("thumbnail", "") if entries else "")
 
     seasons_manager = SeasonManager()
     season = Season(id=1, number=1, name=scraper_title)

@@ -577,7 +577,7 @@ class Decryptor:
                 logger.error("No valid keys available for decryption")
                 return False
 
-            norm_keys = KeysManager.resolve_placeholder_kid(kid, norm_keys)
+            norm_keys = KeysManager.unique_by_kid(KeysManager.resolve_placeholder_kid(kid, norm_keys))
             if key_fallback is not None:
                 norm_keys = KeysManager.normalize(key_fallback.apply([f"{k}:{v}" for k, v in norm_keys]))
 
@@ -622,6 +622,6 @@ class Decryptor:
         self, encrypted_path: str, decrypted_path: str, raw_keys, init_path: str | None = None, key_sanity: bool = False
     ) -> tuple:
         """Decrypt a live (streaming) encrypted segment using the provided keys and return a tuple indicating success and an optional error message."""
-        norm_keys = KeysManager.normalize(raw_keys)
+        norm_keys = KeysManager.unique_by_kid(KeysManager.normalize(raw_keys))
         logger.debug(f"decrypt_segment_live(): {os.path.basename(encrypted_path)} -> {os.path.basename(decrypted_path)} [LIVE -> flux]")
         return self._decrypt_flux_live(encrypted_path, decrypted_path, norm_keys, init_path=init_path, key_sanity=key_sanity)

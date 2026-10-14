@@ -115,6 +115,26 @@ class KeysManager:
         """Coerce any supported key representation into a list of ``(kid, key)`` lowercase hex string tuples."""
         return list(cls(keys))
 
+    @classmethod
+    def unique_by_kid(cls, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """One key per real KID. flux silently keeps the LAST --key given for a KID, so make that explicit (last wins, with
+        a warning). The "1" placeholder and the all-zero KID legitimately carry several candidate keys: left alone."""
+        last: dict[str, str] = {}
+        for kid, key in pairs:
+            if kid != "1" and not cls.is_zero_kid(kid):
+                last[kid] = key
+
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for kid, key in reversed(pairs):
+            if kid in last:
+                if kid in seen:
+                    logger.warning(f"Several different keys for KID {kid}: using the last one")
+                    continue
+                seen.add(kid)
+            out.append((kid, key))
+        return out[::-1]
+
     @staticmethod
     def is_zero_kid(kid: str | None) -> bool:
         """Return True when *kid* is all-zero hex (fixed-key stream)."""

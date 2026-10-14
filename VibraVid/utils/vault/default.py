@@ -29,6 +29,7 @@ class Vault_di_default(BaseVault):
 
         self.session = create_client(headers=self.headers, http2=True)
         self._session_lock = threading.Lock()
+        self.last_origins: dict[str, tuple[str, str | None, str | None]] = {}
         self._prewarm(self.base_url, self._session_lock, "Claudio")
 
     @property
@@ -133,6 +134,10 @@ class Vault_di_default(BaseVault):
         if result is None:
             return 0
 
+        locked = result.get("locked", 0)
+        if locked:
+            logger.warning(f"[{self.name}] {locked} key(s) not stored: a different key is already saved for the same KID")
+
         added = result.get("added", 0)
         return added
 
@@ -202,11 +207,21 @@ class Vault_di_default(BaseVault):
             if tags and kid:
                 self.last_key_flags[kid] = ", ".join(tags)
 
+            if kid and k.get("key"):
+                self.last_origins[kid] = (str(k["key"]).lower(), k.get("license_url"), k.get("pssh"))
+
     def _log_flag(self, kid_key: str, tag: str, detail: str) -> None:
         logger.warning(f"[{self.name}] {tag}: {kid_key} — {detail}")
 
+    def _row_for(self, kid: str, key: str, license_url: str | None, pssh: str | None) -> tuple[str | None, str | None]:
+        """(license_url, pssh) of the vault row holding *key* for *kid* when this vault returned it, else the ones given."""
+        origin = self.last_origins.get(kid.lower())
+        if origin and origin[0] == key.lower() and origin[1]:
+            return origin[1], origin[2]
+        return (self._clean_license_url(license_url) if license_url else None), pssh
+
     def report_wrong_key(self, kid: str, key: str, license_url: str, pssh: str | None = None) -> bool:
-        base_license_url = self._clean_license_url(license_url) if license_url else None
+        base_license_url, pssh = self._row_for(kid, key, license_url, pssh)
         if not base_license_url:
             return False
 
@@ -220,6 +235,32 @@ class Vault_di_default(BaseVault):
         result = self._post("save-keys", payload)
         logger.debug(f"Vault response for report_wrong_key: {result}")
         return bool(result and result.get("warnings_recorded", 0) > 0)
+
+    def replace_key(self, kid: str, new_key: str, old_key: str, license_url: str, pssh: str | None = None) -> bool:
+        """Swap *old_key* (already reported wrong) for *new_key* on its row; a vault with no entry for the KID just stores it."""
+        base_license_url, pssh = self._row_for(kid, old_key, license_url, pssh)
+        if not base_license_url:
+            return False
+
+        payload = {
+            "license_url": base_license_url,
+            "pssh": pssh,
+            "kid": kid,
+            "key": new_key,
+            "replaces": old_key,
+            "app_version": __version__,
+        }
+        result = self._post("save-keys", payload)
+        logger.debug(f"Vault response for replace_key: {result}")
+        if result is None:
+            return False
+
+        if result.get("locked"):
+            if "replaced" not in result:
+                logger.warning(f"[{self.name}] key for KID {kid} not replaced: the vault server is too old to replace keys (deploy the updated worker)")
+            else:
+                logger.warning(f"[{self.name}] key for KID {kid} not replaced: the saved key is not the reported one (already fixed by someone else?)")
+        return bool(result.get("replaced") or result.get("added") or result.get("unchanged"))
 
 
 default_vault = Vault_di_default(name="claudio")

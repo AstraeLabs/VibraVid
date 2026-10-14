@@ -56,6 +56,10 @@ class BaseVault:
         """No-op by default: not every vault backend has a wrong-key/warning concept."""
         return False
 
+    def replace_key(self, kid: str, new_key: str, old_key: str, license_url: str, pssh: str | None = None) -> bool:
+        """Put *new_key* (proven right) in place of *old_key* (proven wrong). A vault with no replace concept just saves it."""
+        return self.set_keys([f"{kid}:{new_key}"], license_url, pssh) > 0
+
     def _prewarm(self, url: str, session_lock: threading.Lock, label: str) -> None:
         """Open the TLS connection in a background thread so the first real lookup doesn't pay the handshake."""
         if not url:

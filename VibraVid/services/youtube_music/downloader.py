@@ -2,11 +2,11 @@
 
 import logging
 import os
-import tempfile
 import shutil
+import tempfile
 
 from rich.console import Console
-from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
+from rich.progress import BarColumn, DownloadColumn, Progress, TimeRemainingColumn, TransferSpeedColumn
 
 from VibraVid.core.muxing.helper.audio import process_song
 from VibraVid.core.ui.tracker import context_tracker

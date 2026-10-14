@@ -579,6 +579,8 @@ stopping once every KID is resolved.
 - Resolved keys show the vault name and its position in `vault`, starting at 1: `kid:key | *claudio [1]`.
 - Newly extracted keys are written back to `custom` vaults, and to `api`/`json` ones only with
   `"save_keys": true` (default `false`).
+- When flux proves a stored key wrong, the vault that returned it gets the corrected key in its place (one key per KID,
+  its warning counter goes back to 0). The default vault keeps the replaced key in `drm_keys_replaced`.
 - Vaults that publish their service list get queried under the service matching the platform, then
   `generic`. The others are queried under `generic`.
 - A vault answering `429` is skipped for the `retry_after` it asks for.
