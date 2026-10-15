@@ -637,12 +637,14 @@ class DashParser:
                 s.drm.method = "cenc"
 
         # Segments: SegmentTemplate > SegmentList > BaseURL single-file
-        tmpl = _first_not_none(rep.find("mpd:SegmentTemplate", _NS), adapt.find("mpd:SegmentTemplate", _NS))
+        tmpl_rep = rep.find("mpd:SegmentTemplate", _NS)
+        tmpl_adapt = adapt.find("mpd:SegmentTemplate", _NS)
+        tmpl = _first_not_none(tmpl_rep, tmpl_adapt)
         seg_list = _first_not_none(rep.find("mpd:SegmentList", _NS), adapt.find("mpd:SegmentList", _NS))
         seg_base = _first_not_none(rep.find("mpd:SegmentBase", _NS), adapt.find("mpd:SegmentBase", _NS))
 
         if tmpl is not None:
-            self._apply_segment_template(tmpl, rep_id, s, period_start, rep_base_url, period_duration=period_duration)
+            self._apply_segment_template(tmpl, rep_id, s, period_start, rep_base_url, period_duration=period_duration, tmpl_adapt=tmpl_adapt)
             s.supports_live_decryption = True  # True segments available
         elif seg_list is not None:
             self._apply_segment_list(seg_list, s, rep_base_url)
@@ -965,7 +967,7 @@ class DashParser:
         expanded = _SEGMENT_TOKEN_RE.sub(_repl, escaped)
         return expanded.replace("__DASH_DOLLAR__", "$")
 
-    def _apply_segment_template(self, tmpl, rep_id, stream, period_start, base_url, period_duration=0.0):
+    def _apply_segment_template(self, tmpl, rep_id, stream, period_start, base_url, period_duration=0.0, tmpl_adapt=None):
         if "/ad/" in base_url.lower():
             logger.info(f"DashParser: segment skipped (ad path) | url={base_url}")
             return
@@ -973,7 +975,8 @@ class DashParser:
         init_tpl = tmpl.get("initialization", "")
         media_tpl = tmpl.get("media", "")
         start_num = int(tmpl.get("startNumber", 1))
-        timescale = int(tmpl.get("timescale", 1))
+        # Inherit timescale from AdaptationSet template if not in Representation template
+        timescale = int(tmpl.get("timescale", tmpl_adapt.get("timescale", "1") if tmpl_adapt is not None else "1"))
         bandwidth = int(stream.bitrate or 0)
         start_time = int(period_start * timescale) if period_start else 0
 

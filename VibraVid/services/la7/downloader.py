@@ -1,10 +1,9 @@
 # 22.08.26
 # By @sync-luca98
 
-import base64
 import logging
 import os
-import xml.etree.ElementTree as ET
+import time
 
 from curl_cffi.requests.exceptions import HTTPError
 from rich.console import Console
@@ -25,40 +24,66 @@ logger = logging.getLogger(__name__)
 console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
 
+WIDEVINE_LICENSE_URL = "https://la7.prod.conax.cloud/widevine/license"
 
-def _extract_playready_license_url(mpd_url: str, referer: str) -> str | None:
-    """Extract PlayReady license URL from DASH manifest mspr:pro element."""
+
+def _get_widevine_preauth_token(page_url: str) -> str | None:
+    """Get Widevine preAuthToken from la7 token endpoint (like Kodi plugin)."""
     try:
-        with create_client(headers={"user-agent": get_userAgent(), "referer": referer}) as client:
-            response = client.get(mpd_url)
+        with create_client(headers={"user-agent": get_userAgent(), "referer": page_url}) as client:
+            response = client.get(page_url)
             response.raise_for_status()
+            html = response.text
         
-        root = ET.fromstring(response.text)
-        ns = {"mspr": "urn:microsoft:playready"}
-        
-        pro_elem = root.find(".//mspr:pro", ns)
-        if pro_elem is not None and pro_elem.text:
-            pro_b64 = pro_elem.text.strip()
-            pro_b64 = pro_b64 + "=" * (-len(pro_b64) % 4)
-            decoded = base64.b64decode(pro_b64)
+            # Find preTokenUrl in page
+            import re
+            pre_token_url_match = re.search(r'preTokenUrl\s*=\s*["\']([^"\']+)["\']', html)
+            if not pre_token_url_match:
+                return None
             
-            xml_start = decoded.find(b"<")
-            if xml_start >= 0:
-                xml_bytes = decoded[xml_start:]
-                pro_xml = xml_bytes.decode("utf-16le")
-                
-                pro_root = ET.fromstring(pro_xml)
-                pr_ns = {"pr": "http://schemas.microsoft.com/DRM/2007/03/PlayReadyHeader"}
-                la_url_elem = pro_root.find(".//pr:LA_URL", pr_ns)
-                if la_url_elem is not None and la_url_elem.text:
-                    return la_url_elem.text.strip()
-                
-                lui_url_elem = pro_root.find(".//pr:LUI_URL", pr_ns)
-                if lui_url_elem is not None and lui_url_elem.text:
-                    return lui_url_elem.text.strip()
+            pre_token_url = pre_token_url_match.group(1)
+            
+            # Request token with headers (same client session)
+            headers_tok = {
+                'host': 'pat.la7.it',
+                'user-agent': get_userAgent(),
+                'accept': '*/*',
+                'accept-language': 'en,en-US;q=0.9,it;q=0.8',
+                'dnt': '1',
+                'te': 'trailers',
+                'origin': 'https://www.la7.it',
+                'referer': 'https://www.la7.it/',
+            }
+            tok_response = client.get(pre_token_url, headers=headers_tok)
+            tok_response.raise_for_status()
+            tok_data = tok_response.json()
+            return tok_data.get('preAuthToken')
     except Exception as exc:
-        console.print(f"[yellow]Could not extract PlayReady license URL: {exc}")
+        console.print(f"[yellow]Could not get Widevine preAuthToken: {exc}")
     return None
+
+
+def _build_widevine_license_info(page_url: str) -> tuple[str, dict]:
+    """Build Widevine license URL and headers (like Kodi plugin)."""
+    tsatmp = str(int(time.time()))
+    preauth_token = _get_widevine_preauth_token(page_url)
+    
+    headers_lic = {
+        'host': 'la7.prod.conax.cloud',
+        'user-agent': get_userAgent(),
+        'accept': '*/*',
+        'accept-language': 'en,en-US;q=0.9,it;q=0.8',
+        'origin': 'https://www.la7.it',
+        'referer': 'https://www.la7.it/',
+    }
+    if preauth_token:
+        headers_lic['preAuthorization'] = preauth_token
+        console.print("[cyan]Got Widevine preAuthToken")
+    else:
+        console.print("[yellow]Could not get Widevine preAuthToken")
+    
+    license_url = f"{WIDEVINE_LICENSE_URL}?d={tsatmp}"
+    return license_url, headers_lic
 
 
 def _download_episode(obj_episode, index_season_selected, index_episode_selected, scrape_serie):
@@ -114,7 +139,7 @@ def download_film(select_title: Entries):
     output_dir = os_manager.get_sanitize_path(movie_folder(*path_components))
     output_path = os.path.join(output_dir, f"{filename}.{extension_output}")
     
-    # Check if it's a cinema film (PlayReady DRM)
+    # Check if it's a cinema film (Widevine DRM)
     is_cinema = "/la7-cinema-tutti-i-film/" in select_title.url
     
     if is_cinema:
@@ -123,24 +148,25 @@ def download_film(select_title: Entries):
         if not info["drm"]:
             raise ValueError("La7 Cinema content is expected to be DRM protected")
         
-        # Extract PlayReady license URL from manifest
-        license_url = _extract_playready_license_url(info["dash_url"], select_title.url)
-        if not license_url:
-            raise ValueError("Could not extract PlayReady license URL from manifest")
+        # Build Widevine license URL and headers (Kodi plugin approach)
+        license_url, license_headers = _build_widevine_license_info(select_title.url)
+        console.print(f"[cyan]Widevine license URL: {license_url}")
         
-        console.print(f"[cyan]PlayReady license URL: {license_url}")
+        console.print("[cyan]Attempting download with Widevine...")
+        result = DASH_Downloader(
+            mpd_url=info["dash_url"],
+            mpd_headers={"referer": select_title.url, "user-agent": get_userAgent()},
+            license_url=license_url,
+            license_headers=license_headers,
+            output_path=output_path,
+            drm_preference=DRMType.WIDEVINE,
+        ).start()
         
-        try:
-            return DASH_Downloader(
-                mpd_url=info["dash_url"],
-                mpd_headers={"referer": select_title.url, "user-agent": get_userAgent()},
-                license_url=license_url,
-                output_path=output_path,
-                drm_preference=DRMType.PLAYREADY,
-            ).start()
-        except HTTPError as exc:
-            console.print(f"[red]La7 Cinema download rejected by the source server: {exc}")
-            return None
+        if result and not result.error:
+            return result
+        
+        console.print(f"[yellow]Widevine failed: {result.error if result else 'Unknown error'}")
+        return None
     
     # Regular episodes - no DRM
     if info["drm"]:

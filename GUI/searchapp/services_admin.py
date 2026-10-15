@@ -25,6 +25,7 @@ BUILTIN_SERVICES = frozenset({
     "streamingcommunity",
     "timvision",
     "tubitv",
+    "youtube_music",
 })
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
