@@ -5,7 +5,7 @@ import logging
 
 from VibraVid.services._base.object import Episode, Season, SeasonManager
 
-from .client import TimvisionClient
+from .client import TIMVISION_HODOR_API, TimvisionClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +21,21 @@ def _get_client() -> TimvisionClient:
 
 def _is_included_in_subscription(availability: str, item: dict = None) -> bool:
     """Check if content is included in standard TIMvision subscription."""
+    # Use original item flags for reliable TVOD/SVOD detection
+    is_tvod = item.get("isTVoD", False) if item else False
+    alt_logo = (item.get("altLogoChannel") or "").upper() if item else ""
     avail_upper = availability.upper()
     
     # Explicitly excluded: ANY TVOD (pay-per-view) and Prime Video (deeplink)
-    if "TVOD" in avail_upper:
+    if is_tvod:
         return False
     if "PRIME" in avail_upper:
+        return False
+    if "PRIME" in alt_logo:
         return False
     
     # For series, check the partner channel (altLogoChannel)
     if item and availability == "Serie":
-        alt_logo = (item.get("altLogoChannel") or "").upper()
         if "PRIME" in alt_logo:
             return False
         # Only include series from known partners that use TIMvision player
@@ -61,8 +65,8 @@ def _is_included_in_subscription(availability: str, item: dict = None) -> bool:
         if keyword in avail_upper:
             return True
     
-    # TIMvision SVOD (but not TVOD)
-    if "SVOD (TIMVISION)" in avail_upper:
+    # TIMvision SVOD (but not TVOD) - check both old and new label formats
+    if "SVOD (TIMVISION)" in avail_upper or "INCLUDED (TIMVISION)" in avail_upper:
         return True
     
     # Series are typically included (fallback for items without partner info)
@@ -154,34 +158,103 @@ class GetSerieInfo:
         self.seasons_manager = SeasonManager()
         self._loaded = False
 
+    def _fetch_season_ids(self) -> list[tuple[int, str]]:
+        """Fetch brand detail from hodor API and extract all season IDs with their numbers.
+        
+        Returns:
+            List of (season_number, season_id) tuples
+        """
+        client = _get_client()
+        if not client.token:
+            client._authenticate()
+        if not client.token:
+            return []
+        
+        try:
+            url = f"{TIMVISION_HODOR_API}/detail/{client.token}/okapi/{self.brand_id}.json"
+            params = {"detailType": "detailShow", "objectType": "brand"}
+            headers = {"xx-operator": "pc", "xx-service": "mycanal", "xx-available-display-languages": "it-IT"}
+            resp = client._session.get(url, params=params, headers=headers, timeout=30)
+            if resp.status_code != 200:
+                logger.warning(f"TIMvision brand detail failed: {resp.status_code}")
+                return []
+            
+            data = resp.json()
+            seasons = data.get("detail", {}).get("seasons", [])
+            result = []
+            for s in seasons:
+                season_number = s.get("seasonNumber")
+                season_id = s.get("contentID")
+                if season_number and season_id:
+                    result.append((season_number, season_id))
+            
+            if result:
+                logger.debug(f"TIMvision: found {len(result)} seasons for brand {self.brand_id}: {result}")
+            return result
+        except Exception as e:
+            logger.warning(f"TIMvision: failed to fetch brand detail for season IDs: {e}")
+            return []
+
     def _load_episodes(self) -> None:
         if self._loaded:
             return
         
-        episodes = _get_client().get_episodes(self.brand_id)
+        client = _get_client()
+        seasons = self._fetch_season_ids()
+        
         by_number: dict[int, Season] = {}
-        for ep in episodes:
-            season_number = ep.get("season") or 1
-            episode_number = ep.get("episode") or 0
-            season = by_number.get(season_number)
-            if season is None:
-                season = by_number[season_number] = self.seasons_manager.add(
-                    Season(
-                        id=self.brand_id,
-                        number=season_number,
-                        name=f"Stagione {season_number}",
-                        slug=self.brand_id,
+        
+        if seasons:
+            # Fetch episodes for each season
+            for season_number, season_id in seasons:
+                episodes = client.get_episodes(self.brand_id, season_id=season_id)
+                for ep in episodes:
+                    ep_season_number = ep.get("season") or season_number
+                    episode_number = ep.get("episode") or 0
+                    season = by_number.get(ep_season_number)
+                    if season is None:
+                        season = by_number[ep_season_number] = self.seasons_manager.add(
+                            Season(
+                                id=self.brand_id,
+                                number=ep_season_number,
+                                name=f"Stagione {ep_season_number}",
+                                slug=self.brand_id,
+                            )
+                        )
+                    season.episodes.add(
+                        Episode(
+                            id=ep["id"],
+                            number=episode_number,
+                            name=ep.get("name") or f"Episodio {episode_number}",
+                            image=ep.get("image", ""),
+                            year=self.year,
+                        )
+                    )
+        else:
+            # Fallback: fetch episodes without season ID (returns season 1 only)
+            episodes = client.get_episodes(self.brand_id)
+            for ep in episodes:
+                season_number = ep.get("season") or 1
+                episode_number = ep.get("episode") or 0
+                season = by_number.get(season_number)
+                if season is None:
+                    season = by_number[season_number] = self.seasons_manager.add(
+                        Season(
+                            id=self.brand_id,
+                            number=season_number,
+                            name=f"Stagione {season_number}",
+                            slug=self.brand_id,
+                        )
+                    )
+                season.episodes.add(
+                    Episode(
+                        id=ep["id"],
+                        number=episode_number,
+                        name=ep.get("name") or f"Episodio {episode_number}",
+                        image=ep.get("image", ""),
+                        year=self.year,
                     )
                 )
-            season.episodes.add(
-                Episode(
-                    id=ep["id"],
-                    number=episode_number,
-                    name=ep.get("name") or f"Episodio {episode_number}",
-                    image=ep.get("image", ""),
-                    year=self.year,
-                )
-            )
         self._loaded = True
 
     def getNumberSeason(self) -> int:

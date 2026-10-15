@@ -461,7 +461,7 @@ class TimvisionClient:
     def get_availability_label(self, search_item: dict) -> str:
         """
         Get detailed availability label from search result item.
-        Similar to RakutenTV: 'TVOD (TIMvision)', 'SVOD (Prime Video)', etc.
+        Similar to RakutenTV: 'Purchase/Rental (TIMvision)', 'Included (Discovery+)', etc.
         """
         item_type = search_item.get("type", "").lower()
         is_tvod = search_item.get("isTVoD", False)
@@ -471,36 +471,64 @@ class TimvisionClient:
         has_acquista = any(s.get("label") == "Acquista" for s in stickers)
         
         if item_type == "personality":
-            return "Persona"
+            return "Person"
+        
+        # Normalize partner names for display
+        def normalize_partner(logo: str) -> str:
+            logo_upper = logo.upper()
+            if "TIMVISION" in logo_upper:
+                return "TIMvision"
+            if "DISCOVERY" in logo_upper:
+                return "Discovery+"
+            if "MEDIASET" in logo_upper:
+                return "Mediaset"
+            if "PARAMOUNT" in logo_upper:
+                return "Paramount+"
+            if "KIDS" in logo_upper:
+                return "TIMvision Kids"
+            if "LA7" in logo_upper:
+                return "La7"
+            return logo
+        
+        partner = normalize_partner(alt_logo)
         
         # For series (folder) and other content, apply detailed logic
         if is_tvod and "Timvision" in alt_logo:
-            return "TVOD (TIMvision)"
+            return "Purchase/Rental (TIMvision)"
         elif is_in_offer and "TIMVISION" in alt_logo:
-            return "SVOD (TIMvision)"
+            return "Included (TIMvision)"
         elif is_in_offer and alt_logo:
-            return f"SVOD ({alt_logo})"
+            return f"Included ({partner})"
         elif has_acquista and alt_logo:
-            return f"TVOD ({alt_logo})"
+            return f"Purchase/Rental ({partner})"
         elif is_in_offer:
-            return "SVOD"
+            return "Included"
         elif is_tvod:
-            return "TVOD"
+            return "Purchase/Rental"
         else:
-            return "Sconosciuto"
+            return "Unknown"
 
     # ------------------------------------------------------------------
     # Episodes (series)
     # ------------------------------------------------------------------
-    def get_episodes(self, brand_id: str) -> list[dict]:
-        """Get all episodes of a series brand ID with season/episode numbers."""
+    def get_episodes(self, brand_id: str, season_id: str | None = None) -> list[dict]:
+        """Get all episodes of a series brand ID with season/episode numbers.
+        
+        Args:
+            brand_id: The brand/series ID
+            season_id: Optional season ID to fetch episodes for a specific season
+        """
         if not self.token:
             self._authenticate()
         if not self.token:
             return []
         try:
+            params = {}
+            if season_id:
+                params["seasonID"] = season_id
             resp = self._session.get(
                 f"{TIMVISION_HODOR_API}/episodes/{self.token}/{brand_id}",
+                params=params,
                 headers={"xx-operator": "pc", "xx-service": "mycanal", "xx-available-display-languages": "it-IT"},
                 timeout=30,
             )
