@@ -206,6 +206,7 @@ jobs:
                   --collect-all Cryptodome \
                   --exclude-module Cryptodome.SelfTest \
                   --add-data "VibraVid${{ matrix.separator }}VibraVid" \
+                  --add-data "GUI/searchapp/api${{ matrix.separator }}GUI/searchapp/api" \
                   --name=${{ matrix.artifact_name }} manual.py
 
             - name: Verify binary architecture
