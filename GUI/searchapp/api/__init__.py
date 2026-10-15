@@ -11,6 +11,17 @@ logger = logging.getLogger(__name__)
 
 def _is_hidden(module_name: str) -> bool:
     """Whether the underlying service module declares `_hide = True`."""
+    from VibraVid.services._base.site_loader import CompiledService
+
+    # A compiled service has no __init__.py: a plain import would cache a namespace package under its name
+    services_path = importlib.import_module("VibraVid.services").__path__[0]
+    compiled = CompiledService(module_name, os.path.join(services_path, module_name))
+    if os.path.isdir(compiled.service_dir) and compiled.is_candidate():
+        try:
+            return bool(getattr(compiled.load(f"VibraVid.services.{module_name}"), "_hide", False))
+        except Exception:
+            return False
+
     for candidate in (f"VibraVid.services.{module_name}", module_name):
         try:
             service_module = importlib.import_module(candidate)

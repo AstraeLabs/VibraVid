@@ -6,23 +6,21 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from curl_cffi import requests
 
 logger = logging.getLogger(__name__)
-
-
-DOMAINS_URL = "https://domains-tracker.server66.workers.dev/get"
-
+DOMAINS_URL = "https://raw.githubusercontent.com/AstraeLabs/Domains/refs/heads/main/domains_s.json"
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
-
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="startup-prefetch")
 _futures: dict[str, Future] = {}
 
 
 def _fetch_domains():
+    logger.info("Fetching domains from GitHub...")
     response = requests.get(DOMAINS_URL, headers=_HEADERS, timeout=4)
     response.raise_for_status()
     return response.json()
 
 
 def _check_update():
+    logger.info("Checking for updates...")
     from VibraVid.utils.upload.update import check_for_updates
 
     return check_for_updates()

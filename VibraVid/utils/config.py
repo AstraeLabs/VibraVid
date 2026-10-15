@@ -24,7 +24,6 @@ GITHUB_DOMAINS_PATH = ".github/script/domains.json"
 
 CONFIG_DOWNLOAD_URL = "https://raw.githubusercontent.com/AstraeLabs/VibraVid/refs/heads/main/Conf/config.json"
 CONFIG_LOGIN_DOWNLOAD_URL = "https://raw.githubusercontent.com/AstraeLabs/VibraVid/refs/heads/main/Conf/login.json"
-DOMAINS_DOWNLOAD_URL = "https://domains-tracker.server66.workers.dev"
 DOMAIN_REFRESH_INTERVAL_SECONDS = 1800
 
 
@@ -563,7 +562,6 @@ class ConfigManager:
         """Load site data from GitHub and update local domains.json file."""
         try:
             _startup_prefetch.start()
-            logger.debug(f"Fetching site data from: {DOMAINS_DOWNLOAD_URL}")
             data = _startup_prefetch.collect("domains", timeout=5)
 
             if data is not None:

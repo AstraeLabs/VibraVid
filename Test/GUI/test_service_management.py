@@ -60,6 +60,57 @@ def test_removable_services_skip_builtins_helpers_and_folders_without_init(servi
     assert services_admin.removable_services() == ["uploaded_one"]
 
 
+def _compiled_service(root, name, suffix):
+    variant = root / name / f"{name}_this_os_pyX"
+    variant.mkdir(parents=True)
+    (variant / f"{name}{suffix}").write_bytes(b"")
+
+
+def test_a_compiled_service_counts_as_a_service_folder_and_is_removable(client, services):
+    import importlib.machinery
+
+    _compiled_service(services, "compiled_one", importlib.machinery.EXTENSION_SUFFIXES[0])
+
+    assert services_admin.is_service_dir(str(services / "compiled_one"))
+    assert not services_admin.is_service_dir(str(services / "no_init"))
+    assert services_admin.removable_services() == ["compiled_one", "uploaded_one"]
+
+    response = _post(client, {"name": "compiled_one"})
+    assert response.status_code == 200
+    assert not (services / "compiled_one").exists()
+
+
+def _upload_zip(client, tmp_path, build_tree):
+    import zipfile
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    archive = tmp_path / "svc.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for arcname in build_tree:
+            zf.writestr(arcname, b"")
+    return client.post("/api/upload-service/", {"service_zip": SimpleUploadedFile("svc.zip", archive.read_bytes())})
+
+
+def test_upload_installs_a_compiled_service_built_for_this_interpreter(client, services, tmp_path):
+    import importlib.machinery
+
+    suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+    response = _upload_zip(client, tmp_path, [f"newsvc/newsvc_this_os_pyX/newsvc{suffix}"])
+
+    assert response.status_code == 200
+    assert response.json()["installed"] == ["newsvc"]
+    assert (services / "newsvc" / "newsvc_this_os_pyX" / f"newsvc{suffix}").is_file()
+
+
+def test_upload_refuses_a_compiled_service_without_a_matching_build(client, services, tmp_path):
+    response = _upload_zip(client, tmp_path, ["newsvc/newsvc_other_os_py399/newsvc.cpython-399-nowhere-os.so"])
+
+    assert response.status_code == 400
+    assert any("nessuna build compatibile" in e for e in response.json()["errors"])
+    assert not (services / "newsvc").exists()
+
+
 def test_builtin_list_matches_the_tracked_service_folders():
     try:
         tracked = subprocess.run(

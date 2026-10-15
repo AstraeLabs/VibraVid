@@ -11,6 +11,7 @@ import zipfile
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
+from VibraVid.services._base.site_loader import CompiledService
 from VibraVid.services._base.tv_display_manager import refresh_output_formats
 from VibraVid.utils import config_manager
 
@@ -97,26 +98,25 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
         except zipfile.BadZipFile:
             return JsonResponse({"success": False, "error": "File ZIP non valido o corrotto."}, status=400)
 
-        # Find service directories (folders with __init__.py)
+        # Find service directories (source: folders with __init__.py; compiled: folders of per-platform builds)
         extracted_items = [d for d in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, d))]
 
         service_folders = []
         for item in extracted_items:
             item_path = os.path.join(tmp_dir, item)
-            init_file = os.path.join(item_path, "__init__.py")
-            if os.path.isfile(init_file):
+            if services_admin.is_service_dir(item_path):
                 service_folders.append(item)
             else:
                 # Check one level deeper (ZIP might have a wrapper dir)
                 for sub in os.listdir(item_path):
                     sub_path = os.path.join(item_path, sub)
-                    if os.path.isdir(sub_path) and os.path.isfile(os.path.join(sub_path, "__init__.py")):
+                    if os.path.isdir(sub_path) and services_admin.is_service_dir(sub_path):
                         service_folders.append(os.path.join(item, sub))
 
         if not service_folders:
             return JsonResponse({
                 "success": False,
-                "error": "Nessun servizio valido trovato nello ZIP. Ogni servizio deve contenere __init__.py con 'indice' e '_useFor'."
+                "error": "Nessun servizio valido trovato nello ZIP. Ogni servizio deve contenere __init__.py con 'indice' e '_useFor' (oppure le build compilate per piattaforma)."
             }, status=400)
 
         import ast as _ast
@@ -128,6 +128,19 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
 
             if svc_name.startswith("_") or svc_name in {"base", "_base"}:
                 errors.append(f"'{svc_name}': reserved name, cannot be installed as a service")
+                continue
+
+            compiled = CompiledService(svc_name, svc_path)
+            if compiled.is_candidate():
+                if compiled.find_entry() is None:
+                    errors.append(f"'{svc_name}': nessuna build compatibile con questo sistema (varianti: {', '.join(compiled.variants())})")
+                    continue
+
+                dest_path = os.path.join(services_dir, svc_name)
+                if os.path.exists(dest_path):
+                    shutil.rmtree(dest_path)
+                shutil.copytree(svc_path, dest_path)
+                installed_services.append(svc_name)
                 continue
 
             syntax_error = None

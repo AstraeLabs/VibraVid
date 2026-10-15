@@ -10,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from VibraVid.utils import config_manager
 
+from .. import services_admin
 from ._shared import _UPDATE_CHECK_TTL, _update_check_cache
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def registry_status(request: HttpRequest) -> JsonResponse:
             full = os.path.join(services_dir, entry)
             if entry.startswith("_") or entry.startswith("."):
                 continue
-            if os.path.isdir(full) and os.path.isfile(os.path.join(full, "__init__.py")):
+            if os.path.isdir(full) and services_admin.is_service_dir(full):
                 services_on_disk.append(entry.lower())
 
     loaded = sorted(gui_api_module.get_available_sites())

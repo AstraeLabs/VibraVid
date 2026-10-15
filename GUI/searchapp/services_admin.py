@@ -4,6 +4,8 @@ import os
 import re
 import shutil
 
+from VibraVid.services._base.site_loader import CompiledService
+
 BUILTIN_SERVICES = frozenset({
     "7movies",
     "animeunity",
@@ -45,6 +47,11 @@ def services_dir() -> str:
     return os.path.join(project_root, "VibraVid", "services")
 
 
+def is_service_dir(path: str) -> bool:
+    """A service folder is either source (``__init__.py``) or compiled per-platform builds (see ``CompiledService``)."""
+    return os.path.isfile(os.path.join(path, "__init__.py")) or CompiledService(os.path.basename(path), path).is_candidate()
+
+
 def removable_services() -> list[str]:
     """Names of the uploaded (non built-in) service folders that currently exist, sorted."""
     base = services_dir()
@@ -56,7 +63,7 @@ def removable_services() -> list[str]:
         full = os.path.join(base, entry)
         if entry.startswith(("_", ".")) or entry in BUILTIN_SERVICES or not _NAME_RE.fullmatch(entry):
             continue
-        if os.path.islink(full) or not os.path.isfile(os.path.join(full, "__init__.py")):
+        if os.path.islink(full) or not is_service_dir(full):
             continue
         names.append(entry)
     return names

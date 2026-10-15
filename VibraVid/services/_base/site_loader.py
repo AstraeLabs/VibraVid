@@ -3,6 +3,7 @@
 import contextvars
 import glob
 import importlib
+import importlib.machinery
 import importlib.util
 import logging
 import os
@@ -44,6 +45,66 @@ def _reraise_if_binary_mismatch(module_name: str, submodule: str, exc: Exception
         ) from exc
 
 
+class CompiledService:
+    def __init__(self, module_name: str, service_dir: str):
+        self.module_name = module_name
+        self.service_dir = service_dir
+
+    def is_candidate(self) -> bool:
+        """Folder without __init__.py that contains at least one variant sub-folder."""
+        if os.path.isfile(os.path.join(self.service_dir, "__init__.py")):
+            return False
+        return any(os.path.isdir(os.path.join(self.service_dir, entry)) for entry in os.listdir(self.service_dir))
+
+    def find_entry(self) -> str | None:
+        """Path of the compiled package module matching the running Python/OS, or None."""
+        for variant in sorted(os.listdir(self.service_dir)):
+            variant_dir = os.path.join(self.service_dir, variant)
+            if not os.path.isdir(variant_dir):
+                continue
+            for suffix in importlib.machinery.EXTENSION_SUFFIXES:
+                entry = os.path.join(variant_dir, self.module_name + suffix)
+                if os.path.isfile(entry):
+                    return entry
+        return None
+
+    def variants(self) -> list[str]:
+        return sorted(e for e in os.listdir(self.service_dir) if os.path.isdir(os.path.join(self.service_dir, e)))
+
+    def load(self, qualified_name: str):
+        """Import the compiled package as ``qualified_name`` (reuses it if already imported)."""
+        if qualified_name in sys.modules:
+            return sys.modules[qualified_name]
+
+        entry = self.find_entry()
+        if entry is None:
+            raise ImportError(
+                f"No compiled build of service '{self.module_name}' matches this system "
+                f"(Python {sys.version_info.major}.{sys.version_info.minor}, expected suffix one of "
+                f"{', '.join(importlib.machinery.EXTENSION_SUFFIXES)}); available variants: {', '.join(self.variants())}"
+            )
+
+        # The package's submodules (downloader, scrapper, ...) are sibling extensions in the same variant folder
+        spec = importlib.util.spec_from_file_location(
+            qualified_name,
+            entry,
+            loader=importlib.machinery.ExtensionFileLoader(qualified_name, entry),
+            submodule_search_locations=[os.path.dirname(entry)],
+        )
+        
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[qualified_name] = module
+        token = current_site_var.set(self.module_name)
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(qualified_name, None)
+            raise
+        finally:
+            current_site_var.reset(token)
+        return module
+
+
 class LazySearchModule:
     def __init__(
         self,
@@ -81,7 +142,11 @@ class LazySearchModule:
         """Load the module on first access."""
         if self._module is None:
             try:
-                if self.source.lower() == "default":
+                compiled = CompiledService(self.module_name, os.path.join(self.base_path, self.module_name)) if self.base_path else None
+                if compiled is not None and compiled.is_candidate():
+                    qualified = f"VibraVid.{folder_name}.{self.module_name}" if self.source.lower() == "default" else self.module_name
+                    self._module = compiled.load(qualified)
+                elif self.source.lower() == "default":
                     try:
                         self._module = importlib.import_module(f"VibraVid.{folder_name}.{self.module_name}")
                     except (ImportError, OSError) as exc:
@@ -239,10 +304,24 @@ def load_search_functions() -> dict[str, LazySearchModule]:
         # Escape base_path for glob to handle paths with special characters like brackets
         escaped_base_path = os_manager.get_glob_path(base_path)
         found_inits = glob.glob(os.path.join(escaped_base_path, "*", "__init__.py"))
+        service_entries = [(init_file, os.path.basename(os.path.dirname(init_file)), None) for init_file in found_inits]
+
+        # Compiled services have no __init__.py: the package is a per-platform .pyd/.so inside a variant folder
+        for dir_name in sorted(os.listdir(base_path)):
+            compiled = CompiledService(dir_name, os.path.join(base_path, dir_name))
+            if dir_name.startswith(("_", ".")) or not os.path.isdir(compiled.service_dir) or not compiled.is_candidate():
+                continue
+
+            entry_file = compiled.find_entry()
+            if entry_file is None:
+                total_service_dirs += 1
+                logger.warning(f"Compiled service '{dir_name}' has no build for this system (variants: {', '.join(compiled.variants())})")
+                console.print(f"[yellow]Warning: compiled service '{dir_name}' has no build matching this Python/OS[/yellow]")
+                continue
+            service_entries.append((entry_file, dir_name, compiled))
 
         source_modules = []
-        for init_file in found_inits:
-            module_name = os.path.basename(os.path.dirname(init_file))
+        for init_file, module_name, compiled in service_entries:
 
             # Skip helper/base modules (starting with underscore)
             if module_name.startswith("_"):
@@ -270,25 +349,33 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                     hide = False
                     has_cli_args = False
 
-                    with open(init_file, encoding="utf-8") as f:
-                        for raw_line in f:
-                            if not has_cli_args and "def register_cli_args" in raw_line:
-                                has_cli_args = True
+                    if compiled is not None:
+                        qualified = f"VibraVid.{folder_name}.{module_name}" if source.lower() == "default" else module_name
+                        compiled_module = compiled.load(qualified)
+                        indice = getattr(compiled_module, "indice", None)
+                        use_for = getattr(compiled_module, "_useFor", None)
+                        hide = bool(getattr(compiled_module, "_hide", False))
+                        has_cli_args = hasattr(compiled_module, "register_cli_args")
+                    else:
+                        with open(init_file, encoding="utf-8") as f:
+                            for raw_line in f:
+                                if not has_cli_args and "def register_cli_args" in raw_line:
+                                    has_cli_args = True
 
-                            line = raw_line.strip()
-                            if not indice and (line.startswith("indice =") or line.startswith("indice=")):
-                                try:
-                                    indice = int(line.split("=")[1].strip())
-                                except (ValueError, IndexError) as e:
-                                    logger.warning(f"Module '{module_name}': Failed to parse indice value - {str(e)}")
-                            elif not use_for and (line.startswith("_useFor =") or line.startswith("_useFor=")):
-                                try:
-                                    use_for = line.split("=")[1].strip().strip('"').strip("'")
-                                except IndexError as e:
-                                    logger.warning(f"Module '{module_name}': Failed to parse _useFor value - {str(e)}")
-                            elif line.startswith("_hide =") or line.startswith("_hide="):
-                                value = line.split("=")[1].split("#")[0].strip().lower()
-                                hide = value == "true"
+                                line = raw_line.strip()
+                                if not indice and (line.startswith("indice =") or line.startswith("indice=")):
+                                    try:
+                                        indice = int(line.split("=")[1].strip())
+                                    except (ValueError, IndexError) as e:
+                                        logger.warning(f"Module '{module_name}': Failed to parse indice value - {str(e)}")
+                                elif not use_for and (line.startswith("_useFor =") or line.startswith("_useFor=")):
+                                    try:
+                                        use_for = line.split("=")[1].strip().strip('"').strip("'")
+                                    except IndexError as e:
+                                        logger.warning(f"Module '{module_name}': Failed to parse _useFor value - {str(e)}")
+                                elif line.startswith("_hide =") or line.startswith("_hide="):
+                                    value = line.split("=")[1].split("#")[0].strip().lower()
+                                    hide = value == "true"
 
                     manifest[init_file] = {
                         "mtime": stat.st_mtime,
@@ -358,6 +445,9 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                 continue
 
             init_file = os.path.join(base_path, module_name, "__init__.py")
+            if not os.path.isfile(init_file):
+                continue
+            
             logger.info(f"Updating indice for module {module_name}: {old_indice} -> {new_indice}")
 
             try:
