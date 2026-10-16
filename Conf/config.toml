@@ -1,0 +1,309 @@
+# =============================================================================
+# VibraVid - Main Configuration (config.toml)
+# =============================================================================
+# Each section is enclosed in square brackets [SECTION_NAME].
+# Lines starting with # are comments and are ignored.
+# Edit only the values, not the key names.
+# =============================================================================
+
+# ---------------------------------------------------------------
+# [DEFAULT] - General application settings
+# ---------------------------------------------------------------
+# Basic options that affect the whole program.
+[DEFAULT]
+# If true, saves detailed trace of downloaded JSON files (developer debug)
+debug_track_json = false
+# Log level: DEBUG, INFO, WARNING, ERROR (lower = more details)
+log_level = "INFO"
+# If true, closes the console automatically at the end
+close_console = true
+# If true, shows messages on screen during execution
+show_message = true
+# If true, downloads the updated list of supported site domains online
+fetch_domain_online = true
+# If true, disables the scraper cache (forces re-run every time)
+disable_scraper_cache = false
+# List of service sources to import (e.g. ["default"] or ["default", 'C:\more_service']).
+# Use the full word "default"; Windows paths can use literal single quotes.
+imp_service = ["default"]
+# Installation path (empty = automatic)
+installation = ""
+# Metadata providers in order of preference (tmdb, imdb, tvdb) separated by comma
+metadata_provider = "tmdb,imdb"
+
+# ---------------------------------------------------------------
+# [OUTPUT] - Where and how to save downloaded files
+# ---------------------------------------------------------------
+# Here you define destination folders and file names.
+[OUTPUT]
+# Main folder where videos end up
+root_path = "Video"
+# Folder name for movies
+movie_folder_name = "Movie"
+# Folder name for TV series
+serie_folder_name = "Serie"
+# Folder name for anime
+anime_folder_name = "Anime"
+# Folder name for music
+music_folder_name = "Music"
+# Folder name for live channels
+live_folder_name = "Live"
+# Format for movie folder/file name (tokens: title_name, title_year, quality)
+movie_format = "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]"
+# Format for TV series episodes
+episode_format = "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]"
+# Format for music tracks
+song_format = "%(album)/%(track_number:02d). %(title)"
+# Tag to write into files (e.g. [VibraVid])
+tag_format = "[VibraVid]"
+
+# ---------------------------------------------------------------
+# [DOWNLOAD] - Download behavior
+# ---------------------------------------------------------------
+# Options that control how content is downloaded.
+[DOWNLOAD]
+# If true, skips download (preview/metadata only)
+skip_download = false
+# If true, automatically selects the best available quality
+auto_select = true
+# If true, uses curl_cffi to download video segments (faster on some sites)
+use_curl_cffi_segments = false
+# Seconds to wait after each download before the next one
+delay_after_download = 0
+# Number of simultaneous downloads (recommended: 4-10)
+thread_count = 10
+# Speed limit in MB/s (0 = unlimited; 10 Mbps is about 1.25 MB/s)
+max_speed_mbps = 0
+# Seconds to wait between segments of a file
+segment_delay_seconds = 0
+# Random variation on segment delay (anti-block)
+segment_delay_jitter_seconds = 0
+# Number of parallel workers to resolve subtitles
+subtitle_resolve_workers = 4
+# Preferred video quality: "best", "worst" or a number
+select_video = "best"
+# Preferred audio languages separated by | (e.g. "ita|eng")
+select_audio = "ita|eng"
+# Preferred subtitle languages separated by | (e.g. "ita|eng")
+select_subtitle = "ita|eng"
+# If true, extracts closed captions embedded in the video
+extract_embedded_cc = false
+# Maximum empty polls for live streams before giving up
+live_max_empty_polls = 8
+# Maximum token refresh rounds before giving up
+max_token_refresh_rounds = 10
+# Seconds to wait between token refresh attempts
+token_refresh_backoff_seconds = 4.0
+# Stalled rounds before considering refresh failed
+token_refresh_stall_rounds = 3
+# If true, embeds the poster inside the video file
+embed_poster = false
+# If true, writes sidecar files (nfo, poster) next to the video for Jellyfin/Emby/Kodi
+write_sidecars = false
+# If true, deletes the temporary folder after download
+cleanup_tmp_folder = true
+
+# ---------------------------------------------------------------
+# [CODEC] - Video codec settings
+# ---------------------------------------------------------------
+[CODEC]
+# If true, automatically detects Dolby Vision and handles the compatible layer
+dv_auto = false
+
+# ---------------------------------------------------------------
+# [PROCESS] - Video/audio processing with ffmpeg
+# ---------------------------------------------------------------
+# Here you configure how ffmpeg processes files after download.
+[PROCESS]
+# Processing engine: "ffmpeg" (recommended)
+engine = "ffmpeg"
+# If true, uses GPU for processing (requires ffmpeg with hardware support)
+use_gpu = false
+# ffmpeg parameters for video (list of arguments)
+param_video = [
+    "-c:v",
+    "libx265",
+    "-crf",
+    "28",
+    "-preset",
+    "medium",
+]
+# ffmpeg parameters for audio
+param_audio = [
+    "-c:a",
+    "libopus",
+    "-b:a",
+    "128k",
+]
+# ffmpeg parameters for music tracks (empty = default)
+param_song = []
+# ffmpeg final parameters applied at the end
+param_final = [
+    "-c",
+    "copy",
+]
+# Preferred audio track order (empty = automatic)
+audio_order = []
+# Preferred subtitle track order (empty = automatic)
+subtitle_order = []
+# Forced subtitle language/disposition
+subtitle_disposition_language = "it-it_forced"
+# If true, merges all audio tracks into a single file
+merge_audio = true
+# If true, merges all subtitles into a single file
+merge_subtitle = true
+# Force subtitles: "auto", "on", "off"
+force_subtitle = "auto"
+# If true, muxes DTS:X tracks
+mux_dtsx = false
+# Output file extension (e.g. mkv, mp4)
+extension = "mkv"
+
+# ---------------------------------------------------------------
+# [REQUESTS] - Network and HTTP requests
+# ---------------------------------------------------------------
+# Timeouts, retries and proxy configuration for internet connections.
+[REQUESTS]
+# Timeout in seconds for each HTTP request
+timeout = 15
+# Maximum number of retries on error
+max_retry = 4
+# If true, verifies SSL certificates (recommended: true)
+verify = true
+# If true, uses a proxy for requests
+use_proxy = false
+# Proxy scope: "scrap+down" (scraping + download) or only part of it
+proxy_scope = "scrap+down"
+# Local bypasser URL (e.g. for anti-bot protection sites)
+bypasser_url = "http://localhost:8192"
+
+# Sub-section: direct proxy configuration
+[REQUESTS.proxy]
+http = "http://localhost:8888"
+https = "http://localhost:8888"
+
+# ---------------------------------------------------------------
+# [DRM] - DRM management (Widevine, etc.)
+# ---------------------------------------------------------------
+# Options for downloading DRM-protected content.
+[DRM]
+# If true, uses the CDM module to decrypt content
+use_cdm = true
+# If true, prefers remote CDM over local CDM
+prefer_remote_cdm = false
+# If true, skips vault key lookup and forces a fresh CDM request.
+# prefer_remote_cdm determines whether that request uses the remote or local CDM.
+bypass_vault_cache = false
+# If true, shows the DRM engine output in logs
+log_engine_output = false
+
+# Sub-section: DRM vault (key database)
+[DRM.vault.default]
+url = "https://drm-db.server66.workers.dev"
+token = ""
+
+# ---------------------------------------------------------------
+# [HOOKS] - Custom scripts
+# ---------------------------------------------------------------
+# Lists of commands to execute at specific moments during execution.
+# Leave lists empty [] if you do not want to use hooks.
+[HOOKS]
+# Executed before program startup
+pre_run = []
+# Executed before each download
+pre_download = []
+# Executed after each download
+post_download = []
+# Executed after program ends
+post_run = []
+
+# ---------------------------------------------------------------
+# [ARR] - Integration with Sonarr / Radarr / Seerr
+# ---------------------------------------------------------------
+# Automation services to manage downloads and media cataloging.
+# If you do not use Sonarr/Radarr/Seerr, leave enabled = false.
+[ARR]
+# If true, enables integration with ARR services
+enabled = false
+# If true, downloads Italian anime by default
+download_italian_anime_default = true
+# If true, enables anime ID crosswalk between providers
+anime_id_crosswalk_enabled = true
+# List of fallback providers for anime (in priority order)
+provider_fallback = [
+    "streamingcommunity",
+    "animeunity",
+    "discoveryplus",
+    "discovery",
+    "dmax",
+    "nove",
+    "realtime",
+    "mediasetinfinity",
+    "raiplay",
+    "homegardentv",
+    "foodnetwork",
+    "animeworld",
+    "crunchyroll",
+    "primevideo",
+    "tubitv",
+]
+# If true, enables periodic polling to check for new episodes
+enable_polling = false
+# If true, enables Seerr webhooks
+enable_seerr_webhook = false
+# If true, enables Sonarr webhooks
+enable_sonarr_webhook = false
+# If true, enables Radarr webhooks
+enable_radarr_webhook = false
+# Interval between polling checks in seconds (300 = 5 minutes)
+polling_interval = 300
+# Full resync interval in seconds (21600 = 6 hours)
+full_resync_interval = 21600
+# Maximum simultaneous downloads via ARR
+max_concurrent_downloads = 2
+# If true, enables webhook priority
+webhook_priority_enabled = true
+# Native webhook priority window in seconds
+native_webhook_priority_window_seconds = 120
+# Seerr fallback delay in seconds
+seerr_fallback_delay_seconds = 20
+
+# ARR path mapping (empty = no mapping)
+[ARR.path_mapping]
+
+# Sonarr configuration
+[ARR.sonarr]
+url = ""
+api_key = ""
+
+# Radarr configuration
+[ARR.radarr]
+url = ""
+api_key = ""
+
+# Seerr configuration
+[ARR.seerr]
+webhook_secret = ""
+
+# Sonarr webhook configuration
+[ARR.sonarr_webhook]
+webhook_secret = ""
+
+# Radarr webhook configuration
+[ARR.radarr_webhook]
+webhook_secret = ""
+
+# ---------------------------------------------------------------
+# [TELEGRAM] - Telegram notifications
+# ---------------------------------------------------------------
+[TELEGRAM]
+# If true, enables Telegram notifications
+enabled = false
+# GUI URL for links in notifications
+gui_url = "http://vibravid:8000"
+# Maximum number of results shown in Telegram searches
+max_results = 8
+
+# =============================================================================
+# END OF CONFIGURATION
+# =============================================================================

@@ -166,6 +166,7 @@ def check_dovi_tool(download: bool = True) -> str | None:
         if cargo_path:
             console.print("[cyan]Cargo detected. Attempting to build dovi_tool from source...[/cyan]")
             binary_dir = binary_paths.ensure_binary_directory()
+            tools_dir = binary_paths.get_tools_directory()
             try:
                 cmd = [
                     "cargo",
@@ -178,7 +179,7 @@ def check_dovi_tool(download: bool = True) -> str | None:
                 ]
                 subprocess.run(cmd, check=True)
                 cargo_bin = os.path.join(os.path.dirname(binary_dir), "bin", "dovi_tool")
-                dest_bin = os.path.join(binary_dir, "dovi_tool")
+                dest_bin = os.path.join(tools_dir, "dovi_tool")
                 if os.path.isfile(cargo_bin):
                     shutil.move(cargo_bin, dest_bin)
                     os.chmod(dest_bin, 0o755)

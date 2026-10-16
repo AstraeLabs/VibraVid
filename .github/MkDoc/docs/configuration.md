@@ -1,6 +1,6 @@
 # Configuration
 
-All settings live in `config.json`. The sections below cover each configuration block.
+All settings live in `Conf/config.toml`. The sections below cover each configuration block.
 ARR automation settings are documented separately in the [ARR Integration](arr.md) guide.
 
 ## TMDB API Key
@@ -40,21 +40,18 @@ point, not a per-interface setting.
   container). If it's missing, search results show a "TMDB covers aren't active" hint.
 - This is the **only** way to configure the key going forward — see the deprecated method below.
 
-### Deprecated method: `Conf/login.json`
+### Deprecated method: `Conf/login.toml`
 
-Older versions read the key from `Conf/login.json`, under a `Provider` section:
+The deprecated fallback reads the key from `Conf/login.toml`, under a `Provider` section:
 
-```json
-{
-  "Provider": {
-    "tmdb": "your_key_here"
-  }
-}
+```toml
+[Provider]
+tmdb = "your_key_here"
 ```
 
 This still works as a fallback if `TMDB_API_KEY` is not set, but it is **deprecated and will be
 removed in a future release** — a warning is logged the first time it's used. Fresh installs'
-`login.json` template does not include a `Provider` section at all, so this path only matters
+`login.toml` template does not include a `Provider` section at all, so this path only matters
 for existing configs carried over from an older version; migrate to the `TMDB_API_KEY`
 environment variable above.
 
@@ -103,36 +100,30 @@ Either (the environment variable wins):
 export TVDB_API_KEY=your_key_here          # PowerShell: $env:TVDB_API_KEY = "your_key_here"
 ```
 
-or in `Conf/login.json`:
+or in `Conf/login.toml`:
 
-```json
-{
-  "Provider": {
-    "tvdb": "your_key_here"
-  }
-}
+```toml
+[Provider]
+tvdb = "your_key_here"
 ```
 
-Unlike the TMDB entry above, `Provider.tvdb` in `login.json` is a supported location. Docker/NAS: set
-`TVDB_API_KEY` in your `.env` file (see `.env.example`). `login.json` can hold secrets: do not commit your
+Unlike the TMDB entry above, `Provider.tvdb` in `login.toml` is a supported location. Docker/NAS: set
+`TVDB_API_KEY` in your `.env` file (see `.env.example`). `login.toml` can hold secrets: do not commit your
 own copy.
 
 ## DEFAULT
 
-```json
-{
-  "DEFAULT": {
-    "debug_track_json": false,
-    "log_level": "INFO",
-    "close_console": true,
-    "show_message": true,
-    "fetch_domain_online": true,
-    "disable_scraper_cache": false,
-    "imp_service": ["default"],
-    "installation": "",
-    "metadata_provider": "tmdb,imdb"
-  }
-}
+```toml
+[DEFAULT]
+debug_track_json = false
+log_level = "INFO"
+close_console = true
+show_message = true
+fetch_domain_online = true
+disable_scraper_cache = false
+imp_service = ["default"]
+installation = ""
+metadata_provider = "tmdb,imdb"
 ```
 
 | Key | Default | Description |
@@ -148,44 +139,41 @@ own copy.
 | `metadata_provider` | `tmdb,imdb` | Provider(s) the sidecars are built from, tried in order: `tmdb`, `imdb` (free, no key), `tvdb` (needs `TVDB_API_KEY`). CLI: `--metadata-provider` |
 
 **Custom `imp_service` example (local folder):**
-```json
-"imp_service": ["default", "/home/user/my_custom_sites"]
+```toml
+imp_service = ["default", "/home/user/my_custom_sites"]
 ```
 
 **Custom `imp_service` example (remote GitHub/Gitea repository):**
-```json
-"imp_service": ["default", "https://github.com/owner/my-vibravid-sites"]
+```toml
+imp_service = ["default", "https://github.com/owner/my-vibravid-sites"]
 ```
 
 **Custom `imp_service` example (private repository, with username/password or token):**
 ```json
 "imp_service": ["default", "http://user:password@192.168.1.149:3000/owner/my-vibravid-sites"]
 ```
-Embed the credentials directly in the URL userinfo, as `<scheme>://<username>:<password>@<host>/<owner>/<repo>` (GitHub: use a personal access token as the password; Gitea: username/password or a token both work). Pin a specific branch/tag with a `#ref` fragment, e.g. `https://host/owner/repo#dev`; otherwise the repository's default branch is used. Since credentials end up in plain text in `config.json`, prefer a scoped token over your account password, and keep `config.json` out of any git history you push (it's tracked in the VibraVid repo itself, so a fork/clone used for personal config should not be pushed upstream with real credentials in it).
+Embed the credentials directly in the URL userinfo, as `<scheme>://<username>:<password>@<host>/<owner>/<repo>` (GitHub: use a personal access token as the password; Gitea: username/password or a token both work). Pin a specific branch/tag with a `#ref` fragment, e.g. `https://host/owner/repo#dev`; otherwise the repository's default branch is used. Since credentials end up in plain text in `config.toml`, prefer a scoped token over your account password, and keep `config.toml` out of any git history you push (it's tracked in the VibraVid repo itself, so a fork/clone used for personal config should not be pushed upstream with real credentials in it).
 
 ## OUTPUT
 
-```json
-{
-  "OUTPUT": {
-    "root_path": "Video",
-    "movie_folder_name": "Movie",
-    "serie_folder_name": "Serie",
-    "anime_folder_name": "Anime",
-    "music_folder_name": "Music",
-    "live_folder_name": "Live",
-    "movie_format": "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]",
-    "episode_format": "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]",
-    "song_format": "%(album)/%(track_number:02d). %(title)",
-    "tag_format": "[VibraVid]"
-  }
-}
+```toml
+[OUTPUT]
+root_path = "Video"
+movie_folder_name = "Movie"
+serie_folder_name = "Serie"
+anime_folder_name = "Anime"
+music_folder_name = "Music"
+live_folder_name = "Live"
+movie_format = "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]"
+episode_format = "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]"
+song_format = "%(album)/%(track_number:02d). %(title)"
+tag_format = "[VibraVid]"
 ```
 
 **`root_path`** — Base directory where videos are saved.
 - Windows: `C:\\MyLibrary\\Folder` or `\\\\MyServer\\Share`
 - Linux/macOS: `Desktop/MyLibrary/Folder`
-- Docker / NAS: set the `VIBRAVID_OUTPUT_ROOT` environment variable instead of editing `config.json` — the value is applied at startup and overrides this field without touching the persisted config file. Example: `VIBRAVID_OUTPUT_ROOT=/app/Video` (container path matching the bind-mount target).
+- Docker / NAS: set the `VIBRAVID_OUTPUT_ROOT` environment variable instead of editing `config.toml` — the value is applied at startup and overrides this field without touching the persisted config file. Example: `VIBRAVID_OUTPUT_ROOT=/app/Video` (container path matching the bind-mount target).
 
 **`movie_folder_name`**, **`serie_folder_name`**, **`anime_folder_name`**, **`music_folder_name`**, **`live_folder_name`** — Subfolder names for each content type (defaults: `"Movie"`, `"Serie"`, `"Anime"`, `"Music"`, `"Live"`). All support the `%{site_name}` placeholder:
 
@@ -303,31 +291,28 @@ Prefix written in the `title` and `comment` tags of the produced file (e.g. `[Vi
 
 ## DOWNLOAD
 
-```json
-{
-  "DOWNLOAD": {
-    "skip_download": false,
-    "auto_select": true,
-    "use_curl_cffi_segments": false,
-    "delay_after_download": 0,
-    "thread_count": 5,
-    "max_speed_mbps": 0,
-    "segment_delay_seconds": 0,
-    "segment_delay_jitter_seconds": 0,
-    "subtitle_resolve_workers": 4,
-    "select_video": "best",
-    "select_audio": "ita|eng",
-    "select_subtitle": "ita|eng",
-    "extract_embedded_cc": false,
-    "live_max_empty_polls": 8,
-    "max_token_refresh_rounds": 10,
-    "token_refresh_backoff_seconds": 4.0,
-    "token_refresh_stall_rounds": 3,
-    "embed_poster": false,
-    "write_sidecars": false,
-    "cleanup_tmp_folder": true
-  }
-}
+```toml
+[DOWNLOAD]
+skip_download = false
+auto_select = true
+use_curl_cffi_segments = false
+delay_after_download = 0
+thread_count = 5
+max_speed_mbps = 0
+segment_delay_seconds = 0
+segment_delay_jitter_seconds = 0
+subtitle_resolve_workers = 4
+select_video = "best"
+select_audio = "ita|eng"
+select_subtitle = "ita|eng"
+extract_embedded_cc = false
+live_max_empty_polls = 8
+max_token_refresh_rounds = 10
+token_refresh_backoff_seconds = 4.0
+token_refresh_stall_rounds = 3
+embed_poster = false
+write_sidecars = false
+cleanup_tmp_folder = true
 ```
 
 ### Performance Settings
@@ -415,12 +400,9 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 
 ## CODEC
 
-```json
-{
-  "CODEC": {
-    "dv_auto": true
-  }
-}
+```toml
+[CODEC]
+dv_auto = true
 ```
 
 | Key | Default | Description |
@@ -429,25 +411,22 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 
 ## PROCESS (Post-Processing)
 
-```json
-{
-  "PROCESS": {
-    "engine": "ffmpeg",
-    "use_gpu": false,
-    "param_video": ["-c:v", "libx265", "-crf", "28", "-preset", "medium"],
-    "param_audio": ["-c:a", "libopus", "-b:a", "128k"],
-    "param_song": [],
-    "param_final": ["-c", "copy"],
-    "audio_order": [],
-    "subtitle_order": [],
-    "subtitle_disposition_language": "it-it_forced",
-    "merge_audio": true,
-    "merge_subtitle": true,
-    "force_subtitle": "auto",
-    "mux_dtsx": false,
-    "extension": "mkv"
-  }
-}
+```toml
+[PROCESS]
+engine = "ffmpeg"
+use_gpu = false
+param_video = ["-c:v", "libx265", "-crf", "28", "-preset", "medium"]
+param_audio = ["-c:a", "libopus", "-b:a", "128k"]
+param_song = []
+param_final = ["-c", "copy"]
+audio_order = []
+subtitle_order = []
+subtitle_disposition_language = "it-it_forced"
+merge_audio = true
+merge_subtitle = true
+force_subtitle = "auto"
+mux_dtsx = false
+extension = "mkv"
 ```
 
 | Key | Default | Description |
@@ -478,21 +457,18 @@ See `VibraVid/core/processors/helper/ex_sub.py` in the repository for conversion
 
 ## REQUESTS
 
-```json
-{
-  "REQUESTS": {
-    "timeout": 15,
-    "max_retry": 4,
-    "verify": true,
-    "use_proxy": false,
-    "proxy_scope": "scrap+down",
-    "proxy": {
-      "http": "http://localhost:8888",
-      "https": "http://localhost:8888"
-    },
-    "bypasser_url": "http://localhost:8192"
-  }
-}
+```toml
+[REQUESTS]
+timeout = 15
+max_retry = 4
+verify = true
+use_proxy = false
+proxy_scope = "scrap+down"
+bypasser_url = "http://localhost:8192"
+
+[REQUESTS.proxy]
+http = "http://localhost:8888"
+https = "http://localhost:8888"
 ```
 
 | Key | Default | Description |
@@ -527,21 +503,16 @@ Any invalid value falls back to `scrap+down`. Override per run from the CLI with
 
 ## DRM
 
-```json
-{
-  "DRM": {
-    "use_cdm": true,
-    "prefer_remote_cdm": false,
-    "bypass_vault_cache": false,
-    "log_engine_output": false,
-    "vault": {
-      "default": {
-        "url": "https://drm-db.server66.workers.dev",
-        "token": ""
-      }
-    }
-  }
-}
+```toml
+[DRM]
+use_cdm = true
+prefer_remote_cdm = false
+bypass_vault_cache = false
+log_engine_output = false
+
+[DRM.vault.default]
+url = "https://drm-db.server66.workers.dev"
+token = ""
 ```
 
 | Key | Default | Description |
@@ -586,11 +557,11 @@ stopping once every KID is resolved.
 - A vault answering `429` is skipped for the `retry_after` it asks for.
 - Optional fields: `service` (force a namespace), `timeout` (seconds, default `10`).
 
-`Conf/config.json` is tracked by git: don't commit third-party vault tokens.
+`Conf/config.toml` is tracked by git: don't commit third-party vault tokens.
 
 ### Remote CDM Services
 
-When remote CDM services are available, add one or both of the following blocks to `config.json`:
+When remote CDM services are available, add one or both of the following blocks to `config.toml`:
 
 **Widevine:**
 ```json
@@ -663,7 +634,7 @@ A third-party hosted CDM service (Widevine and PlayReady) reachable over HTTP. T
 
 ### Named remote CDMs and per-service CDM
 
-To use a different CDM for one service, give each remote CDM a unique id under `DRM.remote_cdm` in `config.json`, then pick it in `login.json`. Each entry has the same fields as the `widevine` / `playready` blocks above (stock pywidevine / pyplayready remote CDMs, or `"type": "custom_api_1"`):
+To use a different CDM for one service, give each remote CDM a unique id under `DRM.remote_cdm` in `config.toml`, then pick it in `login.toml`. Each entry has the same fields as the `widevine` / `playready` blocks above (stock pywidevine / pyplayready remote CDMs, or `"type": "custom_api_1"`):
 
 ```json
 "DRM": {
@@ -692,7 +663,7 @@ To use a different CDM for one service, give each remote CDM a unique id under `
 }
 ```
 
-The ids are free text. Then, in `login.json`, list what the service should use in its `cdm` entry (a single value or a list):
+The ids are free text. Then, in `login.toml`, list what the service should use in its `cdm` entry (a single value or a list):
 
 ```json
 "mysite": {

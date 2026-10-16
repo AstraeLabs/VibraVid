@@ -367,7 +367,7 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
     local = binary_paths.get_local_tool_version(tool)
 
-    managed_dir = os.path.abspath(binary_paths.get_binary_directory())
+    managed_dir = os.path.abspath(binary_paths.get_tools_directory())
     ext = ".exe" if binary_paths.system == "windows" else ""
 
     if local is not None and local == remote:
