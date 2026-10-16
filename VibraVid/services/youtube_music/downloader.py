@@ -6,64 +6,17 @@ import shutil
 import tempfile
 
 from rich.console import Console
-from rich.progress import BarColumn, DownloadColumn, Progress, TimeRemainingColumn, TransferSpeedColumn
 
+from VibraVid.core.downloader import YTDLPDownloader
 from VibraVid.core.muxing.helper.audio import process_song
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.provider.musiclyric import get_lyrics
 from VibraVid.services._base import Entries, site_constants
 from VibraVid.services._base.tv_display_manager import map_song_path
+from VibraVid.setup import get_deno_path
 
 console = Console()
 logger = logging.getLogger(__name__)
-
-
-class YTDLPProgressHook:
-    """Progress hook for yt-dlp that drives a Rich Progress bar."""
-    
-    def __init__(self, title: str, artist: str):
-        self.title = title
-        self.artist = artist
-        self.progress = None
-        self.task_id = None
-        self._total = None
-        self._downloaded = 0
-    
-    def __call__(self, d):
-        if d["status"] == "downloading":
-            if self.progress is None:
-                self.progress = Progress(
-                    "[bold cyan]{task.description}",
-                    BarColumn(bar_width=40),
-                    "[progress.percentage]{task.percentage:>3.0f}%",
-                    "•",
-                    DownloadColumn(),
-                    "•",
-                    TransferSpeedColumn(),
-                    "•",
-                    TimeRemainingColumn(),
-                    console=console,
-                    transient=True,
-                )
-                self.progress.start()
-                self.task_id = self.progress.add_task(f"{self.artist} - {self.title}", total=None)
-            
-            total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            downloaded = d.get("downloaded_bytes", 0)
-            
-            if total:
-                self._total = total
-                self.progress.update(self.task_id, total=total, completed=downloaded)
-            elif self._total:
-                self.progress.update(self.task_id, completed=downloaded)
-                
-        elif d["status"] == "finished":
-            if self.progress and self.task_id is not None:
-                if self._total:
-                    self.progress.update(self.task_id, completed=self._total)
-                self.progress.stop()
-                self.progress = None
-                self.task_id = None
 
 
 def _download_via_ytdlp(select_title) -> str | None:
@@ -86,49 +39,24 @@ def _download_via_ytdlp(select_title) -> str | None:
 
     console.print(f"[cyan]Downloading via yt-dlp: [yellow]{artist} - {title}[/yellow]")
 
-    import yt_dlp
-
-    progress_hook = YTDLPProgressHook(title, artist)
-
     with tempfile.TemporaryDirectory() as temp_dir:
-        ydl_opts = {
-            "format": "bestaudio[ext=webm]/bestaudio/best",
-            "outtmpl": os.path.join(temp_dir, "%(title)s.%(ext)s"),
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "extract_audio": True,
-            "audio_format": "opus",
-            "audio_quality": "0",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "opus",
-                "preferredquality": "0",
-            }],
-            "progress_hooks": [progress_hook],
-            "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://music.youtube.com/",
-                "Origin": "https://music.youtube.com",
-            },
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "web"],
-                    "player_skip": ["webpage", "configs"],
-                }
-            },
-        }
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-
-            downloaded_files = [f for f in os.listdir(temp_dir) if f.endswith((".opus", ".webm", ".m4a", ".mp3"))]
-            if not downloaded_files:
-                logger.warning(f"[youtube_music] No audio file downloaded for {artist} - {title}")
+            downloaded, _stopped, error = YTDLPDownloader(
+                url=url,
+                output_dir=temp_dir,
+                filename="track",
+                format_spec="bestaudio[ext=webm]/bestaudio/best",
+                extract_audio=True,
+                audio_format="opus",
+                audio_quality="0",
+                no_playlist=True,
+                deno_path=get_deno_path(),
+            ).start()
+            if error or not downloaded:
+                logger.warning(f"[youtube_music] No audio file downloaded for {artist} - {title}: {error}")
                 return None
 
-            downloaded_file = os.path.join(temp_dir, downloaded_files[0])
+            downloaded_file = str(downloaded)
             logger.info(f"[youtube_music] Downloaded to temp: {downloaded_file}")
 
             path_components, filename = map_song_path(

@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.headers.get("decrypt-labs-api-key") != API_KEY:
+        if self.headers.get("x-api-key") != API_KEY:
             return self._reply({"message": "invalid api key"}, 401)
         data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         STATE["calls"].append((self.path, {k: v for k, v in data.items() if k in ("scheme", "get_cached_keys_if_exists")}))
@@ -103,5 +103,5 @@ if __name__ == "__main__":
     parser.add_argument("--key", default="testkey")
     args = parser.parse_args()
     API_KEY = args.key
-    print(f"Decrypt Labs emulator on 127.0.0.1:{args.port}", flush=True)
+    print(f"Remote CDM emulator on 127.0.0.1:{args.port}", flush=True)
     HTTPServer(("127.0.0.1", args.port), Handler).serve_forever()

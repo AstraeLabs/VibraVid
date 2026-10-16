@@ -10,6 +10,7 @@ BUILTIN_SERVICES = frozenset({
     "7movies",
     "animeunity",
     "animeworld",
+    "chili",
     "crunchyroll",
     "discovery",
     "discoveryplus",
@@ -27,6 +28,7 @@ BUILTIN_SERVICES = frozenset({
     "streamingcommunity",
     "timvision",
     "tubitv",
+    "youtube",
     "youtube_music",
 })
 

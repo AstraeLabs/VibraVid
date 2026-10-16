@@ -13,11 +13,12 @@ sys.path.insert(0, str(workspace_root))
 from pywidevine.pssh import PSSH
 
 from VibraVid.core.drm import widevine
-from VibraVid.core.drm.cdm.remote.decrypt_labs_cdm import DecryptLabsRemoteCDM, build_remote_cdm
+from VibraVid.core.drm.cdm.remote.remote_cdm_api import RemoteCdmApi, build_remote_cdm
 
 KID_A, KID_B = "aa" * 16, "bb" * 16
 KEY_A, KEY_B = "11" * 16, "22" * 16
 WV_PSSH = PSSH.new(system_id=PSSH.SystemId.Widevine, key_ids=[UUID(hex=KID_A)], version=1).dumps()
+TEST_HOST = "http://remote-cdm.test"
 
 
 class FakeResponse:
@@ -40,8 +41,8 @@ class FakeHttp:
         return FakeResponse(self.queues[path].pop(0))
 
 
-def _cdm(**queues) -> tuple[DecryptLabsRemoteCDM, FakeHttp]:
-    cdm = DecryptLabsRemoteCDM(secret="s3cret", device_name="L3")
+def _cdm(**queues) -> tuple[RemoteCdmApi, FakeHttp]:
+    cdm = RemoteCdmApi(secret="s3cret", host=TEST_HOST, device_name="L3")
     cdm._http = FakeHttp(**queues)
     return cdm, cdm._http
 
@@ -95,7 +96,7 @@ def test_api_error_is_raised_with_details():
 
 
 def test_playready_needs_pssh_b64_and_parses_key_string():
-    cdm = DecryptLabsRemoteCDM(secret="x", device_name="SL3")
+    cdm = RemoteCdmApi(secret="x", host=TEST_HOST, device_name="SL3")
     assert cdm.is_playready
     with pytest.raises(ValueError, match="set_pssh_b64"):
         cdm._init_data(object(), None)
@@ -114,11 +115,11 @@ def test_factory_selects_backend_and_does_not_mutate_config(monkeypatch):
 
     monkeypatch.setattr("pywidevine.remotecdm.RemoteCdm", StockRemote)
 
-    dl_cfg = {"type": "decrypt_labs", "secret": "k", "device_name": "L1"}
-    assert isinstance(build_remote_cdm(dl_cfg, "widevine"), DecryptLabsRemoteCDM)
-    assert dl_cfg == {"type": "decrypt_labs", "secret": "k", "device_name": "L1"}
+    api_cfg = {"type": "custom_api_1", "secret": "k", "host": TEST_HOST, "device_name": "L1"}
+    assert isinstance(build_remote_cdm(api_cfg, "widevine"), RemoteCdmApi)
+    assert api_cfg == {"type": "custom_api_1", "secret": "k", "host": TEST_HOST, "device_name": "L1"}
 
-    pr = build_remote_cdm({"type": "decrypt_labs", "secret": "k", "device_name": "SL3"}, "playready")
+    pr = build_remote_cdm({"type": "custom_api_1", "secret": "k", "host": TEST_HOST, "device_name": "SL3"}, "playready")
     assert pr.is_playready
 
     wv_cfg = {"device_type": "ANDROID", "host": "http://h", "secret": "s", "device_name": "n"}
@@ -149,7 +150,7 @@ def test_prefer_remote_cdm_wins_over_local_device_and_empty_challenge_skips_lice
         [{"pssh": WV_PSSH, "kid": KID_A, "type": "video"}],
         "https://license.test/wv",
         cdm_device_path="C:/does/not/exist.wvd",
-        cdm_remote_api={"type": "decrypt_labs", "secret": "k", "device_name": "L3"},
+        cdm_remote_api={"type": "custom_api_1", "secret": "k", "host": TEST_HOST, "device_name": "L3"},
         prefer_remote_cdm=True,
     )
 

@@ -14,8 +14,8 @@ from VibraVid.setup import device_install
 from VibraVid.setup.device_install import remote_cdm_system, resolve_service_cdm, resolve_service_cdm_paths
 from VibraVid.utils import config_manager
 
-DL_WIDEVINE = {"type": "decrypt_labs", "secret": "k", "device_name": "L3"}
-DL_PLAYREADY = {"type": "decrypt_labs", "secret": "k", "device_name": "SL3"}
+DL_WIDEVINE = {"type": "custom_api_1", "secret": "k", "device_name": "L3"}
+DL_PLAYREADY = {"type": "custom_api_1", "secret": "k", "device_name": "SL3"}
 STOCK_WIDEVINE = {"device_type": "ANDROID", "system_id": 22594, "security_level": 3, "host": "http://h", "secret": "s", "device_name": "d"}
 STOCK_PLAYREADY = {"host": "http://h/playready", "secret": "s", "device_name": "d", "security_level": 3000}
 
@@ -47,9 +47,9 @@ def setup_cdm(monkeypatch):
     ("cfg", "expected"),
     [
         (DL_WIDEVINE, "widevine"),
-        ({"type": "decrypt_labs", "device_name": "ChromeCDM"}, "widevine"),
+        ({"type": "custom_api_1", "device_name": "ChromeCDM"}, "widevine"),
         (DL_PLAYREADY, "playready"),
-        ({"type": "decrypt_labs", "device_type": "PLAYREADY", "device_name": "x"}, "playready"),
+        ({"type": "custom_api_1", "device_type": "PLAYREADY", "device_name": "x"}, "playready"),
         (STOCK_WIDEVINE, "widevine"),
         (STOCK_PLAYREADY, "playready"),
         (REGISTRY["tagged"], "widevine"),  # the explicit "system" key wins

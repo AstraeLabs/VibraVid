@@ -58,6 +58,7 @@ _PREFERRED_ORDER = [
     "tubitv",
     "plutotv",
     "rakutentv",
+    "chili",
     "timvision",
     "amazon_music",
 ]

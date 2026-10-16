@@ -7,7 +7,7 @@ from uuid import UUID
 
 import requests
 
-DEFAULT_HOST = "https://keyxtractor.decryptlabs.com"
+DEFAULT_AUTH_HEADER = "x-api-key"
 
 
 def _clean_kid(kid) -> str:
@@ -21,7 +21,6 @@ def _to_uuid(kid: str) -> UUID:
 
 class Key:
     """Key object exposing the attributes read by the Widevine (`kid`) and PlayReady (`key_id`) code paths."""
-
     def __init__(self, kid, key, type_: str = "CONTENT"):
         self.kid = _to_uuid(kid) if isinstance(kid, str) else kid
         self.key = bytes.fromhex(key) if isinstance(key, str) else key
@@ -36,23 +35,25 @@ class InvalidSession(Exception):
     """Raised when the session ID is unknown."""
 
 
-class DecryptLabsRemoteCDM:
+class RemoteCdmApi:
     def __init__(
         self,
         secret: str,
-        host: str = DEFAULT_HOST,
+        host: str,
         device_name: str = "ChromeCDM",
         device_type: str | None = None,
         service_name: str | None = None,
+        auth_header: str = DEFAULT_AUTH_HEADER,
         **_ignored,
     ):
         """
         Args:
-            secret: Decrypt Labs API key.
-            host: API host.
+            secret: Remote CDM API key.
+            host: API host (required -- provider-specific, set it in config.json).
             device_name: Widevine: ChromeCDM, L1, L2 or L3. PlayReady: SL2 or SL3.
             device_type: Optional, "PLAYREADY" forces PlayReady mode.
             service_name: Optional service tag sent to the API for key caching.
+            auth_header: HTTP header name the API expects the key under.
         """
         self.secret = secret
         self.host = host.rstrip("/")
@@ -66,9 +67,9 @@ class DecryptLabsRemoteCDM:
         self._http = requests.Session()
         self._http.headers.update(
             {
-                "decrypt-labs-api-key": self.secret,
+                auth_header: self.secret,
                 "Content-Type": "application/json",
-                "User-Agent": "vibravid-decrypt-labs-cdm",
+                "User-Agent": "vibravid-remote-cdm",
             }
         )
 
@@ -126,7 +127,7 @@ class DecryptLabsRemoteCDM:
     def _post(self, path: str, payload: dict) -> dict:
         response = self._http.post(f"{self.host}{path}", json=payload, timeout=30)
         if response.status_code != 200:
-            raise requests.RequestException(f"Decrypt Labs {path} failed: {response.status_code} {response.text}")
+            raise requests.RequestException(f"Remote CDM {path} failed: {response.status_code} {response.text}")
 
         data = response.json()
         if data.get("message") != "success":
@@ -136,7 +137,7 @@ class DecryptLabsRemoteCDM:
                     msg += f" - {field}: {data[field]}"
             if "service_certificate is required" in str(data):
                 msg += " (no service certificate was set on the CDM session)"
-            raise requests.RequestException(f"Decrypt Labs API error: {msg}")
+            raise requests.RequestException(f"Remote CDM API error: {msg}")
         return data
 
     @staticmethod
@@ -186,7 +187,7 @@ class DecryptLabsRemoteCDM:
                     data = self._post("/get-request", self._request_payload(session, init_data, False))
                 except requests.RequestException:
                     data = {}
-                
+
                 if "challenge" in data:
                     session["cached_keys"] = cached_keys
                     return self._store_challenge(session, data)
@@ -199,7 +200,7 @@ class DecryptLabsRemoteCDM:
 
         if session["tried_cache"]:
             return b""
-        raise requests.RequestException(f"Unexpected Decrypt Labs response, fields: {list(data.keys())}")
+        raise requests.RequestException(f"Unexpected remote CDM response, fields: {list(data.keys())}")
 
     @staticmethod
     def _store_challenge(session: dict, data: dict) -> bytes:
@@ -278,10 +279,10 @@ def build_remote_cdm(cfg: dict, system: str):
     cfg = dict(cfg)
     backend = str(cfg.pop("type", "")).lower()
 
-    if backend == "decrypt_labs":
+    if backend == "custom_api_1":
         if system == "playready":
             cfg.setdefault("device_type", "PLAYREADY")
-        return DecryptLabsRemoteCDM(**cfg)
+        return RemoteCdmApi(**cfg)
 
     if system == "widevine":
         from pywidevine.device import DeviceTypes

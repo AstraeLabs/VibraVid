@@ -630,21 +630,23 @@ When remote CDM services are available, add one or both of the following blocks 
 | `host` | Remote CDM server URL |
 | `secret` | Authentication secret |
 
-### Decrypt Labs (KeyXtractor)
+### Hosted remote CDM API
 
-[Decrypt Labs](https://decryptlabs.com) is a hosted CDM service (Widevine and PlayReady). To use it, set `"type": "decrypt_labs"` in the `widevine` and/or `playready` block, put your API key in `secret`, and turn on `prefer_remote_cdm`:
+A third-party hosted CDM service (Widevine and PlayReady) reachable over HTTP. To use one, set `"type": "custom_api_1"` in the `widevine` and/or `playready` block, fill in `host` and `secret` from your provider, and turn on `prefer_remote_cdm`:
 
 ```json
 "DRM": {
   "prefer_remote_cdm": true,
   "widevine": {
-    "type": "decrypt_labs",
-    "secret": "YOUR_DECRYPT_LABS_API_KEY",
+    "type": "custom_api_1",
+    "host": "YOUR_PROVIDER_API_URL",
+    "secret": "YOUR_PROVIDER_API_KEY",
     "device_name": "L3"
   },
   "playready": {
-    "type": "decrypt_labs",
-    "secret": "YOUR_DECRYPT_LABS_API_KEY",
+    "type": "custom_api_1",
+    "host": "YOUR_PROVIDER_API_URL",
+    "secret": "YOUR_PROVIDER_API_KEY",
     "device_name": "SL3"
   }
 }
@@ -652,22 +654,24 @@ When remote CDM services are available, add one or both of the following blocks 
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `type` | - | Must be `"decrypt_labs"`. Without it the block is a standard pywidevine / pyplayready remote CDM (above) |
-| `secret` | required | Your Decrypt Labs API key |
+| `type` | - | Must be `"custom_api_1"`. Without it the block is a standard pywidevine / pyplayready remote CDM (above) |
+| `host` | required | Your provider's API URL |
+| `secret` | required | Your provider's API key |
 | `device_name` | `ChromeCDM` | Widevine: `ChromeCDM`, `L1`, `L2` or `L3`. PlayReady: `SL2` or `SL3` |
-| `host` | `https://keyxtractor.decryptlabs.com` | API URL, change it only for a self-hosted compatible service |
+| `auth_header` | `x-api-key` | HTTP header name the provider expects the key under; set it only if your provider requires a different one |
 | `service_name` | - | Optional service tag |
 
 ### Named remote CDMs and per-service CDM
 
-To use a different CDM for one service, give each remote CDM a unique id under `DRM.remote_cdm` in `config.json`, then pick it in `login.json`. Each entry has the same fields as the `widevine` / `playready` blocks above (stock pywidevine / pyplayready remote CDMs, or `"type": "decrypt_labs"`):
+To use a different CDM for one service, give each remote CDM a unique id under `DRM.remote_cdm` in `config.json`, then pick it in `login.json`. Each entry has the same fields as the `widevine` / `playready` blocks above (stock pywidevine / pyplayready remote CDMs, or `"type": "custom_api_1"`):
 
 ```json
 "DRM": {
   "remote_cdm": {
     "remote_widevine_1": {
-      "type": "decrypt_labs",
-      "secret": "YOUR_DECRYPT_LABS_API_KEY",
+      "type": "custom_api_1",
+      "host": "YOUR_PROVIDER_API_URL",
+      "secret": "YOUR_PROVIDER_API_KEY",
       "device_name": "L3"
     },
     "remote_widevine_2": {

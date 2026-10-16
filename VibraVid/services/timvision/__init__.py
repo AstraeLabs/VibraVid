@@ -18,7 +18,7 @@ from .scrapper import get_content_metadata, search_timvision
 console = Console()
 logger = logging.getLogger(__name__)
 
-indice = 19
+indice = 20
 _useFor = "Film_Serie"
 
 entries_manager = EntriesManager()

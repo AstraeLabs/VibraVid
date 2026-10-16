@@ -128,8 +128,8 @@ def remote_cdm_system(cfg: dict) -> str:
     if device_type == "PLAYREADY" or device_name.upper().startswith("SL"):
         return "playready"
     
-    if str(cfg.get("type", "")).lower() == "decrypt_labs" or device_type:
-        return "widevine"  # decrypt_labs without an SL* device, or a pywidevine block (ANDROID / CHROME)
+    if str(cfg.get("type", "")).lower() == "custom_api_1" or device_type:
+        return "widevine"
     
     return "playready"  # a stock pyplayready block has no device_type
 

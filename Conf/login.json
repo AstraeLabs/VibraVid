@@ -31,5 +31,14 @@
     "rakutentv": {
         "email": "",
         "password": ""
+    },
+    "chili": {
+        "email": "",
+        "password": ""
+    },
+    "cs_chrome": {
+        "device_type": "chrome",
+        "netflixid": "",
+        "securenetflixid": ""
     }
 }

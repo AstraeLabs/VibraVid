@@ -9,6 +9,7 @@ _PROVIDER_LABELS = {
     "animeworld": "AnimeWorld",
     "annasarchive": "Anna's Archive",
     "appletv": "Apple TV",
+    "chili": "CHILI",
     "discoveryplus": "Discovery+",
     "disney": "Disney+",
     "dmax": "DMAX",

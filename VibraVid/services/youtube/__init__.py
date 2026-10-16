@@ -1,18 +1,19 @@
 # 16.10.26
+# By @Syncs-Luca98
 
 import logging
 
 from rich.console import Console
 
-from VibraVid.services._base import Entries, EntriesManager, site_constants
-from VibraVid.services._base.output_path import movie_folder
+from VibraVid.core.downloader import YTDLPDownloader
+from VibraVid.services._base import Entries, EntriesManager
 from VibraVid.services._base.site_search_manager import base_process_search_result, make_search_entrypoints
 from VibraVid.utils import TVShowManager
 
 from .downloader import download_video
 
-indice = 25
-_useFor = "Film"
+indice = 22
+_useFor = "Film_Serie"
 console = Console()
 logger = logging.getLogger(__name__)
 entries_manager = EntriesManager()
@@ -20,36 +21,25 @@ table_show_manager = TVShowManager()
 
 
 def _search_youtube(query: str, limit: int = 25) -> list[dict]:
-    """Search YouTube via yt-dlp (ytsearch)."""
-    import yt_dlp
-
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": "in_playlist",
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
-    except Exception as e:
-        logger.error(f"[youtube] yt-dlp search failed: {e}")
+    """Search YouTube with the managed yt-dlp binary (ytsearch)."""
+    info = YTDLPDownloader.extract_info(f"ytsearch{limit}:{query}")
+    if not info:
         return []
 
     items = []
-    for entry in result.get("entries", [])[:limit]:
-        if not entry or not entry.get("id"):
+    for entry in info.get("entries") or []:
+        video_id = entry.get("id") if entry else None
+        if not video_id:
             continue
-        video_id = entry["id"]
         items.append({
             "id": video_id,
-            "title": entry.get("title", "Unknown"),
-            "uploader": entry.get("uploader", entry.get("channel", "Unknown")),
-            "duration": entry.get("duration", 0) or 0,
-            "thumbnail": entry.get("thumbnail", "") or f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+            "title": entry.get("title") or "Unknown",
+            "uploader": entry.get("uploader") or entry.get("channel") or "Unknown",
+            "duration": entry.get("duration") or 0,
+            "thumbnail": entry.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
             "url": f"https://www.youtube.com/watch?v={video_id}",
         })
-    return items
+    return items[:limit]
 
 
 def title_search(query: str) -> int:

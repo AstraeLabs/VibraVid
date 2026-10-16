@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from rich.console import Console
 
+from VibraVid.core.downloader import YTDLPDownloader
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.object import Episode, Season, SeasonManager
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
@@ -14,7 +15,7 @@ from VibraVid.utils import TVShowManager
 
 from .downloader import download_album_tracks, download_song
 
-indice = 20
+indice = 21
 _useFor = "Song"
 console = Console()
 logger = logging.getLogger(__name__)
@@ -83,23 +84,13 @@ def _search_youtube_music(query: str, limit: int = 25) -> list[YTMusicTrack]:
 
 def _search_youtube_music_ytdlp(query: str, limit: int = 25) -> list[YTMusicTrack]:
     """Fallback search via yt-dlp."""
-    import yt_dlp
-
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": "in_playlist",
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"ytsearch{limit}:{query} music", download=False)
-    except Exception as e:
-        logger.error(f"[youtube_music] yt-dlp search failed: {e}")
+    result = YTDLPDownloader.extract_info(f"ytsearch{limit}:{query} music")
+    if not result:
+        logger.error("[youtube_music] yt-dlp search failed")
         return []
 
     tracks = []
-    for entry in result.get("entries", [])[:limit]:
+    for entry in (result.get("entries") or [])[:limit]:
         if not entry or not entry.get("id"):
             continue
         tracks.append(YTMusicTrack(
@@ -144,24 +135,14 @@ def _search_youtube_music_albums(query: str, limit: int = 10) -> list[dict]:
 
 def _search_youtube_music_albums_ytdlp(query: str, limit: int = 10) -> list[dict]:
     """Fallback album search via yt-dlp."""
-    import yt_dlp
-
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": "in_playlist",
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"ytsearch{limit}:{query} album playlist", download=False)
-    except Exception as e:
-        logger.error(f"[youtube_music] yt-dlp album search failed: {e}")
+    result = YTDLPDownloader.extract_info(f"ytsearch{limit}:{query} album playlist")
+    if not result:
+        logger.error("[youtube_music] yt-dlp album search failed")
         return []
 
     albums = []
     seen = set()
-    for entry in result.get("entries", []):
+    for entry in result.get("entries") or []:
         if not entry or not entry.get("id"):
             continue
         title_lower = entry.get("title", "").lower()
@@ -321,28 +302,18 @@ def _build_album_scraper(select_title: Entries):
 
 def _build_album_scraper_ytdlp(select_title: Entries):
     """Fallback: build album from YouTube playlist via yt-dlp."""
-    import yt_dlp
-
     playlist_id = str(getattr(select_title, "id", "") or "").strip()
     if not playlist_id:
         console.print(f"[red]Cannot resolve YouTube playlist id for '{select_title.name}'")
         return None
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": "in_playlist",
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"https://music.youtube.com/playlist?list={playlist_id}", download=False)
-    except Exception as e:
-        console.print(f"[red]Failed to fetch album '{select_title.name}': {e}")
-        logger.error(f"YTMusic album fetch error: {e}")
+    result = YTDLPDownloader.extract_info(f"https://music.youtube.com/playlist?list={playlist_id}")
+    if not result:
+        console.print(f"[red]Failed to fetch album '{select_title.name}'")
+        logger.error(f"YTMusic album fetch error for playlist {playlist_id}")
         return None
 
-    entries = result.get("entries", [])
+    entries = result.get("entries") or []
     if not entries:
         return None
 

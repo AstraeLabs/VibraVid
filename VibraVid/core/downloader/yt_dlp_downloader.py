@@ -1,5 +1,6 @@
 # 09.09.26
 
+import json
 import logging
 import os
 import re
@@ -9,6 +10,8 @@ from typing import Any
 
 from rich.console import Console
 
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, resolve_media_tokens, strip_media_tokens
+from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.setup import get_yt_dlp_path
 
@@ -45,7 +48,10 @@ class YTDLPDownloader:
     ) -> None:
         self.url = url
         self.output_dir = Path(output_dir)
-        self.filename = filename
+        # Services pass a templated name ("... [%(quality)]"): yt-dlp would read the token as its own template, so
+        # download under the clean name and resolve the media tokens from the finished file (see _resolve_media_tokens)
+        self._name_template = filename
+        self.filename = strip_media_tokens(f"{filename}.tmp")[: -len(".tmp")] if filename else filename
         self.headers = headers or {}
         self.cookies = cookies
         self.proxy = proxy
@@ -61,6 +67,35 @@ class YTDLPDownloader:
         self.playlist_end = playlist_end
         self.download_id = download_id
         self.extra_args = kwargs
+
+    @classmethod
+    def extract_info(cls, target: str, timeout: int = 60) -> dict | None:
+        """Metadata of a URL or ``ytsearchN:query`` as yt-dlp's single JSON object, or None on failure.
+
+        Flat: playlist/search entries are listed (id, title, uploader, duration, ...) without resolving each video.
+        """
+        yt_dlp = get_yt_dlp_path()
+        if not yt_dlp:
+            logger.error("yt-dlp binary not found")
+            console.print("[red]yt-dlp binary not found. Run with --binary-update or --dep to check.")
+            return None
+
+        cmd = [yt_dlp, "--flat-playlist", "--dump-single-json", "--no-warnings", target]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.error(f"yt-dlp info failed for {target!r}: {exc}")
+            return None
+
+        if proc.returncode != 0:
+            logger.error(f"yt-dlp info exited {proc.returncode} for {target!r}: {proc.stderr.strip()[-300:]}")
+            return None
+
+        try:
+            return json.loads(proc.stdout)
+        except ValueError:
+            logger.error(f"yt-dlp info returned invalid JSON for {target!r}")
+            return None
 
     def start(self) -> tuple[Path | None, bool, str | None]:
         from VibraVid.remote.capture import reject_if_capturing
@@ -93,9 +128,14 @@ class YTDLPDownloader:
             if self.format_spec and self.format_spec != "bestvideo+bestaudio/best":
                 cmd.extend(["-f", self.format_spec])
         else:
+            # A literal "%" in a title or folder name must not be read as an output-template field
+            if self.filename:
+                out_template = f"{str(self.output_dir / self.filename).replace('%', '%%')}.%(ext)s"
+            else:
+                out_template = f"{str(self.output_dir).replace('%', '%%')}{os.sep}%(title)s.%(ext)s"
             cmd.extend([
                 "-o",
-                str(self.output_dir / f"{self.filename}.%(ext)s") if self.filename else str(self.output_dir / "%(title)s.%(ext)s"),
+                out_template,
                 "-f",
                 self.format_spec,
                 "--no-warnings",
@@ -193,7 +233,7 @@ class YTDLPDownloader:
                 if downloaded in files_before:
                     console.print(f"[yellow]File already exists: {downloaded}[/yellow]")
                     return downloaded, False, None
-                return downloaded, False, None
+                return self._resolve_media_tokens(downloaded), False, None
 
             return None, False, "Download completed but output file not found"
 
@@ -205,6 +245,22 @@ class YTDLPDownloader:
         except Exception as exc:
             logger.exception(f"yt-dlp execution failed: {exc}")
             return None, False, str(exc)
+
+    def _resolve_media_tokens(self, downloaded: Path) -> Path:
+        """Probe the finished file and rename it so quality/codec/language tokens of the name template are filled."""
+        template = self._name_template
+        if not template or not any(placeholder in template for placeholder in MEDIA_PLACEHOLDERS):
+            return downloaded
+
+        try:
+            new_path = downloaded.with_name(resolve_media_tokens(template, get_media_metadata(str(downloaded))) + downloaded.suffix)
+            if new_path != downloaded:
+                os.replace(downloaded, new_path)
+                logger.info(f"Dynamic rename applied: {new_path}")
+            return new_path
+        except Exception as exc:
+            console.print(f"[yellow]Warning: Dynamic rename failed: {exc}")
+            return downloaded
 
     @staticmethod
     def _handle_progress_line(bar_manager: DownloadBarManager, line: str) -> None:

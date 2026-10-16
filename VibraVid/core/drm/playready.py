@@ -7,7 +7,7 @@ import logging
 from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
-from VibraVid.core.drm.cdm.remote.decrypt_labs_cdm import DecryptLabsRemoteCDM, build_remote_cdm
+from VibraVid.core.drm.cdm.remote.remote_cdm_api import RemoteCdmApi, build_remote_cdm
 from VibraVid.core.drm.system import accumulate_content_key, normalize_kid
 from VibraVid.setup import binary_paths, get_info_prd
 from VibraVid.utils.http_client import create_client
@@ -119,7 +119,7 @@ def _get_playready_keys_local_cdm(
             console.print(f"[red]Error loading local CDM device: {e}")
             return None
     else:
-        console.print("[green]Using remote CDM.")
+        console.print(f"\n[green]Using remote CDM: [red]{cdm_remote_api.get('device_name', '?')}")
         try:
             cdm = build_remote_cdm(cdm_remote_api, "playready")
         except Exception as e:
@@ -153,13 +153,13 @@ def _get_playready_keys_local_cdm(
                 continue
 
             # Create license challenge
-            if isinstance(cdm, DecryptLabsRemoteCDM):
+            if isinstance(cdm, RemoteCdmApi):
                 cdm.set_pssh_b64(pssh, session_id)
                 if kid_info and kid_info != "n/a":
                     cdm.set_required_kids([kid_info], session_id)
             challenge = cdm.get_license_challenge(session_id, pssh_obj.wrm_headers[0])
 
-            if not challenge and isinstance(cdm, DecryptLabsRemoteCDM):
+            if not challenge and isinstance(cdm, RemoteCdmApi):
                 for key_obj in cdm.get_keys(session_id):
                     accumulate_content_key(all_content_keys, extracted_kids, key_obj.key_id.hex, key_obj.key.hex())
                 continue
