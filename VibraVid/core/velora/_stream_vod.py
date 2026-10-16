@@ -875,6 +875,7 @@ class VodStreamMixin:
         dl_segs: list[dict] = []
         next_num = 0
         single_file_emitted = False
+        did_arbitrary_split = False
         for seg in stream.segments:
             if seg.byte_range:
                 dl_segs.append(
@@ -898,6 +899,10 @@ class VodStreamMixin:
                     ranged, _total_size = build_dash_sidx_segments(seg.url, all_headers, self._SIDX_CHUNK_BYTES, REQUEST_TIMEOUT)
                 else:
                     ranged, _total_size = build_dash_ranged_segments(seg.url, all_headers, chunk_size, REQUEST_TIMEOUT)
+                    if ranged:
+                        # Arbitrary 8MB slices are NOT box-aligned fragments: per-chunk
+                        # live decrypt + bare-fragment repair can never succeed on them.
+                        did_arbitrary_split = True
 
                 if ranged:
                     for part in ranged:
@@ -937,6 +942,13 @@ class VodStreamMixin:
             else:
                 effective_live = False
                 logger.info("DASH byte-range single-file stream: decrypting after merge (not per-segment)")
+
+        if did_arbitrary_split:
+            # Client-side 8MB slices of one file never start on a moof boundary,
+            # so live per-chunk decrypt (and its bare-fragment repair check) fails
+            # on every chunk -- download, merge, then decrypt the whole file.
+            effective_live = False
+            logger.info("DASH single-file stream split into arbitrary byte ranges: decrypting after merge (not per-segment)")
 
         if self._probe_kid_or_skip(stream, dl_segs, all_headers, bar_manager, probed_kid):
             return

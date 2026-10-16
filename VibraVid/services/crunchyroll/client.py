@@ -76,8 +76,8 @@ class CrunchyrollError(Exception):
 class CrunchyrollClient:
     def __init__(self, locale: str | None = None, **kwargs) -> None:
         self.locale = locale or resolve_crunchyroll_locale()
-        self.device_id = config_manager.login.get("crunchyroll", "device_id")
-        self.etp_rt = config_manager.login.get("crunchyroll", "etp_rt")
+        self.device_id = config_manager.login.get("crunchyroll", "device_id", default="")
+        self.etp_rt = config_manager.login.get("crunchyroll", "etp_rt", default="")
 
         self.web_base_url = BASE_URL
         self.api_base_url = self._resolve_api_base_url()
@@ -252,6 +252,53 @@ class CrunchyrollClient:
         Login.show(Login.ACCOUNT if self.etp_rt else Login.ANONYMOUS)
         return True
 
+    def start_anonymous(self) -> bool:
+        """Authenticate without a user account (client_credentials) for public endpoints like search."""
+        headers = self._get_headers()
+        headers["authorization"] = f"Basic {PUBLIC_TOKEN}"
+        headers["content-type"] = "application/x-www-form-urlencoded"
+
+        data = {
+            "grant_type": "client_credentials",
+            "scope": "offline_access",
+        }
+
+        try:
+            response = self.session.post(
+                f"{self.api_base_url}/auth/v1/token", cookies=self._get_cookies(), headers=headers, data=data
+            )
+        except Exception as e:
+            logger.error(f"Anonymous authentication failed: {e}")
+            return False
+
+        if response.status_code != 200:
+            logger.error(f"Anonymous authentication failed: {response.status_code}")
+            return False
+
+        try:
+            result = response.json()
+        except Exception:
+            return False
+
+        access = result.get("access_token")
+        if not access:
+            return False
+
+        self.access_token = access
+        if result.get("refresh_token"):
+            self.refresh_token = result.get("refresh_token")
+        if result.get("account_id"):
+            self.account_id = result.get("account_id")
+
+        try:
+            expires_in = int(result.get("expires_in", 3600) or 3600)
+        except Exception:
+            expires_in = 3600
+        self._set_expires_at(expires_in=expires_in)
+
+        Login.show(Login.ANONYMOUS)
+        return True
+
     def _refresh(self) -> None:
         """Refresh access token - single attempt."""
         if not self.refresh_token:
@@ -273,41 +320,91 @@ class CrunchyrollClient:
         data = {
             "grant_type": "refresh_token",
             "refresh_token": self.refresh_token,
+            "scope": "offline_access",
             "device_type": "Chrome on Windows",
         }
         if self.device_id:
             data["device_id"] = self.device_id
 
-        response = self.session.post(
-            f"{self.api_base_url}/auth/v1/token", cookies=self._get_cookies(), headers=headers, data=data
-        )
+        try:
+            response = self.session.post(
+                f"{self.api_base_url}/auth/v1/token", cookies=self._get_cookies(), headers=headers, data=data
+            )
+        except Exception as e:
+            logger.warning(f"refresh_token grant request failed ({e}), trying etp_rt_cookie fallback")
+            response = None
 
-        if response.status_code != 200:
-            logger.error(f"Token refresh failed: {response.status_code}")
-            raise RuntimeError(f"Token refresh failed: {response.status_code}")
+        if response is not None and response.status_code == 200:
+            self._apply_token_result(response.json())
+            return
 
-        result = response.json()
-        self.access_token = result.get("access_token")
+        etp_rt_value = self.etp_rt or self.refresh_token
+        if etp_rt_value:
+            cookies = dict(self._get_cookies())
+            cookies["etp_rt"] = etp_rt_value
+            etp_data = {
+                "grant_type": "etp_rt_cookie",
+                "scope": "offline_access",
+                "device_type": "Chrome on Windows",
+            }
+            if self.device_id:
+                etp_data["device_id"] = self.device_id
+            try:
+                etp_response = self.session.post(
+                    f"{self.api_base_url}/auth/v1/token", cookies=cookies, headers=headers, data=etp_data
+                )
+            except Exception as e:
+                logger.error(f"Token refresh requests failed: {e}")
+                raise RuntimeError(f"Token refresh failed: {e}") from e
+            if etp_response.status_code == 200:
+                self._apply_token_result(etp_response.json())
+                return
+            first_status = response.status_code if response is not None else "ERR"
+            logger.error(
+                f"Token refresh failed: {first_status} / etp_rt_cookie {etp_response.status_code}"
+            )
+        else:
+            logger.error(f"Token refresh failed: {response.status_code if response is not None else 'ERR'}")
+        raise RuntimeError(f"Token refresh failed: {response.status_code if response is not None else 'request failed'}")
+
+    def _apply_token_result(self, result: dict) -> None:
+        """Store a successful /auth/v1/token response and persist the cache."""
+        access = result.get("access_token")
+        if not access:
+            raise RuntimeError("Token refresh returned no access_token")
+        self.access_token = access
         self.refresh_token = result.get("refresh_token") or self.refresh_token
+        if result.get("account_id"):
+            self.account_id = result.get("account_id")
 
-        expires_in = int(result.get("expires_in", 3600) or 3600)
+        try:
+            expires_in = int(result.get("expires_in", 3600) or 3600)
+        except Exception:
+            expires_in = 3600
         self._set_expires_at(expires_in=expires_in)
         self._save_token_cache()
 
     def _ensure_token(self) -> None:
         """Ensure valid access token - no retries."""
         if not self.access_token:
-            if not self.start():
-                raise RuntimeError("Authentication failed")
-            return
+            if self.etp_rt and self.start():
+                return
+            if self.start_anonymous():
+                return
+            raise RuntimeError("Authentication failed")
 
         # Refresh if expiring soon
         if not disk_cache.is_fresh({"expiry": self.expires_at}, buffer_seconds=30):
             try:
                 self._refresh()
+                return
             except Exception:
-                if not self.start():
-                    raise RuntimeError("Re-authentication failed") from None
+                pass
+            if self.etp_rt and self.start():
+                return
+            if self.start_anonymous():
+                return
+            raise RuntimeError("Re-authentication failed") from None
 
     def request(self, method: str, url: str, **kwargs):
         """Single request attempt - no retries."""
@@ -326,7 +423,10 @@ class CrunchyrollClient:
             try:
                 self._refresh()
             except Exception:
-                self.start()
+                if self.etp_rt:
+                    self.start()
+                else:
+                    self.start_anonymous()
             kwargs["headers"] = {**self._get_headers(), **headers}
             response = self.session.request(method, url, **kwargs)
 

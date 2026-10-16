@@ -6,7 +6,7 @@ from rich.console import Console
 
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
-from VibraVid.utils import TVShowManager, config_manager
+from VibraVid.utils import TVShowManager, config_manager, disk_cache
 
 from .client import CrunchyrollClient
 from .downloader import download_film, download_series
@@ -65,7 +65,11 @@ def title_search(query: str) -> int:
     entries_manager.clear()
     table_show_manager.clear()
 
-    if not config_manager.login.get("crunchyroll", "device_id") or not config_manager.login.get("crunchyroll", "etp_rt"):
+    device_id = config_manager.login.get("crunchyroll", "device_id", default="")
+    etp_rt = config_manager.login.get("crunchyroll", "etp_rt", default="")
+    cached = disk_cache.load("crunchyroll", "token")
+    has_cache = bool(isinstance(cached, dict) and (cached.get("access_token") or cached.get("refresh_token")))
+    if not (device_id or etp_rt or has_cache):
         console.print(
             "[yellow]\nWarning: Crunchyroll device_id/etp_rt are not set, search will return no results for this site.\n"
             "[yellow]Set them in [cyan]Conf/login.json[/cyan] under [cyan]crunchyroll.device_id[/cyan] and [cyan]crunchyroll.etp_rt[/cyan]."
@@ -73,9 +77,15 @@ def title_search(query: str) -> int:
         return 0
 
     client = CrunchyrollClient()
-    if not client.start():
-        console.print("[red] Failed to authenticate with Crunchyroll.")
-        raise Exception("Failed to authenticate with Crunchyroll.")
+    try:
+        client._ensure_token()
+    except Exception as e:
+        console.print(f"[red] Failed to authenticate with Crunchyroll: {e}")
+        try:
+            client.close()
+        except Exception:
+            pass
+        return 0
 
     api_url = f"{client.api_base_url}/content/v2/discover/search"
     params = {
