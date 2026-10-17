@@ -13,7 +13,7 @@ from VibraVid.utils.http_client import check_region_availability
 from . import client as api
 from .downloader import download_film, download_series
 
-indice = 19
+indice = 18
 _useFor = "Film_Serie"
 _region = api.REGIONS
 console = Console()
@@ -32,7 +32,7 @@ def register_cli_args(parser) -> list:
     group.add_argument("--device", dest="device", default="lgui40", choices=["lgui40", "atvui40", "web"], help="Device profile: lgui40 = 1080p PlayReady (default), atvui40 = 1080p Widevine, web = 720p Widevine.",)
     group.add_argument("--quality", dest="quality", default="FHD", choices=["FHD", "UHD"], help="Requested video quality (UHD only if the title offers it).",)
     group.add_argument("--audio-lang", dest="audio_lang", default=None, help="Audio language code, e.g. ITA, NLD, ENG (default: the main language of the country).",)
-    group.add_argument("--country", dest="country", default=None, metavar="CC",help="Chili country for search and titles, e.g. it, uk, de, at, pl, es (default: from the URL, else 'country' in login.json, else it).",)
+    group.add_argument("--country", dest="country", default=None, metavar="CC",help="Chili country for search and titles, e.g. it, uk, de, at, pl, es (default: from the URL, else 'country' in login.toml, else it).",)
     return ["url", "device", "quality", "audio_lang", "country"]
 
 

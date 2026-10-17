@@ -2,7 +2,7 @@
 # ruff: noqa: E402
 
 import io
-import json
+import tomllib
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -89,8 +89,8 @@ def test_configure_none_leaves_values_unchanged(out):
 
 
 def test_the_shipped_config_has_no_progress_settings():
-    """Progress output is command-line only: nothing in config.json may change it."""
-    config = json.loads((workspace_root / "Conf" / "config.json").read_text(encoding="utf-8"))
+    """Progress output is command-line only: nothing in config.toml may change it."""
+    config = tomllib.loads((workspace_root / "Conf" / "config.toml").read_text(encoding="utf-8"))
     assert not {"progress_mode", "progress_interval"} & {key for section in config.values() if isinstance(section, dict) for key in section}
 
 

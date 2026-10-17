@@ -21,7 +21,7 @@ def resolve_log_level(name) -> int:
     if isinstance(level, int):
         return level
     
-    print(f"[VibraVid] Unknown DEFAULT.log_level {name!r} in config.json (use DEBUG, INFO, WARNING, ERROR or CRITICAL): using INFO.", file=sys.stderr)
+    print(f"[VibraVid] Unknown DEFAULT.log_level {name!r} in config (use DEBUG, INFO, WARNING, ERROR or CRITICAL): using INFO.", file=sys.stderr)
     return logging.INFO
 
 

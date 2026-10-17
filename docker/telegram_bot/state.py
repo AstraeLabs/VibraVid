@@ -1,14 +1,14 @@
 # 26.07.26
 
-import json
 import logging
 import os
 from collections import OrderedDict, deque
 from pathlib import Path
 
+import tomllib
 from telethon import TelegramClient
 
-CONFIG_PATH = Path(os.getenv("VIBRAVID_CONFIG", "/app/Conf/config.json"))
+CONFIG_PATH = Path(os.getenv("VIBRAVID_CONFIG", "/app/Conf/config.toml"))
 STATE_DIR = Path(os.getenv("STATE_DIR", "/app/tgstate"))
 PAGE_SIZE = 15
 EP_PAGE_SIZE = 30
@@ -41,7 +41,7 @@ logging.getLogger("telethon").setLevel(logging.WARNING)
 
 
 class Config:
-    """Config with hot-reload: re-reads config.json when its mtime changes"""
+    """Config with hot-reload: re-reads config.toml when its mtime changes"""
     def __init__(self) -> None:
         self._mtime = 0.0
         self._tg: dict = {}
@@ -56,11 +56,11 @@ class Config:
             return
         self._mtime = mtime
         try:
-            with CONFIG_PATH.open(encoding="utf-8") as fh:
-                data = json.load(fh)
+            with CONFIG_PATH.open("rb") as fh:
+                data = tomllib.load(fh)
             self._tg = data.get("TELEGRAM", {}) or {}
         except (OSError, ValueError):
-            log.exception("config.json unreadable (%s), using env only", CONFIG_PATH)
+            log.exception("config.toml unreadable (%s), using env only", CONFIG_PATH)
             self._tg = {}
 
     def _get(self, key: str, env: str, default):

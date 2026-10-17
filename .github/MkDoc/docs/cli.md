@@ -78,7 +78,7 @@ python manual.py -i streamingcommunity --search "interstellar" -ss "ita_forced"
 # Skip the whole download if the requested filter matches no track
 python manual.py -i streamingcommunity --search "interstellar" -sa "deu" --skip-no-match
 
-# Output container (overrides PROCESS.extension from config.json for this run)
+# Output container (overrides PROCESS.extension from config.toml for this run)
 python manual.py -i streamingcommunity --search "interstellar" --extension mp4
 ```
 
@@ -137,10 +137,10 @@ python manual.py -i streamingcommunity --search "interstellar" --sidecars
 # Only IMDb (free, no API key needed)
 python manual.py -i streamingcommunity --search "interstellar" --sidecars --metadata-provider imdb
 
-# TheTVDB first, TMDB as fallback (needs TVDB_API_KEY or Provider.tvdb in login.json)
+# TheTVDB first, TMDB as fallback (needs TVDB_API_KEY or Provider.tvdb in login.toml)
 python manual.py -i streamingcommunity --search "interstellar" --sidecars --metadata-provider tvdb,tmdb
 
-# Disable for this run even if enabled in config.json
+# Disable for this run even if enabled in config.toml
 python manual.py -i streamingcommunity --search "interstellar" --no-sidecars
 ```
 
@@ -303,9 +303,7 @@ python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist
 | `--use-curl-cffi` | Download segments via curl_cffi (browser TLS impersonation) instead of Velora — for sites where individual segments are Cloudflare-protected |
 | `--http-version {1.1,2,3}` | Force the HTTP protocol version used for requests instead of letting the client negotiate it |
 | `-o`, `--output <PATH>` | Output file path for `--down`/`--yt-dlp` direct downloads |
-| `--amazon-music-login` | Log in to Amazon Music (stores credentials for future runs) |
-| `--amazon-music-logout` | Clear stored Amazon Music login credentials |
-| `--clear` | Delete the cached login/session tokens of the service selected with `-i` (e.g. `-i crunchyroll --clear`) before running. Requires `-i`; never touches other services or `login.json` |
+| `--clear` | Delete the cached login/session tokens of the service selected with `-i` (e.g. `-i crunchyroll --clear`) before running. Requires `-i`; never touches other services or `login.toml` |
 | `--key <KID:KEY>` | Decryption key in hex `KID:KEY` format, repeatable. Works with `--down` and with a service run (`-i 0 --key <KID>:<KEY>`): it is used instead of looking the key up in the vault/CDM for the KIDs it covers; any other KID is still resolved normally |
 | `--no-vault-cache` | Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens) |
 | `--no-decrypt` | Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass) |

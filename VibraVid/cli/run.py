@@ -224,8 +224,6 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("--check-update", action="store_true", help="Check GitHub Releases for a newer version and exit (no download)")
     util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
-    util_group.add_argument("--amazon-music-login", dest="amazon_music_login", action="store_true", help="Log in to Amazon Music via direct API device registration (no proxy/CA needed).")
-    util_group.add_argument("--amazon-music-logout", dest="amazon_music_logout", action="store_true", help="Remove stored Amazon Music credentials from login.json.")
     util_group.add_argument("--clear", dest="clear", action="store_true", help="Delete the cached login/session tokens of the service selected with -i before running (use after changing account/cookies). Requires -i; never touches other services.")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
@@ -317,7 +315,7 @@ def _apply_interactive_site_options(selected_module_name, site_module_name):
 
 
 def build_site_options(args, parser, site_option_dests, site_module_name):
-    """Merge this run's site-specific CLI values with the site's persisted `extra_args` (login.json)"""
+    """Merge this run's site-specific CLI values with the site's persisted `extra_args`"""
     persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
     site_options = {"drm": getattr(args, "drm", None)}
     for dest in site_option_dests:
@@ -609,18 +607,6 @@ def main():
 
         if hasattr(args, "dep") and args.dep:
             show_dependencies(search_functions)
-            return
-
-        if getattr(args, "amazon_music_login", False):
-            from VibraVid.provider.amazon import login as amazon_music_login
-
-            amazon_music_login()
-            return
-
-        if getattr(args, "amazon_music_logout", False):
-            from VibraVid.provider.amazon import logout as amazon_music_logout
-
-            amazon_music_logout()
             return
 
         clear_error = clear_args_error(args)

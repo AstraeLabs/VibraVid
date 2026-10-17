@@ -12,8 +12,9 @@ log in, click the extension icon, then use:
 
 - The **filter** box keeps only the keys (or values) containing your text, e.g. `st`, and **COPY JSON**
   copies exactly what is shown.
-- **COPY JSON** puts the JSON on a single line, so it can be pasted straight into `Conf/login.json`
-  without breaking it.
+- **COPY JSON** puts the JSON on a single line. In `login.toml`, wrap copied JSON in triple quotes
+  (for example `cookies = '''{"key":"value"}'''`). Use triple **single** quotes: they keep the text exactly as
+  copied (backslashes and `\n` inside the JSON are not interpreted), while plain quoted TOML strings cannot contain raw quotes.
 
 ---
 
@@ -29,9 +30,10 @@ log in, click the extension icon, then use:
 2. **Click** the CookieInspector extension icon in your browser toolbar.
 3. **Click** "Get Cookies" button.
 4. **Click** "Copy JSON" to copy the authentication data.
-5. Add it to `Conf/login.json`:
-   ```json
-   "crunchyroll": <paste_copied_json_here>
+5. Add it to `Conf/login.toml`:
+   ```toml
+   [crunchyroll]
+   cookies = '''<paste_copied_json_here>'''
    ```
 
 ---
@@ -43,15 +45,16 @@ log in, click the extension icon, then use:
 1. **Open** [Mediaset](https://mediasetinfinity.mediaset.it/) and **log in** (pick your profile).
 2. **Click** the CookieInspector extension icon, then **GET STORAGE**.
 3. Type `rtilogin_acd` in the **filter** box and **click** "Copy JSON".
-4. Add it to `Conf/login.json`:
-   ```json
-   "mediasetinfinity": <paste_copied_json_here>
+4. Add the copied value to `Conf/login.toml`:
+   ```toml
+   [mediasetinfinity]
+   rtilogin_acd = '''<paste_copied_value_here>'''
    ```
-   The result looks like `"mediasetinfinity": {"rtilogin_acd": {"caToken": "...", "persona": {"id": "..."}, ...}}`.
+   The value is JSON; triple single quotes keep it a valid TOML string. The template ships with `rtilogin_acd = '''[paste here]'''`: replace `[paste here]` with the copied value (or leave it untouched to log in anonymously).
 
 Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application** tab → **Local Storage** →
-`mediasetinfinity.mediaset.it`, copy the value of the `rtilogin_acd` key and put it in
-`"mediasetinfinity": {"rtilogin_acd": <value>}`.
+`mediasetinfinity.mediaset.it`, copy the value of the `rtilogin_acd` key and put it in the
+`rtilogin_acd` field above.
 
 ---
 
@@ -61,13 +64,14 @@ Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application**
 
 1. **Open** [Discovery+](https://play.discoveryplus.com/) and **log in**.
 2. **Click** the CookieInspector extension icon, then **GET COOKIES**.
-3. **Click** "Copy JSON" and add it to `Conf/login.json` (only the `st` cookie is used):
-   ```json
-   "discoveryplus": <paste_copied_json_here>
+3. **Click** "Copy JSON" and add it to `Conf/login.toml`:
+   ```toml
+   [discoveryplus]
+   cookies = '''<paste_copied_json_here>'''
    ```
 
 Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application** tab → **Cookies**, search for
-the `st` cookie and copy its value into `"discoveryplus": {"st": "<value>"}`.
+the `st` cookie and copy its value into `st = "<value>"` in the `[discoveryplus]` section.
 
 ### Screenshot Reference
 ![st location](assets/login/discoveryplus_eu_st.png)
@@ -80,13 +84,14 @@ the `st` cookie and copy its value into `"discoveryplus": {"st": "<value>"}`.
 
 1. **Open** [HBO Max](https://play.hbomax.com/) and **log in**.
 2. **Click** the CookieInspector extension icon, then **GET COOKIES**.
-3. **Click** "Copy JSON" and add it to `Conf/login.json` (only the `st` and `session` cookies are used):
-   ```json
-   "hbomax": <paste_copied_json_here>
+3. **Click** "Copy JSON" and add it to `Conf/login.toml`:
+   ```toml
+   [hbomax]
+   cookies = '''<paste_copied_json_here>'''
    ```
 
 Without the extension, copy the `st` cookie value by hand as shown for Discovery+ and write it to
-`"hbomax": {"st": "<value>"}`.
+`st = "<value>"` in the `[hbomax]` section.
 
 ---
 
@@ -97,9 +102,11 @@ Without the extension, copy the `st` cookie value by hand as shown for Discovery
 1. **Open** [Disney+](https://www.disneyplus.com/) and **log in**.
 2. **Click** the CookieInspector extension icon, then **GET TOKEN**. It reads the session out of the
    page's storage and shows only `access_token` and `refresh_token`.
-3. **Click** "Copy JSON" and add it to `Conf/login.json`:
-   ```json
-   "disney": <paste_copied_json_here>
+3. **Click** "Copy JSON" and add it to `Conf/login.toml`:
+   ```toml
+   [disney]
+   token = "<access_token>"
+   refresh_token = "<refresh_token>"
    ```
 
 Disney+ accepts `access_token` or `token` for the session token, and uses `refresh_token` to renew it. After the
@@ -119,9 +126,10 @@ first run the renewed values are saved back to the same `disney` section.
 2. **Click** the CookieInspector extension icon in your browser toolbar.
 3. **Click** "Get Cookies" button.
 4. **Click** "Copy JSON" to copy the authentication data.
-5. Add it to `Conf/login.json`:
-   ```json
-   "primevideo": <paste_copied_json_here>
+5. Add it to `Conf/login.toml`:
+   ```toml
+   [primevideo]
+   cookies = '''<paste_copied_json_here>'''
    ```
 
 ---
@@ -133,12 +141,11 @@ Unlike the cookie-based services above, Tubi TV authenticates with a plain email
 
 ### Steps
 
-1. Add your Tubi TV account credentials to `Conf/login.json`:
-   ```json
-   "tubitv": {
-     "email": "your@email.com",
-     "password": "your-password"
-   }
+1. Add your Tubi TV account credentials to `Conf/login.toml`:
+   ```toml
+   [tubi]
+   email = "your@email.com"
+   password = "your-password"
    ```
 
 Without these set, search returns no results for this site.
@@ -157,7 +164,8 @@ Without these set, search returns no results for this site.
 2. **Click** the CookieInspector extension icon in your browser toolbar.
 3. **Click** "Get Cookies" button.
 4. **Click** "Copy JSON" to copy the authentication data.
-5. Add it to `Conf/login.json`:
-   ```json
-   "appletv": <paste_copied_json_here>
+5. Add it to `Conf/login.toml`:
+   ```toml
+   [appletv]
+   cookies = '''<paste_copied_json_here>'''
    ```

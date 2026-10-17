@@ -167,16 +167,45 @@ class BinaryPaths:
         return "glibc"
 
     def get_binary_directory(self) -> str:
-        """Return the platform-specific directory where binaries are stored."""
+        """Return the platform-specific directory where binaries are stored.
+
+        Layout (Windows example):
+            C:\\binary\\VibraVid
+                tools\\          <-- eseguibili (ffmpeg, yt-dlp, deno, velora, flux, ...)
+                wvd\\            <-- chiavi Widevine (.wvd)
+                prd\\            <-- chiavi PlayReady (.prd)
+        """
         if self.binary_dir_override:
             return self.binary_dir_override
 
         if self.system == "windows":
-            return os.path.join(os.path.splitdrive(self.home_dir)[0] + os.path.sep, "binary")
+            return os.path.join(os.path.splitdrive(self.home_dir)[0] + os.path.sep, "binary", "VibraVid")
         elif self.system == "darwin":
-            return os.path.join(self.home_dir, "Applications", "binary")
+            return os.path.join(self.home_dir, "Applications", "binary", "VibraVid")
         else:  # linux
-            return os.path.join(self.home_dir, ".local", "bin", "binary")
+            return os.path.join(self.home_dir, ".local", "bin", "binary", "VibraVid")
+
+    def get_legacy_binary_directory(self) -> str | None:
+        """Flat directory used before the tools/wvd/prd layout (``<base>/binary``), or None when there is none to fall back to."""
+        if self.binary_dir_override:
+            return None
+        return os.path.dirname(self.get_binary_directory())
+
+    def get_tools_directory(self) -> str:
+        """Directory degli eseguibili di supporto (ffmpeg, yt-dlp, deno, velora, flux, ...)."""
+        return os.path.join(self.get_binary_directory(), "tools")
+
+    def get_cdm_directory(self) -> str:
+        """Directory radice per i file CDM (device.wvd / device.prd), ora direttamente sotto VibraVid."""
+        return self.get_binary_directory()
+
+    def get_wvd_directory(self) -> str:
+        """Directory per i file Widevine (.wvd)."""
+        return os.path.join(self.get_binary_directory(), "wvd")
+
+    def get_prd_directory(self) -> str:
+        """Directory per i file PlayReady (.prd)."""
+        return os.path.join(self.get_binary_directory(), "prd")
 
     def ensure_binary_directory(self, mode: int = 0o755) -> str:
         """Create the binary directory if it does not already exist."""
@@ -210,15 +239,37 @@ class BinaryPaths:
                 return {}
 
     def get_binary_path(self, tool: str, binary_name: str) -> str | None:
-        """Return the local path of *binary_name* if it has already been resolved (cache hit) or if the file exists on disk."""
+        """Return the local path of *binary_name* if it has already been resolved (cache hit) or if the file exists on disk.
+
+        Lookup order:
+        1. in-memory cache (``_resolved``)
+        2. ``<binary_dir>/tools/<binary_name>`` (nuova posizione ordinata)
+        3. ``<binary_dir>/<binary_name>`` (posizione legacy piatta, per compatibilità)
+        4. ``<parent of binary_dir>/<binary_name>`` (cartella piatta delle versioni precedenti, es. ``C:/binary``)
+        """
         if binary_name in self._resolved:
             return self._resolved[binary_name]
 
-        local_path = os.path.join(self.get_binary_directory(), binary_name)
+        local_path = os.path.join(self.get_tools_directory(), binary_name)
         if os.path.isfile(local_path):
             logger.debug(f"Found local binary {binary_name} at {local_path}")
             self._resolved[binary_name] = local_path
             return local_path
+
+        # Backward compatibility: binaries downloaded by previous versions lay flat in the binary dir.
+        legacy_path = os.path.join(self.get_binary_directory(), binary_name)
+        if os.path.isfile(legacy_path):
+            logger.debug(f"Found legacy local binary {binary_name} at {legacy_path}")
+            self._resolved[binary_name] = legacy_path
+            return legacy_path
+
+        previous_dir = self.get_legacy_binary_directory()
+        if previous_dir:
+            previous_path = os.path.join(previous_dir, binary_name)
+            if os.path.isfile(previous_path):
+                logger.debug(f"Found binary {binary_name} in the pre-tools directory {previous_path}")
+                self._resolved[binary_name] = previous_path
+                return previous_path
 
         return None
 
@@ -242,11 +293,11 @@ class BinaryPaths:
             return None
 
     def _versions_file(self) -> str:
-        return os.path.join(self.get_binary_directory(), VERSIONS_FILENAME)
+        return os.path.join(self.get_tools_directory(), VERSIONS_FILENAME)
 
     def _legacy_tool_version_file(self, tool: str) -> str:
         """Pre-consolidation per-tool version file (one ".<tool>.version" file each)."""
-        return os.path.join(self.get_binary_directory(), f".{tool}.version")
+        return os.path.join(self.get_tools_directory(), f".{tool}.version")
 
     def _read_versions(self) -> dict:
         try:
@@ -356,7 +407,7 @@ class BinaryPaths:
         if binary_name in self._resolved:
             return self._resolved[binary_name]
 
-        local_path = os.path.join(self.get_binary_directory(), binary_name)
+        local_path = os.path.join(self.get_tools_directory(), binary_name)
 
         with self._download_lock:
             # Double-checked locking: another thread may have completed the download while we were waiting to acquire the lock.

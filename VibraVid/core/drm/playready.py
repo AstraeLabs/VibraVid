@@ -57,7 +57,7 @@ def get_playready_keys(
         logger.error("PlayReady: prefer_remote_cdm=true but no remote CDM config found")
         console.print(
             "[red]Error: prefer_remote_cdm=true but no remote CDM config found. Database lookup will continue."
-            f"\n[yellow]If no database key exists, place device.prd in:[/] [white]{binary_paths.get_binary_directory()}[/white]"
+            f"\n[yellow]If no database key exists, place device.prd in:[/] [white]{binary_paths.get_prd_directory()}[/white]"
         )
 
         # Return None here to skip CDM extraction but allow database lookup in manager._resolve_keys
@@ -67,7 +67,7 @@ def get_playready_keys(
         logger.error("PlayReady: prefer_remote_cdm=false but no local CDM device found")
         console.print(
             "[red]Error: prefer_remote_cdm=false but no local CDM device found. Database lookup will continue."
-            f"\n[yellow]If no database key exists, place device.prd in:[/] [white]{binary_paths.get_binary_directory()}[/white]"
+            f"\n[yellow]If no database key exists, place device.prd in:[/] [white]{binary_paths.get_prd_directory()}[/white]"
         )
 
         # Return None here to skip CDM extraction but allow database lookup in manager._resolve_keys
@@ -77,7 +77,7 @@ def get_playready_keys(
         logger.error("Must provide either cdm_device_path or cdm_remote_api")
         console.print(
             "[red]Error: Must provide either cdm_device_path or cdm_remote_api."
-            f"\n[yellow]Place device.prd in:[/] [white]{binary_paths.get_binary_directory()}[/white]"
+            f"\n[yellow]Place device.prd in:[/] [white]{binary_paths.get_prd_directory()}[/white]"
         )
         return None
 

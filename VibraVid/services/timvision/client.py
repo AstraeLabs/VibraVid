@@ -29,7 +29,7 @@ _CONFIG_TTL = 24 * 3600
 
 
 def _load_login() -> dict:
-    """Load credentials from login.json."""
+    """Load credentials from login"""
     try:
         return config_manager.login.get_section("timvision", {})
     except Exception:
@@ -108,7 +108,7 @@ class TimvisionClient:
         return False
 
     def login(self) -> bool:
-        """Login with the browser cookies from login.json."""
+        """Login with the browser cookies from login"""
         if self.cookies:
             return True
         
@@ -124,7 +124,6 @@ class TimvisionClient:
     # ------------------------------------------------------------------
     # Player config (pass endpoints, hapi endpoints)
     # ------------------------------------------------------------------
-
     def _load_config(self) -> dict:
         cached = disk_cache.load_fresh("timvision", "player_config")
         if cached:

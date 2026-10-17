@@ -11,7 +11,7 @@ CACHE_PATH_PREFIX = "remote-cache://"
 
 
 def current_overlay() -> dict | None:
-    """Per-thread login sections that replace ``Conf/login.json`` while a remote request is served, else ``None``."""
+    """Per-thread login sections that replace ``Conf/login`` while a remote request is served, else ``None``."""
     return getattr(_state, "overlay", None)
 
 

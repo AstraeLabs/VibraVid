@@ -269,7 +269,7 @@ class _FluxDaemon:
         if tracks is None:
             if not getattr(self, "_scan_warned", False):
                 self._scan_warned = True
-                logger.error("flux daemon has no scan support (flux >= 0.4.10 required in C:\\binary)")
+                logger.error("flux daemon has no scan support (flux >= 0.4.10 required in C:\\binary\\VibraVid)")
             return None
         
         try:

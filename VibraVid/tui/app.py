@@ -42,7 +42,7 @@ AREAS = {
     "downloads": ("Downloads", "Live progress with per-track bars, cancel and retry.", "M2"),
     "queue": ("Queue", "Batch queue, shared with the --queue-* CLI commands.", "M3"),
     "history": ("History", "Past downloads with status, paths and errors.", "M3"),
-    "settings": ("Settings", "config.json and login.json editors.", "M4"),
+    "settings": ("Settings", "config.toml and login.toml editors.", "M4"),
     "system": ("System", "Dependencies, DRM, logs and update check.", "M4"),
 }
 

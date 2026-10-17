@@ -1,6 +1,6 @@
 # Hook System
 
-Execute custom scripts at specific points in the download lifecycle. Hooks are configured in `config.json` under the `HOOKS` key.
+Execute custom scripts at specific points in the download lifecycle. Hooks are configured in `config.toml` under the `HOOKS` key.
 
 **Available stages:**
 - `pre_run` — runs before the main flow starts
@@ -8,58 +8,47 @@ Execute custom scripts at specific points in the download lifecycle. Hooks are c
 - `post_download` — runs after each individual download completes (in the GUI, once per item)
 - `post_run` — runs once when the overall execution ends
 
-```json
-{
-  "HOOKS": {
-    "pre_run": [
-      {
-        "name": "prepare-env",
-        "type": "python",
-        "path": "scripts/prepare.py",
-        "args": ["--clean"],
-        "env": { "MY_FLAG": "1" },
-        "cwd": "~",
-        "os": ["linux", "darwin"],
-        "timeout": 60,
-        "enabled": true,
-        "continue_on_error": true
-      }
-    ],
-    "pre_download": [
-      {
-        "name": "pre-download-env",
-        "type": "python",
-        "path": "/app/script.py",
-        "args": ["{download_title}"],
-        "timeout": 30,
-        "enabled": true,
-        "continue_on_error": true
-      }
-    ],
-    "post_download": [
-      {
-        "name": "post-download-env",
-        "type": "python",
-        "path": "/app/script.py",
-        "args": ["{download_path}"],
-        "env": { "MY_FLAG": "1" },
-        "cwd": "~",
-        "os": ["linux"],
-        "timeout": 60,
-        "enabled": true,
-        "continue_on_error": true
-      }
-    ],
-    "post_run": [
-      {
-        "name": "notify",
-        "type": "bash",
-        "command": "echo 'Download finished: {download_title}'",
-        "allow_inline_template": true
-      }
-    ]
-  }
-}
+```toml
+# Replace the matching "pre_run = []" / "pre_download = []" / ... line of [HOOKS] in config.toml with these tables
+# (a key can't be declared twice in TOML).
+[[HOOKS.pre_run]]
+name = "prepare-env"
+type = "python"
+path = "scripts/prepare.py"
+args = ["--clean"]
+env = { MY_FLAG = "1" }
+cwd = "~"
+os = ["linux", "darwin"]
+timeout = 60
+enabled = true
+continue_on_error = true
+
+[[HOOKS.pre_download]]
+name = "pre-download-env"
+type = "python"
+path = "/app/script.py"
+args = ["{download_title}"]
+timeout = 30
+enabled = true
+continue_on_error = true
+
+[[HOOKS.post_download]]
+name = "post-download-env"
+type = "python"
+path = "/app/script.py"
+args = ["{download_path}"]
+env = { MY_FLAG = "1" }
+cwd = "~"
+os = ["linux"]
+timeout = 60
+enabled = true
+continue_on_error = true
+
+[[HOOKS.post_run]]
+name = "notify"
+type = "bash"
+command = "echo 'Download finished: {download_title}'"
+allow_inline_template = true
 ```
 
 ## Hook Options

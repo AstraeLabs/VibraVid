@@ -1,0 +1,78 @@
+# VibraVid - logins (login.toml)
+# Fill in only the services you use and leave the others empty.
+# This file contains credentials: do not share it.
+#
+# email / password: just fill in the fields.
+# cookies: export them with CookieInspector (https://github.com/AstraeLabs/Extension/)
+#   and replace [paste here] with the export, keeping the three single quotes:
+#   cookies = '''{"cookie_name":"cookie_value"}'''
+# cdm: name of your WVD/PRD file, or an id from [DRM.remote_cdm]. Empty = default.
+
+[amazon_music]
+cookies = '''[paste here]'''
+cdm = ""
+
+[appletv]
+cookies = '''[paste here]'''
+cdm = ""
+
+[chili]
+email = ""
+password = ""
+country = ""
+cdm = ""
+
+[crunchyroll]
+cookies = '''[paste here]'''
+device_id = ""
+cdm = ""
+
+[cs_chrome]
+device_type = "chrome"
+netflixid = ""
+securenetflixid = ""
+cdm = ""
+
+[discoveryplus]
+st = ""
+cdm = ""
+
+[disney]
+token = ""
+refresh_token = ""
+cdm = ""
+
+[hbomax]
+st = ""
+cdm = ""
+
+[mediasetinfinity]
+rtilogin_acd = '''[paste here]'''
+cdm = ""
+
+[nowtvit]
+skyCEsidmesso01 = ""
+cdm = ""
+
+[paramountplus]
+st = ""
+cdm = ""
+
+[primevideo]
+cookies = '''[paste here]'''
+cdm = ""
+
+[rakutentv]
+email = ""
+password = ""
+country = ""
+cdm = ""
+
+[timvision]
+cookies = '''[paste here]'''
+cdm = ""
+
+[tubi]
+email = ""
+password = ""
+cdm = ""

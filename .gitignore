@@ -51,9 +51,8 @@ start.sh
 .DS_Store
 GUI/db.sqlite3
 Conf/domains.json
-Conf/login.json
+Conf/login.toml
 Conf/remote.json
-Conf/config.json.backup
 /.cache
 !/.cache/arr
 !/.cache/arr/.gitkeep

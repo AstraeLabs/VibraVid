@@ -25,7 +25,7 @@ Key variables (full list in `.env.example`):
 | `VIBRAVID_PORT` | `8000` | Host port exposed by the container |
 | `VIBRAVID_VIDEO_DIR` | named volume | Where downloads land on the host (e.g. `/volume2/Movies`) |
 | `VIBRAVID_DB_DIR` | named volume | Host path for the SQLite database |
-| `VIBRAVID_CONFIG_DIR` | named volume | Host path for `config.json` / `login.json` |
+| `VIBRAVID_CONFIG_DIR` | named volume | Host path for `config.toml` / `login.toml` |
 | `VIBRAVID_LOGS_DIR` | named volume | Host path for application logs |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Comma-separated hostnames Django accepts |
 | `CSRF_TRUSTED_ORIGINS` | `http://localhost:8000,...` | Origins for CSRF validation |

@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 from VibraVid.services._base.site_loader import CompiledService
 from VibraVid.services._base.tv_display_manager import refresh_output_formats
 from VibraVid.utils import config_manager
+from VibraVid.utils.config import tomllib
 
 from .. import services_admin
 from .._download_infra import set_max_download_slots
@@ -271,32 +272,35 @@ def save_settings(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"success": False, "error": "Parametri mancanti"}, status=400)
 
         file_type = data.get('file_type')  # 'config' or 'login'
-        content = data.get('content', '').strip()
-
-        if not file_type or not content:
-            return JsonResponse({
-                "success": False,
-                "error": "Parametri mancanti"
-            }, status=400)
-
-        try:
-            json.loads(content)
-        except json.JSONDecodeError as e:
-            return JsonResponse({
-                "success": False,
-                "error": f"JSON non valido: {str(e)}"
-            }, status=400)
-
-        conf_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "Conf")
         if file_type == 'config':
-            file_path = os.path.join(conf_dir, "config.json")
+            file_path = config_manager.config_file_path
         elif file_type == 'login':
-            file_path = os.path.join(conf_dir, "login.json")
+            file_path = config_manager.login_file_path
         else:
             return JsonResponse({
                 "success": False,
                 "error": "Tipo di file non valido"
             }, status=400)
+
+        # Either the whole raw file ("content"), or a structured edit merged into it ("patch" + optional "delete" key paths)
+        patch = data.get('patch')
+        content = data.get('content', '').strip()
+        if patch is None and not content:
+            return JsonResponse({
+                "success": False,
+                "error": "Parametri mancanti"
+            }, status=400)
+        if patch is not None and not isinstance(patch, dict):
+            return JsonResponse({"success": False, "error": "Parametri mancanti"}, status=400)
+
+        if patch is None:
+            try:
+                tomllib.loads(content)
+            except tomllib.TOMLDecodeError as e:
+                return JsonResponse({
+                    "success": False,
+                    "error": f"TOML non valido: {str(e)}"
+                }, status=400)
 
         backup_path = file_path + ".backup"
         if os.path.exists(file_path):
@@ -305,26 +309,30 @@ def save_settings(request: HttpRequest) -> JsonResponse:
             except OSError as e:
                 logger.exception("Backup failed: %s", e)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
-            formatted = json.dumps(json.loads(content), indent=4, ensure_ascii=False)
-            f.write(formatted)
+        if patch is None:
+            content_saved = content + "\n"
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content_saved)  # as typed: the comments in the file are the user's guide
+        else:
+            content_saved = config_manager.patch_file(file_type, patch, data.get('delete') or [])  # also reloads the cache
 
         # Apply the download concurrency limit and refresh the in-memory config/login cache immediately
         if file_type == 'config':
             try:
-                new_cfg = json.loads(content)
+                new_cfg = tomllib.loads(content_saved)
                 slots = int(new_cfg.get("ARR", {}).get("max_concurrent_downloads", 1) or 1)
                 set_max_download_slots(slots)
             except Exception as exc:
                 logger.exception("Failed to apply max concurrent slots: %s", exc)
 
             try:
-                config_manager.reload_config_only()
+                if patch is None:
+                    config_manager.reload_config_only()
                 refresh_output_formats()
             except Exception as exc:
                 logger.exception("Failed to reload config cache after save: %s", exc)
 
-        elif file_type == 'login':
+        elif file_type == 'login' and patch is None:
             try:
                 config_manager.reload_login_only()
             except Exception as exc:
@@ -332,7 +340,9 @@ def save_settings(request: HttpRequest) -> JsonResponse:
 
         return JsonResponse({
             "success": True,
-            "message": f"{file_type}.json salvato con successo"
+            "message": f"{file_type}.toml salvato con successo",
+            "content": content_saved,
+            "parsed": tomllib.loads(content_saved),
         })
 
     except Exception as e:

@@ -802,7 +802,7 @@ class StreamSelector:
         dv_top_tier_tolerance: float | None = None,
     ):
         raw_vf = _normalize_filter_value(video_filter, "best").strip()
-        self._hybrid = raw_vf.lower() == "hybrid"  # select_video in config.json
+        self._hybrid = raw_vf.lower() == "hybrid"
         self._vf = "best" if self._hybrid else raw_vf
         self._af = _normalize_filter_value(audio_filter, "best").strip()
         self._sf = _normalize_filter_value(subtitle_filter, "all").strip()
