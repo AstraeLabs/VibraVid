@@ -155,7 +155,7 @@ class Generic_Downloader(BaseDownloader):
             - max_time: cap downloaded duration, e.g. "01:00:00" or seconds.
             - cookies: default cookies applied to sources without their own.
             - custom_filters: optional {"video","audio","subtitle"} selector
-              overrides; otherwise the values from config.json are used.
+              overrides; otherwise the values from config are used.
             - chapters: Chapter markers to inject into the muxed output, e.g. [{"name": str, "seconds": int}]. Default: context_tracker.chapters.
             - poster_url: Poster/still image URL to embed in the muxed output. Default: context_tracker.poster_url.
         """

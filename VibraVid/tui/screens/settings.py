@@ -36,7 +36,7 @@ ARR_BANNER_TEXT = (
 
 
 class SettingsScreen(Screen):
-    """Screen for viewing and editing config.json and login.json settings."""
+    """Screen for viewing and editing config.toml and login.toml settings."""
 
     BINDINGS = [
         ("ctrl+s", "save_current_section", "Save Section"),
@@ -199,8 +199,8 @@ class SettingsScreen(Screen):
                     except Exception as ex:
                         logger.debug(f"Skipping unmounted field {field_id}: {ex}")
                 config_manager.save_login()
-                status.update("[bold green]Login credentials saved to login.json[/]")
-                self.notify("login.json saved successfully!", severity="information")
+                status.update("[bold green]Login credentials saved to login.toml[/]")
+                self.notify("login.toml saved successfully!", severity="information")
             else:
                 section_data = config_manager._config_data.setdefault(self._current_section, {})
                 for field_id, (sec, key, orig_type) in self._field_map.items():
@@ -231,7 +231,7 @@ class SettingsScreen(Screen):
                     config_manager.config.set_key(sec, key, val)
 
                 config_manager.save_config()
-                status.update(f"[bold green]Section [{self._current_section}] saved to config.json[/]")
+                status.update(f"[bold green]Section [{self._current_section}] saved to config.toml[/]")
                 self.notify(f"Section [{self._current_section}] saved!", severity="information")
         except Exception as e:
             logger.error(f"Error saving settings: {e}")

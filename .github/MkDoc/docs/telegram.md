@@ -21,20 +21,19 @@ https://my.telegram.org) in addition to the `bot_token` from BotFather.
 **only** from `TG_*` environment variables, typically from a dedicated
 `.env.telegram` file (copied from `.env.telegram.example`) loaded by the
 `telegram` service in `docker-compose.yml`. There is no fallback to
-`Conf/login.json` or `Conf/config.json`: they're intentionally kept separate
+`Conf/login.toml` or `Conf/config.toml`: they're intentionally kept separate
 from the rest of VibraVid's configuration. Changing them requires restarting
 the container.
 
 **Non-sensitive settings** (`enabled`, `gui_url`, `max_results`) live instead
-in the `TELEGRAM` section of `Conf/config.json`, hot-reloaded (no restart
+in the `TELEGRAM` section of `Conf/config.toml`, hot-reloaded (no restart
 needed), falling back to the same `TG_*` variables if absent there.
 
-```json
-"TELEGRAM": {
-    "enabled": false,
-    "gui_url": "http://vibravid:8000",
-    "max_results": 8
-}
+```toml
+[TELEGRAM]
+enabled = false
+gui_url = "http://vibravid:8000"
+max_results = 8
 ```
 
 Relevant environment variables (see `.env.telegram.example`):

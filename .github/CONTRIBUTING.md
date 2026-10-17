@@ -24,8 +24,7 @@ cd VibraVid
 pip install -r requirements.txt
 ```
 
-See [`.github/MkDoc/docs/configuration.md`](MkDoc/docs/configuration.md)
-for `config.json` / `login.json` setup, and
+See [`.github/MkDoc/docs/configuration.md`](MkDoc/docs/configuration.md) for `config.toml` / `login.toml` setup, and
 [`.github/MkDoc/docs/cli.md`](MkDoc/docs/cli.md) for running the CLI
 (`python manual.py ...`), the TUI (`python tui.py`), or the GUI
 (`GUI/manage.py runserver`).

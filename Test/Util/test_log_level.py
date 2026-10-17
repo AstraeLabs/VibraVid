@@ -1,6 +1,6 @@
 # 06.10.26
 
-"""``DEFAULT.log_level`` in config.json: a value Python doesn't know must not stop the app from starting."""
+"""``DEFAULT.log_level`` in config.toml: a value Python doesn't know must not stop the app from starting."""
 
 import logging
 

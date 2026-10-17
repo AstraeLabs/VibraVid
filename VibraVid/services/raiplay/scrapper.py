@@ -48,6 +48,7 @@ class GetSerieInfo:
             # Collect all seasons from all multimedia blocks
             self.all_seasons_data = []
             blocks_found = {}
+            fallback_seasons_data = []
 
             # Block names to skip (supplementary content, not main seasons)
             skip_blocks = {"clip", "extra", "highlights", "anticipazioni", "speciale", "backstage"}
@@ -76,24 +77,30 @@ class GetSerieInfo:
                             logger.debug(" - Skipping Clip set")
                             continue
 
-                        # Skip sets that don't look like seasons (no number, not "stagione")
-                        # unless the block_name has a season number
-                        has_season_number = bool(re.search(r"(\d+)", set_name)) or bool(re.search(r"(\d+)", block_name))
-                        is_season_like = "stagione" in set_name.lower() or "stagione" in block_name.lower()
-                        if not has_season_number and not is_season_like:
-                            logger.debug(f" - Skipping non-season set: {set_name} in block {block_name}")
+                        # Only add sets with episodes
+                        if episode_count <= 0:
                             continue
 
-                        # Only add sets with episodes
-                        if episode_count > 0:
-                            self.all_seasons_data.append(
-                                {"season_set": season_set, "block_id": block_id, "block_name": block_name}
-                            )
+                        # Sets that don't look like seasons (no number, not "stagione") are only a fallback:
+                        # a single-season program has just a plain "Episodi" block/set
+                        has_season_number = bool(re.search(r"(\d+)", set_name)) or bool(re.search(r"(\d+)", block_name))
+                        is_season_like = "stagione" in set_name.lower() or "stagione" in block_name.lower()
+                        entry = {"season_set": season_set, "block_id": block_id, "block_name": block_name}
+                        if not has_season_number and not is_season_like:
+                            logger.debug(f" - Non-season set kept as fallback: {set_name} in block {block_name}")
+                            fallback_seasons_data.append(entry)
+                            continue
 
-                            # Track which blocks we found
-                            if block_name not in blocks_found:
-                                blocks_found[block_name] = 0
-                            blocks_found[block_name] += 1
+                        self.all_seasons_data.append(entry)
+
+                        # Track which blocks we found
+                        if block_name not in blocks_found:
+                            blocks_found[block_name] = 0
+                        blocks_found[block_name] += 1
+
+            # No numbered season at all: the plain sets (e.g. "Episodi") are the content
+            if not self.all_seasons_data:
+                self.all_seasons_data = fallback_seasons_data
 
             # Add all collected seasons, but avoid duplicates by season number
             # Keep only the first occurrence of each season number (from main block)
@@ -101,6 +108,7 @@ class GetSerieInfo:
             for season_data in self.all_seasons_data:
                 set_name = season_data["season_set"].get("name", "")
                 block_name = season_data["block_name"]
+                
                 # Extract season number to check for duplicates
                 match = re.search(r"(\d+)", block_name)
                 if not match:

@@ -141,7 +141,7 @@ services:
         required: false
 
     volumes:
-      # Read-only: the bot only reads the TELEGRAM section of config.json
+      # Read-only: the bot only reads the TELEGRAM section of config.toml
       # (enabled/gui_url/max_results); it never writes to Conf.
       - ${VIBRAVID_CONFIG_DIR:-vibravid_config}:/app/Conf:ro
       # Telethon session + per-user site-filter prefs. Writable, bot-only.
@@ -151,7 +151,7 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: "/app"
       STATE_DIR: "/app/tgstate"
-      VIBRAVID_CONFIG: "/app/Conf/config.json"
+      VIBRAVID_CONFIG: "/app/Conf/config.toml"
       # TG_GUI_URL default (http://vibravid:8000) already matches this
       # compose network; override here or in .env.telegram if needed.
       # VIBRAVID_BOT_SECRET: ""

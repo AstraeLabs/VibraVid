@@ -82,7 +82,7 @@ def _filled(value) -> bool:
 
 
 def get_site_login_status(site: str) -> dict | None:
-    """Determine whether this site has a login.json section, and if so whether all its required keys are present. """
+    """Determine whether this site has a login section, and if so whether all its required keys are present. """
     lazy = load_search_functions().get(f"{site}_search")
     module = lazy.get_module() if lazy else None
     spec = getattr(module, "LOGIN", None) if module else None

@@ -103,7 +103,7 @@ python manual.py --server home -i amazon_music --logout
 * what the service prints (the pairing link and code, progress) appears in your terminal, links are not opened on the
   server's screen;
 * its questions (region, "press Enter after authorizing"...) are asked in your terminal and your answers go back;
-* the tokens it obtains are stored in **your** `Conf/login.json` / `.cache`, exactly as in a local run; the server writes
+* the tokens it obtains are stored in **your** `Conf/login.toml` / `.cache`, exactly as in a local run; the server writes
   nothing and forgets the login when it ends (Ctrl+C cancels it, an unanswered login ends after 5 minutes);
 * the service does not need to be installed on the client.
 

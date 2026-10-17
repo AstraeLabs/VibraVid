@@ -6,6 +6,8 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from searchapp.api import get_available_sites, get_site_categories
 
+from VibraVid.utils.config import tomllib
+
 from .. import services_admin
 from .._download_infra import _get_scheduled_downloads
 from .._library_paths import titleize_name
@@ -59,18 +61,16 @@ def _watchlist_tiles(limit: int | None = None) -> list[dict]:
 
 
 def _site_extra_args_map() -> dict:
-    """``{site: "custom CLI-style options"}`` for the providers that have ``extra_args`` set in login.json."""
-    import json as _json
-
+    """``{site: "custom CLI-style options"}`` for the providers that have ``extra_args`` set in login.toml."""
     try:
-        login_data = _json.loads(_conf_text("login.json") or "{}")
+        login_data = tomllib.loads(_conf_text("login.toml"))
         return {
             site_name: block["extra_args"]
             for site_name, block in login_data.items()
             if isinstance(block, dict) and block.get("extra_args")
         }
     except Exception:
-        logger.exception("login.json non leggibile per site_extra_args")
+        logger.exception("login.toml non leggibile per site_extra_args")
         return {}
 
 
@@ -124,6 +124,14 @@ def cinema_watchlist(request: HttpRequest) -> HttpResponse:
         "interval_minutes": int(interval // 60) if interval else 0,
         "interval_options": [{"seconds": m * 60, "minutes": m} for m in WATCHLIST_INTERVALS],
     })
+
+
+def _conf_section(filename: str, section: str) -> dict:
+    """One section of a TOML config file as a dict (``{}`` when the file or the section can't be read), for the page's forms."""
+    try:
+        return tomllib.loads(_conf_text(filename)).get(section) or {}
+    except tomllib.TOMLDecodeError:
+        return {}
 
 
 def _conf_text(filename: str) -> str:
@@ -199,8 +207,9 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
         "arr": arr,
         "queued": queued,
         "app_version": __version__,
-        "config_content": _conf_text("config.json"),
-        "login_content": _conf_text("login.json"),
+        "config_content": _conf_text("config.toml"),
+        "login_content": _conf_text("login.toml"),
+        "config_arr": _conf_section("config.toml", "ARR"),
         "site_extra_args": _site_extra_args_map(),
     })
 

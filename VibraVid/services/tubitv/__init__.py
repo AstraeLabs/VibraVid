@@ -62,10 +62,7 @@ def title_search(query: str) -> int:
 
     tubi_email, tubi_password = tubi_credentials()
     if not tubi_email or not tubi_password:
-        console.print(
-            "[yellow]\nWarning: Tubi TV email/password are not set, search will return no results for this site.\n"
-            "[yellow]Set them in [cyan]Conf/login.json[/cyan] under [cyan]tubi.email[/cyan] and [cyan]tubi.password[/cyan]."
-        )
+        console.print("[yellow]\nWarning: Tubi TV email/password are not set, search will return no results for this site.\n")
         return 0
 
     try:

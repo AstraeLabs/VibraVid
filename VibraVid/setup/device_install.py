@@ -15,15 +15,47 @@ logger = logging.getLogger(__name__)
 class DeviceSearcher:
     def __init__(self):
         self.base_dir = binary_paths.ensure_binary_directory()
+        self.tools_dir = binary_paths.get_tools_directory()
+        self.cdm_dir = binary_paths.get_cdm_directory()
+        self.prd_dir = binary_paths.get_prd_directory()
+        self.wvd_dir = binary_paths.get_wvd_directory()
+        self.previous_dir = binary_paths.get_legacy_binary_directory()
+
+    def _fallback_dirs(self) -> list[str]:
+        """Flat directories searched after the dedicated CDM directory: the binary root, then the pre-tools one."""
+        return [d for d in (self.base_dir, self.previous_dir) if d and os.path.isdir(d)]
+
+    def _cdm_dir_for_ext(self, ext: str) -> str | None:
+        """Return the dedicated CDM subdirectory for *ext* (.wvd / .prd), else None."""
+        ext = ext.lower()
+        if ext == ".wvd":
+            return self.wvd_dir
+        if ext == ".prd":
+            return self.prd_dir
+        return None
+
+    def _target_dir(self, filename: str | None) -> str | None:
+        """Directory where a file named *filename* should live: cdm/wvd, cdm/prd or the binary root."""
+        if not filename:
+            return self.base_dir
+        low = filename.lower()
+        if low.endswith(".wvd"):
+            return self.wvd_dir
+        if low.endswith(".prd"):
+            return self.prd_dir
+        return self.base_dir
 
     def _check_existing(self, ext: str) -> str | None:
-        """Check for existing files with given extension in binary directory."""
+        """Check for existing files with given extension in their dedicated CDM directory (or binary root)."""
         try:
-            for file in os.listdir(self.base_dir):
-                if file.lower().endswith(ext):
-                    path = os.path.join(self.base_dir, file)
-                    logger.debug(f"Found {ext} file in binary directory: {path}")
-                    return path
+            dedicated = self._cdm_dir_for_ext(ext)
+            scan_dirs = ([dedicated] if dedicated and os.path.isdir(dedicated) else []) + self._fallback_dirs()
+            for scan_dir in scan_dirs:
+                for file in os.listdir(scan_dir):
+                    if file.lower().endswith(ext) and os.path.isfile(os.path.join(scan_dir, file)):
+                        path = os.path.join(scan_dir, file)
+                        logger.debug(f"Found {ext} file in {scan_dir}: {path}")
+                        return path
 
             return None
 
@@ -65,10 +97,18 @@ class DeviceSearcher:
         """
         if filename:
             try:
-                target_path = os.path.join(self.base_dir, filename)
+                target_dir = self._target_dir(filename)
+                target_path = os.path.join(target_dir, filename)
                 if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                    logger.debug(f"Found {filename} in binary directory: {target_path}")
+                    logger.debug(f"Found {filename} in {target_dir}: {target_path}")
                     return target_path
+                
+                for fallback_dir in self._fallback_dirs():
+                    fallback_path = os.path.join(fallback_dir, filename)
+                    if os.path.isfile(fallback_path) and os.path.getsize(fallback_path) > 0:
+                        logger.debug(f"Found {filename} in {fallback_dir}: {fallback_path}")
+                        return fallback_path
+                    
             except Exception as e:
                 logger.exception(f"Error checking for existing file {filename}")
                 console.print(f"[red]Error checking for existing file {filename}: {e}")
@@ -110,7 +150,7 @@ class ServiceCdm:
 
 
 def get_remote_cdm_registry() -> dict:
-    """Named remote CDMs from config.json (``DRM.remote_cdm``): ``{id: <same block as DRM.widevine / DRM.playready>}``."""
+    """Named remote CDMs from config.toml (``DRM.remote_cdm``): ``{id: <same block as DRM.widevine / DRM.playready>}``."""
     from VibraVid.utils import config_manager
 
     registry = config_manager.config.get_dict("DRM", "remote_cdm", default={})
@@ -136,7 +176,7 @@ def remote_cdm_system(cfg: dict) -> str:
 
 def resolve_service_cdm(site_name: str | None) -> ServiceCdm:
     """
-    Resolve the service's "cdm" entry in login.json (a string or a list).
+    Resolve the service's "cdm" entry in login.toml (a string or a list).
     """
     result = ServiceCdm()
     if not site_name:
@@ -161,9 +201,9 @@ def resolve_service_cdm(site_name: str | None) -> ServiceCdm:
             searcher = searcher or DeviceSearcher()
             resolved = searcher.search(filename=entry)
             if not resolved:
-                console.print(f"[red]Error: [red]cdm[/red] file '{entry}' configured for '{site_name}' in login.json was not found in the binary directory.")
+                console.print(f"[red]Error: [red]cdm[/red] file '{entry}' configured for '{site_name}' in login.toml was not found in the binary directory.")
                 raise FileNotFoundError(
-                    f"cdm file '{entry}' configured for '{site_name}' in login.json was not found in the binary directory."
+                    f"cdm file '{entry}' configured for '{site_name}' in login.toml was not found in the binary directory."
                 )
             
             if lowered.endswith(".wvd"):
@@ -177,8 +217,8 @@ def resolve_service_cdm(site_name: str | None) -> ServiceCdm:
         if not isinstance(remote_cfg, dict) or not remote_cfg:
             known = ", ".join(sorted(registry)) or "none defined"
             message = (
-                f"cdm '{entry}' configured for '{site_name}' in login.json is neither a .wvd/.prd file "
-                f"nor a remote CDM id in config.json DRM.remote_cdm (known ids: {known})."
+                f"cdm '{entry}' configured for '{site_name}' in login.toml is neither a .wvd/.prd file "
+                f"nor a remote CDM id in config.toml DRM.remote_cdm (known ids: {known})."
             )
             console.print(f"[red]Error: {message}")
             raise FileNotFoundError(message)
@@ -193,6 +233,6 @@ def resolve_service_cdm(site_name: str | None) -> ServiceCdm:
 
 
 def resolve_service_cdm_paths(site_name: str | None) -> tuple[str | None, str | None]:
-    """Resolve per-service .wvd/.prd overrides from the service's "cdm" entry in login.json (remote CDM ids are ignored here)."""
+    """Resolve per-service .wvd/.prd overrides from the service's "cdm" entry in login.toml (remote CDM ids are ignored here)."""
     resolved = resolve_service_cdm(site_name)
     return resolved.wvd_path, resolved.prd_path

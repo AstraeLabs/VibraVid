@@ -12,6 +12,8 @@ from datetime import timezone as dt_timezone
 from django.db import close_old_connections
 from django.utils import timezone
 
+from VibraVid.utils import config_manager
+
 logger = logging.getLogger("ARR")
 
 # Module-level lock for thread-safe enqueue operations
@@ -19,13 +21,7 @@ _enqueue_lock = threading.Lock()
 
 
 def _load_arr_config() -> dict:
-    """Load the 'arr' section from Conf/config.json, with env-var overrides."""
-    conf_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-        "Conf",
-    )
-    config_path = os.path.join(conf_dir, "config.json")
-
+    """Load the 'arr' section from Conf/config.toml, with env-var overrides."""
     arr_cfg = {
         "enabled": False,
         "enable_polling": True,
@@ -49,13 +45,11 @@ def _load_arr_config() -> dict:
     }
 
     try:
-        with open(config_path, encoding="utf-8") as f:
-            full_cfg = json.load(f)
-        file_arr = full_cfg.get("ARR", {})
+        file_arr = config_manager.config.get_section("ARR")
         if file_arr:
             arr_cfg.update(file_arr)
     except Exception as exc:
-        logger.warning(f"Could not read ARR config from config.json: {exc}")
+        logger.warning(f"Could not read ARR config from config.toml: {exc}")
 
     # Environment variable overrides (higher priority)
     def _env(key, default=None):

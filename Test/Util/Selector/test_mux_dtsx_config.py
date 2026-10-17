@@ -1,7 +1,7 @@
 # 05.10.26
 # ruff: noqa: E402
 
-import json
+import tomllib
 import sys
 from pathlib import Path
 
@@ -78,9 +78,7 @@ def test_config_repair_does_not_turn_a_legacy_true_into_false(monkeypatch, use_c
 
     class _Response:
         status_code = 200
-
-        def json(self):
-            return {"PROCESS": {"force_subtitle": "auto", "mux_dtsx": False}, "CODEC": {"dv_auto": True}}
+        text = '[PROCESS]\nforce_subtitle = "auto"\nmux_dtsx = false\n\n[CODEC]\ndv_auto = true\n'
 
     monkeypatch.setattr(config_module.requests, "get", lambda *a, **k: _Response())
     assert manager._repair_missing_config_keys() is True
@@ -91,7 +89,7 @@ def test_config_repair_does_not_turn_a_legacy_true_into_false(monkeypatch, use_c
 
 
 def test_shipped_config_has_it_under_process_right_after_force_subtitle():
-    config = json.loads((workspace_root / "Conf" / "config.json").read_text(encoding="utf-8"))
+    config = tomllib.loads((workspace_root / "Conf" / "config.toml").read_text(encoding="utf-8"))
     keys = list(config["PROCESS"])
     assert keys[keys.index("force_subtitle") + 1] == "mux_dtsx"
     assert "mux_dtsx" not in config["CODEC"]

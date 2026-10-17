@@ -98,7 +98,7 @@ class ChiliClient:
         return f"gatekeeper_{self.market}"
 
     def _load_credentials(self):
-        """Load cookies from login.json chili section."""
+        """Load cookies from login chili section."""
         try:
             self.cookies = config_manager.login.get_section("chili", {})
             email = self.cookies.get("email")
@@ -254,7 +254,7 @@ class ChiliClient:
         email = login_section.get("email")
         password = login_section.get("password")
         if not email or not password:
-            raise RuntimeError("Chili credentials not configured in login.json (need email/password or refresh_token)")
+            raise RuntimeError("Chili credentials not configured in login (need email/password or refresh_token)")
 
         if not self._device_registered:
             self._register_device()

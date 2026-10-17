@@ -58,7 +58,7 @@ def test_parse_site_extra_args_unknown_site_returns_empty_dict(monkeypatch):
     assert _shared.parse_site_extra_args("nosuchsite", "--quality UHD") == {}
 
 
-def test_resolve_persisted_site_options_reads_login_json(fake_site, monkeypatch):
+def test_resolve_persisted_site_options_reads_login_toml(fake_site, monkeypatch):
     monkeypatch.setattr(
         config_manager.login,
         "get_section",

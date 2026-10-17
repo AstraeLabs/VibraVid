@@ -367,7 +367,10 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
     local = binary_paths.get_local_tool_version(tool)
 
-    managed_dir = os.path.abspath(binary_paths.get_binary_directory())
+    managed_dirs = {os.path.abspath(binary_paths.get_tools_directory())}
+    previous_dir = binary_paths.get_legacy_binary_directory()
+    if previous_dir:
+        managed_dirs.add(os.path.abspath(previous_dir))
     ext = ".exe" if binary_paths.system == "windows" else ""
 
     if local is not None and local == remote:
@@ -413,7 +416,7 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
         if path:
             # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
-            if os.path.dirname(os.path.abspath(path)) != managed_dir:
+            if os.path.dirname(os.path.abspath(path)) not in managed_dirs:
                 logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
                 continue
 

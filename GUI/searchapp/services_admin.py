@@ -19,7 +19,6 @@ BUILTIN_SERVICES = frozenset({
     "homegardentv",
     "la7",
     "mediasetinfinity",
-    "monochrome",
     "nove",
     "plutotv",
     "raiplay",

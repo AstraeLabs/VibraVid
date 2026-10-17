@@ -24,7 +24,7 @@ def _redact_params(params: dict) -> dict:
 
 
 def _configured_api_key() -> str | None:
-    """Return the TMDB key: TMDB_API_KEY env var takes priority; falls back to the legacy Conf/login.json Provider.tmdb key (deprecated)."""
+    """Return the TMDB key: TMDB_API_KEY env var takes priority; falls back to the legacy Conf/login Provider.tmdb key (deprecated)."""
     global _warned_legacy_login_key
 
     env_key = str(os.environ.get("TMDB_API_KEY") or "").strip()
@@ -35,7 +35,7 @@ def _configured_api_key() -> str | None:
     if legacy_key:
         if not _warned_legacy_login_key:
             logger.warning(
-                "TMDB key read from Conf/login.json (Provider.tmdb) — deprecated, "
+                "TMDB key read from Conf/login (Provider.tmdb) — deprecated, "
                 "set the TMDB_API_KEY environment variable instead. Legacy support "
                 "will be removed in a future release."
             )

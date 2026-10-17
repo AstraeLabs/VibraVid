@@ -34,7 +34,7 @@ def client():
 
 def _login(monkeypatch, content: str):
     real = cinema._conf_text
-    monkeypatch.setattr(cinema, "_conf_text", lambda name: content if name == "login.json" else real(name))
+    monkeypatch.setattr(cinema, "_conf_text", lambda name: content if name == "login.toml" else real(name))
 
 
 def _embedded_map(page: str) -> dict:
@@ -44,25 +44,28 @@ def _embedded_map(page: str) -> dict:
 
 
 def test_map_only_has_providers_with_custom_arguments(monkeypatch):
-    _login(monkeypatch, json.dumps({
-        "a": {"extra_args": "--url x"},
-        "b": {"extra_args": ""},
-        "c": {"token": "t"},
-        "d": "not a block",
-    }))
+    _login(monkeypatch, '''
+d = "not a block"
+[a]
+extra_args = "--url x"
+[b]
+extra_args = ""
+[c]
+token = "t"
+''')
 
     assert cinema._site_extra_args_map() == {"a": "--url x"}
 
 
-@pytest.mark.parametrize("content", ["not json", "[]", "5", "# Non riesco a leggere login.json: boom"])
-def test_unreadable_or_odd_login_json_gives_an_empty_map(monkeypatch, content):
+@pytest.mark.parametrize("content", ["not = = toml", "[unclosed", "# Non riesco a leggere login.toml: boom"])
+def test_unreadable_or_odd_login_toml_gives_an_empty_map(monkeypatch, content):
     _login(monkeypatch, content)
 
     assert cinema._site_extra_args_map() == {}
 
 
 def test_search_page_embeds_the_map_and_the_info_line(client, monkeypatch):
-    _login(monkeypatch, json.dumps({"streamingcommunity": {"extra_args": "--url <b>x</b> & y"}}))
+    _login(monkeypatch, '[streamingcommunity]\nextra_args = "--url <b>x</b> & y"\n')
 
     page = client.get("/").content.decode()
 
@@ -72,13 +75,13 @@ def test_search_page_embeds_the_map_and_the_info_line(client, monkeypatch):
 
 
 def test_search_page_without_custom_arguments(client, monkeypatch):
-    _login(monkeypatch, "{}")
+    _login(monkeypatch, "")
 
     assert _embedded_map(client.get("/").content.decode()) == {}
 
 
 def test_settings_page_still_gets_the_same_map(client, monkeypatch):
-    _login(monkeypatch, json.dumps({"raiplay": {"extra_args": "--foo"}}))
+    _login(monkeypatch, '[raiplay]\nextra_args = "--foo"\n')
 
     page = client.get("/settings/").content.decode()
     match = re.search(r'<script id="cn-src-extra-args" type="application/json">(.*?)</script>', page, re.S)
@@ -87,7 +90,7 @@ def test_settings_page_still_gets_the_same_map(client, monkeypatch):
 
 
 def test_search_page_reads_the_options_from_the_cli_schema_endpoint(client, monkeypatch):
-    _login(monkeypatch, "{}")
+    _login(monkeypatch, "")
 
     page = client.get("/").content.decode()
 

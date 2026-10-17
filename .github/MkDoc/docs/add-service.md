@@ -43,13 +43,13 @@ instead of a literal import — see the GUI adapter note below.
 
 #### Loading services from a remote repository
 
-`imp_service` (in `Conf/config.json`, `DEFAULT.imp_service`) doesn't only accept local folder
+`imp_service` (in `Conf/config.toml`, `DEFAULT.imp_service`) doesn't only accept local folder
 paths — an entry can also be an **http(s) URL to a GitHub or Gitea repository** laid out the
 same way as `VibraVid/services/` (one subfolder per service, each with its own `__init__.py`
 defining `indice`/`_useFor`).
 
-```json
-"imp_service": ["default", "https://git.example.com/me/my-vibravid-sites"]
+```toml
+imp_service = ["default", "https://git.example.com/me/my-vibravid-sites"]
 ```
 
 For a private repo, put credentials in the URL userinfo —

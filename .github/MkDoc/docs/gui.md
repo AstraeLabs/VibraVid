@@ -32,7 +32,7 @@ directly.
 - **Results** (`/search/`) — each result can be downloaded, added to the watchlist, or (for
   series) expanded to show seasons and episodes via the series-detail view.
 - **Start download** (`/download/`) — queues the selected movie or episodes. By default, track
-  selection (video/audio/subtitle) follows the same `config.json` filters as the CLI. To pick
+  selection (video/audio/subtitle) follows the same `config.toml` filters as the CLI. To pick
   tracks yourself, tick **Choose tracks manually** (next to the Quality picker, which it
   overrides) before downloading: the download pauses and a **Choose tracks** panel appears on
   the Downloads page. Tick the tracks you want and press **Download selected tracks** (at least
@@ -77,7 +77,7 @@ directly.
 - **Polling interval** (`watchlist/auto-interval/`) — how often the auto-loop checks for new
   episodes. Default is **4 hours** (14400 s); selectable values are 15 min, 30 min, 1 h, 2 h,
   4 h, 6 h, 12 h, and 24 h (the minimum is 15 min). A value chosen in the GUI is saved as
-  `DEFAULT.watchlist_interval_seconds` in `Conf/config.json` and takes precedence over the
+  `DEFAULT.watchlist_interval_seconds` in `Conf/config.toml` and takes precedence over the
   `WATCHLIST_AUTO_INTERVAL_SECONDS` environment variable, which only sets the initial default.
 - **Preferred quality** (up to 1080p) per item: the watchlist waits until the provider
   confirms that resolution for each episode, and only treats an episode as done when a local
@@ -88,7 +88,7 @@ directly.
 
 ### Settings / configuration editor
 
-`/settings/` is an in-browser editor for `Conf/config.json` and `Conf/login.json`:
+`/settings/` is an in-browser editor for `Conf/config.toml` and `Conf/login.toml`:
 
 - Edits both files in tabs, validates JSON before saving, and writes a `.backup` alongside
   the original.

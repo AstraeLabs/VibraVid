@@ -292,4 +292,4 @@ Check logs for Python errors:
 docker compose logs --tail=50
 ```
 
-Common causes: invalid `config.json` (delete the conf volume and let the entrypoint re-seed it), missing bind-mount directory (create it on the host first), or a stale database migration (run `docker compose down -v` and start fresh).
+Common causes: invalid `config.toml` (delete the conf volume and let the entrypoint re-seed it), missing bind-mount directory (create it on the host first), or a stale database migration (run `docker compose down -v` and start fresh).

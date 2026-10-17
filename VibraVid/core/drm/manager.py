@@ -85,7 +85,7 @@ class DRMManager:
     @classmethod
     def for_site(cls, site_name: str | None) -> "DRMManager":
         """
-        Build the manager for a service, honouring the "cdm" entry of that service in login.json.
+        Build the manager for a service, honouring the "cdm" entry of that service in login.toml.
         """
         chosen = resolve_service_cdm(site_name)
         drm = config_manager.config
@@ -562,7 +562,7 @@ class DRMManager:
 
             logger.error(f"All {drm_type} extraction methods failed")
             console.print(f"\n[red]All extraction methods failed for {drm_type}")
-            console.print(f"[yellow]Please place CDM files (.wvd for Widevine, .prd for PlayReady) in: {binary_paths.get_binary_directory()}[/yellow]")
+            console.print(f"[yellow]Please place CDM files (.wvd for Widevine in wvd, .prd for PlayReady in prd) in: {binary_paths.get_cdm_directory()}[/yellow]")
         else:
             if manual_keys:
                 return KeysManager(manual_keys)
