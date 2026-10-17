@@ -190,6 +190,7 @@ jobs:
                   --hidden-import=pathvalidate \
                   --hidden-import=xml.etree.ElementTree \
                   --hidden-import=mutagen \
+                  --hidden-import=yaml \
                   --hidden-import=pywidevine \
                   --hidden-import=pyplayready \
                   --hidden-import=ttconv \

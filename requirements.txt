@@ -13,3 +13,4 @@ pycryptodomex
 mutagen
 textual
 Pillow
+pyyaml
