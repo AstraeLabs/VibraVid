@@ -69,7 +69,7 @@
 
 
 {% block scripts %}
-{# Le opzioni personalizzate (login.toml -> extra_args) entrano come JSON, non interpolate in JS: sono testo scritto dall'utente. #}
+{# Le opzioni personalizzate (login.toml -> args) entrano come JSON, non interpolate in JS: sono testo scritto dall'utente. #}
 {{ site_extra_args|json_script:"cn-site-extra-args" }}
 <script>
 (function () {

@@ -227,10 +227,10 @@ def test_patch_file_merges_deletes_and_reloads(conf):
     assert manager.config.get_section("ARR")["path_mapping"] == {"/a": "/b"}
     assert manager.config.get_section("ARR")["sonarr"] == {"url": "", "api_key": ""}  # the rest of the section is untouched
 
-    manager.patch_file("login", {"tubi": {"extra_args": "--x"}})
-    assert manager.login.get("tubi", "extra_args") == "--x"
-    manager.patch_file("login", {}, delete=[["tubi", "extra_args"], ["nosuch", "key"]])
-    assert manager.login.get("tubi", "extra_args", default=None) is None
+    manager.patch_file("login", {"tubi": {"args": "--x"}})
+    assert manager.login.get("tubi", "args") == "--x"
+    manager.patch_file("login", {}, delete=[["tubi", "args"], ["nosuch", "key"]])
+    assert manager.login.get("tubi", "args", default=None) is None
 
     with pytest.raises(ValueError):
         manager.patch_file("domains", {})

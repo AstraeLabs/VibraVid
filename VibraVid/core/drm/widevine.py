@@ -3,14 +3,15 @@
 import base64
 import json
 import logging
+import os
 from collections.abc import Callable
 
 from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.drm.cdm.remote.remote_cdm_api import RemoteCdmApi, build_remote_cdm
-from VibraVid.core.drm.system import accumulate_content_key, normalize_kid
-from VibraVid.setup import binary_paths, get_info_wvd
+from VibraVid.core.drm.system import accumulate_content_key, cdm_load_line, normalize_kid
+from VibraVid.setup import binary_paths, read_device_wvd
 from VibraVid.utils.http_client import create_client
 
 console = Console()
@@ -26,8 +27,8 @@ def get_widevine_keys(
     key: str = None,
     license_data: dict = None,
     license_certificate: str = None,
-    prefer_remote_cdm: bool = True,
     license_request_fn: Callable[[bytes, dict], bytes] | None = None,
+    cdm_origin: str | None = None,
 ):
     """
     Extract Widevine CONTENT keys (KID/KEY) from a license.
@@ -41,12 +42,12 @@ def get_widevine_keys(
         key (str): Optional raw license data to bypass HTTP request.
         license_data (dict): Optional pre-fetched license data.
         license_certificate (str): Optional base64-encoded SignedMessage for CDM Privacy Mode. If None or empty, set_service_certificate is not called.
-        prefer_remote_cdm (bool): Prefer remote CDM over local. If True and remote config missing, raises error instead of fallback.
         license_request_fn (Callable[[bytes, dict], bytes]): Optional callback that takes the raw
           challenge bytes and the current pssh_list item ({'pssh', 'kid', 'type'}) being licensed,
           and returns the raw license bytes. When provided, the built-in HTTP POST to license_url
           is bypassed — used by services whose license endpoint is a custom signed API call rather
           than a plain POST, and/or needs per-KID request data.
+        cdm_origin (str): Optional note on why this CDM was picked (login.toml, config.toml, search ...), printed after the CDM is loaded.
 
     Returns:
         list: List of strings "KID:KEY" (only CONTENT keys) or None if error.
@@ -55,38 +56,20 @@ def get_widevine_keys(
         manual = KeysManager(key)
         return manual if manual else None
 
-    # Check if we have either local or remote CDM
     cdm_remote_api = cdm_remote_api if cdm_remote_api else None
-    if prefer_remote_cdm and cdm_remote_api is None:
-        logger.error("Widevine: prefer_remote_cdm=true but no remote CDM config found")
-        console.print(
-            "[red]Error: prefer_remote_cdm=true but no remote CDM config found. Database lookup will continue."
-            f"\n[yellow]If no database key exists, place device.wvd in:[/] [white]{binary_paths.get_wvd_directory()}[/white]"
-        )
-
-        # Return None here to skip CDM extraction but allow database lookup in manager._resolve_keys
-        return None
-
-    if not prefer_remote_cdm and cdm_device_path is None:
-        logger.error("Widevine: prefer_remote_cdm=false but no local CDM device found")
-        console.print(
-            "[red]Error: prefer_remote_cdm=false but no local CDM device found. Database lookup will continue."
-            f"\n[yellow]If no database key exists, place device.wvd in:[/] [white]{binary_paths.get_wvd_directory()}[/white]"
-        )
-
-        # Return None here to skip CDM extraction but allow database lookup in manager._resolve_keys
-        return None
-
     if cdm_device_path is None and cdm_remote_api is None:
-        logger.error("Must provide either cdm_device_path or cdm_remote_api")
+        logger.error("Widevine: no CDM configured (no .wvd file and no remote CDM)")
         console.print(
-            "[red]Error: Must provide either cdm_device_path or cdm_remote_api."
-            f"\n[yellow]Place device.wvd in:[/] [white]{binary_paths.get_wvd_directory()}[/white]"
+            "[red]Error: no Widevine CDM configured. Database lookup will continue."
+            f"\n[yellow]If no database key exists, place a .wvd in:[/] [white]{binary_paths.get_wvd_directory()}[/white]"
+            "[yellow] or set [white]cdm[/white] in config.toml (section DRM)."
         )
+
+        # Return None here to skip CDM extraction but allow database lookup in manager._resolve_keys
         return None
 
-    if prefer_remote_cdm:
-        cdm_device_path = None  # the remote CDM was asked for: a local device file must not win over it
+    if cdm_remote_api is not None:
+        cdm_device_path = None  # a remote CDM was chosen explicitly: a local device file must not win over it
 
     return _get_widevine_keys(
         pssh_list,
@@ -97,6 +80,7 @@ def get_widevine_keys(
         license_data,
         license_certificate,
         license_request_fn,
+        cdm_origin,
     )
 
 
@@ -109,6 +93,7 @@ def _get_widevine_keys(
     license_data: dict = None,
     license_certificate: str = None,
     license_request_fn: Callable[[bytes, dict], bytes] | None = None,
+    cdm_origin: str | None = None,
 ):
     """Extract Widevine keys using local or remote CDM device."""
     if license_url is None and license_request_fn is None:
@@ -125,7 +110,14 @@ def _get_widevine_keys(
 
     # Initialize device
     if cdm_device_path is not None:
-        console.print(f"\n{get_info_wvd(cdm_device_path)}")
+        detail = None
+        try:
+            info = read_device_wvd(cdm_device_path)
+            logger.info(f"Widevine device {cdm_device_path}: {info}")
+            detail = ("SysID", info["system_id"]) if info else None
+        except Exception:
+            logger.debug("Widevine device details unavailable", exc_info=True)  # a bad file is reported by the load below
+        console.print(f"\n{cdm_load_line(os.path.basename(cdm_device_path), cdm_origin, detail)}")
         try:
             device = Device.load(cdm_device_path)
             cdm = Cdm.from_device(device)
@@ -134,7 +126,7 @@ def _get_widevine_keys(
             console.print(f"[red]Error loading local CDM device: {e}")
             return None
     else:
-        console.print(f"\n[green]Using remote CDM: [red]{cdm_remote_api.get('device_name', '?')}")
+        console.print(f"\n{cdm_load_line('remote ' + str(cdm_remote_api.get('device_name', '?')), cdm_origin)}")
         try:
             cdm = build_remote_cdm(cdm_remote_api, "widevine")
         except Exception as e:

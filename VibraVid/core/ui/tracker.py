@@ -664,6 +664,14 @@ class ContextTracker:
         self.local.bypass_vault_cache = value
 
     @property
+    def cdm_override(self):
+        return getattr(self.local, "cdm_override", None)
+
+    @cdm_override.setter
+    def cdm_override(self, value):
+        self.local.cdm_override = value
+
+    @property
     def http_version(self):
         return getattr(self.local, "http_version", None)
 

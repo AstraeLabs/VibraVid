@@ -95,6 +95,8 @@ directly.
 - `ARR.max_concurrent_downloads` is applied live without a restart. Most other settings take
   effect after a **reload** (`api/reload-config/`, which reloads config and/or login through
   the config manager) or a restart of the server.
+- The **Custom CLI options** panel sets the `args` of a service (default options for each of its downloads, see
+  [Default options for a service](configuration.md#default-options-for-a-service-args)). Removing the options leaves `args = ""` in `login.toml`.
 - The same page also shows a live status indicator for the optional Bypasser sidecar (driven by
   the `BYPASSER_URL` environment variable) — see the [Docker guide](docker.md) for enabling it.
 

@@ -3,6 +3,16 @@
 import base64
 import re
 
+from rich.markup import escape
+
+
+def cdm_load_line(name: str, why: str | None = None, detail: tuple[str, object] | None = None) -> str:
+    """The console line for the CDM in use: ``[+] <name>``, then an optional ``label: value`` (SysID / Model) and ``why`` it was picked when known."""
+    line = f"[green]\\[+][/green] [cyan]{escape(name)}"
+    if detail:
+        line += f" [white]| [cyan]{escape(detail[0])}: [red]{escape(str(detail[1]))}"
+    return f"{line} [white]| [dim]why: {escape(why)}" if why else line
+
 
 def normalize_kid(kid) -> str:
     """Canonical KID/KEY hex form: dash-stripped, whitespace-trimmed, lowercase."""

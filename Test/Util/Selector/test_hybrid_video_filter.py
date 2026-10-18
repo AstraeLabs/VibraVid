@@ -68,16 +68,32 @@ def _dragons_s03e06_ladder():
     ]
 
 
-def test_best_picks_dv_outright_when_it_has_highest_bitrate():
-    """select_video="best" ora sceglie letteralmente il bitrate/risoluzione piu' alto: se la DV
-    vince davvero (come nel ladder reale S03E06), deve essere selezionata come primaria."""
+def test_best_prefers_the_non_dv_stream_and_dv_auto_attaches_dv_as_companion():
+    """select_video="best" non usa la DV come video primario quando esiste un flusso non DV (anche se
+    la DV ha il bitrate piu' alto, come nel ladder reale S03E06): prende l'HDR10 migliore e con dv_auto
+    aggiunge la DV come companion."""
     streams = _dragons_s03e06_ladder()
     StreamSelector("best", "false", "false", dv_auto=True).apply(streams)
     video = [s for s in streams if s.type == "video" and s.selected]
     assert len(video) == 1
-    assert video[0].id == "dv"
-    # e' gia' native DV (profile 5): dv_auto non deve creare un companion inutile
+    assert video[0].id == "hdr10"
+    assert [s.id for s in streams if s.dv_companion] == ["dv"]
+
+
+def test_best_without_dv_auto_never_selects_dv():
+    streams = _dragons_s03e06_ladder()
+    StreamSelector("best", "false", "false", dv_auto=False).apply(streams)
+    video = [s for s in streams if s.type == "video" and s.selected]
+    assert [s.id for s in video] == ["hdr10"]
     assert [s for s in streams if s.dv_companion] == []
+
+
+def test_explicit_dv_codec_filter_still_selects_dv():
+    """Chiedere esplicitamente un codec DV (dvhe / dv) mantiene la DV come video selezionato."""
+    streams = _dragons_s03e06_ladder()
+    StreamSelector("codec=dvhe", "false", "false", dv_auto=False).apply(streams)
+    video = [s for s in streams if s.type == "video" and s.selected]
+    assert [s.id for s in video] == ["dv"]
 
 
 def _dragons_s03e01_ladder():

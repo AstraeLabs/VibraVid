@@ -81,6 +81,10 @@ def search(string_to_search=None, get_onlyDatabase=False, direct_item=None, sele
     return base_search(..., direct_item=direct_item, ...)
 ```
 
+Users can give these options a default in the service's section of `login.toml`, with `args = "--url ..."`
+(see [Default options for a service](configuration.md#default-options-for-a-service-args)). Nothing to do in the service:
+`context_tracker.site_options` already contains them, and a flag given on the command line wins.
+
 `base_search`/`base_process_search_result` (in `VibraVid/services/_base/site_search_manager.py`)
 handle the rest — season/episode selection, table display, and dispatch to your
 `download_film`/`download_series` functions. Reuse them rather than reimplementing the flow.
@@ -273,6 +277,22 @@ normal POST.
 ```python
 keys = dl.drm_manager.get_wv_keys(pssh, license_url, license_certificate, headers, key=None)
 ```
+
+**Which CDM the service will use.** The user picks the CDM with `cdm` (see [Configuration](configuration.md)),
+so never open a `.wvd` / `.prd` yourself. If the service needs to know what it is dealing with (for example to
+choose a Chrome or an Android device identity), ask the core:
+
+```python
+from VibraVid.setup import resolve_service_cdm_info
+
+widevine = resolve_service_cdm_info("myservice", height=1080).get("widevine")
+# None                       -> no Widevine CDM
+# {"remote": False, "path", "type": "CHROME" | "ANDROID", "security_level", ...}   local .wvd
+# {"remote": True, "name", "type": "CHROME" | "ANDROID", "security_level"}         remote CDM
+# {"path", "error"}          -> the .wvd could not be read
+```
+
+`height` is the quality you are about to ask for (it decides which `min_height` / `max_height` rule applies).
 
 ### Custom filter override
 

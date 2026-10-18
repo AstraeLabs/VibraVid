@@ -271,24 +271,23 @@ def get_info_prd(cdm_device_path):
     )
 
 
-def resolve_service_cdm_info(site_name: str | None) -> dict:
-    """Resolve the Widevine and PlayReady CDM paths for a given site, returning structured info about each."""
-    from .device_install import resolve_service_cdm
+def resolve_service_cdm_info(site_name: str | None, height: int | None = None) -> dict:
+    """Resolve the best available CDM for the given site and height, returning structured info for both Widevine and PlayReady."""
+    from .device_install import describe_remote_cdm, resolve_cdm
 
-    chosen = resolve_service_cdm(site_name)
+    chosen = resolve_cdm(site_name, height)
 
-    def describe(path: str | None, override: str | None, reader) -> dict | None:
+    def describe(system: str, path: str | None, remote: dict | None, reader) -> dict | None:
+        if remote:
+            return {"system": system, "path": None, "remote": True, **describe_remote_cdm(remote)}
         if not path:
             return None
-        source = "service" if override else "default"
         try:
-            return {**reader(path), "source": source}
+            return {**reader(path), "remote": False}
         except Exception as e:
-            return {"path": path, "source": source, "error": str(e)}
+            return {"path": path, "remote": False, "error": str(e)}
 
     return {
-        "widevine": describe(chosen.wvd_path or get_wvd_path(), chosen.wvd_path, read_device_wvd),
-        "playready": describe(chosen.prd_path or get_prd_path(), chosen.prd_path, read_device_prd),
-        "widevine_remote": bool(chosen.widevine_remote),
-        "playready_remote": bool(chosen.playready_remote),
+        "widevine": describe("widevine", chosen.wvd_path, chosen.widevine_remote, read_device_wvd),
+        "playready": describe("playready", chosen.prd_path, chosen.playready_remote, read_device_prd),
     }

@@ -26,7 +26,7 @@ from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
 from .base import BaseDownloader, DownloadResult
-from .drm_keys import effective_manual_key, fetch_drm_keys
+from .drm_keys import effective_manual_key, fetch_drm_keys, selected_video_height
 from .util._drm_probe import PROBE_BYTES_FAST, DRMProbe
 
 console = Console()
@@ -433,7 +433,7 @@ class DASH_Downloader(BaseDownloader):
         elif self.drm_preference == DRMType.PLAYREADY and not has_pr and has_wv:
             logger.warning("DRM mismatch: preference=playready but only Widevine PSSH found.")
 
-    def _fetch_keys(self, drm_psshs: dict[str, list[dict]]) -> list[str]:
+    def _fetch_keys(self, drm_psshs: dict[str, list[dict]], streams: list | None = None) -> list[str]:
         """Dispatch key fetch to DRMManager using the configured drm_preference.
 
         When the manifest only carries the *other* DRM type (see
@@ -452,6 +452,7 @@ class DASH_Downloader(BaseDownloader):
             license_certificate=self.license_certificate,
             license_request_fn=self.license_request_fn,
             cross_drm_fallback=True,
+            height=None if streams is None else selected_video_height(streams),
         )
 
     def _fetch_keys_for_audio_mpd(
@@ -770,7 +771,7 @@ class DASH_Downloader(BaseDownloader):
                 logger.error("Content is DRM-protected but no license_url or manual key provided")
             self._update_status("Fetching keys ...")
 
-            self.decryption_keys = self._fetch_keys(drm_psshs)
+            self.decryption_keys = self._fetch_keys(drm_psshs, streams)
 
             if not self.decryption_keys:
                 self.error = "Failed to fetch decryption keys"

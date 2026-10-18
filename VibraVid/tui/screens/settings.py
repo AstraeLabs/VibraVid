@@ -19,6 +19,17 @@ from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
 
+def _cdm_json(target, raw: str):
+    """A ``cdm`` typed as a JSON list or table (a list of files / quality rules) is saved as that, not as text."""
+    key = target[1] if isinstance(target, tuple) else target
+    if key == "cdm" and raw[:1] in ("[", "{"):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            pass
+    return raw
+
+
 SECTIONS: list[tuple[str, str]] = [
     ("DEFAULT", "sec_default"),
     ("OUTPUT", "sec_output"),
@@ -190,7 +201,7 @@ class SettingsScreen(Screen):
                                 logger.warning(f"Field {field_id}: invalid JSON, keeping previous value")
                                 continue
                         else:
-                            val = raw_val
+                            val = _cdm_json(target, raw_val)
                         if isinstance(target, tuple):
                             service, key = target
                             config_manager._login_data.setdefault(service, {})[key] = val
@@ -225,7 +236,7 @@ class SettingsScreen(Screen):
                                 else:
                                     val = raw_val
                         else:
-                            val = raw_val
+                            val = _cdm_json(key, raw_val)
 
                     section_data[key] = val
                     config_manager.config.set_key(sec, key, val)

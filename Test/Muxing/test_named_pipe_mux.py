@@ -245,7 +245,7 @@ skip_no_live = pytest.mark.skipif(not _HAVE_LIVE_URLS, reason="CUSTOM.py URLs no
 
 
 @skip_no_live
-def test_pipe_mux_custom_100_segments(tmp_path):
+def test_pipe_mux_custom_100_segments(tmp_path, monkeypatch):
     """Real download: 100 segments HLS video + DASH audio via named pipes → .mkv with video+audio."""
     import sys, os
     src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -255,6 +255,10 @@ def test_pipe_mux_custom_100_segments(tmp_path):
     from VibraVid.core.downloader._generic import Generic_Downloader
     from VibraVid.core.ui.tracker import context_tracker
     from VibraVid.core.muxing.helper.video.compat import get_stream_codecs
+
+    # The keys of these test streams come from the vault: a local bypass_vault_cache = true must not skip it.
+    monkeypatch.setattr("VibraVid.core.drm.manager.BYPASS_VAULT_CACHE", False)
+    monkeypatch.setattr(context_tracker, "bypass_vault_cache", False)
 
     context_tracker.force_livemux = True
     out = str(tmp_path / "custom_test.mkv")

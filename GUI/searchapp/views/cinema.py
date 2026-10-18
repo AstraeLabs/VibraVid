@@ -61,13 +61,13 @@ def _watchlist_tiles(limit: int | None = None) -> list[dict]:
 
 
 def _site_extra_args_map() -> dict:
-    """``{site: "custom CLI-style options"}`` for the providers that have ``extra_args`` set in login.toml."""
+    """``{site: "custom CLI-style options"}`` for the providers that have a non-empty ``args`` in login.toml."""
     try:
         login_data = tomllib.loads(_conf_text("login.toml"))
         return {
-            site_name: block["extra_args"]
+            site_name: block["args"]
             for site_name, block in login_data.items()
-            if isinstance(block, dict) and block.get("extra_args")
+            if isinstance(block, dict) and block.get("args")
         }
     except Exception:
         logger.exception("login.toml non leggibile per site_extra_args")

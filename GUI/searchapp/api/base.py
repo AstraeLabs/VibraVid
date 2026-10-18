@@ -1,10 +1,13 @@
 # 06.06.25
 
+import functools
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.services._base.site_extra_args import persisted_site_options
 from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.utils import config_manager
 
@@ -67,10 +70,31 @@ class Season:
 
 
 _SCRAPER_CACHE_TTL = 900  # 15 minutes — allows the GUI to see new episodes without a container restart
+_OPTION_METHODS = ("search", "get_series_metadata", "start_download")
+
+
+def _with_login_args(method):
+    """Run *method* with the site's `args` from login.toml as site options, unless the caller already set options (a download task, a remote request)."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        if context_tracker.site_options:
+            return method(self, *args, **kwargs)
+        with persisted_site_options(self.site_name):
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class BaseStreamingAPI(ABC):
     _scraper_cache: dict[str, tuple[Any, float]] = {}  # key → (scraper, timestamp)
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for name in _OPTION_METHODS:
+            method = cls.__dict__.get(name)
+            if callable(method):
+                setattr(cls, name, _with_login_args(method))
 
     def __init__(self):
         self.site_name: str = ""

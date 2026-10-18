@@ -13,7 +13,7 @@ def fake_login_data(monkeypatch):
         "mysite": {
             "cdm": ["custom.wvd", "custom.prd"],
             "username": "foo",
-            "extra_args": {"quality": "UHD"},
+            "args": {"quality": "UHD"},
         }
     }
     monkeypatch.setattr(config_manager, "_login_data", data)
@@ -50,7 +50,7 @@ async def test_login_list_value_round_trips_unchanged(fake_login_data):
 async def test_login_dict_value_round_trips_unchanged(fake_login_data):
     await _save_login_section()
 
-    assert fake_login_data["mysite"]["extra_args"] == {"quality": "UHD"}
+    assert fake_login_data["mysite"]["args"] == {"quality": "UHD"}
 
 
 @pytest.mark.anyio

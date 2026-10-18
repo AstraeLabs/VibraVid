@@ -29,7 +29,6 @@ pssh_list = [
 drm = DRMManager(
     widevine_device_path=get_wvd_path(),
     playready_device_path=get_prd_path(),
-    prefer_remote_cdm=False,
 )
 
 keys_manager = drm.get_wv_keys(
