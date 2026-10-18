@@ -191,6 +191,8 @@ jobs:
                   --hidden-import=xml.etree.ElementTree \
                   --hidden-import=mutagen \
                   --hidden-import=yaml \
+                  --hidden-import=jsonpickle \
+                  --collect-all pycountry \
                   --hidden-import=pywidevine \
                   --hidden-import=pyplayready \
                   --hidden-import=ttconv \
