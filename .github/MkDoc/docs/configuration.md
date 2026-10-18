@@ -1,124 +1,65 @@
 # Configuration
 
-All settings live in `Conf/config.toml`. The sections below cover each configuration block.
-ARR automation settings are documented separately in the [ARR Integration](arr.md) guide.
+Settings live in `Conf/config.toml` (one section per block below). ARR settings: [ARR Integration](arr.md).
 
 ## TMDB API Key
 
-An optional [TMDB](https://www.themoviedb.org/) API key unlocks:
+Optional. A free [TMDB key](https://www.themoviedb.org/settings/api) unlocks the `%(tmdb_*)`, `%(original_title)`, `%(original_language)` and `%(imdb_id)` filename tokens, poster/backdrop artwork (`embed_poster`) and strict TMDB/TVDB matching in [ARR](arr.md). Without it the tokens are dropped from filenames and artwork/matching falls back to the site's own data. One key serves CLI, TUI, GUI and ARR.
 
-- The `%(tmdb_*)`, `%(original_title)`, `%(original_language)` and `%(imdb_id)` filename tokens
-  (see [Movie Format](#movie-format) / [Episode Format](#episode-format) below).
-- Poster/backdrop artwork (`embed_poster` in [DOWNLOAD](#download)).
-- Strict TMDB/TVDB identity matching for the [ARR Integration](arr.md).
+Set the **`TMDB_API_KEY`** environment variable before running:
 
-It is **not required** — without it these features degrade gracefully (tokens are dropped from
-filenames, artwork/matching falls back to the site's own data).
-
-The key is shared by every interface (CLI, TUI, GUI, ARR) — there is a single configuration
-point, not a per-interface setting.
-
-### Setting the key (current, supported method)
-
-1. Create a key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) (free).
-2. Export it as the **`TMDB_API_KEY`** environment variable before running VibraVid:
-
-   ```bash
-   export TMDB_API_KEY=your_key_here
-   python manual.py      # CLI
-   python tui.py         # TUI
-   python GUI/manage.py runserver 0.0.0.0:8000   # GUI
-   ```
-
-   On Windows (PowerShell): `$env:TMDB_API_KEY = "your_key_here"`.
-
-- **Docker / NAS**: set `TMDB_API_KEY` in your `.env` file (see `.env.example`) — it's already
-  wired through `docker-compose.yml` under the ARR Integration section and applies to the
-  bundled GUI/ARR container.
-- **GUI**: there is no in-app field for the key; it's read from the environment at process
-  start, so after setting/changing it you need to restart the server (or recreate the
-  container). If it's missing, search results show a "TMDB covers aren't active" hint.
-- This is the **only** way to configure the key going forward — see the deprecated method below.
-
-### Deprecated method: `Conf/login.toml`
-
-The deprecated fallback reads the key from `Conf/login.toml`, under a `Provider` section:
-
-```toml
-[Provider]
-tmdb = "your_key_here"
+```bash
+export TMDB_API_KEY=your_key_here        # PowerShell: $env:TMDB_API_KEY = "your_key_here"
+python manual.py                         # CLI (python tui.py / python GUI/manage.py runserver 0.0.0.0:8000)
 ```
 
-This still works as a fallback if `TMDB_API_KEY` is not set, but it is **deprecated and will be
-removed in a future release** — a warning is logged the first time it's used. Fresh installs'
-`login.toml` template does not include a `Provider` section at all, so this path only matters
-for existing configs carried over from an older version; migrate to the `TMDB_API_KEY`
-environment variable above.
+- **Docker / NAS**: set it in `.env` (see `.env.example`).
+- **GUI**: no in-app field; the key is read at process start, so restart the server/container after changing it. Without it, search shows a "TMDB covers aren't active" hint.
+- **Deprecated**: `[Provider] tmdb = "..."` in `Conf/login.toml` still works as a fallback (logs a warning) but will be removed.
+- `login.toml` can hold secrets: don't commit your copy.
 
-## Metadata Providers (TMDB, IMDb, TVDB)
+## Metadata providers
 
-With `write_sidecars` enabled ([DOWNLOAD](#download)) VibraVid writes, next to every downloaded file, the
-files that **Jellyfin, Emby and Kodi** read to identify it without guessing from the filename:
+With `write_sidecars` ([DOWNLOAD](#download)) VibraVid writes the files Jellyfin, Emby and Kodi read (Plex ignores them) next to each download. Fields a provider lacks are left out.
 
 | Media | Files |
 |-------|-------|
 | Film | `<name>.nfo`, `<name>-poster.jpg`, `<name>-fanart.jpg` |
-| Episode | `<name>.nfo` and `<name>-thumb.jpg` (the episode still) |
-| Series | `tvshow.nfo`, `poster.jpg`, `fanart.jpg` and `season01-poster.jpg` in the show's folder (the parent of the season folder). Written **once**, filled in as missing, never overwritten: later episodes only add what is missing |
-
-Plex ignores all of these. The format is the Kodi one (Jellyfin, Emby and Nova Video Player read it too). Each file
-carries everything the matching provider has; what it lacks is simply left out:
+| Episode | `<name>.nfo`, `<name>-thumb.jpg` (episode still) |
+| Series | `tvshow.nfo`, `poster.jpg`, `fanart.jpg`, `season01-poster.jpg` in the show folder (parent of the season folder); written once, only missing parts are added later |
 
 | Provider | Film | Episode | Series |
 |----------|------|---------|--------|
-| **TMDB** | title, original title, year, premiere date, rating + vote count, tagline, plot, runtime, age rating (IT, else US), genres, keywords, countries, studios, collection (name + overview), directors, writers, 15 actors with role and photo, YouTube trailer, poster, fanart | title, air date, plot, runtime, rating + votes, directors, writers, guest stars, still | title, original title, year, status, rating + votes, plot, age rating, runtime, genres, networks, 15 actors, poster, fanart, one poster per season |
-| **IMDb** | same, except there is no fanart (and the trailer is an IMDb page) | same, from the episode's own IMDb record | same, except no fanart and no season posters |
-| **TVDB** | same, without rating and vote count (TVDB's `score` is a popularity number) | title, air date, plot, runtime, still (TVDB has no episode crew or rating) | no rating; poster, fanart, cast, networks, age rating, status |
+| **TMDB** | title, original title, year, premiere date, rating + votes, tagline, plot, runtime, age rating (IT, else US), genres, keywords, countries, studios, collection, directors, writers, 15 actors (role, photo), YouTube trailer, poster, fanart | title, air date, plot, runtime, rating + votes, directors, writers, guest stars, still | title, original title, year, status, rating + votes, plot, age rating, runtime, genres, networks, 15 actors, poster, fanart, season posters |
+| **IMDb** | same, no fanart (trailer is an IMDb page) | same, from the episode's own record | same, no fanart or season posters |
+| **TVDB** | same, no rating/votes | title, air date, plot, runtime, still | no rating; poster, fanart, cast, networks, age rating, status |
 
-### Choosing the provider
-
-`metadata_provider` (in [DEFAULT](#default)) is one name or an ordered list; the first provider with a reliable match is used.
-Providers that are unavailable (no key) are skipped.
+`metadata_provider` ([DEFAULT](#default)) is one name or an ordered list; the first provider with a reliable match wins, unavailable ones (no key) are skipped.
 
 | Provider | Key | Language | Notes |
 |----------|-----|----------|-------|
-| `tmdb` | `TMDB_API_KEY` (see [above](#tmdb-api-key)) | Italian | Best matching (searches Italian titles) and the only one that remaps anime absolute numbering |
-| `imdb` | none (free) | English | Public GraphQL endpoint; searches by English title, so Italian titles are found only when the site supplies a TMDB id **and** a TMDB key is set |
-| `tvdb` | `TVDB_API_KEY` | Italian when TVDB has a translation | Requires a [TheTVDB](https://thetvdb.com/api-information) API key |
+| `tmdb` | `TMDB_API_KEY` ([above](#tmdb-api-key)) | Italian | Best matching; only one that remaps anime absolute numbering |
+| `imdb` | none | English | Italian titles are found only if the site supplies a TMDB id **and** a TMDB key is set |
+| `tvdb` | `TVDB_API_KEY` | Italian when translated | Needs a [TheTVDB key](https://thetvdb.com/api-information) |
 
 ```bash
-python manual.py ... --metadata-provider tmdb,imdb   # default: TMDB, then IMDb as free fallback
-python manual.py ... --metadata-provider imdb        # no API key needed at all
-python manual.py ... --metadata-provider tvdb,tmdb
+python manual.py ... --metadata-provider tmdb,imdb   # default
+python manual.py ... --metadata-provider imdb        # no key needed
 ```
 
-### Setting the TVDB key
-
-Either (the environment variable wins):
-
-```bash
-export TVDB_API_KEY=your_key_here          # PowerShell: $env:TVDB_API_KEY = "your_key_here"
-```
-
-or in `Conf/login.toml`:
+**TVDB key**: the `TVDB_API_KEY` environment variable (wins; Docker/NAS: `.env`), or in `Conf/login.toml` (a supported location, unlike TMDB's):
 
 ```toml
 [Provider]
 tvdb = "your_key_here"
 ```
 
-Unlike the TMDB entry above, `Provider.tvdb` in `login.toml` is a supported location. Docker/NAS: set
-`TVDB_API_KEY` in your `.env` file (see `.env.example`). `login.toml` can hold secrets: do not commit your
-own copy.
-
 ## Default options for a service (`args`)
 
-Every service section in `Conf/login.toml` has an `args` key (empty by default). Whatever you write there is
-added to **every** download of that service, written exactly like on the [command line](cli.md):
+Every service section in `Conf/login.toml` has an `args` key (empty by default), added to **every** download of that service and written like on the [command line](cli.md):
 
 ```toml
 [nowtvit]
-skyCEsidmesso01 = "..."
 args = "--quality 1080 --range HDR10"
 
 [chili]
@@ -142,31 +83,23 @@ metadata_provider = "tmdb,imdb"
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `close_console` | `true` | Automatically close the console after download completes |
-| `debug_track_json` | `false` | Log a `TRACKS_JSON` payload with selected tracks, keys, and manifest metadata — useful for debugging stream selection |
-| `log_level` | `"INFO"` | Logging verbosity. Accepts standard Python values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `show_message` | `true` | Show the startup banner and clear the console before printing it |
-| `fetch_domain_online` | `true` | Automatically fetch the latest domains from GitHub |
-| `disable_scraper_cache` | `false` | GUI only: the Django backend caches an already-instantiated site scraper per title for 15 minutes so repeat requests (e.g. opening the same series-detail page) don't re-scrape. |
-| `imp_service` | `["default"]` | Service source paths to load site modules from. `"default"` loads all built-in sites. Add absolute paths to directories containing custom site modules — each must have `__init__.py` defining `indice` and `_useFor`. A GitHub/Gitea repository URL is also accepted: its archive is downloaded and cached under `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`. The cache is trusted for 15 minutes; past that, only a cheap "latest commit" check is made and the archive is only re-downloaded if that commit changed. Custom modules take precedence over built-ins with the same name. |
-| `installation` | `""` | Controls which bundled binaries are auto-downloaded at setup. `""` (base): FFmpeg, Velora, flux. `"yt"`: base + yt-dlp, deno. `"full"`: base + dovi_tool, mkvtoolnix, yt-dlp, deno |
-| `metadata_provider` | `tmdb,imdb` | Provider(s) the sidecars are built from, tried in order: `tmdb`, `imdb` (free, no key), `tvdb` (needs `TVDB_API_KEY`). CLI: `--metadata-provider` |
+| `close_console` | `true` | Close the console after the download |
+| `debug_track_json` | `false` | Log a `TRACKS_JSON` payload (selected tracks, keys, manifest metadata) |
+| `log_level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `show_message` | `true` | Show the startup banner and clear the console first |
+| `fetch_domain_online` | `true` | Fetch the latest domains from GitHub |
+| `disable_scraper_cache` | `false` | GUI only: disable the 15-minute per-title scraper cache |
+| `imp_service` | `["default"]` | Where to load site modules from: `"default"` (built-ins), local directories (each module needs `__init__.py` defining `indice` and `_useFor`), or a GitHub/Gitea repo URL. Custom modules override built-ins of the same name |
+| `installation` | `""` | Binaries downloaded at setup. `""`: FFmpeg, Velora, flux. `"yt"`: + yt-dlp, deno. `"full"`: + dovi_tool, mkvtoolnix, yt-dlp, deno |
+| `metadata_provider` | `tmdb,imdb` | Sidecar providers, tried in order (`tmdb`, `imdb`, `tvdb`). CLI: `--metadata-provider` |
 
-**Custom `imp_service` example (local folder):**
 ```toml
-imp_service = ["default", "/home/user/my_custom_sites"]
+imp_service = ["default", "/home/user/my_custom_sites"]                         # local folder
+imp_service = ["default", "https://github.com/owner/my-vibravid-sites"]         # repository
+imp_service = ["default", "http://user:password@192.168.1.149:3000/owner/repo"] # private repo
 ```
 
-**Custom `imp_service` example (remote GitHub/Gitea repository):**
-```toml
-imp_service = ["default", "https://github.com/owner/my-vibravid-sites"]
-```
-
-**Custom `imp_service` example (private repository, with username/password or token):**
-```toml
-imp_service = ["default", "http://user:password@192.168.1.149:3000/owner/my-vibravid-sites"]
-```
-Embed the credentials directly in the URL userinfo, as `<scheme>://<username>:<password>@<host>/<owner>/<repo>` (GitHub: use a personal access token as the password; Gitea: username/password or a token both work). Pin a specific branch/tag with a `#ref` fragment, e.g. `https://host/owner/repo#dev`; otherwise the repository's default branch is used. Since credentials end up in plain text in `config.toml`, prefer a scoped token over your account password, and keep `config.toml` out of any git history you push (it's tracked in the VibraVid repo itself, so a fork/clone used for personal config should not be pushed upstream with real credentials in it).
+Repository archives are cached in `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`; the cache is trusted for 15 minutes, then a cheap latest-commit check decides whether to re-download. Pin a branch/tag with `#ref` (`https://host/owner/repo#dev`). Credentials go in the URL (`user:password@`; GitHub: a personal access token as password) and end up in plain text in `config.toml`: prefer a scoped token and never push a config containing them.
 
 ## OUTPUT
 
@@ -184,119 +117,40 @@ song_format = "%(album)/%(track_number:02d). %(title)"
 tag_format = "[VibraVid]"
 ```
 
-**`root_path`** — Base directory where videos are saved.
-- Windows: `C:\\MyLibrary\\Folder` or `\\\\MyServer\\Share`
-- Linux/macOS: `Desktop/MyLibrary/Folder`
-- Docker / NAS: set the `VIBRAVID_OUTPUT_ROOT` environment variable instead of editing `config.toml` — the value is applied at startup and overrides this field without touching the persisted config file. Example: `VIBRAVID_OUTPUT_ROOT=/app/Video` (container path matching the bind-mount target).
+- **`root_path`**: base directory. Windows: `C:\\MyLibrary\\Folder` or `\\\\MyServer\\Share`; Linux/macOS: `Desktop/MyLibrary/Folder`. Docker/NAS: set `VIBRAVID_OUTPUT_ROOT` (e.g. `/app/Video`) instead; it overrides this field at startup without touching `config.toml`.
+- **`movie_folder_name`**, **`serie_folder_name`**, **`anime_folder_name`**, **`music_folder_name`**, **`live_folder_name`**: subfolder per content type (defaults `"Movie"`, `"Serie"`, `"Anime"`, `"Music"`, `"Live"`); all accept `%{site_name}`, e.g. `"Movie/%{site_name}"` -> `Movie/Crunchyroll`.
 
-**`movie_folder_name`**, **`serie_folder_name`**, **`anime_folder_name`**, **`music_folder_name`**, **`live_folder_name`** — Subfolder names for each content type (defaults: `"Movie"`, `"Serie"`, `"Anime"`, `"Music"`, `"Live"`). All support the `%{site_name}` placeholder:
+### Format tokens
 
-```
-"Movie/%{site_name}"  ->  "Movie/Crunchyroll"
-"Serie/%{site_name}"  ->  "Serie/Crunchyroll"
-```
+Defaults: `movie_format` = `"%(title_name) (%(title_year))/%(title_name) (%(title_year))"`, `episode_format` = `"%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d)"` (e.g. `Breaking Bad/S01/Pilot S01E05.mkv`). `/` separates folders from the filename.
 
-### Movie Format
+| Token | Movie | Episode | Description |
+|-------|:-----:|:-------:|-------------|
+| `%(title_name)`, `%(title_name_slug)` | x | | Movie title (slug) |
+| `%(title_year)` | x | | Release year (omitted if unavailable) |
+| `%(series_name)`, `%(series_name_slug)` | | x | Series name (slug) |
+| `%(series_year)` | | x | Series release year |
+| `%(season:FORMAT)`, `%(episode:FORMAT)` | | x | Season / episode number with padding |
+| `%(episode_name)`, `%(episode_name_slug)` | | x | Episode title (sanitized / slug) |
+| `%(absolute:FORMAT)` | | x | Absolute episode number, anime only (AnimeUnity/AnimeWorld) |
+| `%(quality)`, `%(language)` | x | x | Video resolution, audio languages |
+| `%(video_codec)`, `%(audio_codec)` | x | x | Codecs |
+| `%(audio_flags)`, `%(sub_flags)` | x | x | Track flags, e.g. `DEFAULT`, `CC-SDH-FORCED` |
+| `%(original_title)`, `%(original_language)` | x | x | Original title / language code (e.g. `ja`) (TMDB key) |
+| `%(tmdb_id)`, `%(tmdb_title)`, `%(imdb_id)` | x | x | TMDB id, TMDB title in the lookup language, IMDb id e.g. `tt0409591` (TMDB key) |
+| `%(tmdb_episode_title)` | | x | TMDB episode title, from `tmdb_id` + season/episode (TMDB key) |
+| `%(tmdb_season_number:FORMAT)` | | x | Real TMDB season number, mapped from absolute/flat numbers when needed (anime) (TMDB key) |
+| `%(tmdb_season_name)` | | x | TMDB season name, e.g. `Season 2`, mapped the same way (TMDB key) |
 
-**Default:** `"%(title_name) (%(title_year))/%(title_name) (%(title_year))"`
+**Padding** (`season`, `episode`, `absolute`, `tmdb_season_number`, `track_number`): `%(season:02d)` -> `01`, `%(season:03d)` -> `001`, `%(season:d)` -> `1`.
 
-```
-%(title_name) (%(title_year))/   ->  folder    Inception (2010)/
-%(title_name) (%(title_year))    ->  filename  Inception (2010).mkv
-```
+Tokens that can't be resolved (no TMDB key, `absolute` on non-anime) are removed together with any surrounding `[]`/`()`.
 
-| Variable | Description |
-|----------|-------------|
-| `%(title_name)` | Movie title |
-| `%(title_name_slug)` | Movie title as slug |
-| `%(title_year)` | Release year (omitted if unavailable) |
-| `%(quality)` | Video resolution |
-| `%(language)` | Audio languages |
-| `%(video_codec)` | Video codec |
-| `%(audio_codec)` | Audio codec |
-| `%(audio_flags)` | Audio track flags, e.g. `DEFAULT` |
-| `%(sub_flags)` | Subtitle track flags, e.g. `CC-SDH-FORCED` |
-| `%(original_title)` | Original-language title (requires TMDB API key) |
-| `%(original_language)` | Original language code, e.g. `ja` (requires TMDB API key) |
-| `%(tmdb_id)` | TMDB ID (requires TMDB API key) |
-| `%(tmdb_title)` | TMDB title in the configured lookup language (requires TMDB API key) |
-| `%(imdb_id)` | IMDb ID, e.g. `tt0409591` (requires TMDB API key) |
+**`song_format`** (default `"%(album)/%(track_number:02d). %(title)"` -> `Discovery/01. One More Time.mp3`): `%(artist)`, `%(artist_slug)`, `%(album)`, `%(album_slug)`, `%(title)`, `%(title_slug)`, `%(year)` (omitted if unavailable), `%(track_number:FORMAT)`.
 
-### Episode Format
+**`tag_format`** (default `"[VibraVid]"`): prefix written in the `title` and `comment` tags (`[VibraVid] Inception`), both by the final retag and the merge `-metadata` flags. `""` disables tagging; any other text replaces the prefix.
 
-**Default:** `"%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d)"`
-
-```
-%(series_name)/     ->  series folder   Breaking Bad/
-S%(season:02d)/     ->  season folder   S01/
-%(episode_name)...  ->  filename        Pilot S01E05.mkv
-```
-
-| Variable | Description |
-|----------|-------------|
-| `%(series_name)` | Series name |
-| `%(series_name_slug)` | Series name as slug |
-| `%(series_year)` | Series release year |
-| `%(season:FORMAT)` | Season number with inline padding (see below) |
-| `%(episode:FORMAT)` | Episode number with inline padding (see below) |
-| `%(episode_name)` | Episode title (sanitized) |
-| `%(episode_name_slug)` | Episode title as slug |
-| `%(absolute:FORMAT)` | Absolute episode number with inline padding — anime only (AnimeUnity/AnimeWorld) |
-| `%(quality)` | Video resolution |
-| `%(language)` | Audio languages |
-| `%(video_codec)` | Video codec |
-| `%(audio_codec)` | Audio codec |
-| `%(audio_flags)` | Audio track flags, e.g. `DEFAULT` |
-| `%(sub_flags)` | Subtitle track flags, e.g. `CC-SDH-FORCED` |
-| `%(original_title)` | Original-language title (requires TMDB API key) |
-| `%(original_language)` | Original language code, e.g. `ja` (requires TMDB API key) |
-| `%(tmdb_id)` | TMDB ID (requires TMDB API key) |
-| `%(tmdb_title)` | TMDB title in the configured lookup language (requires TMDB API key) |
-| `%(tmdb_episode_title)` | TMDB episode title, resolved from `%(tmdb_id)` + season/episode number (requires TMDB API key) |
-| `%(tmdb_season_number:FORMAT)` | Real TMDB season number, mapped from an absolute/flat episode number when needed (anime) — supports inline padding like `season`/`episode` (requires TMDB API key) |
-| `%(tmdb_season_name)` | TMDB season name, e.g. `Season 2`, mapped the same way (requires TMDB API key) |
-| `%(imdb_id)` | IMDb ID, e.g. `tt0409591` (requires TMDB API key) |
-
-**Inline padding syntax (for `season`, `episode`, `absolute`, and `track_number` in Song Format below):**
-
-| Token | Result (n=1) | Description |
-|-------|-------------|-------------|
-| `%(season:02d)` | `01` | Zero-pad to 2 digits |
-| `%(season:03d)` | `001` | Zero-pad to 3 digits |
-| `%(season:d)` | `1` | No padding |
-
-> Tokens that cannot be resolved (e.g. TMDB tokens without an API key, or `%(absolute)` on non-anime services) are removed from the filename together with any surrounding `[]`/`()` wrapper, so they never leak as literal text.
-
-### Song Format
-
-**Default:** `"%(album)/%(track_number:02d). %(title)"`
-
-```
-%(album)/                        ->  folder    Discovery/
-%(track_number:02d). %(title)    ->  filename  01. One More Time.mp3
-```
-
-| Variable | Description |
-|----------|-------------|
-| `%(artist)` | Artist name |
-| `%(artist_slug)` | Artist name as slug |
-| `%(album)` | Album name |
-| `%(album_slug)` | Album name as slug |
-| `%(title)` | Track title |
-| `%(title_slug)` | Track title as slug |
-| `%(year)` | Release year (omitted if unavailable) |
-| `%(track_number:FORMAT)` | Track number with inline padding (see above) |
-
-### Tag Format
-
-**Default:** `"[VibraVid]"`
-
-Prefix written in the `title` and `comment` tags of the produced file (e.g. `[VibraVid] Inception`). It is applied both by the in-place retag at the end of a download and by the `-metadata` flags used during the merge.
-
-- Set it to `""` to disable tagging entirely: no retag and no metadata tags are written.
-- Any other text replaces the prefix, e.g. `"[MyPrefix]"` -> `[MyPrefix] Inception`.
-
-### Recommended configuration (with a TMDB API key)
+Recommended with a TMDB key:
 
 ```toml
 movie_format = "%(title_name) (%(title_year)) [%(tmdb_id)]/%(title_name) (%(title_year)) [%(tmdb_title)] [%(quality)]"
@@ -329,88 +183,63 @@ write_sidecars = false
 cleanup_tmp_folder = true
 ```
 
-### Performance Settings
-
 | Key | Default | Description |
 |-----|---------|-------------|
-| `auto_select` | `true` | Automatically select streams based on filters. When `false`, enables interactive track selection before download |
-| `delay_after_download` | `0` | Delay (seconds) applied after each movie or episode download |
-| `skip_download` | `false` | Skip the download step and process existing files |
-| `thread_count` | `5` | Number of concurrent segment requests for a single stream |
-| `max_speed_mbps` | `0` | Cap on the segment download rate in MB/s, applied to each stream (video/audio) separately; `0` = unlimited. Overridable per run with `--max-speed`. |
-| `subtitle_resolve_workers` | `4` | Number of HLS subtitle renditions resolved/downloaded concurrently. `1` restores the original strictly-sequential behaviour |
-| `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 closed captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`, no separate subtitle file) from the downloaded video into a subtitle track. Opt-in because it requires decoding the whole video, adding extra time/CPU per download |
-| `cleanup_tmp_folder` | `true` | Remove temporary files after download |
-| `embed_poster` | `false` | Embed a poster/still into the downloaded file: the matching TMDB artwork if found, otherwise the site's own poster/still as a fallback |
-| `write_sidecars` | `false` | Write a Kodi/Jellyfin/Emby `<name>.nfo` plus `<name>-poster.jpg` (films) / `<name>-thumb.jpg` (episodes) next to each downloaded file, only when the metadata match is reliable. Plex ignores these files. See [Metadata Providers](#metadata-providers-tmdb-imdb-tvdb). CLI: `--sidecars` / `--no-sidecars` |
+| `auto_select` | `true` | Select streams from the filters; `false` = interactive track selection |
+| `delay_after_download` | `0` | Seconds to wait after each movie/episode |
+| `skip_download` | `false` | Skip downloading and process existing files |
+| `thread_count` | `5` | Concurrent segment requests per stream |
+| `max_speed_mbps` | `0` | Rate cap in MB/s per stream (video/audio separately); `0` = unlimited. CLI: `--max-speed` |
+| `subtitle_resolve_workers` | `4` | HLS subtitle renditions resolved concurrently; `1` = sequential |
+| `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`) into a subtitle track. Opt-in: needs decoding the whole video (extra time/CPU) |
+| `cleanup_tmp_folder` | `true` | Remove temporary files afterwards |
+| `embed_poster` | `false` | Embed a poster/still: matching TMDB artwork, else the site's own |
+| `write_sidecars` | `false` | Write `.nfo` + poster/thumb next to each download when the match is reliable (see [Metadata providers](#metadata-providers)). CLI: `--sidecars` / `--no-sidecars` |
+| `use_curl_cffi_segments` | `false` | Download segments via `curl_cffi` (TLS/JA3 impersonation) instead of Velora |
+| `segment_delay_seconds` | `0` | Fixed delay before each segment request (CDN rate limits) |
+| `segment_delay_jitter_seconds` | `0` | Random 0..N seconds added on top of the delay |
+| `live_max_empty_polls` | `8` | Live HLS/DASH: consecutive polls without new segments (or failures) before the stream is considered ended |
+| `max_token_refresh_rounds` | `10` | Retry rounds when segments fail mid-download (expired token -> 403, transient 503): fresh manifest/token, retry only failed segments |
+| `token_refresh_backoff_seconds` | `4.0` | Wait = `backoff x round`, capped at 20s |
+| `token_refresh_stall_rounds` | `3` | Give up after this many consecutive rounds without progress |
 
+### Stream selection filters
 
-### Segment Throttling, Live Streams & Token Refresh
+`select_video`, `select_audio` and `select_subtitle` choose which tracks are downloaded.
 
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `use_curl_cffi_segments` | `false` | Download segments through `curl_cffi` (TLS/JA3 fingerprint impersonation) instead of the default Velora HTTP backend. |
-| `segment_delay_seconds` | `0` | Fixed delay inserted before each segment request — throttles download speed to stay under a CDN's rate limit |
-| `segment_delay_jitter_seconds` | `0` | Random jitter (0 to this value, seconds) added on top of `segment_delay_seconds` so requests aren't perfectly periodic |
-| `live_max_empty_polls` | `8` | Live HLS/DASH downloads only: number of consecutive polls with no new segments (or poll failures) before VibraVid concludes the live stream has ended and stops |
-| `max_token_refresh_rounds` | `10` | Maximum retry rounds when segments fail mid-download (e.g. the CDN manifest token expired -> HTTP 403, or a transient 503) — VibraVid re-requests a fresh manifest/token and retries just the failed segments |
-| `token_refresh_backoff_seconds` | `4.0` | Base backoff between token-refresh rounds; actual wait is `backoff × round number`, capped at 20s |
-| `token_refresh_stall_rounds` | `3` | Give up early if this many consecutive refresh rounds make no progress (same or more segments still failing), instead of exhausting all `max_token_refresh_rounds` |
-
-### Stream Selection Filters
-
-Use `select_video`, `select_audio`, and `select_subtitle` to control which tracks are downloaded.
-
-**Video (`select_video`):**
+**Video**
 
 | Value | Description |
 |-------|-------------|
-| `"best"` | Best available resolution |
+| `"best"` / `"worst"` | Best / worst resolution |
 | `"hybrid"` | Best HDR (non-DV) base + worst Dolby Vision companion |
-| `"worst"` | Worst available resolution |
-| `"1080"` | Exact height (falls back to worst if not found) |
-| `"1080,H265"` | Height + codec constraint |
-| `"1080\|best"` | Height with fallback to best |
-| `"1080\|best,H265"` | Height + codec with fallback to best |
-| `"b=8000:f=best"` | Bitrate cap (kbps) — best within range. Useful when the highest-bitrate rendition isn't decryptable with your DRM device/security level |
-| `"b=1000-8000:f=best"` | Bitrate range (kbps) — best within range |
-| `"b=1000-:f=best"` | Bitrate floor only (no upper bound) — best within range |
+| `"1080"` | Exact height (falls back to worst) |
+| `"1080,H265"` | Height + codec |
+| `"1080\|best"`, `"1080\|best,H265"` | Same, falling back to best |
+| `"b=8000:f=best"` | Bitrate cap (kbps); useful when the top rendition isn't decryptable with your CDM level |
+| `"b=1000-8000:f=best"`, `"b=1000-:f=best"` | Bitrate range / floor only |
 | `"false"` | Skip video |
 
-Native `key=value` filters combine multiple constraints (resolution, codec, bitrate, id, fallback) in one string, joined by `:` — keys are `r=` (resolution), `c=` (codec), `b=` (bitrate), `i=` (manifest id, regex), `f=` (fallback: `best`/`worst`/`all`), e.g. `"r=1080:c=hvc1:f=best"`.
+Native `key=value` filters combine constraints with `:`: `r=` resolution, `c=` codec, `b=` bitrate, `i=` manifest id (regex), `f=` fallback (`best`/`worst`/`all`), e.g. `"r=1080:c=hvc1:f=best"`.
 
-**Audio (`select_audio`):**
+**Audio**
 
 | Value | Description | If not found |
 |-------|-------------|--------------|
-| `"best"` | Best bitrate per language | Selects best across all |
-| `"worst"` | Worst bitrate per language | Selects worst across all |
-| `"all"` | All audio tracks | Downloads all |
-| `"default"` | Streams marked as default | DROP |
-| `"non-default"` | Streams NOT marked as default | DROP |
-| `"ita"` | Italian audio | DROP |
-| `"ita\|it"` | Pipe-separated language codes | DROP if none found |
-| `"ita,MP4A"` | Language + codec | DROP if combination not found |
-| `"ita\|best"` | Language with fallback to best | Fallback to best |
-| `"ita\|best,AAC"` | Language + codec with fallback | Fallback to best |
-| `"b=64-192:f=best"` | Bitrate range (kbps) — best within range | Ignores range if no match |
-| `"1ita\|2eng"` | Numbered slots — exclusive priority | Skips the whole download |
-| `"false"` | Skip audio | — |
+| `"best"` / `"worst"` | Best / worst bitrate per language | Best / worst across all |
+| `"all"` | All tracks | Downloads all |
+| `"default"` / `"non-default"` | Streams marked / not marked default | DROP |
+| `"ita"` | Italian | DROP |
+| `"ita\|it"` | Pipe-separated languages | DROP if none |
+| `"ita,MP4A"` | Language + codec | DROP |
+| `"ita\|best"`, `"ita\|best,AAC"` | Language (+ codec) with fallback | Falls back to best |
+| `"b=64-192:f=best"` | Bitrate range (kbps) | Ignores range |
+| `"1ita\|2eng"` | Numbered slots, exclusive priority | Skips the whole download |
+| `"false"` | Skip audio | n/a |
 
-Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (language + codec + fallback).
+Same native keys as video plus `l=` language, e.g. `"l=ita:c=aac:f=best"`.
 
-**Subtitle (`select_subtitle`):**
-
-| Value | Description |
-|-------|-------------|
-| `"all"` | All subtitles |
-| `"default"` | Streams marked as default |
-| `"non-default"` | Streams NOT marked as default |
-| `"ita\|eng"` | Pipe-separated language codes |
-| `"ita_forced"` | Language with flag (`forced`, `cc`, `sdh`) |
-| `"ita_forced\|eng_cc"` | Multiple languages with flags |
-| `"false"` | Skip subtitles |
+**Subtitle**: `"all"`, `"default"`, `"non-default"`, `"ita|eng"` (languages), `"ita_forced"` (flags `forced`, `cc`, `sdh`), `"ita_forced|eng_cc"`, `"false"`.
 
 ## CODEC
 
@@ -419,11 +248,9 @@ Same native keys as video, plus `l=` for language, e.g. `"l=ita:c=aac:f=best"` (
 dv_auto = true
 ```
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `dv_auto` | `true` | Automatically pair a Dolby Vision companion with the main video (at the cheapest available quality) when `select_video` picks a non-DV video and the title also ships a DV variant, even without `select_video="hybrid"`. Set to `false` to only pair a companion when `select_video="hybrid"` is explicitly requested |
+`dv_auto` (default `true`): when `select_video` picks a non-DV video and the title ships a DV variant, also pair the DV companion (at the cheapest quality) even without `select_video="hybrid"`. `false` = only pair with `hybrid`.
 
-## PROCESS (Post-Processing)
+## PROCESS
 
 ```toml
 [PROCESS]
@@ -445,29 +272,26 @@ extension = "mkv"
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `engine` | `"ffmpeg"` | Muxing engine used to combine video, audio and subtitle tracks. `ffmpeg` or `mkvmerge` (`mkvmerge` requires a **full installation**) |
-| `use_gpu` | `false` | Enable hardware acceleration. GPU type is auto-detected at runtime: `cuda` (NVIDIA), `qsv` (Intel), `vaapi` (AMD) |
-| `param_video` | H.265/HEVC | FFmpeg video encoding parameters, e.g. `["-c:v", "libx265", "-crf", "28", "-preset", "medium"]` |
-| `param_audio` | Opus 128k | FFmpeg audio encoding parameters, e.g. `["-c:a", "libopus", "-b:a", "128k"]` |
-| `param_song` | `[]` | FFmpeg re-encode parameters applied to downloaded music tracks. |
-| `param_final` | `["-c", "copy"]` | Final FFmpeg parameters. When set, takes full precedence over `param_video` and `param_audio` |
-| `audio_order` | `[]` | Order of audio tracks in the output, e.g. `["ita", "eng"]` |
-| `subtitle_order` | `[]` | Order of subtitle tracks in the output, e.g. `["ita", "eng"]` |
-| `merge_audio` | `true` | Merge all audio tracks into a single output file |
-| `merge_subtitle` | `true` | Merge all subtitle tracks into a single output file |
-| `subtitle_disposition_language` | `"it-it_forced"` | Mark a specific subtitle track as default/forced |
-| `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio tracks instead of dropping them at selection time. ffmpeg cannot demux DTS:X, so this requires mkvmerge to be installed.
-| `extension` | `"mkv"` | Output container format: `"mkv"` or `"mp4"` |
+| `engine` | `"ffmpeg"` | Muxer: `ffmpeg` or `mkvmerge` (needs a **full installation**) |
+| `use_gpu` | `false` | Hardware acceleration, auto-detected: `cuda` (NVIDIA), `qsv` (Intel), `vaapi` (AMD) |
+| `param_video` | H.265 | FFmpeg video encoding parameters |
+| `param_audio` | Opus 128k | FFmpeg audio encoding parameters |
+| `param_song` | `[]` | FFmpeg re-encode parameters for music tracks |
+| `param_final` | `["-c", "copy"]` | Final FFmpeg parameters; when set, takes precedence over `param_video`/`param_audio` |
+| `audio_order`, `subtitle_order` | `[]` | Track order in the output, e.g. `["ita", "eng"]` |
+| `merge_audio`, `merge_subtitle` | `true` | Merge all audio / subtitle tracks into the output file |
+| `subtitle_disposition_language` | `"it-it_forced"` | Subtitle track to mark default/forced |
+| `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio instead of dropping it at selection (ffmpeg can't demux DTS:X: needs mkvmerge) |
+| `extension` | `"mkv"` | Output container: `"mkv"` or `"mp4"` (CLI overrides per run) |
+| `force_subtitle` | `"auto"` | Subtitle handling before remux (below) |
 
-**`force_subtitle`** — Controls how subtitles are handled before remuxing:
+| `force_subtitle` | Behaviour |
+|------------------|-----------|
+| `"auto"` | Rename/convert by detected format; VTT is sanitized (unmatched `<` replaced) to avoid data loss when muxed as SRT |
+| `"copy"` | Mux the original file as-is (no conversion, no VTT sanitization) |
+| `"srt"` / `"vtt"` / `"ass"` | Force-convert all subtitles with FFmpeg (sanitization applied for `vtt`) |
 
-| Value | Behaviour |
-|-------|-----------|
-| `"auto"` (default) | Subtitles are renamed/converted based on their detected format. VTT files are sanitized (unmatched `<` replaced) to prevent data loss when muxed as SRT |
-| `"copy"` | No conversion or renaming — the original file is muxed as-is. Also skips VTT sanitization |
-| `"srt"` / `"vtt"` / `"ass"` | Force-convert all subtitles to the specified format using FFmpeg, with sanitization applied for `vtt` |
-
-See `VibraVid/core/processors/helper/ex_sub.py` in the repository for conversion logic.
+Conversion logic: `VibraVid/core/processors/helper/ex_sub.py`.
 
 ## REQUESTS
 
@@ -487,26 +311,15 @@ https = "http://localhost:8888"
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `timeout` | `15` | Request timeout in seconds |
-| `max_retry` | `4` | Maximum retry attempts for failed requests |
-| `verify` | `true` | Verify TLS/SSL certificates on outgoing requests and segment downloads. |
-| `use_proxy` | `false` | Enable proxy support for HTTP requests |
-| `proxy_scope` | `scrap+down` | Where the proxy is applied: `scrap`, `down`, or `scrap+down` (see below) |
-| `proxy.http` | — | Proxy URL for HTTP targets |
-| `proxy.https` | — | Proxy URL for HTTPS targets |
-| `bypasser_url` | `http://localhost:8192` | Endpoint of the **bypasser** sidecar that solves monochrome.tf's Cloudflare Turnstile widget for the **monochrome** Amazon Music download. **Required** — there is no in-process fallback. Keep the localhost default for local runs; in Docker the `BYPASSER_URL` env in `docker-compose.yml` overrides it to the `bypasser` service. |
+| `timeout` | `15` | Request timeout (seconds) |
+| `max_retry` | `4` | Retries for failed requests |
+| `verify` | `true` | Verify TLS certificates (requests and segment downloads) |
+| `use_proxy` | `false` | Enable the proxy |
+| `proxy_scope` | `scrap+down` | `scrap` (VibraVid's HTTP client: search, metadata, manifests, licenses), `down` (Velora segment downloads) or `scrap+down`. Invalid values fall back to `scrap+down`. CLI: `--proxy-scope` |
+| `proxy.http`, `proxy.https` | - | Proxy URL for HTTP / HTTPS targets (the key is the *target* scheme, not the proxy protocol) |
+| `bypasser_url` | `http://localhost:8192` | **Required** bypasser sidecar that solves monochrome.tf's Cloudflare Turnstile for the **monochrome** Amazon Music download (no in-process fallback). Docker: overridden by `BYPASSER_URL` in `docker-compose.yml` |
 
-**Proxy scope** — when `use_proxy` is `true`, `proxy_scope` decides *which* traffic goes through the proxy:
-
-| Value | Effect |
-|-------|--------|
-| `scrap` | Only VibraVid's own HTTP client (search, metadata, manifests, DRM licenses) |
-| `down` | Only the Velora download engine (media/subtitle segment downloads) |
-| `scrap+down` | Both (default) |
-
-Any invalid value falls back to `scrap+down`. Override per run from the CLI with `--proxy-scope scrap|down|scrap+down`.
-
-**SOCKS5 support** — the `http`/`https` keys refer to the **target** URL scheme, not the proxy protocol. The value can be an HTTP **or** a SOCKS5 proxy URL. Use `socks5h://` (with the `h`) to resolve DNS through the proxy — recommended for geo-restricted sites and to avoid DNS leaks. Authentication is supported via `user:pass@`.
+The proxy can be HTTP or SOCKS5. Use `socks5h://` to resolve DNS through the proxy (geo-restricted sites, no DNS leaks); `user:pass@` is supported:
 
 ```toml
 [REQUESTS.proxy]
@@ -530,36 +343,21 @@ token = ""
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `use_cdm` | `true` | Enable CDM-based key extraction. When `false`, only database/vault lookups are attempted |
-| `cdm` | `"search"` | Default CDM for every service that doesn't set its own `cdm` in `login.toml`: `"search"` (first `.wvd` / `.prd` in the binary folder), a device file name, a remote CDM id, or a list. See [Choosing the CDM](#choosing-the-cdm-cdm) |
-| `bypass_vault_cache` | `false` | Skip the DRM key vault lookup and force a fresh CDM license request every run, instead of reusing a previously-seen key. |
-| `log_engine_output` | `false` | Log the decrypt engine's own stdout/stderr output — equivalent to the CLI's `--log-decryptor-output`. Off by default since it's verbose; useful when a decrypt is failing and you need the raw engine output |
-| `vault` | — | Optional external DRM key store(s), queried before CDM extraction |
+| `use_cdm` | `true` | CDM key extraction; `false` = only vault lookups |
+| `cdm` | `"search"` | Default CDM for services without their own (see [Choosing the CDM](#choosing-the-cdm-cdm)) |
+| `bypass_vault_cache` | `false` | Skip the vault lookup and request a fresh license every run |
+| `log_engine_output` | `false` | Log the decrypt engine's stdout/stderr (verbose). CLI: `--log-decryptor-output` |
+| `vault` | - | External key store(s), queried before CDM extraction |
 
 ### Multiple / self-hosted DRM vaults
 
-Add as many entries as you want under `[DRM.vault]`, one `[DRM.vault.<name>]` table each. They're queried in the order
-they're declared, stopping once every KID is resolved.
+One `[DRM.vault.<name>]` table per vault, queried in declaration order until every KID is resolved.
 
 ```toml
-[DRM.vault.default]
-url = "https://drm-db.server66.workers.dev"
-token = ""
-
 [DRM.vault.myvault]
 url = "https://drm.example.com"
 token = "..."
 protocol = "custom"
-
-[DRM.vault.public_api]
-url = "https://vault.example.org"
-token = "..."
-protocol = "api"
-
-[DRM.vault.public_json]
-url = "https://vault.example.net"
-token = "..."
-protocol = "json"
 
 [DRM.vault.query_vault]
 url = "https://keys.example.net/"
@@ -575,26 +373,20 @@ protocol = "query"
 | `json` | `POST {url}` `{"method", "params", "token"}` (JSON-RPC) | only with `save_keys` |
 | `query` | `GET {url}?service=&kid=&username=&password=` | no |
 
-- `protocol` is optional: when it's missing it's auto-detected once and cached in
-  `.cache/services/vault/universal_<name>.json` (delete the file to detect it again).
-- `default` (or `vault_1`, its old name) is the built-in vault. It logs as `claudio`.
-- Resolved keys show the vault name and its position in `vault`, starting at 1: `kid:key | *claudio [1]`.
-- Newly extracted keys are written back to `custom` vaults, and to `api`/`json` ones only with
-  `save_keys = true` (default `false`).
-- When flux proves a stored key wrong, the vault that returned it gets the corrected key in its place (one key per KID,
-  its warning counter goes back to 0). The default vault keeps the replaced key in `drm_keys_replaced`.
-- Vaults that publish their service list get queried under the service matching the platform, then
-  `generic`. The others are queried under `generic`.
-- A vault answering `429` is skipped for the `retry_after` it asks for.
+- `protocol` is optional: auto-detected once and cached in `.cache/services/vault/universal_<name>.json` (delete to re-detect).
+- `default` (old name `vault_1`) is the built-in vault, logged as `claudio`. Resolved keys show `kid:key | *claudio [1]` (vault name + position).
+- New keys are written back to `custom` vaults, and to `api`/`json` ones only with `save_keys = true` (default `false`).
+- When flux proves a stored key wrong, the vault that returned it gets the corrected key (one key per KID, warning counter reset). The default vault keeps the old one in `drm_keys_replaced`.
+- Vaults that publish a service list are queried under the matching service, then `generic`; others under `generic`.
+- A vault answering `429` is skipped for the requested `retry_after`.
 - Optional fields: `service` (force a namespace), `timeout` (seconds, default `10`).
 
 `Conf/config.toml` is tracked by git: don't commit third-party vault tokens.
 
-### Remote CDM Services
+### Remote CDMs
 
-A remote CDM is declared once under `[DRM.remote_cdm.<id>]` in `config.toml`; the id is free text (except `search` and `default`, which are reserved) and is what you then put in `cdm`. The fields depend on the kind of remote CDM.
+Declare once under `[DRM.remote_cdm.<id>]`; the id is free text (not `search`/`default`) and is what you put in `cdm`.
 
-**Widevine (pywidevine remote CDM):**
 ```toml
 [DRM.remote_cdm.my_widevine]
 device_type = "ANDROID"
@@ -603,19 +395,7 @@ security_level = 3
 host = "https://cdrm-project.com/remotecdm/widevine"
 secret = "CDRM"
 device_name = "public"
-```
 
-| Key | Description |
-|-----|-------------|
-| `device_type` | Device model: `"ANDROID"` or `"CHROME"` |
-| `system_id` | Widevine system ID (default `22590` for Android) |
-| `security_level` | Security level 1–3 (3 = L3) |
-| `host` | Remote CDM server URL |
-| `secret` | Authentication secret |
-| `device_name` | Device identifier registered on the remote service |
-
-**PlayReady (pyplayready remote CDM):**
-```toml
 [DRM.remote_cdm.my_playready]
 device_name = "public"
 security_level = 3000
@@ -623,57 +403,49 @@ host = "https://cdrm-project.com/remotecdm/playready"
 secret = "CDRM"
 ```
 
-| Key | Description |
-|-----|-------------|
-| `device_name` | Device identifier registered on the remote service |
-| `security_level` | Security level (e.g. `3000` for SL3000) |
-| `host` | Remote CDM server URL |
-| `secret` | Authentication secret |
+| Key | Widevine | PlayReady | Description |
+|-----|:--------:|:---------:|-------------|
+| `device_type` | x | | `"ANDROID"` or `"CHROME"` |
+| `system_id` | x | | Widevine system ID (default `22590` for Android) |
+| `security_level` | x | x | Widevine 1-3; PlayReady e.g. `3000` for SL3000 |
+| `host` | x | x | Remote CDM server URL |
+| `secret` | x | x | Authentication secret |
+| `device_name` | x | x | Device registered on the remote service |
 
-The system an id serves (Widevine or PlayReady) is inferred from its fields: `device_type` or `type = "custom_api_1"` mean Widevine, a `device_name` starting with `SL` means PlayReady, and a block without `device_type` is treated as PlayReady. Add `system = "widevine"` or `system = "playready"` to set it explicitly.
+The system (Widevine/PlayReady) is inferred: `device_type` or `type = "custom_api_1"` = Widevine, a `device_name` starting with `SL` = PlayReady, no `device_type` = PlayReady. Set `system = "widevine"` / `"playready"` to force it.
 
 ### Hosted remote CDM API
 
-A third-party hosted CDM service (Widevine and PlayReady) reachable over HTTP. Declare it as a remote CDM with `type = "custom_api_1"`, fill in `host` and `secret` from your provider, and select it with `cdm`:
+A third-party hosted CDM (Widevine and PlayReady) over HTTP: same `[DRM.remote_cdm.<id>]` table with `type = "custom_api_1"`, plus `host` and `secret` from your provider.
 
 ```toml
-[DRM]
-cdm = ["hosted_widevine", "hosted_playready"]
-
 [DRM.remote_cdm.hosted_widevine]
 type = "custom_api_1"
 host = "YOUR_PROVIDER_API_URL"
 secret = "YOUR_PROVIDER_API_KEY"
 device_name = "L3"
-
-[DRM.remote_cdm.hosted_playready]
-type = "custom_api_1"
-host = "YOUR_PROVIDER_API_URL"
-secret = "YOUR_PROVIDER_API_KEY"
-device_name = "SL3"
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `type` | - | Must be `"custom_api_1"`. Without it the block is a standard pywidevine / pyplayready remote CDM (above) |
-| `host` | required | Your provider's API URL |
-| `secret` | required | Your provider's API key |
-| `device_name` | `ChromeCDM` | Widevine: `ChromeCDM`, `L1`, `L2` or `L3`. PlayReady: `SL2` or `SL3` |
-| `auth_header` | `x-api-key` | HTTP header name the provider expects the key under; set it only if your provider requires a different one |
+| `type` | - | Must be `"custom_api_1"` (otherwise a standard pywidevine/pyplayready remote CDM) |
+| `host`, `secret` | required | Provider API URL and key |
+| `device_name` | `ChromeCDM` | Widevine: `ChromeCDM`, `L1`, `L2`, `L3`. PlayReady: `SL2`, `SL3` |
+| `auth_header` | `x-api-key` | Header the provider expects the key in |
 | `service_name` | - | Optional service tag |
 
 ### Choosing the CDM (`cdm`)
 
-`cdm` picks which CDM extracts the keys. It can be set in `config.toml` under `[DRM]` (the default for every service) and in a service's section of `login.toml` (only for that service). Each DRM system, Widevine and PlayReady, has exactly one CDM at a time: a local device file or a remote CDM, never both.
+`cdm` picks the CDM that extracts keys. Set it in `[DRM]` of `config.toml` (default for all services) and/or in a service section of `login.toml` (that service only). Each system (Widevine, PlayReady) uses exactly one CDM at a time: a local device file or a remote CDM.
 
 | `cdm` entry | Meaning |
 |-------------|---------|
-| `"search"` | The first `.wvd` (Widevine) and `.prd` (PlayReady) found in the binary folder, see [Local CDM Devices](#local-cdm-devices) |
-| ends with `.wvd` / `.prd` | That device file, looked up in the `wvd/` (Widevine) or `prd/` (PlayReady) directory |
-| `"default"` | Only in `login.toml`: use the `cdm` of `[DRM]`. An empty `cdm = ""` means the same |
-| anything else | The id of a remote CDM from `DRM.remote_cdm` |
+| `"search"` | First `.wvd` (Widevine) and `.prd` (PlayReady) in the binary folder ([Local CDM devices](#local-cdm-devices)) |
+| ends with `.wvd` / `.prd` | That file, looked up in `wvd/` or `prd/` |
+| `"default"` | `login.toml` only: use `[DRM]`'s `cdm` (`cdm = ""` means the same) |
+| anything else | Id of a remote CDM from `DRM.remote_cdm` |
 
-The value is a single entry or a list with one entry per system. A system is resolved in this order: the service's `cdm` in `login.toml`, then `cdm` in `[DRM]`, then `"search"`. A service that only names a `.wvd` therefore keeps the `[DRM]` choice for PlayReady. A file that is missing, or an id that doesn't exist, stops the download with an error that lists the known ids.
+The value is one entry or a list with one entry per system. Per system the order is: service `cdm` in `login.toml`, then `[DRM]`, then `"search"` (a service naming only a `.wvd` keeps the `[DRM]` choice for PlayReady). A missing file or unknown id stops the download with an error listing the known ids. The CLI `--cdm` ([cli](cli.md)) wins over both for one run.
 
 ```toml
 # config.toml: default for everyone
@@ -685,37 +457,9 @@ cdm = ["my_widevine", "my_playready.prd"]
 cdm = "mine.wvd"
 ```
 
-The `--cdm` option of the [command line](cli.md) sits above both: for one run, it wins over `login.toml` and `[DRM]`.
-
-#### Which CDM was used
-
-Each time keys are requested, the console prints one line: the device file (name only, no path) with its `SysID` (`.wvd`) or `Model` (`.prd`), or `remote` plus the device name of a remote CDM, and why it was picked.
-
-```
-[+] device_l3.wvd | SysID: 22594 | why: search
-[+] tv_sl3000.prd | Model: TPV AOC 50U6185 | why: config.toml [DRM]
-[+] remote L1 | why: login.toml 'mysite', min_height 1080
-```
-
-| Text after `why:` | Meaning |
-|-------------------|---------|
-| `--cdm` | Given on the command line |
-| `login.toml '<service>'` (plus `, min_height 1080` when a quality rule picked it) | The service's own `cdm` |
-| `config.toml [DRM]` | The default `cdm` of `[DRM]` |
-| `search` | The first device file found in the binary folder |
-
-The security level and the full path of the device go to the log file instead.
-
-#### Checking the settings at startup
-
-When the program starts, every `cdm` is checked, whatever the video height: the `--cdm` option, each service in `login.toml` and `[DRM]`. A missing device file, an unknown remote id, a reserved id (`search`, `default`) or a malformed quality rule is printed as a warning right away, instead of failing later when the keys are needed. A mistake in `--cdm` stops the run, since it was asked for explicitly; one in the files only warns, because downloads without DRM don't need a CDM.
-
-#### CDM by video quality
-
-A list entry can be a table that applies only to a range of video heights: `min_height` and `max_height` (both inclusive, both optional). The `cdm` inside it is any of the entries above, or a list of them. For each system the first entry that matches wins, and an entry without limits always matches, so put it last.
+**CDM by video quality**: a list entry can be a table limited to a height range, with `min_height` / `max_height` (inclusive, both optional) and a `cdm` (any entry above, or a list). Per system the first matching entry wins; an entry without limits always matches, so put it last. The height compared is the tallest selected video (0 for audio only), since one manifest uses one license session. No match falls through to the next level (`[DRM]`, then `"search"`).
 
 ```toml
-# Remote L1 CDM for 1080p and above, local L3 device file below
 [mysite]
 cdm = [
   { min_height = 1080, cdm = "my_l1_remote" },
@@ -723,14 +467,29 @@ cdm = [
 ]
 ```
 
-The height compared is the tallest video selected for the download (0 when only audio is selected), because one manifest uses a single license session. Entries that match no height fall through to the next level (`[DRM]`, then `"search"`).
+**Which CDM was used**: each key request prints one line: device file name (no path) with `SysID` (`.wvd`) or `Model` (`.prd`), or `remote` + device name, and why it was picked. The security level and full path go to the log file.
+
+```
+[+] device_l3.wvd | SysID: 22594 | why: search
+[+] tv_sl3000.prd | Model: TPV AOC 50U6185 | why: config.toml [DRM]
+[+] remote L1 | why: login.toml 'mysite', min_height 1080
+```
+
+| After `why:` | Meaning |
+|--------------|---------|
+| `--cdm` | Command line |
+| `login.toml '<service>'` (+ `, min_height 1080` for quality rules) | The service's own `cdm` |
+| `config.toml [DRM]` | `[DRM]`'s default `cdm` |
+| `search` | First device file in the binary folder |
+
+**Startup check**: every `cdm` (`--cdm`, each service in `login.toml`, `[DRM]`) is validated at startup regardless of height. A missing file, unknown remote id, reserved id (`search`, `default`) or malformed quality rule is warned right away. A wrong `--cdm` stops the run; mistakes in the files only warn (non-DRM downloads need no CDM).
 
 !!! note
     `prefer_remote_cdm` and the inline `[DRM.widevine]` / `[DRM.playready]` blocks no longer exist: declare the remote CDM under `[DRM.remote_cdm.<id>]` and select it with `cdm`.
 
-### Local CDM Devices
+### Local CDM devices
 
-To use local CDM device files instead of remote services, place them in the binary directory resolved at runtime:
+Put device files in the binary directory (override with `VIBRAVID_BINARY_DIR`, e.g. `/home/user_name/.local/bin/binary`):
 
 | Platform | Binary directory |
 |----------|------------------|
@@ -738,12 +497,8 @@ To use local CDM device files instead of remote services, place them in the bina
 | Linux | `~/.local/bin/binary/VibraVid` |
 | macOS | `~/Applications/binary/VibraVid` |
 
-Override it with `VIBRAVID_BINARY_DIR` if you need a different path, for example `/home/user_name/.local/bin/binary`. Inside it:
-
 - `tools/`: executables (ffmpeg, yt-dlp, velora, flux, ...) and `.versions.json`
-- `wvd/`: **Widevine** `.wvd` files (from pywidevine)
-- `prd/`: **PlayReady** `.prd` files (from pyplayready)
+- `wvd/`: **Widevine** `.wvd` files (pywidevine)
+- `prd/`: **PlayReady** `.prd` files (pyplayready)
 
-Files left in the previous flat location (`C:\binary`, `~/.local/bin/binary`, `~/Applications/binary`) are still found, so nothing has to be moved by hand.
-
-With `cdm = "search"` (the default) the first `.wvd` and `.prd` found are used. To keep several files and pick one, name it in `cdm`, for example `cdm = "mine.wvd"`.
+Files in the old flat location (`C:\binary`, `~/.local/bin/binary`, `~/Applications/binary`) are still found. With `cdm = "search"` the first `.wvd`/`.prd` is used; to keep several, name one, e.g. `cdm = "mine.wvd"`.

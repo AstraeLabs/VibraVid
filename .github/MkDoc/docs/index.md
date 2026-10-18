@@ -8,61 +8,37 @@ DRM HLS/DASH downloader.
 
 ## Installation
 
-### Option 1 — Manual Clone
+### Manual clone
 
 ```bash
 git clone https://github.com/AstraeLabs/VibraVid.git
 cd VibraVid
 ```
 
-Then install and run with either **pip** or **uv**:
+| | pip | uv |
+|---|---|---|
+| Install | `pip install -r requirements.txt` | `uv sync` |
+| Run | `python manual.py` | `uv run manual.py` |
+| Sync deps | `pip install -r requirements.txt --upgrade` | `uv sync --upgrade` |
 
-**pip:**
-```bash
-pip install -r requirements.txt   # install
-python manual.py                  # run
-pip install -r requirements.txt --upgrade  # sync deps
-```
+### Unraid
 
-**uv:**
-```bash
-uv sync              # install
-uv run manual.py     # run
-uv sync --upgrade  # sync deps
-```
+Find the app in the Community Applications.
 
-### Option 2 — Unraid
-
-```
-You can find the app in the Community Application
-```
-
-### Option 3 — Android/Termux (automatic)
+### Android/Termux (automatic)
 
 !!! important
-    This script requires **Termux**. Do **NOT** install Termux from the Google Play Store, as
-    that version is outdated and abandoned due to Android policy restrictions. Instead,
-    download the latest official version from:
+    Requires **Termux**. Do **NOT** use the Google Play version (outdated and abandoned); get it from [F-Droid](https://f-droid.org/packages/com.termux/) or [GitHub Releases](https://github.com/termux/termux-app/releases).
 
-    - 📥 [F-Droid](https://f-droid.org/packages/com.termux/)
-    - 📥 [GitHub Releases](https://github.com/termux/termux-app/releases)
-
-Once you have installed Termux, open the app, copy the command below, paste it into the terminal, and press **Enter** to run the automatic installation (it will download VibraVid, compile all necessary components including Velora, and configure the storage folder):
+In Termux, paste this to download VibraVid, compile the components (including Velora) and set up the storage folder:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/ManoloZocco/StreamingCommunity/main/termux_install.sh | bash
 ```
 
-Once the installation is complete, you can launch the app at any time by simply typing:
+Then launch it any time with `vibravid`.
 
-```bash
-vibravid
-```
-
-### Additional Documentation
-
-- 📝 [Login Guide](login.md) — Authentication for supported services
-- 🖥️ [NAS Deployment Guide](nas.md) — Docker setup on Synology, TrueNAS, and other NAS devices
+See also: [Login guide](login.md), [NAS deployment](nas.md).
 
 ## Quick Start
 
@@ -72,51 +48,22 @@ python manual.py
 
 ## Update
 
-When an interactive CLI session starts, VibraVid checks GitHub Releases in the background (cached for 24 hours) and prints the command that matches your installation if a newer release exists. Use `VibraVid --check-update` to check on demand or `--skip-update-check` to disable the startup check.
+At interactive CLI startup VibraVid checks GitHub Releases in the background (cached 24 h) and prints the command for your installation if a newer release exists. `VibraVid --check-update` checks on demand; `--skip-update-check` disables the startup check.
 
-### Binary (Windows / macOS / Linux)
+| Installation | Update |
+|---|---|
+| Binary (Windows / macOS / Linux) | `VibraVid -UP` |
+| Docker | `docker compose pull && docker compose up -d` |
+| Manual clone | `git fetch origin && git reset --hard origin/main`, then sync dependencies (table above) |
 
-```bash
-VibraVid -UP
-```
-
-### Docker
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-### Manual clone
+Folders ignored by `.gitignore` (e.g. `Video/`) are **not** deleted by the reset. If the folder isn't a git repository yet:
 
 ```bash
+git init
+git remote add origin https://github.com/AstraeLabs/VibraVid.git
 git fetch origin
 git reset --hard origin/main
 ```
-
-Then sync dependencies:
-
-**pip:**
-```bash
-pip install -r requirements.txt --upgrade
-```
-
-**uv:**
-```bash
-uv sync --upgrade
-```
-
-!!! note
-    If the folder is not yet an initialized Git repository:
-    ```bash
-    git init
-    git remote add origin https://github.com/AstraeLabs/VibraVid.git
-    git fetch origin
-    git reset --hard origin/main
-    ```
-
-!!! warning
-    Folders ignored by `.gitignore` (e.g. `Video/`) **will not be deleted**.
 
 ## Downloaders
 
@@ -132,15 +79,9 @@ uv sync --upgrade
 
 ### Custom multi-source downloads
 
-`Generic_Downloader` takes a list of `sources`, downloads every selected track from
-every source **concurrently** on one shared progress bar, then muxes them into a single
-file — including hybrid **Dolby Vision + HDR10** output (the DV RPU is injected into the
-HDR10 base via `mkvmerge`/`dovi_tool`).
+`Generic_Downloader` downloads every selected track from every source in `sources` **concurrently** on one progress bar and muxes them into one file, including hybrid **Dolby Vision + HDR10** (the DV RPU is injected into the HDR10 base via `mkvmerge`/`dovi_tool`).
 
-When sources are full manifests (DASH MPD, HLS master) the tracks are auto-selected from
-the advertised codec/resolution/range — including the Dolby Vision base/companion pairing
-when `custom_filters={"video": "hybrid"}` is set (see [Companion Dolby Vision](configuration.md)),
-across any number of sources, with no per-source tagging needed.
+Full manifests (DASH MPD, HLS master) are auto-selected by codec/resolution/range, including the DV base/companion pairing with `custom_filters={"video": "hybrid"}` (see [Companion Dolby Vision](configuration.md)), across any number of sources and without per-source tagging.
 
 ```python
 from VibraVid.core.downloader import Generic_Downloader
@@ -158,13 +99,9 @@ Generic_Downloader(
 ).start()
 ```
 
-Supported `role` values: `video`, `audio`, `subtitle` (a range tag like `video:hdr10`
-is accepted but is purely a cosmetic label). Roles are only needed for attribute-less
-rendition manifests (e.g. Apple TV+, where every stream parses with no codec/resolution
-metadata) to tell sources apart — a normal manifest doesn't need any. Optional per-source
-fields: `language`, `name`, `label`, `headers`, `cookies`, `protocol`. Limit a test run
-with `max_segments=N` or `max_time="HH:MM:SS"`, or grab a specific clip with a range:
-`max_segments="10-50"` or `max_time="00:01:00-00:05:00"`.
+- `role`: `video`, `audio`, `subtitle` (a range tag like `video:hdr10` is only a label). Needed only for attribute-less rendition manifests (e.g. Apple TV+) to tell sources apart.
+- Optional per-source fields: `language`, `name`, `label`, `headers`, `cookies`, `protocol`.
+- Test runs: `max_segments=N` or `max_time="HH:MM:SS"`; a clip: `max_segments="10-50"` or `max_time="00:01:00-00:05:00"`.
 
 ## Related Projects
 

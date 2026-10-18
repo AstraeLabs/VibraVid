@@ -1,191 +1,96 @@
 # CLI Usage
 
-!!! tip
-    TMDB-based filename tokens (`%(tmdb_id)`, `%(original_title)`, etc.) and poster embedding
-    require a TMDB API key — see [TMDB API Key](configuration.md#tmdb-api-key) for setup.
-
-## Basic Commands
+## Basics
 
 ```bash
-# Show help and available sites
-python manual.py -h
-
-# Search and download
-python manual.py -i streamingcommunity --search "interstellar"
-
-# Auto-download the first result (--item 0 picks the first result, 0-based)
-python manual.py -i streamingcommunity --search "interstellar" --item 0
-
-# Select a specific result by index (0-based) instead of the first
-python manual.py -i streamingcommunity --search "interstellar" --item 2
-
-# Use a site by its index number
-python manual.py -i 0 --search "interstellar"
-
-# Skip TS/CAM releases (StreamingCommunity only)
-python manual.py -i streamingcommunity --search "interstellar" --skip-ts
-
-# Disable the log file for this run
-python manual.py -i streamingcommunity --search "interstellar" --no-log
+python manual.py -h                                                       # help + available sites
+python manual.py -i streamingcommunity --search "interstellar"            # search and download
+python manual.py -i streamingcommunity --search "interstellar" --item 0   # pick a result (0-based) without prompting
+python manual.py -i 0 --search "interstellar"                             # site by index number
+python manual.py -i streamingcommunity --search "interstellar" --skip-ts  # skip TS/CAM (StreamingCommunity only)
+python manual.py -i streamingcommunity --search "interstellar" --no-log   # no log file for this run
+python manual.py --dep                                                    # show dependency paths
 ```
 
-## Series Selection
+## Series and year
 
-Use `--season` and `--episode` to skip interactive prompts:
+`--season` / `--episode` skip the prompts. Values: a number, a range `"1-5"`, or `"*"` for all.
 
 ```bash
-# Specific episode
 python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode 3
-
-# Range of episodes
 python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode "1-5"
-
-# All episodes of a season
-python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode "*"
-
-# All episodes of all seasons
-python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season "*"
-
-# Multiple seasons
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season 1 --episode "*"   # whole season
+python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season "*"               # all seasons
 python manual.py -i streamingcommunity --search "breaking bad" --item 0 --season "1-3"
+
+python manual.py -i streamingcommunity --search "dune" --year 2021          # exact year
+python manual.py -i streamingcommunity --search "batman" --year "1990-2015" # range
 ```
 
-## Year Filter
+## Track selection and output
 
 ```bash
-# Exact year
-python manual.py -i streamingcommunity --search "dune" --year 2021
-
-# Year range
-python manual.py -i streamingcommunity --search "batman" --year "1990-2015"
+python manual.py ... -sv 1080                  # video
+python manual.py ... -sa "eng"                 # audio language
+python manual.py ... -ss "eng"                 # subtitles
+python manual.py ... -ss "ita_forced"          # only the forced subtitle track
+python manual.py ... -sa "deu" --skip-no-match # skip the whole download if the filter matches no track
+python manual.py ... --extension mp4           # container (overrides PROCESS.extension for this run)
 ```
 
-## Stream Track Overrides
+Full filter syntax: [Stream selection filters](configuration.md#stream-selection-filters).
+
+## Console, proxy, progress
 
 ```bash
-# Video resolution
-python manual.py -i streamingcommunity --search "interstellar" -sv 1080
+python manual.py --close-console false                                # keep the console open (loop mode)
+python manual.py -i ... --close-console true                          # close it after the download
 
-# Audio language
-python manual.py -i streamingcommunity --search "interstellar" -sa "eng"
+python manual.py -i ... --use_proxy                                   # configured proxy, default scope
+python manual.py -i ... --use_proxy --proxy-scope down                # only downloads (Velora)
+python manual.py -i ... --use_proxy --proxy-scope scrap               # only scraping
 
-# Subtitles
-python manual.py -i streamingcommunity --search "interstellar" -ss "eng"
-
-# Only the forced subtitle track
-python manual.py -i streamingcommunity --search "interstellar" -ss "ita_forced"
-
-# Skip the whole download if the requested filter matches no track
-python manual.py -i streamingcommunity --search "interstellar" -sa "deu" --skip-no-match
-
-# Output container (overrides PROCESS.extension from config.toml for this run)
-python manual.py -i streamingcommunity --search "interstellar" --extension mp4
-```
-
-See [Stream Selection Filters](configuration.md#stream-selection-filters) for the full
-`-sv`/`-sa`/`-ss` filter syntax (resolution, codec, bitrate, language, Dolby Vision companion).
-
-## Console Behaviour Override
-
-```bash
-# Keep console open (loop mode)
-python manual.py --close-console false
-
-# Close console after download
-python manual.py -i streamingcommunity --search "interstellar" --close-console true
-```
-
-## Proxy
-
-```bash
-# Use the configured proxy for everything (default scope)
-python manual.py -i streamingcommunity --search "interstellar" --use_proxy
-
-# Proxy only the downloads (Velora), scrape directly
-python manual.py -i streamingcommunity --search "interstellar" --use_proxy --proxy-scope down
-
-# Proxy only the scraping, download directly
-python manual.py -i streamingcommunity --search "interstellar" --use_proxy --proxy-scope scrap
-```
-
-## Progress Output
-
-By default the download shows live bars redrawn in place.
-
-```bash
-# One line per track every 5 seconds (and on every phase change / completion), e.g.
+python manual.py -i ... --plain-progress                              # one line per track every 5s, e.g.
 #   Vid [H.264] 720p 2.4 Mbps  28%  290.2M / 1012.7M  65.27M/s  ETA 00:11
-python manual.py -i streamingcommunity --search "interstellar" --plain-progress
-
-# ...every 2 seconds
-python manual.py -i streamingcommunity --search "interstellar" --plain-progress --progress-interval 2
-
-# No progress output at all
-python manual.py -i streamingcommunity --search "interstellar" --no-progress
+python manual.py -i ... --plain-progress --progress-interval 2        # every 2s
+python manual.py -i ... --no-progress                                 # no progress output
 ```
 
-## Metadata Sidecars (`.nfo` + artwork)
+## Metadata sidecars
 
-Write the files Jellyfin, Emby and Kodi use to identify a download (`<name>.nfo` plus `-poster.jpg` for a film or
-`-thumb.jpg` for an episode). Only written for a reliable match; off by default (`DOWNLOAD.write_sidecars`).
-See [Metadata Providers](configuration.md#metadata-providers-tmdb-imdb-tvdb).
+`.nfo` + artwork for Jellyfin/Emby/Kodi, only for a reliable match; off by default (`DOWNLOAD.write_sidecars`). See [Metadata providers](configuration.md#metadata-providers).
 
 ```bash
-# Enable for this run, with the default providers (TMDB, then IMDb)
-python manual.py -i streamingcommunity --search "interstellar" --sidecars
-
-# Only IMDb (free, no API key needed)
-python manual.py -i streamingcommunity --search "interstellar" --sidecars --metadata-provider imdb
-
-# TheTVDB first, TMDB as fallback (needs TVDB_API_KEY or Provider.tvdb in login.toml)
-python manual.py -i streamingcommunity --search "interstellar" --sidecars --metadata-provider tvdb,tmdb
-
-# Disable for this run even if enabled in config.toml
-python manual.py -i streamingcommunity --search "interstellar" --no-sidecars
+python manual.py -i ... --sidecars                                    # TMDB, then IMDb
+python manual.py -i ... --sidecars --metadata-provider imdb           # IMDb only, no key
+python manual.py -i ... --sidecars --metadata-provider tvdb,tmdb      # needs TVDB_API_KEY or Provider.tvdb
+python manual.py -i ... --no-sidecars                                 # off for this run
 ```
 
-## Show Dependency Paths
+## Direct download (`--down`)
+
+Download from a URL, skipping site search. Type is auto-detected (MP4 / HLS / DASH / ISM) or forced with `--type`.
 
 ```bash
-python manual.py --dep
-```
-
-## Direct Download by URL (`--down`)
-
-Download a stream directly from its URL, bypassing site search entirely. The stream type is
-auto-detected (MP4 / HLS / DASH / ISM) or can be forced with `--type`.
-
-```bash
-# Simple MP4 / auto-detected stream
+# MP4 / auto-detected
 python manual.py --down "https://example.com/video.mp4" -o "./Video/clip.mp4"
 
-# HLS with a known decryption key
-python manual.py --down "https://example.com/master.m3u8" --type hls \
-  --key "<KID>:<KEY>" -o "./Video/movie.mkv"
+# HLS with a known key
+python manual.py --down "https://example.com/master.m3u8" --type hls --key "<KID>:<KEY>" -o "./Video/movie.mkv"
 
-# DASH with a DRM license server (Widevine)
+# DASH + Widevine license server (--license-headers adds headers for the license request; repeatable like --headers)
 python manual.py --down "https://example.com/manifest.mpd" --type dash \
   --license-url "https://example.com/wv/license" --drm widevine \
-  --headers "Authorization: Bearer <token>" -o "./Video/movie.mkv"
+  --headers "Authorization: Bearer <token>" --license-headers "Authorization: Bearer <token>" -o "./Video/movie.mkv"
 
-# DASH with a DRM license server that also needs its own HTTP header (repeatable, like --headers)
-python manual.py --down "https://example.com/manifest.mpd" --type dash \
-  --license-url "https://example.com/wv/license" --drm widevine \
-  --license-headers "Authorization: Bearer <token>" -o "./Video/movie.mkv"
-
-# Grab just a clip: segments 10-50, or the 00:01:00-00:05:00 time range
-python manual.py --down "https://example.com/master.m3u8" --type hls \
-  --max-segments "10-50" -o "./Video/clip.mkv"
-python manual.py --down "https://example.com/master.m3u8" --type hls \
-  --max-time "00:01:00-00:05:00" -o "./Video/clip.mkv"
+# Only a clip: segments 10-50, or a time range
+python manual.py --down "https://example.com/master.m3u8" --type hls --max-segments "10-50" -o "./Video/clip.mkv"
+python manual.py --down "https://example.com/master.m3u8" --type hls --max-time "00:01:00-00:05:00" -o "./Video/clip.mkv"
 ```
 
-### Custom JSON Manifest
+### Custom JSON manifest
 
-`--down` also accepts a local path or URL pointing at a **custom JSON manifest** — a plain
-stream description for sources that don't expose a real HLS/DASH/ISM manifest. It's
-auto-detected when the target is a `.json` file/URL containing the `"vibravid_manifest"`
-marker, no `--type` needed.
+`--down` also takes a `.json` file/URL containing `"vibravid_manifest"` (auto-detected, no `--type`) for sources without a real manifest:
 
 ```json
 {
@@ -210,194 +115,124 @@ marker, no `--type` needed.
 
 ```bash
 python manual.py --down "https://example.com/manifest.json" -o "./Video/movie.mkv"
-python manual.py --down "./local_manifest.json" -o "./Video/movie.mkv"
 ```
 
-Segment modes for a track's `segments` field:
-
-| Mode | Fields | Behaviour |
+| `segments` mode | Fields | Behaviour |
 |---|---|---|
-| `list` | array of URLs, or objects with `url`/`size`/`duration`/`range` | explicit segment list |
-| `template` | `template`, `start`, `step` (or `duration`), `end` (or `count`) | DASH-style `$Number$` / `$Time$` / `$RepresentationID$` placeholder expansion |
-| `ranges` / `chunk` | `url` + explicit `ranges` array, or `chunk` + `size` to auto-split | byte-range segments carved out of a single file |
+| `list` | URLs, or objects with `url`/`size`/`duration`/`range` | explicit list |
+| `template` | `template`, `start`, `step` (or `duration`), `end` (or `count`) | DASH-style `$Number$` / `$Time$` / `$RepresentationID$` expansion |
+| `ranges` / `chunk` | `url` + `ranges` array, or `chunk` + `size` to auto-split | byte ranges of a single file |
 
-`init` accepts a URL string, an object (`url`, `range`), or inline base64 (`data`) for the
-initialization segment. Placeholders support zero-padding, e.g. `$Number%05d$`; `$$` escapes
-a literal `$`.
+`init` is a URL string, an object (`url`, `range`) or inline base64 (`data`). Placeholders support zero-padding (`$Number%05d$`); `$$` is a literal `$`.
 
-### Batch Replay from a TRACKS_JSON file (`--down-json`)
+### Batch replay (`--down-json`)
 
-`--down-json` runs every entry's `cmd` from a `TRACKS_JSON` debug file (see
-`debug_track_json` in [Configuration](configuration.md)) in sequence, instead of a single
-`--down` invocation:
+Runs every entry's `cmd` from a `TRACKS_JSON` debug file (`debug_track_json` in [Configuration](configuration.md)) in sequence:
 
 ```bash
 python manual.py --down-json "./debug/tracks_20260821.json"
 ```
 
-### Attaching metadata to a direct download (`--meta-*`)
+### Metadata for a direct download (`--meta-*`)
 
-A plain `--down` has no title/type/season/episode context, so title-dependent hooks and the
-Vault upload/lookup are skipped by default for it. Pass `--meta-*` flags to attach that context
-so those still work:
+A plain `--down` has no title context, so title-dependent hooks and Vault upload/lookup are skipped. `--meta-*` attaches it (`--resolve-only` sets these automatically):
 
 ```bash
-python manual.py --down "https://example.com/master.m3u8" --type hls \
-  --key "<KID>:<KEY>" -o "./Video/Movie (2024)/movie.mkv" \
-  --meta-title "Movie Name" --meta-type Film --meta-site streamingcommunity
+python manual.py --down "https://example.com/master.m3u8" --type hls --key "<KID>:<KEY>" \
+  -o "./Video/Movie (2024)/movie.mkv" --meta-title "Movie Name" --meta-type Film --meta-site streamingcommunity
 
-# TV episode
-python manual.py --down "https://example.com/master.m3u8" --type hls \
-  --key "<KID>:<KEY>" -o "./Video/Show/Season 01/episode.mkv" \
+python manual.py --down "..." --type hls --key "<KID>:<KEY>" -o "./Video/Show/Season 01/episode.mkv" \
   --meta-title "Show Name" --meta-type TV --meta-season 1 --meta-episode 3
 ```
 
-`--resolve-only` sets these automatically on the `--down` entry it produces, so this is mostly
-needed when hand-building a `--down`/`--down-json` invocation yourself.
+## yt-dlp (`--yt-dlp`)
 
-## Direct Download via yt-dlp (`--yt-dlp`)
-
-Download from any site yt-dlp supports bypassing site search entirely — separate from `--down`, which is for direct HLS/DASH/ISM/MP4 URLs.
+Any site yt-dlp supports (separate from `--down`, which is for HLS/DASH/ISM/MP4 URLs).
 
 ```bash
-# Basic download
 python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." -o "./Video/clip.mp4"
-
-# Pick a specific format instead of the default bestvideo+bestaudio/best
-python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --format "best[height<=720]"
-
-# List available formats and exit, or pick one interactively
-python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --list-formats
-python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --interactive-format
-
-# Extract audio only
-python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --extract-audio \
-  --audio-format mp3 --audio-quality 0
-
-# Subtitles
-python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --write-subs --sub-langs it,en
-python manual.py --yt-dlp "https://www.youtube.com/watch?v=..." --write-auto-subs
-
-# Only the first N entries of a playlist
-python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist-end 5
+python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-quality 0
 ```
 
 | Flag | Effect |
 |---|---|
-| `--yt-dlp <URL>` | Download this URL with yt-dlp instead of the site-search/`--down` flow |
-| `--format <SPEC>` | yt-dlp format selector (default: `bestvideo+bestaudio/best`) |
-| `--list-formats` | List available formats for the URL and exit |
-| `--interactive-format` | Show available formats and prompt for the format ID before downloading |
-| `--extract-audio` | Extract audio only |
-| `--audio-format <FORMAT>` | Audio format for extraction (e.g. `mp3`, `m4a`, `wav`, `opus`) |
-| `--audio-quality <QUALITY>` | Audio quality for extraction (e.g. `0`, `5`, `8k`) |
-| `--playlist-end <N>` | Only process the first N entries of a playlist |
-| `--sub-langs <LANGS>` | Comma-separated subtitle languages (e.g. `it,en`) |
-| `--write-subs` | Write subtitles |
-| `--write-auto-subs` | Write auto-generated subtitles |
+| `--yt-dlp <URL>` | Download with yt-dlp instead of the site-search/`--down` flow |
+| `--format <SPEC>` | Format selector (default `bestvideo+bestaudio/best`) |
+| `--list-formats` | List formats and exit |
+| `--interactive-format` | Show formats and prompt for the format ID |
+| `--extract-audio` | Audio only |
+| `--audio-format <FORMAT>` | `mp3`, `m4a`, `wav`, `opus`, ... |
+| `--audio-quality <QUALITY>` | `0`, `5`, `8k`, ... |
+| `--playlist-end <N>` | Only the first N playlist entries |
+| `--sub-langs <LANGS>` | Comma-separated subtitle languages (`it,en`) |
+| `--write-subs` / `--write-auto-subs` | Write subtitles / auto-generated subtitles |
 
-## Advanced Options
+## Advanced options
 
 | Flag | Effect |
 |---|---|
-| `--use-curl-cffi` | Download segments via curl_cffi (browser TLS impersonation) instead of Velora — for sites where individual segments are Cloudflare-protected |
-| `--http-version {1.1,2,3}` | Force the HTTP protocol version used for requests instead of letting the client negotiate it |
-| `-o`, `--output <PATH>` | Output file path for `--down`/`--yt-dlp` direct downloads |
-| `--clear` | Delete the cached login/session tokens of the service selected with `-i` (e.g. `-i crunchyroll --clear`) before running. Requires `-i`; never touches other services or `login.toml` |
-| `--key <KID:KEY>` | Decryption key in hex `KID:KEY` format, repeatable. Works with `--down` and with a service run (`-i 0 --key <KID>:<KEY>`): it is used instead of looking the key up in the vault/CDM for the KIDs it covers; any other KID is still resolved normally |
-| `--no-vault-cache` | Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens) |
-| `--cdm <CDM>` | CDM for this run only, taking priority over `login.toml` and `config.toml`: a `.wvd` / `.prd` file name, `search`, or a remote CDM id. Repeatable, one per DRM system (`--cdm mine.wvd --cdm my_playready`). A JSON list or table is accepted for [quality rules](configuration.md#cdm-by-video-quality). An unknown file or id stops the run before anything is downloaded |
-| `--no-decrypt` | Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass) |
-| `--no-livemux` | Disable the streaming-mux fast path for this run, always falling back to the normal post-download `join_media()` pass. On by default |
-| `--livemux` | Force-enable the streaming-mux fast path for this run even if the current service does not opt in via `_live_mux = True`. Off by default |
-| `--no-concurrent` | Download video, audio and subtitles sequentially instead of simultaneously for this run. Concurrent download is on by default |
-| `--skip-no-match` | Skip the whole download if `-sv`/`-sa`/`-ss` matches no track, instead of falling back to the best available one |
-| `--log-decryptor-output` | Write flux's own stdout+stderr lines to the log file as they run, tagged with the engine name (e.g. `[FLUX]`) instead of `[INFO]` |
-| `--abc` | Anonymize printed KID:KEY pairs in the console/log, masking alternating characters with `?` |
-| `--hls-method AES_128\|NONE` | Override the HLS segment encryption method, ignoring the manifest's own `#EXT-X-KEY` tag (or supplying one when it has none). `NONE` treats every segment as already clear; `AES_128` forces AES-128-CBC (pair with `--hls-key`/`--hls-iv`) |
-| `--hls-key <HEX\|BASE64\|FILE>` | Raw AES-128 key to use instead of fetching `URI=` from the manifest's `#EXT-X-KEY` tag |
-| `--hls-iv <HEX>` | IV to use instead of the manifest's `IV=0x...` (or the implicit per-segment IV) |
-| `--skip-content-check` | Skip the preflight HEAD content-type check for MP4 direct downloads (`--type mp4`) — needed for single-use download URLs where a HEAD request consumes the link |
-| `--skip-sanitize` | Use the `-o` output path verbatim (MP4/HLS/DASH/ISM direct downloads), skipping path sanitization (transliteration of non-ASCII characters) |
-| `--no-manifest-info` | Don't print the parsed manifest/streams table |
-| `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download whichever is outdated |
-| `--resolve-only` | Resolve and cache the manifest (keys, license, playlist) without actually downloading — pairs with `--down-json`/the queue to download later without re-resolving |
-| `--tui` | Launch the Textual terminal UI instead of the plain CLI flow |
+| `--use-curl-cffi` | Download segments via curl_cffi (browser TLS impersonation) instead of Velora, for Cloudflare-protected segments |
+| `--http-version {1.1,2,3}` | Force the HTTP version |
+| `-o`, `--output <PATH>` | Output path for `--down` / `--yt-dlp` |
+| `--clear` | Delete the cached login/session tokens of the service given with `-i` (requires `-i`; never touches other services or `login.toml`) |
+| `--key <KID:KEY>` | Hex decryption key, repeatable. With `--down` or a service run (`-i 0 --key <KID>:<KEY>`): used instead of the vault/CDM for the KIDs it covers, other KIDs resolve normally |
+| `--no-vault-cache` | Bypass the vault cache; fresh CDM license request every run |
+| `--cdm <CDM>` | CDM for this run, above `login.toml` and `config.toml`: a `.wvd`/`.prd` name, `search`, or a remote CDM id. Repeatable, one per DRM system (`--cdm mine.wvd --cdm my_playready`). A JSON list/table is accepted for [quality rules](configuration.md#choosing-the-cdm-cdm). Unknown file/id stops the run before downloading |
+| `--no-decrypt` | Debug: no decryption at all (in-flight or post-download) |
+| `--no-livemux` / `--livemux` | Disable / force the streaming-mux fast path (default on, unless the service doesn't opt in via `_live_mux = True`) |
+| `--no-concurrent` | Download video, audio and subtitles sequentially (concurrent by default) |
+| `--skip-no-match` | Skip the download if `-sv`/`-sa`/`-ss` match no track, instead of falling back to the best |
+| `--log-decryptor-output` | Write flux's stdout/stderr to the log, tagged with the engine name (e.g. `[FLUX]`) |
+| `--abc` | Anonymize printed KID:KEY pairs (alternating characters masked with `?`) |
+| `--hls-method AES_128\|NONE` | Override the HLS encryption method, ignoring `#EXT-X-KEY` (or supplying it). `NONE` = clear segments; `AES_128` = AES-128-CBC (pair with `--hls-key`/`--hls-iv`) |
+| `--hls-key <HEX\|BASE64\|FILE>` | Raw AES-128 key instead of fetching the manifest's `URI=` |
+| `--hls-iv <HEX>` | IV instead of the manifest's `IV=0x...` (or the implicit per-segment IV) |
+| `--skip-content-check` | Skip the HEAD content-type check for MP4 downloads (`--type mp4`), for single-use URLs |
+| `--skip-sanitize` | Use `-o` verbatim (no transliteration of non-ASCII characters) |
+| `--no-manifest-info` | Don't print the manifest/streams table |
+| `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download outdated ones |
+| `--resolve-only` | Resolve and cache manifest/keys/license/playlist without downloading (pairs with `--down-json` / the queue) |
+| `--tui` | Launch the Textual terminal UI |
 | `-UP`, `--update` | Auto-update to the latest release (binary builds only) |
-| `--check-update` | Check GitHub Releases for a newer version, print how to update for your installation (binary, source, Docker) and exit — no download |
-| `--skip-update-check` | Skip the background update check run at interactive CLI startup (the result is cached for 24 hours; failed checks are retried after 30 minutes) |
-| `--version` | Print the installed version and exit |
+| `--check-update` | Print how to update for your installation (binary, source, Docker) and exit |
+| `--skip-update-check` | Skip the background startup check (cached 24h; failures retried after 30 min) |
+| `--version` | Print the version and exit |
 
 ```bash
-# Resolve now, download later: cache the manifest/keys without downloading
-python manual.py -i streamingcommunity --search "interstellar" --item 0 --resolve-only
-
-# Launch the TUI instead of the classic prompt-driven flow
-python manual.py --tui
-```
-
-```bash
-# Manual AES-128 override, e.g. for a manifest missing its own #EXT-X-KEY tag
-python manual.py --down "https://example.com/master.m3u8" --type hls \
-  --hls-method AES_128 \
-  --hls-key "0011223344556677889900112233445566" \
-  --hls-iv "00000000000000000000000000000001" \
-  -o "./Video/clip.mkv"
+# Manual AES-128 override (manifest without its own #EXT-X-KEY)
+python manual.py --down "https://example.com/master.m3u8" --type hls --hls-method AES_128 \
+  --hls-key "0011223344556677889900112233445566" --hls-iv "00000000000000000000000000000001" -o "./Video/clip.mkv"
 ```
 
 ### Default options for a service
 
-The options of a service (`python manual.py -i <service> --help`) can be given a permanent default with the
-`args` key of the service's section in `Conf/login.toml`, for example `args = "--quality 1080"`. A flag typed on the
-command line still wins for that run. See [Default options for a service](configuration.md#default-options-for-a-service-args).
+`python manual.py -i <service> --help` lists a service's options; `args` in `login.toml` sets permanent defaults for them ([details](configuration.md#default-options-for-a-service-args)).
 
-## Download Queue (`--queue-*`)
+## Download queue (`--queue-*`)
 
 ```bash
-# Queue instead of downloading now
-python manual.py -i streamingcommunity --search "interstellar" --item 0 --queue-add
+python manual.py -i streamingcommunity --search "interstellar" --item 0 --queue-add   # queue instead of downloading
 python manual.py --down "https://example.com/movie.mkv" -o "./Video/movie.mkv" --queue-add
-
-# Inspect / manage the queue
 python manual.py --queue-list
 python manual.py --queue-remove <ID>
 python manual.py --queue-clear
-
-# Process every pending (or interrupted) item in order
-python manual.py --queue-run
+python manual.py --queue-run                       # process every pending/interrupted item in order
 ```
 
 !!! note
-    Only invocations that would already complete without any prompt can be queued; anything
-    ambiguous (e.g. `--global`, or a site search with no `--item`) is rejected at
-    enqueue time.
+    Only invocations that complete without any prompt can be queued; ambiguous ones (`--global`, a site search without `--item`) are rejected when enqueued.
 
-Items enqueued together share one auto-generated queue name (e.g. `20260723-152525`, shown
-by `--queue-list`). Most queue commands accept that name to target just one batch instead of
-every queue, and a run can be further narrowed to specific item ids:
+Items enqueued together share an auto-generated queue name (e.g. `20260723-152525`, shown by `--queue-list`). Pass it to target one batch:
 
 ```bash
-# Target one specific batch
-python manual.py --queue-run 20260723-152525
-python manual.py --queue-list 20260723-152525
-python manual.py --queue-clear 20260723-152525
-
-# Restrict a run to specific item ids (as shown by --queue-list)
-python manual.py --queue-run --queue-ids abc12345,def67890
-
-# Interactively pick which queue to run from a numbered list
-python manual.py --queue-select
+python manual.py --queue-run 20260723-152525       # also --queue-list / --queue-clear <name>
+python manual.py --queue-run --queue-ids abc12345,def67890   # only these item ids (see --queue-list)
+python manual.py --queue-select                    # pick the queue from a numbered list
 ```
 
-## Global Search
+## Global search
 
 ```bash
-# Global search
 python manual.py --global -s "cars"
-
-# Filter by category
-python manual.py --category 1    # Anime
-python manual.py --category 2    # Movies & Series
-python manual.py --category 3    # Series only
-python manual.py --category 4    # Movies only
+python manual.py --category 1    # Anime   (2: Movies & Series, 3: Series only, 4: Movies only)
 ```

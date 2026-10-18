@@ -2,66 +2,38 @@
 
 ## Core flow
 
-Everything in this section applies to every service, regardless of site or media type.
-
 ### Directory layout
 
 ```
 VibraVid/services/<name>/
 ├── __init__.py     # CLI entry point: search(), title_search(), --url resolution
 ├── client.py       # auth + low-level HTTP
-├── scrapper.py     # metadata fetching (title/season/episode info)
+├── scrapper.py     # metadata (title/season/episode info)
 └── downloader.py   # builds DASH_Downloader / HLS_Downloader and starts it
 ```
 
-This split isn't enforced by the loader — only `__init__.py` with a `search()` function is
-required
+The split isn't enforced: only `__init__.py` with a `search()` function is required.
 
 ### Registration (auto-discovery)
 
-`VibraVid/services/_base/site_loader.py` scans `VibraVid/services/*/​__init__.py` at startup.
-Two module-level names are **required**:
+`VibraVid/services/_base/site_loader.py` scans `VibraVid/services/*/__init__.py` at startup. Two module-level names are **required**:
 
 ```python
-indice = 900          # sort position in the CLI/GUI site list — pick a free number, the
-                       # loader renumbers everything to consecutive indices on the next run
-_useFor = "Film_Serie"  # one of: Anime, Film_Serie, Serie, Song, Tor
+indice = 900            # position in the CLI/GUI site list; pick a free number, the loader renumbers on the next run
+_useFor = "Film_Serie"  # Anime, Film_Serie, Serie, Song or Tor
 ```
 
-A module that defines `_hide = True` is loaded but excluded from CLI/GUI/ARR listings —
-useful while a service is still being built.
+`_hide = True` loads the module but hides it from CLI/GUI/ARR listings (useful while building).
 
-**The folder name must be a valid Python identifier** (letters/digits/underscore, not starting
-with a digit) if anything elsewhere in the project will reference it with a literal import
-statement — the loader itself uses `importlib.import_module("VibraVid.services.<name>")`, which
-works fine with any string, but `from VibraVid.services.<name>.scrapper import X` written as
-source code is parsed by the compiler and `<name>` must be identifier-like there. A site whose
-natural name isn't one still works for the CLI
-loader itself, but any other code that needs a submodule must resolve it dynamically with
-`resolve_service_submodule(module_name, submodule)` (`VibraVid/services/_base/site_loader.py`)
-instead of a literal import — see the GUI adapter note below.
+The folder name must be a valid Python identifier if any code references it with a literal import (`from VibraVid.services.<name>.scrapper import X`). The loader itself works with any name; for other names resolve submodules dynamically with `resolve_service_submodule(module_name, submodule)` (`VibraVid/services/_base/site_loader.py`), see the GUI adapter below.
 
 #### Loading services from a remote repository
 
-`imp_service` (in `Conf/config.toml`, `DEFAULT.imp_service`) doesn't only accept local folder
-paths — an entry can also be an **http(s) URL to a GitHub or Gitea repository** laid out the
-same way as `VibraVid/services/` (one subfolder per service, each with its own `__init__.py`
-defining `indice`/`_useFor`).
-
-```toml
-imp_service = ["default", "https://git.example.com/me/my-vibravid-sites"]
-```
-
-For a private repo, put credentials in the URL userinfo —
-`https://user:token@host/owner/repo` — and pin a branch/tag with a `#ref` suffix
-(`.../owner/repo#dev`); otherwise the repo's default branch is used.
-
+An `imp_service` entry can be a GitHub/Gitea repository URL laid out like `VibraVid/services/` (one subfolder per service, each `__init__.py` defining `indice`/`_useFor`). Private repos, `#ref` pinning and caching: see [`imp_service`](configuration.md#default).
 
 ### CLI options (`--url`, etc.)
 
-Expose a `register_cli_args(parser) -> list[str]` function; the CLI calls it to add
-site-specific flags and stores their values in `context_tracker.site_options`, keyed by
-argparse `dest`:
+Expose `register_cli_args(parser) -> list[str]`; the CLI adds the flags and stores their values in `context_tracker.site_options`, keyed by argparse `dest`:
 
 ```python
 def register_cli_args(parser) -> list:
@@ -70,7 +42,7 @@ def register_cli_args(parser) -> list:
     return ["url"]
 ```
 
-Read it back in `search()`:
+Read it in `search()`:
 
 ```python
 def search(string_to_search=None, get_onlyDatabase=False, direct_item=None, selections=None, scrape_serie=None):
@@ -81,82 +53,36 @@ def search(string_to_search=None, get_onlyDatabase=False, direct_item=None, sele
     return base_search(..., direct_item=direct_item, ...)
 ```
 
-Users can give these options a default in the service's section of `login.toml`, with `args = "--url ..."`
-(see [Default options for a service](configuration.md#default-options-for-a-service-args)). Nothing to do in the service:
-`context_tracker.site_options` already contains them, and a flag given on the command line wins.
+Users can set a default for these options with `args = "--url ..."` in the service's `login.toml` section ([details](configuration.md#default-options-for-a-service-args)). Nothing to do in the service: `context_tracker.site_options` already contains them, and a command-line flag wins.
 
-`base_search`/`base_process_search_result` (in `VibraVid/services/_base/site_search_manager.py`)
-handle the rest — season/episode selection, table display, and dispatch to your
-`download_film`/`download_series` functions. Reuse them rather than reimplementing the flow.
+`base_search` / `base_process_search_result` (`VibraVid/services/_base/site_search_manager.py`) handle season/episode selection, the results table and dispatch to your `download_film` / `download_series`. Reuse them.
 
 ### Authentication (`client.py`)
 
-There is no fixed auth pattern — services in this codebase use credential logins, static
-tokens, and captured session cookies, sometimes more than one at once for different parts of
-the same site. What generalizes:
+No fixed pattern (credential logins, static tokens, session cookies, sometimes several per site). What generalizes:
 
-- **Cache the session on disk** if login has any real cost (rate limits, a multi-step
-  handshake). Use `VibraVid.utils.disk_cache` (`load`/`save`/`is_fresh`) keyed by service name,
-  with an `expiry` timestamp. Skipping this
-  means every CLI invocation re-authenticates, and some backends will start throttling or
-  blocking logins after a handful of runs in quick succession.
-- **A fresh HTTP client per request drops cookies set by a previous response.** If auth relies
-  on a session cookie, capture it after login (`dict(http_client.cookies)`) and pass it
-  explicitly (`cookies=...`) into every subsequent `create_client(...)` call — don't assume a
-  cookie jar persists across separate `create_client` context managers.
-- **A "web session" and an "app/API session" can be two unrelated login systems** even on the
-  same domain. If an endpoint keeps returning empty/short-form data despite a valid-looking
-  session, check whether it actually belongs to a different auth path than the one you're
-  authenticating against — don't assume all endpoints on one domain share one cookie.
-- For IP/region detection, reuse `VibraVid.utils.http_client.get_my_location()` (already
-  cached to `.cache/ip.json`) instead of adding another geolocation call.
+- **Cache the session on disk** if login is costly (rate limits, multi-step handshake): `VibraVid.utils.disk_cache` (`load`/`save`/`is_fresh`), keyed by service name, with an `expiry` timestamp. Otherwise every CLI run re-authenticates and backends may throttle or block.
+- **A fresh HTTP client per request drops cookies** from earlier responses. Capture the session cookie after login (`dict(http_client.cookies)`) and pass `cookies=...` to every later `create_client(...)`.
+- **A "web session" and an "app/API session" can be unrelated logins** on the same domain. If an endpoint returns empty/short data despite a valid session, check whether it belongs to a different auth path.
+- For IP/region use `VibraVid.utils.http_client.get_my_location()` (cached in `.cache/ip.json`).
 
 ### Metadata (`scrapper.py`)
 
-Populate `VibraVid.services._base.object.Episode`/`Season` (CLI path) or the GUI's
-`Entries`/`Episode`/`Season` dataclasses (`GUI/searchapp/api/base.py`) with what the site
-actually gives you — don't leave `image`/`slug`/`year` empty if the raw API response already
-has them:
+Fill `VibraVid.services._base.object.Episode`/`Season` (CLI) or the GUI's `Entries`/`Episode`/`Season` dataclasses (`GUI/searchapp/api/base.py`) with everything the site gives you:
 
-- **`image` on both search results and episodes** — the GUI's series "hero" background and
-  episode thumbnails fall back to whatever `Entries.poster`/`Episode.image` are set to; an
-  empty field there is a visible regression, not a cosmetic one.
-- **`slug` must be a real, human-readable title slug — never an opaque content ID.** Several
-  downstream lookups (TMDB year/poster resolution in particular) use `slug` as a search key;
-  passing a content ID through as `slug` makes every such lookup silently miss.
-- **Prefer the site's own release date/year field over a TMDB guess.** TMDB slug/name lookup
-  is a *fallback* for when the site doesn't already carry the year — check the raw metadata
-  response for the real field first.
-- **If you genuinely can't determine the year, set it to the literal string `"9999"`** rather
-  than leaving it blank — that's the sentinel `EntriesManager.add()` checks for to trigger the
-  TMDB slug/name year lookup described above (falling back to the current year if no TMDB key is
-  configured or the lookup fails); an empty year skips this fallback entirely (see
-  `VibraVid/services/_base/object.py`).
-- **If your service is for TV/series content, add its module name to `_TV_MATCH_SITES`** in
-  `VibraVid/services/_base/tmdb_artwork.py` — TMDB series/episode matching (artwork, season
-  names) is gated by this allowlist, so without it `resolve_series_tmdb_id()` silently returns
-  `None` for your service even with a valid TMDB key configured. Movie matching has no such
-  allowlist.
+- **`image` on search results and episodes**: the GUI hero background and episode thumbnails fall back to `Entries.poster`/`Episode.image`; empty is a visible regression.
+- **`slug` must be a human-readable title slug, never an opaque content ID**: TMDB year/poster lookups use it as the search key and silently miss otherwise.
+- **Prefer the site's own release year over a TMDB guess**; the TMDB slug/name lookup is only a fallback.
+- **If the year is unknown, use the string `"9999"`**: `EntriesManager.add()` treats it as the trigger for the TMDB year lookup (current year if no key or no match). An empty year skips the fallback (`VibraVid/services/_base/object.py`).
+- **TV/series services: add the module name to `_TV_MATCH_SITES`** in `VibraVid/services/_base/tmdb_artwork.py`. Series/episode TMDB matching (artwork, season names) is gated by it; without it `resolve_series_tmdb_id()` returns `None` even with a key. Movies have no allowlist.
 
 ### Building the download (`downloader.py`)
 
-- If a license/session token is obtainable **up front** (before the manifest is even parsed),
-  prefer passing `license_url` + `license_headers` to `DASH_Downloader`/`HLS_Downloader` over a
-  per-challenge `license_request_fn` callback. The CDM pipeline
-  (`VibraVid/core/drm/widevine.py` / `playready.py`) already does a plain POST with your headers
-  — a callback is only needed when the license request itself requires per-challenge
-  server-side computation that can't be front-loaded.
-- **Always pass a real, non-empty `license_url`, even when a callback does the actual license
-  HTTP request itself.** The vault key-storage step keys stored keys by `license_url` — leaving
-  it `None`/unset (which becomes an empty string downstream) makes that save call fail with an
-  HTTP 400, silently losing the key for future reuse even though the download itself succeeds.
-- If the service exposes a quality ceiling gated by DRM scheme (e.g. one scheme tops out well
-  below the other), pick `drm_preference` from the user's configured target quality rather than
-  hardcoding one scheme.
+- If a license/session token is available **before** the manifest is parsed, pass `license_url` + `license_headers` to `DASH_Downloader`/`HLS_Downloader` instead of a `license_request_fn` callback. The CDM pipeline (`VibraVid/core/drm/widevine.py` / `playready.py`) already POSTs with your headers; use a callback only when the request needs per-challenge server-side computation.
+- **Always pass a non-empty `license_url`, even when a callback does the request.** The vault stores keys by `license_url`; `None`/empty makes the save fail with HTTP 400 and the key is lost for reuse (the download still succeeds).
+- If DRM scheme limits quality (one scheme tops out below the other), choose `drm_preference` from the user's target quality instead of hardcoding.
 
-For anything beyond this base case — non-standard license flows, forcing a track, chapters, a
-live status line, a custom manifest format, or a music/audio service — see
-[Advanced / optional features](#advanced--optional-features) below.
+Non-standard license flows, forced tracks, chapters, status line, custom manifests and music services: [Advanced / optional features](#advanced-optional-features).
 
 ### GUI adapter
 
@@ -175,15 +101,9 @@ class MyService(GenericStreamingAPI):
         return GetSerieInfo(media_item.id)
 ```
 
-This is auto-discovered the same way as the CLI module (`GUI/searchapp/api/__init__.py` scans
-the package directory) — no separate registration step, and no logo/icon asset to add anywhere:
-the GUI has no per-site static image requirement. `GenericStreamingAPI.search()` and
-`get_series_metadata()` already call your CLI-side `search()`/scrapper for you; only override
-`_build_entry`/`_map_episode` if the default field mapping doesn't fit.
+Auto-discovered like the CLI module (`GUI/searchapp/api/__init__.py` scans the package); no registration and no logo asset needed. `search()` and `get_series_metadata()` already call your CLI-side `search()`/scrapper; override `_build_entry`/`_map_episode` only if the default mapping doesn't fit.
 
-**If `<name>` isn't a valid Python identifier**, the literal
-`from VibraVid.services.<name>.scrapper import GetSerieInfo` above is a `SyntaxError` — resolve
-the submodule dynamically instead:
+If `<name>` isn't a valid identifier, resolve the submodule dynamically (real example: `GUI/searchapp/api/7movies.py`):
 
 ```python
 from VibraVid.services._base.site_loader import resolve_service_submodule
@@ -196,28 +116,17 @@ class MyService(GenericStreamingAPI):
         return scrapper.GetSerieInfo(media_item.id)
 ```
 
-See `GUI/searchapp/api/7movies.py` for a real example.
-
-If you want your service to show up in a specific position in the GUI site list instead of just
-being appended after the known ones, add its module name to `_PREFERRED_ORDER` in
-`GUI/searchapp/api/__init__.py` — this is purely cosmetic ordering, not required for the service
-to work. The category shown for it (Film_Serie/Anime/Serie/Song/Tor) comes straight from the
-`_useFor` you already set in the CLI module's `__init__.py` — nothing extra to set on the GUI
-side for that.
+To pin a position in the GUI site list instead of being appended, add the module name to `_PREFERRED_ORDER` in `GUI/searchapp/api/__init__.py` (cosmetic only). The category comes from `_useFor`.
 
 ## Advanced / optional features
 
-None of this is needed for a basic service. Jump to whichever subsection matches something your
-site actually requires.
+None of this is needed for a basic service.
 
 ### License/DRM patterns
 
-Beyond the base `license_url`/`license_headers`/`license_request_fn` case described in
-[Building the download](#building-the-download-downloaderpy):
+Beyond the base `license_url` / `license_headers` / `license_request_fn` case ([Building the download](#building-the-download-downloaderpy)):
 
-**Dynamic query string.** If your license endpoint needs a computed query string on top of the
-base URL, build `license_url` as an f-string with the params baked in rather than trying to
-express them as `license_headers`:
+**Dynamic query string.** Bake computed params into `license_url` instead of `license_headers`:
 
 ```python
 license_url = (
@@ -227,9 +136,7 @@ license_url = (
 dl = DASH_Downloader(mpd_url, license_url=license_url, license_headers={"Authorization": f"Bearer {token}"})
 ```
 
-**Multiple outputs.** If resolving the license needs more than one piece of data (the URL itself
-plus separate params and/or headers that must travel together), have your resolver return them
-as a tuple and unpack it in `downloader.py` rather than forcing everything into one string:
+**Multiple outputs.** When the license needs URL, params and headers together, return a tuple and unpack it in `downloader.py`:
 
 ```python
 def generate_license_url(tracking_info: dict) -> tuple[str, dict, dict]:
@@ -244,10 +151,7 @@ if license_params:
 dl = DASH_Downloader(mpd_url, license_url=license_url, license_headers=license_headers)
 ```
 
-**Stateful exchange.** If the license server requires a lease that must be renewed/retried
-rather than a one-shot POST, build a closure capturing whatever per-title state it needs and
-pass that closure as `license_request_fn` instead of a static `license_url`/`license_headers`
-pair:
+**Stateful exchange.** For a lease that must be renewed/retried, pass a closure as `license_request_fn`:
 
 ```python
 def _make_license_request_fn(asset_id: str, session_token: str):
@@ -263,24 +167,18 @@ def _make_license_request_fn(asset_id: str, session_token: str):
 
 dl = DASH_Downloader(
     mpd_url,
-    license_url=f"https://license.example.com/lease/{asset_id}",  # still required, see note above
+    license_url=f"https://license.example.com/lease/{asset_id}",  # still required
     license_request_fn=_make_license_request_fn(asset_id, session_token),
 )
 ```
 
-**Direct DRM manager access.** If none of the above fit and you truly need to resolve keys
-yourself outside the downloader's own DRM flow, call the DRM manager directly instead of routing
-through `license_url`/`license_request_fn` — but treat this as a last resort, not the default:
-prefer the generic downloader-driven flow whenever the site's license endpoint behaves like a
-normal POST.
+**Direct DRM manager access.** Last resort, only if you must resolve keys outside the downloader's DRM flow:
 
 ```python
 keys = dl.drm_manager.get_wv_keys(pssh, license_url, license_certificate, headers, key=None)
 ```
 
-**Which CDM the service will use.** The user picks the CDM with `cdm` (see [Configuration](configuration.md)),
-so never open a `.wvd` / `.prd` yourself. If the service needs to know what it is dealing with (for example to
-choose a Chrome or an Android device identity), ask the core:
+**Which CDM the service will use.** The user picks it with `cdm` ([Configuration](configuration.md)); never open a `.wvd` / `.prd` yourself. To know what you're dealing with (e.g. Chrome vs Android identity), ask the core:
 
 ```python
 from VibraVid.setup import resolve_service_cdm_info
@@ -292,13 +190,11 @@ widevine = resolve_service_cdm_info("myservice", height=1080).get("widevine")
 # {"path", "error"}          -> the .wvd could not be read
 ```
 
-`height` is the quality you are about to ask for (it decides which `min_height` / `max_height` rule applies).
+`height` is the quality you are about to request; it selects the `min_height` / `max_height` rule.
 
 ### Custom filter override
 
-If you need to force a specific track (e.g. a given audio language) beyond what the standard
-config-driven filters already select, set `custom_filters` directly on the downloader instance
-after constructing it, rather than adding a new constructor argument:
+To force a track (e.g. an audio language) beyond the config filters, set `custom_filters` on the downloader instead of adding a constructor argument:
 
 ```python
 dl = DASH_Downloader(...)
@@ -308,15 +204,10 @@ dl.start()
 
 ### Custom ad-skip (`ad_decision_fn`)
 
-If the site stitches ads into the manifest (SSAI bumpers/creatives alongside the real
-content), don't teach the core what that site's ads look like — keep the knowledge in the
-service and let the core only enforce it. The service provides a decision callback,
-`DASH_Downloader`/`HLS_Downloader`/`ISM_Downloader` take it as `ad_decision_fn`, and the
-generic pipeline applies whatever it returns, symmetrically across video/audio (so tracks
-can't desync), with "keep everything" as the answer on any doubt:
+For sites that stitch ads (SSAI bumpers/creatives) into the manifest, keep the ad knowledge in the service. `DASH_Downloader` / `HLS_Downloader` / `ISM_Downloader` take a decision callback as `ad_decision_fn`; the pipeline applies it symmetrically to video and audio (no desync), and "keep everything" is the answer on any doubt:
 
 ```python
-# VibraVid/services/<name>/ads.py (stdlib only — no core imports, unit-testable)
+# VibraVid/services/<name>/ads.py (stdlib only, no core imports, unit-testable)
 def my_ad_decision(manifest_kind: str, content: str | None, ctx: dict | None = None) -> dict:
     if manifest_kind == "dash":
         ...  # parse the MPD, find ad Periods
@@ -330,13 +221,13 @@ def my_ad_decision(manifest_kind: str, content: str | None, ctx: dict | None = N
     return {}
 ```
 
-Decision shapes (all optional, `{}` means keep everything):
+Decision shapes (all optional; `{}` keeps everything):
 
-- DASH: `{"drop_period_idx": [...], "reason": str}` — dropped from **every** stream; same-language audio continuations split across periods are rejoined automatically.
-- HLS: `{"keep_init_urls": [...]}` (MAP-block level) and/or `{"drop_seg_idx": [...]}` (segment indices in playlist order, applied per rendition).
+- DASH: `{"drop_period_idx": [...], "reason": str}`, dropped from **every** stream; same-language audio continuations split across periods are rejoined.
+- HLS: `{"keep_init_urls": [...]}` (MAP-block level) and/or `{"drop_seg_idx": [...]}` (playlist-order indices, per rendition).
 - ISM: `{"drop_url_substrings": [...]}` (matched against segment URLs) and/or `{"drop_seg_idx": [...]}` (timeline indices).
 
-Pass it to the downloader only on the stitched path:
+Pass it only on the stitched path:
 
 ```python
 from .ads import my_ad_decision
@@ -347,12 +238,7 @@ dl.start()
 
 ### Batch downloads (albums, season packs)
 
-If your service downloads multiple items in one run (an album, a season pack) and you don't want
-one failed item to abort the whole batch, catch the per-item error yourself and report it via
-`context_tracker.report_download_error(message)` / `report_download_success()`
-(`VibraVid/core/ui/tracker.py`) instead of letting the exception propagate — this lets the
-GUI/CLI show a partial-success summary at the end rather than failing the entire run on one bad
-track:
+So one failed item doesn't abort the batch, catch per-item errors and report them with `context_tracker.report_download_error(message)` / `report_download_success()` (`VibraVid/core/ui/tracker.py`); GUI/CLI then show a partial-success summary:
 
 ```python
 from VibraVid.core.ui.tracker import context_tracker
@@ -369,12 +255,9 @@ for item in items_to_download:
 
 ### Chapters
 
-If the site exposes chapter/scene markers, pass them as `chapters=` to `DASH_Downloader`/
-`HLS_Downloader` so they land in the muxed output — don't leave this out just because the base
-flow doesn't require it. Each chapter is a `{"name": str, "seconds": int}` dict.
+Pass chapter markers as `chapters=` to `DASH_Downloader` / `HLS_Downloader`; each is `{"name": str, "seconds": int}`.
 
-**Markers known up front**: compute the chapter list (name + start-time pairs) before starting
-the download and pass it once:
+**Known up front:**
 
 ```python
 chapters = [
@@ -385,10 +268,7 @@ chapters = [
 dl = DASH_Downloader(mpd_url, chapters=chapters or None)
 ```
 
-**Markers that arrive during a live/long-running download**: pass a single mutable list into
-the downloader up front, then keep appending to that *same list object* from a background
-polling thread as new markers show up — the downloader only reads the list once, at final mux
-time, so anything appended before then is picked up automatically:
+**Arriving during a live/long download:** pass one mutable list and keep appending to that same object from a background thread; the downloader reads it once, at final mux time.
 
 ```python
 chapters: list = []
@@ -407,10 +287,7 @@ def _watch_and_append(chapters: list, record_start: float) -> None:
 
 ### Live status line (long-running/live downloads)
 
-If your download can run for a long time (in particular, live recordings) and you want to
-surface a status that changes over time — connection state, a counter, anything worth showing
-above the progress bars — use the shared status-line mechanism instead of printing ad-hoc lines
-that would scroll past the bars:
+To show a changing status above the progress bars (connection state, a counter), use the shared status line instead of printing lines that scroll past the bars:
 
 ```python
 from VibraVid.core.ui.bar_manager import get_bar_manager
@@ -420,48 +297,20 @@ if bar_manager:
     bar_manager.set_status_text("[cyan]your rich-markup status text")
 ```
 
-Call `set_status_text` again whenever the state changes — there's no polling interval built in,
-the caller decides when and how often to update it. The text also lands in the log file
-automatically (tagged `[msg_room]`), so don't add your own `logger.info` call for the same
-status text.
+Call it whenever the state changes (no built-in polling). The text is also logged as `[msg_room]`, so don't add your own `logger.info` for it.
 
 ### Custom manifest format
 
-If the site doesn't expose a standard DASH/HLS manifest — only raw per-track data you'd have to
-assemble yourself — don't write a bespoke downloader from scratch. Build a `vibravid_manifest`
-JSON structure from the resolved track data (`VibraVid/core/manifest/custom.py` parses it) and
-hand that to the existing downloader machinery instead:
+If the site has no standard DASH/HLS manifest, don't write a bespoke downloader: build a `vibravid_manifest` from the resolved tracks (format: [Custom JSON manifest](cli.md#custom-json-manifest); parser: `VibraVid/core/manifest/custom.py`) and hand it to the existing downloaders:
 
 ```python
-manifest = {
-    "vibravid_manifest": True,
-    "base_url": "https://cdn.example.com/movie/",
-    "duration": 5400,
-    "tracks": [
-        {
-            "type": "video", "id": "v0", "codecs": "avc1.640028",
-            "bitrate": 5000000, "width": 1920, "height": 1080, "fps": "24",
-            "init": {"url": "init_video.mp4"},
-            "segments": [{"url": "seg_video_1.m4s"}, {"url": "seg_video_2.m4s"}],
-        },
-        {
-            "type": "audio", "id": "a0", "codecs": "mp4a.40.2",
-            "bitrate": 128000, "language": "en", "channels": "2",
-            "init": {"url": "init_audio.mp4"},
-            "segments": [{"url": "seg_audio_1.m4s"}, {"url": "seg_audio_2.m4s"}],
-        },
-    ],
-}
+manifest = {"vibravid_manifest": True, "base_url": "https://cdn.example.com/movie/", "duration": 5400, "tracks": [...]}
 dl = DASH_Downloader(json.dumps(manifest))
 ```
 
 ### Search backed by TMDB
 
-If the site itself has no usable search endpoint (or its search results are too sparse to build
-a good listing/season-episode structure from), you don't have to scrape one — use TMDB directly
-as the search backend instead. Note this needs a configured TMDB API key; without one this kind
-of service silently returns zero results, so don't choose this pattern as a silent fallback the
-user has no way to notice is broken.
+If the site has no usable search (or too sparse to build listings and season/episode structure), use TMDB as the search backend. It needs a TMDB API key; without one the service returns zero results silently, so don't use it as a hidden fallback.
 
 ```python
 from VibraVid.provider.tmdb import tmdb
@@ -475,43 +324,19 @@ def search(query: str) -> list[Entries]:
             image=f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get("poster_path") else None,
         ))
     for show in tmdb.search_series(query):
-        results.append(Entries(
-            id=show["id"], name=show["name"], slug=show["name"],
-            type="tv", year=show.get("first_air_date", "")[:4],
-        ))
+        results.append(Entries(id=show["id"], name=show["name"], slug=show["name"],
+                               type="tv", year=show.get("first_air_date", "")[:4]))
     return results
-
-class GetSerieInfo:
-    def __init__(self, tmdb_id: str):
-        self.tmdb_id = tmdb_id
-        self.seasons_manager = SeasonManager()
-
-    def _load(self):
-        details = tmdb._make_request(f"tv/{self.tmdb_id}") or {}
-        for raw_season in details.get("seasons", []):
-            self.seasons_manager.add(Season(number=raw_season["season_number"], tmdb_id=raw_season["id"]))
-
-    def getEpisodeSeasons(self, season_number: int) -> list[Episode]:
-        season = tmdb._make_request(f"tv/{self.tmdb_id}/season/{season_number}") or {}
-        return [Episode(number=e["episode_number"], name=e["name"]) for e in season.get("episodes", [])]
 ```
 
-Only the final step — resolving a chosen TMDB result back to a real playable item/URL on the
-site — stays site-specific and isn't shown here.
+For series, build seasons/episodes in `GetSerieInfo` from `tmdb._make_request(f"tv/{id}")` and `tv/{id}/season/{n}`. Resolving a chosen result to a playable item/URL on the site stays site-specific.
 
 ### Music services (lyrics & tagging)
 
-If the service is audio-only (music, not film/series), the final processing step isn't video
-muxing — it's `VibraVid.core.muxing.helper.audio.process_song(...)`. Route the downloaded file
-through that instead of reimplementing audio post-processing.
+For audio-only services the final step is `VibraVid.core.muxing.helper.audio.process_song(...)`, not video muxing.
 
-- **Lyrics**: call `VibraVid.provider.musiclyric.get_lyrics(title, artist, album,
-  duration_seconds)` rather than writing your own lyrics fetch — it already handles a
-  multi-provider fallback chain and converts synced lyrics from TTML into LRC when that's the
-  format returned.
-- **Tagging**: populate `track_number`, `cover_url`, `album_artist`, and `lyrics` when the site
-  exposes them and pass them into `process_song(...)` — same principle as `image`/`slug`/`year`
-  above: don't leave a field empty just because the base flow doesn't require it.
+- **Lyrics**: `VibraVid.provider.musiclyric.get_lyrics(title, artist, album, duration_seconds)` has a multi-provider fallback chain and converts synced TTML lyrics to LRC.
+- **Tagging**: pass `track_number`, `cover_url`, `album_artist` and `lyrics` to `process_song(...)` when the site exposes them.
 
 ```python
 lyrics_result = None
@@ -532,16 +357,6 @@ final_path = process_song(
 )
 ```
 
-Note: TMDB poster/still art embedding into the final file is separate and needs no extra work
-here — it's zero-touch as long as `image`/`slug`/`year` are populated per the
-[Metadata](#metadata-scrapperpy) section above.
+TMDB poster/still embedding is separate and automatic once `image`/`slug`/`year` are filled per [Metadata](#metadata-scrapperpy).
 
-### Installing and removing a service from the GUI
-
-Settings → *Providers* → **Add a provider** installs a ZIP into `VibraVid/services/<name>`. The same
-box lists the services you uploaded under **Uploaded providers**, each with a **Remove** button
-(click twice to confirm). Only folders that are not shipped with the project can be removed; the
-built-in services are refused. Services that come from an `imp_service` source (a git repository or
-a local path) are not touched. With Docker, uploaded services live in the container's writable
-layer, so they are lost when the container is recreated — re-upload them or keep them in an
-`imp_service` source.
+Users can install and remove your service from the GUI: see [Custom service upload](gui.md#custom-service-upload).
