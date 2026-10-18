@@ -113,8 +113,11 @@ def _native_dv_codec(s) -> str:
 
     for codecs in (getattr(s, "codecs", "") or "").lower().split(","):
         codecs = codecs.strip()
-        if codecs.startswith(DV_CODEC_PREFIXES) and codecs.split(".")[1:2] in (["05"], ["08"]):
+        if codecs.startswith(DV_CODEC_PREFIXES):
             return codecs
+
+    if (getattr(s, "video_range", "") or "").upper() == "DV":
+        return "dv"
 
     return ""
 
@@ -983,9 +986,7 @@ class StreamSelector:
         if self._dv_top_tier_tolerance is not None:
             videos = self._drop_rogue_top_tier(videos, self._dv_top_tier_tolerance)
         if not self._hybrid:
-            if not self._dv_auto and not explicit_dv_filter:
-                videos = [s for s in videos if not _is_dv(s)]
-            elif self._dv_auto and not explicit_dv_filter:
+            if self._dv_auto and not explicit_dv_filter:
                 non_dv = [s for s in videos if not _is_dv(s)]
                 if non_dv:
                     videos = non_dv

@@ -43,6 +43,17 @@ def test_parse_site_extra_args_parses_known_flags(fake_site):
     assert result == {"quality": "UHD", "optimize_audio": True}
 
 
+def test_parse_site_extra_args_ignores_dests_the_site_does_not_define(monkeypatch):
+    """A site may list dests (season, episode) that the main CLI parser defines, not its own."""
+    def register(parser):
+        parser.add_argument("--vcodec", dest="vcodec", default=None)
+        return ["vcodec", "season", "episode"]
+
+    lazy = SimpleNamespace(get_module=lambda: SimpleNamespace(register_cli_args=register))
+    monkeypatch.setattr(site_extra_args, "load_search_functions", lambda: {"mysite_search": lazy})
+    assert _shared.parse_site_extra_args("mysite", "--vcodec AVC") == {"vcodec": "AVC"}
+
+
 def test_parse_site_extra_args_empty_string_returns_empty_dict(fake_site):
     assert _shared.parse_site_extra_args(fake_site, "") == {}
     assert _shared.parse_site_extra_args(fake_site, "   ") == {}

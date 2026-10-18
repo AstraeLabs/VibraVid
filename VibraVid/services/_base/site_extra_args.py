@@ -35,7 +35,8 @@ def parse_site_extra_args(site: str, raw: str) -> dict:
     except (SystemExit, argparse.ArgumentError, ValueError) as e:
         raise ValueError(f"Invalid custom option for '{site}': {e}") from e
 
-    return {dest: getattr(parsed, dest) for dest in dests}
+    # dests such as season/episode are registered by the main parser, not by the mini parser
+    return {dest: getattr(parsed, dest) for dest in dests if hasattr(parsed, dest)}
 
 
 def get_site_extra_args_schema(site: str) -> list[dict]:

@@ -248,7 +248,7 @@ Same native keys as video plus `l=` language, e.g. `"l=ita:c=aac:f=best"`.
 dv_auto = true
 ```
 
-`dv_auto` (default `true`): when `select_video` picks a non-DV video and the title ships a DV variant, also pair the DV companion (at the cheapest quality) even without `select_video="hybrid"`. `false` = only pair with `hybrid`.
+`dv_auto` (default `true`): when `select_video` picks a non-DV video and the title ships a DV variant, also pair the DV companion (at the cheapest quality) even without `select_video="hybrid"`. `false` = only pair with `hybrid`, and DV streams compete like any other track (`best` may pick a DV one).
 
 ## PROCESS
 

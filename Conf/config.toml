@@ -75,7 +75,7 @@ cleanup_tmp_folder = true
 
 [CODEC]
 # Detect Dolby Vision and handle the compatible layer
-dv_auto = false
+dv_auto = true
 
 # Post-download processing with ffmpeg
 [PROCESS]
