@@ -23,6 +23,24 @@ def manual_keys(key: Any) -> list[str]:
     return [key] if isinstance(key, str) else list(key)
 
 
+def selected_video_height(streams) -> int:
+    """Height of the tallest selected video stream, 0 when none is selected: what the per-quality ``cdm`` rules compare against."""
+    tallest = 0
+    for stream in streams or []:
+        if getattr(stream, "type", "") != "video" or not getattr(stream, "selected", False):
+            continue
+
+        height = getattr(stream, "height", 0) or 0
+        if not height:
+            try:
+                height = int((getattr(stream, "resolution", "") or "").lower().replace("p", "").split("x")[-1])
+            except ValueError:
+                height = 0
+        tallest = max(tallest, int(height))
+
+    return tallest
+
+
 def fetch_drm_keys(
     drm_manager,
     drm_psshs: dict[str, list[dict]],
@@ -39,6 +57,7 @@ def fetch_drm_keys(
     swallow_errors: bool = False,
     widevine_license_data: bool = True,
     manual_key_fallback: bool = True,
+    height: int | None = None,
 ) -> list[str]:
     """
     ===================================  =====  =====  =====  =================
@@ -53,6 +72,9 @@ def fetch_drm_keys(
     ===================================  =====  =====  =====  =================
     """
     keys = None
+    if height is not None:
+        drm_manager.select_cdm(height)
+    
     effective_pref = _effective_preference(drm_psshs, preference, cross_drm_fallback)
 
     def _resolve(label: str, call):

@@ -103,19 +103,20 @@ def test_arr_patch_changes_only_arr_and_keeps_the_comments(client, conf):
     assert config_manager.config.get_bool("ARR", "enabled") is True
 
 
-def test_extra_args_patch_sets_and_removes_per_site_options(client, conf):
+def test_args_patch_sets_and_empties_per_site_options(client, conf):
     _, login_file = conf
 
-    _post(client, {"file_type": "login", "patch": {"tubi": {"extra_args": "--quality UHD"}}})
-    assert tomllib.loads(login_file.read_text(encoding="utf-8"))["tubi"]["extra_args"] == "--quality UHD"
-    assert config_manager.login.get("tubi", "extra_args") == "--quality UHD"
+    _post(client, {"file_type": "login", "patch": {"tubi": {"args": "--quality UHD"}}})
+    assert tomllib.loads(login_file.read_text(encoding="utf-8"))["tubi"]["args"] == "--quality UHD"
+    assert config_manager.login.get("tubi", "args") == "--quality UHD"
 
-    response = _post(client, {"file_type": "login", "patch": {}, "delete": [["tubi", "extra_args"]]})
+    # what the settings page sends when the options of a service are removed: the key stays, empty
+    response = _post(client, {"file_type": "login", "patch": {"tubi": {"args": ""}}, "delete": []})
 
     assert response.json()["success"] is True
     text = login_file.read_text(encoding="utf-8")
-    assert "extra_args" not in text and "# VibraVid - logins" in text
-    assert config_manager.login.get("tubi", "extra_args", default=None) is None
+    assert tomllib.loads(text)["tubi"]["args"] == "" and "# VibraVid - logins" in text
+    assert config_manager.login.get("tubi", "args") == ""
 
 
 def test_system_page_serves_the_toml_files_and_the_arr_section(client, conf):

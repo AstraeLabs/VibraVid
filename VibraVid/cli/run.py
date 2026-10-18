@@ -23,6 +23,7 @@ from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import load_search_functions
 from VibraVid.services._base.site_extra_args import resolve_persisted_site_options
+from VibraVid.setup import CLI_ORIGIN, parse_cdm_cli, validate_cdm_settings
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.setup.system import (
     _initialize_paths,
@@ -158,6 +159,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument( "--proxy-scope", dest="proxy_scope", type=str, choices=["scrap", "down", "scrap+down"], metavar="scrap|down|scrap+down", help="Where to apply the proxy: scraping only, downloads only, or both")
     dl_opts.add_argument("--close-console", dest="close_console", type=str, choices=["true", "false"],metavar="true|false", help="Exit after last download (overrides config)")
     dl_opts.add_argument("--no-vault-cache", dest="bypass_vault_cache", action="store_const", const=True, default=None, help="Bypass DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)")
+    dl_opts.add_argument("--cdm", dest="cdm", action="append", metavar="CDM", default=None, help="CDM for this run, overriding login.toml and config.toml: a .wvd/.prd file name, 'search', or a remote CDM id. Repeatable (one per DRM system); JSON accepted for quality rules")
     dl_opts.add_argument("--http-version", dest="http_version", choices=["1.1", "2", "3"], default=None, help="HTTP version Velora uses for segment downloads (default: 1.1 — safest for ~99%% of CDNs). Use 2 for CDNs with aggressive anti-bot fingerprinting that block HTTP/1.1-only ALPN (e.g. phncdn/Pornhub)")
     dl_opts.add_argument("--max-speed", dest="max_speed_mbps", type=float, metavar="MB/s", default=None, help="Cap the segment download rate in MB/s (0 = unlimited). Applies to each stream (video/audio) separately. Useful for CDNs that throttle clients exceeding a speed threshold")
     dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
@@ -315,7 +317,7 @@ def _apply_interactive_site_options(selected_module_name, site_module_name):
 
 
 def build_site_options(args, parser, site_option_dests, site_module_name):
-    """Merge this run's site-specific CLI values with the site's persisted `extra_args`"""
+    """Merge this run's site-specific CLI values with the site's `args` from login.toml"""
     persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
     site_options = {"drm": getattr(args, "drm", None)}
     for dest in site_option_dests:
@@ -550,6 +552,23 @@ def show_dependencies(search_functions):
         console.print(f"  {status} [yellow]{device_name}:[/] [white]{path_display}[/]")
 
 
+def _check_cdm_settings(args) -> None:
+    """Apply ``--cdm`` and report broken ``cdm`` settings now, instead of when the keys are first needed (a bad ``--cdm`` stops the run)."""
+    try:
+        context_tracker.cdm_override = parse_cdm_cli(getattr(args, "cdm", None))
+    except ValueError as exc:
+        console.print(f"[red]{exc}")
+        sys.exit(1)
+
+    problems = validate_cdm_settings(context_tracker.cdm_override)
+    cli_problems = [p for p in problems if f"in {CLI_ORIGIN}" in p]
+    for problem in problems:
+        logger.warning(problem)
+        console.print(f"[{'red' if problem in cli_problems else 'yellow'}]{problem}")
+    if cli_problems:
+        sys.exit(1)
+
+
 def main():
     try:
         argv = sys.argv[1:]
@@ -672,6 +691,7 @@ def main():
         # Propagate CLI download limits to the service flow
         apply_limits(args)
         context_tracker.bypass_vault_cache = getattr(args, "bypass_vault_cache", None)
+        _check_cdm_settings(args)
         context_tracker.http_version = getattr(args, "http_version", None)
         DownloadBarManager.configure(getattr(args, "progress_mode", None), getattr(args, "progress_interval", None))
         context_tracker.skip_decrypt = bool(getattr(args, "skip_decrypt", False))

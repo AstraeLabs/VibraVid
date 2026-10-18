@@ -21,7 +21,7 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
 
 from .base import BaseDownloader, DownloadResult
-from .drm_keys import effective_manual_key, fetch_drm_keys
+from .drm_keys import effective_manual_key, fetch_drm_keys, selected_video_height
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -196,7 +196,7 @@ class ISM_Downloader(BaseDownloader):
 
         return result
 
-    def _fetch_keys(self, drm_psshs: dict[str, list[dict]]) -> list[str]:
+    def _fetch_keys(self, drm_psshs: dict[str, list[dict]], streams: list | None = None) -> list[str]:
         """
         Dispatch key-fetch to :class:`DRMManager`.
 
@@ -214,6 +214,7 @@ class ISM_Downloader(BaseDownloader):
             license_certificate=self.license_certificate,
             cross_drm_fallback=True,
             swallow_errors=True,
+            height=None if streams is None else selected_video_height(streams),
         )
 
     def start(self) -> DownloadResult:
@@ -268,7 +269,7 @@ class ISM_Downloader(BaseDownloader):
 
         if is_protected:
             self._update_status("Fetching keys ...")
-            keys = self._fetch_keys(drm_psshs)
+            keys = self._fetch_keys(drm_psshs, streams)
 
             if keys:
                 self.media_downloader.set_key(keys)

@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -581,17 +581,7 @@ class GetSerieInfo:
         browse_url = f"{self.conf['site_base']}{href}"
         logger.debug(f"Constructed browse URL for RSC: {browse_url}")
 
-        host_marker = self.conf["site_base"].split("://", 1)[-1] + "/"
-        url_path = browse_url.split(host_marker)[1] if host_marker in browse_url else browse_url
-        state = [
-            "",
-            {"children": [["path", url_path, "c"], {"children": ["__PAGE__", {}, None, "refetch"]}, None, None]},
-            None,
-            None,
-        ]
-        router_state_tree = quote(json.dumps(state, separators=(",", ":")))
-
-        rsc_headers = {"rsc": "1", "next-router-state-tree": router_state_tree, "User-Agent": get_userAgent()}
+        rsc_headers = {"rsc": "1", "User-Agent": get_userAgent()}
         base = re.escape(self.conf["site_base"])
         video_url_re = r"(?:" + base + r'/video/[^"]*?' + r"|" + base + r'/[^"]*?/player/?' + r")"
         str_re = r'(?:[^"\\]|\\.)*'

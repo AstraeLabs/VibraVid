@@ -686,19 +686,19 @@
 	renderExtraArgs();
 
 	function saveExtraArgs() {
-		// Per-site "extra_args" key, alongside each site's other login.toml fields.
-		// The server sets/updates it for the sites in extraArgsState and drops it from the ones
-		// that had it and no longer do (extraArgsSaved), leaving the rest of the file as is.
-		var patch = {}, remove = [];
+		// Per-site "args" key, alongside each site's other login.toml fields.
+		// The server sets/updates it for the sites in extraArgsState and empties it (args = "")
+		// for the ones that had it and no longer do (extraArgsSaved), leaving the rest of the file as is.
+		var patch = {};
 		Object.keys(extraArgsState).forEach(function (site) {
-			patch[site] = { extra_args: extraArgsState[site] };
+			patch[site] = { args: extraArgsState[site] };
 		});
 		Object.keys(extraArgsSaved).forEach(function (site) {
-			if (!(site in extraArgsState)) remove.push([site, "extra_args"]);
+			if (!(site in extraArgsState)) patch[site] = { args: "" };
 		});
 
 		say(extraArgsMsg, "Saving…");
-		post(URL_SAVE, JSON.stringify({ file_type: "login", patch: patch, delete: remove }), true)
+		post(URL_SAVE, JSON.stringify({ file_type: "login", patch: patch, delete: [] }), true)
 			.then(function (data) {
 				if (!data.success) { say(extraArgsMsg, data.error || "Not saved.", "bad"); return; }
 				editor.login.value = data.content;

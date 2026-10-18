@@ -62,12 +62,12 @@ def test_resolve_persisted_site_options_reads_login_toml(fake_site, monkeypatch)
     monkeypatch.setattr(
         config_manager.login,
         "get_section",
-        lambda s, default=None: {"extra_args": "--quality UHD"} if s == fake_site else (default or {}),
+        lambda s, default=None: {"args": "--quality UHD"} if s == fake_site else (default or {}),
     )
     assert _shared._resolve_persisted_site_options(fake_site) == {"quality": "UHD", "optimize_audio": False}
 
 
-def test_resolve_persisted_site_options_no_extra_args_key(fake_site, monkeypatch):
+def test_resolve_persisted_site_options_no_args_key(fake_site, monkeypatch):
     monkeypatch.setattr(
         config_manager.login,
         "get_section",
@@ -80,7 +80,7 @@ def test_resolve_persisted_site_options_invalid_args_does_not_raise(fake_site, m
     monkeypatch.setattr(
         config_manager.login,
         "get_section",
-        lambda s, default=None: {"extra_args": '--quality "unterminated'} if s == fake_site else (default or {}),
+        lambda s, default=None: {"args": '--quality "unterminated'} if s == fake_site else (default or {}),
     )
     assert _shared._resolve_persisted_site_options(fake_site) == {}
 
@@ -143,8 +143,19 @@ def test_login_status_from_section_any_filled_value_counts(monkeypatch):
 
 
 def test_login_status_from_section_ignores_non_credential_keys(monkeypatch):
-    _fake_login_section(monkeypatch, {"mysite": {"cdm": "device.wvd", "extra_args": "--quality UHD", "token": ""}})
+    _fake_login_section(monkeypatch, {"mysite": {"cdm": "device.wvd", "args": "--quality UHD", "token": ""}})
     assert site_extra_args.get_site_login_status("mysite")["present"] is False
+
+
+def test_login_status_from_section_with_only_options_has_no_login(monkeypatch):
+    _fake_login_section(monkeypatch, {"mysite": {"args": "", "cdm": ""}})
+    assert site_extra_args.get_site_login_status("mysite") is None
+
+
+def test_login_status_from_section_with_args_and_empty_credential_still_needs_login(monkeypatch):
+    _fake_login_section(monkeypatch, {"mysite": {"args": "--quality UHD", "token": ""}})
+    status = site_extra_args.get_site_login_status("mysite")
+    assert status["present"] is False and status["missing"] == ["token"]
 
 
 def test_login_status_from_section_empty_section_has_login_but_no_keys(monkeypatch):
@@ -156,3 +167,63 @@ def test_login_status_from_section_empty_section_has_login_but_no_keys(monkeypat
 def test_login_status_site_without_section_has_no_login(monkeypatch):
     _fake_login_section(monkeypatch, {"other": {"token": "x"}})
     assert site_extra_args.get_site_login_status("mysite") is None
+
+
+def test_persisted_site_options_applies_args_and_restores_the_previous_options(fake_site, monkeypatch):
+    from VibraVid.core.ui.tracker import context_tracker
+
+    monkeypatch.setattr(
+        config_manager.login,
+        "get_section",
+        lambda s, default=None: {"args": "--quality UHD"} if s == fake_site else (default or {}),
+    )
+    context_tracker.site_options = {"quality": "HD"}
+
+    with site_extra_args.persisted_site_options(fake_site):
+        assert context_tracker.site_options == {"quality": "UHD", "optimize_audio": False}
+
+    assert context_tracker.site_options == {"quality": "HD"}
+    context_tracker.site_options = None
+
+
+def test_adapter_methods_use_the_login_args_unless_options_are_already_set(fake_site, monkeypatch):
+    from searchapp.api.base import BaseStreamingAPI
+    from VibraVid.core.ui.tracker import context_tracker
+
+    monkeypatch.setattr(
+        config_manager.login,
+        "get_section",
+        lambda s, default=None: {"args": "--quality UHD"} if s == fake_site else (default or {}),
+    )
+
+    class FakeAPI(BaseStreamingAPI):
+        def __init__(self):
+            super().__init__()
+            self.site_name = fake_site
+
+        def search(self, query):
+            return dict(context_tracker.site_options)
+
+        def get_series_metadata(self, media_item):
+            return None
+
+        def start_download(self, media_item, season=None, episodes=None):
+            return True
+
+    context_tracker.site_options = None
+    assert FakeAPI().search("x") == {"quality": "UHD", "optimize_audio": False}
+    assert not context_tracker.site_options  # restored
+
+    context_tracker.site_options = {"quality": "from-the-caller"}  # a download task or a remote request set its own
+    assert FakeAPI().search("x") == {"quality": "from-the-caller"}
+    context_tracker.site_options = None
+
+
+def test_reference_login_toml_ships_empty_args():
+    import tomllib
+
+    login = tomllib.loads((repo_root / "Conf" / "login.toml").read_text(encoding="utf-8"))
+    shipped = {name: section["args"] for name, section in login.items() if "args" in section}
+
+    assert shipped and set(shipped.values()) == {""}
+    assert not any("extra_args" in section for section in login.values())

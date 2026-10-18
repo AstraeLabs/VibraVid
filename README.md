@@ -54,6 +54,7 @@ covered in the
 - **[N_m3u8DL-RE](https://github.com/nilaoda/N_m3u8DL-RE)** — Universal downloader for HLS/DASH/ISM (by nilaoda)
 - **[pywidevine](https://github.com/devine-dl/pywidevine)** — Widevine L3 decryption library (by devine-dl)
 - **[pyplayready](https://git.gay/ready-dl/pyplayready)** — PlayReady decryption library (by ready-dl)
+- **[VibraVid for Android](https://github.com/Lumus122/VibraVid-For-Android)** — Android version of VibraVid (by Lumus122)
 
 ## Disclaimer
 

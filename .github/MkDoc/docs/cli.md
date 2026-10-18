@@ -306,6 +306,7 @@ python manual.py --yt-dlp "https://www.youtube.com/playlist?list=..." --playlist
 | `--clear` | Delete the cached login/session tokens of the service selected with `-i` (e.g. `-i crunchyroll --clear`) before running. Requires `-i`; never touches other services or `login.toml` |
 | `--key <KID:KEY>` | Decryption key in hex `KID:KEY` format, repeatable. Works with `--down` and with a service run (`-i 0 --key <KID>:<KEY>`): it is used instead of looking the key up in the vault/CDM for the KIDs it covers; any other KID is still resolved normally |
 | `--no-vault-cache` | Bypass the DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens) |
+| `--cdm <CDM>` | CDM for this run only, taking priority over `login.toml` and `config.toml`: a `.wvd` / `.prd` file name, `search`, or a remote CDM id. Repeatable, one per DRM system (`--cdm mine.wvd --cdm my_playready`). A JSON list or table is accepted for [quality rules](configuration.md#cdm-by-video-quality). An unknown file or id stops the run before anything is downloaded |
 | `--no-decrypt` | Debug switch: don't decrypt at all (neither the in-flight per-segment path nor the post-download pass) |
 | `--no-livemux` | Disable the streaming-mux fast path for this run, always falling back to the normal post-download `join_media()` pass. On by default |
 | `--livemux` | Force-enable the streaming-mux fast path for this run even if the current service does not opt in via `_live_mux = True`. Off by default |
@@ -343,6 +344,12 @@ python manual.py --down "https://example.com/master.m3u8" --type hls \
   --hls-iv "00000000000000000000000000000001" \
   -o "./Video/clip.mkv"
 ```
+
+### Default options for a service
+
+The options of a service (`python manual.py -i <service> --help`) can be given a permanent default with the
+`args` key of the service's section in `Conf/login.toml`, for example `args = "--quality 1080"`. A flag typed on the
+command line still wins for that run. See [Default options for a service](configuration.md#default-options-for-a-service-args).
 
 ## Download Queue (`--queue-*`)
 

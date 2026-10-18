@@ -22,7 +22,7 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import get_headers
 
 from .base import BaseDownloader, DownloadResult
-from .drm_keys import effective_manual_key, fetch_drm_keys
+from .drm_keys import effective_manual_key, fetch_drm_keys, selected_video_height
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -287,7 +287,7 @@ class HLS_Downloader(BaseDownloader):
 
         return result
 
-    def _fetch_keys(self, drm_psshs: dict[str, list[dict]]) -> list[str]:
+    def _fetch_keys(self, drm_psshs: dict[str, list[dict]], streams: list | None = None) -> list[str]:
         """Dispatch key fetch to DRMManager using the configured drm_preference"""
         return fetch_drm_keys(
             self.drm_manager,
@@ -301,6 +301,7 @@ class HLS_Downloader(BaseDownloader):
             license_request_fn=self.license_request_fn,
             fairplay=True,
             swallow_errors=True,
+            height=None if streams is None else selected_video_height(streams),
         )
 
     def _collect_embedded_cc(self, streams: list) -> list:
@@ -413,7 +414,7 @@ class HLS_Downloader(BaseDownloader):
 
         # Vault/CDM resolution runs whenever DRM is detected
         if is_protected or self.key or self.license_request_fn:
-            keys = self._fetch_keys(drm_psshs)
+            keys = self._fetch_keys(drm_psshs, streams)
 
             if keys:
                 self.media_downloader.set_key(keys)

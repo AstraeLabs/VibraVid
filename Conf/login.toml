@@ -6,67 +6,81 @@
 # cookies: export them with CookieInspector (https://github.com/AstraeLabs/Extension/)
 #   and replace [paste here] with the export, keeping the three single quotes:
 #   cookies = '''{"cookie_name":"cookie_value"}'''
-# cdm: name of your WVD/PRD file, or an id from [DRM.remote_cdm]. Empty = default.
+# args: default options for every download of the service, written like on the command line, e.g. args = "--quality 1080" (see the docs).
+# cdm: name of your WVD/PRD file, "search" or an id from [DRM.remote_cdm]. Empty = default (see the docs).
 
 [amazon_music]
 cookies = '''[paste here]'''
 cdm = ""
+args = ""
 
 [appletv]
 cookies = '''[paste here]'''
 cdm = ""
+args = ""
 
 [chili]
 email = ""
 password = ""
 country = ""
 cdm = ""
+args = ""
 
 [crunchyroll]
 cookies = '''[paste here]'''
 device_id = ""
 cdm = ""
+args = ""
 
 [cs_chrome]
 device_type = "chrome"
 netflixid = ""
 securenetflixid = ""
 cdm = ""
+args = ""
 
 [discoveryplus]
 st = ""
 cdm = ""
+args = ""
 
 [disney]
 token = ""
 refresh_token = ""
 cdm = ""
+args = ""
 
 [hbomax]
 st = ""
 cdm = ""
+args = ""
 
 [mediasetinfinity]
 rtilogin_acd = '''[paste here]'''
 cdm = ""
+args = ""
 
 [nowtvit]
 skyCEsidmesso01 = ""
 cdm = ""
+args = ""
 
 [paramountplus]
 st = ""
 cdm = ""
+args = ""
 
 [primevideo]
 cookies = '''[paste here]'''
 cdm = ""
+args = ""
 
 [rakutentv]
 email = ""
 password = ""
 country = ""
 cdm = ""
+args = ""
 
 [timvision]
 cookies = '''[paste here]'''

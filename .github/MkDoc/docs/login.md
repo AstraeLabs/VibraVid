@@ -16,6 +16,9 @@ log in, click the extension icon, then use:
   (for example `cookies = '''{"key":"value"}'''`). Use triple **single** quotes: they keep the text exactly as
   copied (backslashes and `\n` inside the JSON are not interpreted), while plain quoted TOML strings cannot contain raw quotes.
 
+Every service section of `login.toml` also has an `args = ""` key: options added to each download of that service
+(for example `args = "--quality 1080"`). See [Default options for a service](configuration.md#default-options-for-a-service-args).
+
 ---
 
 ## Crunchyroll: Get Cookies via Extension

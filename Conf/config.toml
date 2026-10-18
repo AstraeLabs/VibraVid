@@ -25,7 +25,6 @@ serie_folder_name = "Serie"
 anime_folder_name = "Anime"
 music_folder_name = "Music"
 live_folder_name = "Live"
-# Movie tokens: title_name, title_year, quality
 movie_format = "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]"
 episode_format = "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]"
 song_format = "%(album)/%(track_number:02d). %(title)"
@@ -39,9 +38,7 @@ skip_download = false
 auto_select = true
 # Faster on some sites
 use_curl_cffi_segments = false
-# Seconds to wait after each download
 delay_after_download = 0
-# Simultaneous downloads (4-10 recommended)
 thread_count = 10
 # MB/s, 0 = unlimited (10 Mbps is about 1.25 MB/s)
 max_speed_mbps = 0
@@ -118,7 +115,6 @@ mux_dtsx = false
 extension = "mkv"
 
 [REQUESTS]
-# Seconds
 timeout = 15
 max_retry = 4
 # Check SSL certificates (recommended)
@@ -135,9 +131,10 @@ https = "http://localhost:8888"
 
 [DRM]
 use_cdm = true
-# Prefer the remote CDM over the local one
-prefer_remote_cdm = false
-# Skip the vault and ask the CDM for a fresh key (remote or local, see prefer_remote_cdm)
+# Default CDM: "search" (first .wvd/.prd in the binary folder), a file name, a remote id or a list (see docs)
+cdm = "search"
+
+# Skip the vault and ask the CDM for a fresh key
 bypass_vault_cache = false
 log_engine_output = false
 
@@ -153,7 +150,7 @@ token = ""
 # token = "..."
 # protocol = "custom"
 
-# Remote CDMs with an id, chosen per service with cdm = "<id>" in login.toml.
+# Remote CDMs with an id, chosen with cdm = "<id>" here or in login.toml.
 # Same fields as a pywidevine / pyplayready remote CDM, or type = "custom_api_1" for a hosted CDM.
 # [DRM.remote_cdm.my_widevine]
 # type = "custom_api_1"

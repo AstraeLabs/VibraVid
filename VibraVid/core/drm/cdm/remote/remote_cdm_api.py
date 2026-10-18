@@ -274,7 +274,7 @@ class RemoteCdmApi:
 
 def build_remote_cdm(cfg: dict, system: str):
     """
-    Build the remote CDM described by a `DRM.widevine` / `DRM.playready` config dict.
+    Build the remote CDM described by a `DRM.remote_cdm.<id>` config dict.
     """
     cfg = dict(cfg)
     backend = str(cfg.pop("type", "")).lower()

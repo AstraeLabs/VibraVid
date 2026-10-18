@@ -47,9 +47,9 @@ def test_map_only_has_providers_with_custom_arguments(monkeypatch):
     _login(monkeypatch, '''
 d = "not a block"
 [a]
-extra_args = "--url x"
+args = "--url x"
 [b]
-extra_args = ""
+args = ""
 [c]
 token = "t"
 ''')
@@ -65,7 +65,7 @@ def test_unreadable_or_odd_login_toml_gives_an_empty_map(monkeypatch, content):
 
 
 def test_search_page_embeds_the_map_and_the_info_line(client, monkeypatch):
-    _login(monkeypatch, '[streamingcommunity]\nextra_args = "--url <b>x</b> & y"\n')
+    _login(monkeypatch, '[streamingcommunity]\nargs = "--url <b>x</b> & y"\n')
 
     page = client.get("/").content.decode()
 
@@ -81,7 +81,7 @@ def test_search_page_without_custom_arguments(client, monkeypatch):
 
 
 def test_settings_page_still_gets_the_same_map(client, monkeypatch):
-    _login(monkeypatch, '[raiplay]\nextra_args = "--foo"\n')
+    _login(monkeypatch, '[raiplay]\nargs = "--foo"\n')
 
     page = client.get("/settings/").content.decode()
     match = re.search(r'<script id="cn-src-extra-args" type="application/json">(.*?)</script>', page, re.S)

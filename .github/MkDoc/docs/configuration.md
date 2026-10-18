@@ -111,6 +111,20 @@ Unlike the TMDB entry above, `Provider.tvdb` in `login.toml` is a supported loca
 `TVDB_API_KEY` in your `.env` file (see `.env.example`). `login.toml` can hold secrets: do not commit your
 own copy.
 
+## Default options for a service (`args`)
+
+Every service section in `Conf/login.toml` has an `args` key (empty by default). Whatever you write there is
+added to **every** download of that service, written exactly like on the [command line](cli.md):
+
+```toml
+[nowtvit]
+skyCEsidmesso01 = "..."
+args = "--quality 1080 --range HDR10"
+
+[chili]
+args = "--country es"
+```
+
 ## DEFAULT
 
 ```toml
@@ -505,7 +519,7 @@ https = "socks5h://user:pass@localhost:1080"
 ```toml
 [DRM]
 use_cdm = true
-prefer_remote_cdm = false
+cdm = "search"
 bypass_vault_cache = false
 log_engine_output = false
 
@@ -517,7 +531,7 @@ token = ""
 | Key | Default | Description |
 |-----|---------|-------------|
 | `use_cdm` | `true` | Enable CDM-based key extraction. When `false`, only database/vault lookups are attempted |
-| `prefer_remote_cdm` | `false` | Use the remote CDM configured in `widevine` / `playready` (see [Remote CDM Services](#remote-cdm-services) below) instead of local device files. When `true`, a local `.wvd` / `.prd` is ignored even if present |
+| `cdm` | `"search"` | Default CDM for every service that doesn't set its own `cdm` in `login.toml`: `"search"` (first `.wvd` / `.prd` in the binary folder), a device file name, a remote CDM id, or a list. See [Choosing the CDM](#choosing-the-cdm-cdm) |
 | `bypass_vault_cache` | `false` | Skip the DRM key vault lookup and force a fresh CDM license request every run, instead of reusing a previously-seen key. |
 | `log_engine_output` | `false` | Log the decrypt engine's own stdout/stderr output — equivalent to the CLI's `--log-decryptor-output`. Off by default since it's verbose; useful when a decrypt is failing and you need the raw engine output |
 | `vault` | — | Optional external DRM key store(s), queried before CDM extraction |
@@ -578,11 +592,11 @@ protocol = "query"
 
 ### Remote CDM Services
 
-When remote CDM services are available, add one or both of the following blocks to `config.toml`:
+A remote CDM is declared once under `[DRM.remote_cdm.<id>]` in `config.toml`; the id is free text (except `search` and `default`, which are reserved) and is what you then put in `cdm`. The fields depend on the kind of remote CDM.
 
-**Widevine:**
+**Widevine (pywidevine remote CDM):**
 ```toml
-[DRM.widevine]
+[DRM.remote_cdm.my_widevine]
 device_type = "ANDROID"
 system_id = 22590
 security_level = 3
@@ -600,9 +614,9 @@ device_name = "public"
 | `secret` | Authentication secret |
 | `device_name` | Device identifier registered on the remote service |
 
-**PlayReady:**
+**PlayReady (pyplayready remote CDM):**
 ```toml
-[DRM.playready]
+[DRM.remote_cdm.my_playready]
 device_name = "public"
 security_level = 3000
 host = "https://cdrm-project.com/remotecdm/playready"
@@ -616,21 +630,23 @@ secret = "CDRM"
 | `host` | Remote CDM server URL |
 | `secret` | Authentication secret |
 
+The system an id serves (Widevine or PlayReady) is inferred from its fields: `device_type` or `type = "custom_api_1"` mean Widevine, a `device_name` starting with `SL` means PlayReady, and a block without `device_type` is treated as PlayReady. Add `system = "widevine"` or `system = "playready"` to set it explicitly.
+
 ### Hosted remote CDM API
 
-A third-party hosted CDM service (Widevine and PlayReady) reachable over HTTP. To use one, set `type = "custom_api_1"` in the `widevine` and/or `playready` block, fill in `host` and `secret` from your provider, and turn on `prefer_remote_cdm`:
+A third-party hosted CDM service (Widevine and PlayReady) reachable over HTTP. Declare it as a remote CDM with `type = "custom_api_1"`, fill in `host` and `secret` from your provider, and select it with `cdm`:
 
 ```toml
 [DRM]
-prefer_remote_cdm = true
+cdm = ["hosted_widevine", "hosted_playready"]
 
-[DRM.widevine]
+[DRM.remote_cdm.hosted_widevine]
 type = "custom_api_1"
 host = "YOUR_PROVIDER_API_URL"
 secret = "YOUR_PROVIDER_API_KEY"
 device_name = "L3"
 
-[DRM.playready]
+[DRM.remote_cdm.hosted_playready]
 type = "custom_api_1"
 host = "YOUR_PROVIDER_API_URL"
 secret = "YOUR_PROVIDER_API_KEY"
@@ -646,43 +662,71 @@ device_name = "SL3"
 | `auth_header` | `x-api-key` | HTTP header name the provider expects the key under; set it only if your provider requires a different one |
 | `service_name` | - | Optional service tag |
 
-### Named remote CDMs and per-service CDM
+### Choosing the CDM (`cdm`)
 
-To use a different CDM for one service, give each remote CDM a unique id under `DRM.remote_cdm` in `config.toml`, then pick it in `login.toml`. Each entry has the same fields as the `widevine` / `playready` blocks above (stock pywidevine / pyplayready remote CDMs, or `type = "custom_api_1"`):
-
-```toml
-[DRM.remote_cdm.remote_widevine_1]
-type = "custom_api_1"
-host = "YOUR_PROVIDER_API_URL"
-secret = "YOUR_PROVIDER_API_KEY"
-device_name = "L3"
-
-[DRM.remote_cdm.remote_widevine_2]
-device_type = "ANDROID"
-system_id = 22594
-security_level = 3
-host = "http://192.168.1.10:8786"
-secret = "my_secret"
-device_name = "device"
-
-[DRM.remote_cdm.remote_playready_1]
-host = "http://192.168.1.10:8787"
-secret = "my_secret"
-device_name = "device"
-security_level = 3000
-```
-
-The ids are free text. Then, in `login.toml`, list what the service should use in its `cdm` entry (a single value or a list):
-
-```toml
-[mysite]
-cdm = ["remote_widevine_1", "my_playready.prd"]
-```
+`cdm` picks which CDM extracts the keys. It can be set in `config.toml` under `[DRM]` (the default for every service) and in a service's section of `login.toml` (only for that service). Each DRM system, Widevine and PlayReady, has exactly one CDM at a time: a local device file or a remote CDM, never both.
 
 | `cdm` entry | Meaning |
 |-------------|---------|
-| ends with `.wvd` / `.prd` | A device file, looked up in the `wvd/` (Widevine) or `prd/` (PlayReady) directory |
+| `"search"` | The first `.wvd` (Widevine) and `.prd` (PlayReady) found in the binary folder, see [Local CDM Devices](#local-cdm-devices) |
+| ends with `.wvd` / `.prd` | That device file, looked up in the `wvd/` (Widevine) or `prd/` (PlayReady) directory |
+| `"default"` | Only in `login.toml`: use the `cdm` of `[DRM]`. An empty `cdm = ""` means the same |
 | anything else | The id of a remote CDM from `DRM.remote_cdm` |
+
+The value is a single entry or a list with one entry per system. A system is resolved in this order: the service's `cdm` in `login.toml`, then `cdm` in `[DRM]`, then `"search"`. A service that only names a `.wvd` therefore keeps the `[DRM]` choice for PlayReady. A file that is missing, or an id that doesn't exist, stops the download with an error that lists the known ids.
+
+```toml
+# config.toml: default for everyone
+[DRM]
+cdm = ["my_widevine", "my_playready.prd"]
+
+# login.toml: this service uses a local Widevine file, PlayReady stays as in [DRM]
+[mysite]
+cdm = "mine.wvd"
+```
+
+The `--cdm` option of the [command line](cli.md) sits above both: for one run, it wins over `login.toml` and `[DRM]`.
+
+#### Which CDM was used
+
+Each time keys are requested, the console prints one line: the device file (name only, no path) with its `SysID` (`.wvd`) or `Model` (`.prd`), or `remote` plus the device name of a remote CDM, and why it was picked.
+
+```
+[+] device_l3.wvd | SysID: 22594 | why: search
+[+] tv_sl3000.prd | Model: TPV AOC 50U6185 | why: config.toml [DRM]
+[+] remote L1 | why: login.toml 'mysite', min_height 1080
+```
+
+| Text after `why:` | Meaning |
+|-------------------|---------|
+| `--cdm` | Given on the command line |
+| `login.toml '<service>'` (plus `, min_height 1080` when a quality rule picked it) | The service's own `cdm` |
+| `config.toml [DRM]` | The default `cdm` of `[DRM]` |
+| `search` | The first device file found in the binary folder |
+
+The security level and the full path of the device go to the log file instead.
+
+#### Checking the settings at startup
+
+When the program starts, every `cdm` is checked, whatever the video height: the `--cdm` option, each service in `login.toml` and `[DRM]`. A missing device file, an unknown remote id, a reserved id (`search`, `default`) or a malformed quality rule is printed as a warning right away, instead of failing later when the keys are needed. A mistake in `--cdm` stops the run, since it was asked for explicitly; one in the files only warns, because downloads without DRM don't need a CDM.
+
+#### CDM by video quality
+
+A list entry can be a table that applies only to a range of video heights: `min_height` and `max_height` (both inclusive, both optional). The `cdm` inside it is any of the entries above, or a list of them. For each system the first entry that matches wins, and an entry without limits always matches, so put it last.
+
+```toml
+# Remote L1 CDM for 1080p and above, local L3 device file below
+[mysite]
+cdm = [
+  { min_height = 1080, cdm = "my_l1_remote" },
+  { cdm = "device_l3.wvd" },
+]
+```
+
+The height compared is the tallest video selected for the download (0 when only audio is selected), because one manifest uses a single license session. Entries that match no height fall through to the next level (`[DRM]`, then `"search"`).
+
+!!! note
+    `prefer_remote_cdm` and the inline `[DRM.widevine]` / `[DRM.playready]` blocks no longer exist: declare the remote CDM under `[DRM.remote_cdm.<id>]` and select it with `cdm`.
 
 ### Local CDM Devices
 
@@ -702,4 +746,4 @@ Override it with `VIBRAVID_BINARY_DIR` if you need a different path, for example
 
 Files left in the previous flat location (`C:\binary`, `~/.local/bin/binary`, `~/Applications/binary`) are still found, so nothing has to be moved by hand.
 
-Set `prefer_remote_cdm` to `false` and local devices will be picked up automatically. With `true`, the remote block is used and the local files are ignored.
+With `cdm = "search"` (the default) the first `.wvd` and `.prd` found are used. To keep several files and pick one, name it in `cdm`, for example `cdm = "mine.wvd"`.
