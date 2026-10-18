@@ -23,7 +23,7 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 
 class YTDLPDownloader:
-    """Wrapper per yt-dlp binario."""
+    """Wrapper for the yt-dlp binary."""
 
     def __init__(
         self,
@@ -48,8 +48,6 @@ class YTDLPDownloader:
     ) -> None:
         self.url = url
         self.output_dir = Path(output_dir)
-        # Services pass a templated name ("... [%(quality)]"): yt-dlp would read the token as its own template, so
-        # download under the clean name and resolve the media tokens from the finished file (see _resolve_media_tokens)
         self._name_template = filename
         self.filename = strip_media_tokens(f"{filename}.tmp")[: -len(".tmp")] if filename else filename
         self.headers = headers or {}
@@ -67,6 +65,8 @@ class YTDLPDownloader:
         self.playlist_end = playlist_end
         self.download_id = download_id
         self.extra_args = kwargs
+        self._yt_dlp_last_pct: dict[str, float] = {}
+        self._yt_dlp_speed_hist: list[float] = []
 
     @classmethod
     def extract_info(cls, target: str, timeout: int = 60) -> dict | None:
@@ -128,7 +128,6 @@ class YTDLPDownloader:
             if self.format_spec and self.format_spec != "bestvideo+bestaudio/best":
                 cmd.extend(["-f", self.format_spec])
         else:
-            # A literal "%" in a title or folder name must not be read as an output-template field
             if self.filename:
                 out_template = f"{str(self.output_dir / self.filename).replace('%', '%%')}.%(ext)s"
             else:
@@ -262,8 +261,7 @@ class YTDLPDownloader:
             console.print(f"[yellow]Warning: Dynamic rename failed: {exc}")
             return downloaded
 
-    @staticmethod
-    def _handle_progress_line(bar_manager: DownloadBarManager, line: str) -> None:
+    def _handle_progress_line(self, bar_manager: DownloadBarManager, line: str) -> None:
         """Translate yt-dlp's progress output into VibraVid progress metrics."""
         cleaned = _ANSI_ESCAPE.sub("", line)
         pct_match = re.search(r"(?P<pct>\d+(?:\.\d+)?)%", cleaned)
@@ -280,13 +278,30 @@ class YTDLPDownloader:
         if total_match:
             total = total_match.group(1)
         if speed_match:
-            speed = speed_match.group(1)
+            raw = speed_match.group(1)
+            m = re.match(r"([\d.]+)\s*([KMGT]?i?B)", raw)
+            if m:
+                val = float(m.group(1))
+                self._yt_dlp_speed_hist.append(val)
+                if len(self._yt_dlp_speed_hist) > 20:
+                    self._yt_dlp_speed_hist.pop(0)
+                speed = f"{sum(self._yt_dlp_speed_hist) / len(self._yt_dlp_speed_hist):.2f}{m.group(2)}/s"
+            else:
+                speed = raw
+
+        pct = float(pct_match.group("pct"))
+
+        task_key = "yt_dlp"
+        last_pct = self._yt_dlp_last_pct.get("yt_dlp")
+        if last_pct is not None and pct < last_pct:
+            self._yt_dlp_last_pct["yt_dlp"] = 0.0
+        self._yt_dlp_last_pct["yt_dlp"] = pct
 
         bar_manager.handle_progress_line(
             {
-                "task_key": "yt_dlp",
+                "task_key": task_key,
                 "label": "yt-dlp",
-                "pct": float(pct_match.group("pct")),
+                "pct": pct,
                 "speed": speed,
                 "size": total,
             }
@@ -334,8 +349,7 @@ class YTDLPDownloader:
         ]
 
     def _find_downloaded_file(self) -> Path | None:
-        """Trova il file scaricato nella output_dir."""
-        # yt-dlp usa l'estensione reale, cerchiamo il file più recente che matcha il filename
+        """Find the downloaded file in the output_dir."""
         if self.filename:
             candidates = [
                 file_path
@@ -347,5 +361,4 @@ class YTDLPDownloader:
         if not candidates:
             return None
 
-        # Ritorna il più grande (completo)
         return max(candidates, key=lambda p: p.stat().st_size)
