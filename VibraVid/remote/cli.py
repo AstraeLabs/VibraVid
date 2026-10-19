@@ -12,7 +12,7 @@ from VibraVid.core.ui.tracker import context_tracker
 from .client import RemoteClient, make_license_request_fn, make_manifest_refresh_fn
 from .config import RemoteServer, pick_remote_server
 from .credentials import LocalCache, apply_updates
-from .factory import build_downloader
+from .factory import build_downloader, download_media
 from .models import RemoteError, ResolvedMedia
 
 console = Console()
@@ -194,10 +194,7 @@ def download_resolved(client: RemoteClient, use_server_cdm: bool, session_id: st
     site_token = current_site_var.set(site)
     try:
         if media.kind == "mp4":
-            from VibraVid.core.downloader import MP4_Downloader
-
-            result = MP4_Downloader(media.url, path, headers=media.headers or None, key=media.key, chapters=media.chapters, poster_url=media.poster_url)
-            return DownloadResult.from_raw(result).ok
+            return download_media(media, path).ok
 
         key = None
         license_fn = None

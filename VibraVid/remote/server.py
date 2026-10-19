@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 KEY_HEADER = "X-VibraVid-Key"
 WORKER_TIMEOUT = 180.0
+_login_hints: dict[str, set] = {}
+_cache_hints: dict[str, set] = {}
 
 
 def authenticate(settings: ServeSettings, presented: str | None) -> RemoteUser | None:
@@ -182,18 +184,12 @@ def run_for_client(identity: Identity, site: str, options: dict | None, fn):
     return _in_thread(work, identity=identity)
 
 
-_login_hints: dict[str, set] = {}
-
-
 def learn_login_sections(site: str, names) -> None:
     _login_hints.setdefault(site, set()).update(names)
 
 
 def login_section_hints(site: str) -> list[str]:
     return sorted(_login_hints.get(site, ()))
-
-
-_cache_hints: dict[str, set] = {}
 
 
 def learn_cache_services(site: str, names) -> None:

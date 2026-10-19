@@ -10,6 +10,7 @@ _PROVIDER_LABELS = {
     "annasarchive": "Anna's Archive",
     "appletv": "Apple TV",
     "chili": "CHILI",
+    "cs_chrome": "CS Chrome",
     "discoveryplus": "Discovery+",
     "disney": "Disney+",
     "dmax": "DMAX",

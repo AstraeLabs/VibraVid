@@ -10,10 +10,10 @@ from pathlib import Path
 from VibraVid.utils import config_manager
 from VibraVid.utils._log_buffer import flush_startup_buffer
 
-# INFO    → info, warning, error, critical
-# WARNING → warning, error, critical
-# ERROR   → error, critical
-# DEBUG   → debug, info, warning, error, critical
+conf_log_level = str(config_manager.config.get("DEFAULT", "log_level") or "").upper()
+_log_file = None
+logger = logging.getLogger(__name__)
+
 
 def resolve_log_level(name) -> int:
     """Numeric level for a ``log_level`` config value; an unknown name (e.g. ``FULL``) falls back to INFO instead of crashing at import."""
@@ -25,9 +25,7 @@ def resolve_log_level(name) -> int:
     return logging.INFO
 
 
-conf_log_level = str(config_manager.config.get("DEFAULT", "log_level") or "").upper()
 LOG_LEVEL = resolve_log_level(conf_log_level)
-_log_file = None
 
 
 def get_log_file_path():
@@ -89,6 +87,3 @@ def setup_logger(name=None, no_log: bool = False):
             raise
 
     return logger
-
-
-logger = logging.getLogger(__name__)

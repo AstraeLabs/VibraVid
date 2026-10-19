@@ -46,6 +46,12 @@ _RELEASE_CACHE_TTL = 24 * 60 * 60
 _RELEASE_ERROR_TTL = 30 * 60
 _CHECK_TIMEOUT = 4
 
+_UPDATE_COMMANDS = {
+    "installer": "VibraVid -UP",
+    "source_code": "git pull && pip install -r requirements.txt --upgrade  (uv: uv sync --upgrade)",
+    "docker": "docker compose pull && docker compose up -d",
+}
+
 
 def _numeric_version(value: str) -> tuple[int, ...] | None:
     """Only compare stable numeric release tags; never compare flattened strings."""
@@ -142,13 +148,6 @@ def get_execution_mode():
         pass
 
     return "source_code"
-
-
-_UPDATE_COMMANDS = {
-    "installer": "VibraVid -UP",
-    "source_code": "git pull && pip install -r requirements.txt --upgrade  (uv: uv sync --upgrade)",
-    "docker": "docker compose pull && docker compose up -d",
-}
 
 
 def update_command(mode: str) -> str:

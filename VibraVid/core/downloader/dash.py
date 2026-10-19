@@ -782,7 +782,7 @@ class DASH_Downloader(BaseDownloader):
 
         # ── Download
         self._log_tracks_json(streams, self.decryption_keys, self.mpd_url)
-        if SKIP_DOWNLOAD or context_tracker.capture_keys is not None:
+        if SKIP_DOWNLOAD or context_tracker.capture_keys is not None or context_tracker.export_file is not None:
             return self._skip_download_result()
 
         self._update_status("Downloading ...")

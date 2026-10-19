@@ -94,7 +94,8 @@ def test_arr_patch_changes_only_arr_and_keeps_the_comments(client, conf):
     body = response.json()
     assert response.status_code == 200 and body["success"] is True
     text = config_file.read_text(encoding="utf-8")
-    assert "# Sonarr / Radarr / Seerr integration" in text
+    assert "# Simultaneous downloads started by ARR" in text
+    assert "# Tag to write into files" in text
     saved = tomllib.loads(text)
     assert saved["ARR"]["enabled"] is True and saved["ARR"]["max_concurrent_downloads"] == 3
     assert saved["ARR"]["sonarr"] == tomllib.loads(CONFIG_REF)["ARR"]["sonarr"]

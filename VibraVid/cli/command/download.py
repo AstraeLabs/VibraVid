@@ -1,9 +1,6 @@
 # 10.12.25
 
-import json
 import logging
-import shlex
-import subprocess
 from pathlib import Path
 
 from rich.console import Console
@@ -26,44 +23,66 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
-def handle_direct_download_json(args) -> tuple[bool, bool]:
-    """Run every 'cmd' entry from a TRACKS_JSON file (see debug_track_json) when --down-json is passed."""
-    path: str | None = getattr(args, "down_json", None)
+def _import_output_path(media, output: str | None) -> str:
+    """Where an imported entry goes: the ``-o`` path, else the local naming of its title, else a name derived from the URL."""
+    extension = config_manager.config.get("PROCESS", "extension")
+    if output:
+        return derive_output_path(media.url, output, extension)
+
+    if media.title:
+        from VibraVid.remote.cli import output_path_for
+
+        return output_path_for(media, media.site)
+    return derive_output_path(media.url, None, extension)
+
+
+def handle_import(args) -> tuple[bool, bool]:
+    """Download every entry of a ``--export`` JSON file when --import is passed."""
+    path: str | None = getattr(args, "import_file", None)
     if not path:
         return False, False
 
-    json_path = Path(path.strip())
-    if not json_path.is_file():
-        console.print(f"[red]--down-json file not found: {json_path}")
-        return True, False
+    from VibraVid.core.downloader.util._export import read_export
+    from VibraVid.remote.cli import _prepare_context
+    from VibraVid.remote.factory import download_media
+    from VibraVid.services._base.site_loader import current_site_var
 
     try:
-        entries = json.loads(json_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        console.print(f"[red]Could not parse {json_path}: {exc}")
+        entries = read_export(path)
+    except ValueError as exc:
+        console.print(f"[red]--import: {exc}")
         return True, False
 
-    if not isinstance(entries, list):
-        console.print(f"[red]{json_path} does not contain a JSON array of track entries.")
-        return True, False
+    output = (getattr(args, "output", None) or "").strip() or None
+    if output and len(entries) > 1:
+        console.print("[yellow]-o is ignored: the file has several entries, each one is named from its own title")
+        output = None
 
     total = len(entries)
-    console.print(f"[cyan]{total} command(s) to run from {json_path}")
+    console.print(f"[cyan]{total} entr{'y' if total == 1 else 'ies'} to download from {path}")
 
     failures = []
-    for i, entry in enumerate(entries, 1):
-        name = (entry or {}).get("name") or f"entry {i}"
-        cmd = (entry or {}).get("cmd") if isinstance(entry, dict) else None
-        if not cmd:
-            console.print(f"[yellow][{i}/{total}] Skipping '{name}': no 'cmd' field")
+    for i, media in enumerate(entries, 1):
+        name = media.title or media.url
+        console.print(f"\n[cyan][{i}/{total}] {name} [dim]({media.kind})")
+        site_token = current_site_var.set(media.site)
+        try:
+            _prepare_context(media, media.site)
+            result = download_media(media, _import_output_path(media, output))
+        except Exception as exc:
+            logger.exception(f"Import of '{name}' failed: {exc}")
+            console.print(f"[red]  failed: {exc}")
+            failures.append(name)
             continue
+        finally:
+            current_site_var.reset(site_token)
 
-        console.print(f"\n[cyan][{i}/{total}] {name}")
-        result = subprocess.run(shlex.split(cmd, posix=False))
-        if result.returncode != 0:
-            console.print(f"[yellow]  exited with code {result.returncode}")
+        if not result.ok:
+            console.print(f"[red]  failed: {result.error or 'stopped'}")
             failures.append(name)
 
+    if failures:
+        console.print(f"\n[yellow]{len(failures)}/{total} failed: {', '.join(failures)}")
     return True, not failures
 
 

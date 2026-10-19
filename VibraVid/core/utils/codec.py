@@ -150,31 +150,11 @@ VIDEO_CODEC_PREFIXES: tuple[str, ...] = (
 
 DV_CODEC_PREFIXES: tuple[str, ...] = ("dvh1", "dvhe", "dvav", "dav1")
 
-
-def infer_video_range(codecs: str) -> str:
-    """Infer the HDR/DV type from a codec string (shared by DASH and HLS parsers)."""
-    c = (codecs or "").lower()
-    for prefix in DV_CODEC_PREFIXES:
-        if c.startswith(prefix) or f",{prefix}" in c:
-            return "DV"
-    if re.search(r"hvc1\.2\.|hev1\.2\.", c):
-        return "HDR10"
-    if re.search(r"hvc1\.8\.|hev1\.8\.", c):
-        return "HDR10"
-    if re.search(r"av01\.[12]\.", c):
-        return "HDR10"
-    return ""
-
-
 VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".mkv", ".m4v", ".ts", ".mov", ".webm", ".m2ts", ".avi"})
-
 AUDIO_EXTENSIONS: frozenset[str] = frozenset({".m4a", ".aac", ".mp3", ".ts", ".mp4", ".wav", ".webm", ".opus", ".flac"})
-
 SUBTITLE_EXTENSIONS: frozenset[str] = frozenset(
     {".srt", ".vtt", ".ass", ".sub", ".ssa", ".m4s", ".ttml", ".ttml2", ".xml", ".dfxp"}
 )
-
-
 CODEC_EXTENSION_MAP: dict[str, str] = {
     # Video
     "avc1": "mp4",
@@ -215,23 +195,6 @@ CODEC_EXTENSION_MAP: dict[str, str] = {
     "ass": "ass",
     "ssa": "ssa",
 }
-
-
-def get_codec_extension(codec_str: str, default: str = "mp4") -> str:
-    """
-    Return the preferred file extension for a codec string.
-
-    Performs prefix matching (e.g. 'avc1.640028' → 'mp4').
-    """
-    if not codec_str:
-        return default
-    c = codec_str.strip().lower()
-    for prefix, ext in CODEC_EXTENSION_MAP.items():
-        if c.startswith(prefix):
-            return ext
-    return default
-
-
 _VIDEO_CODEC_TOKEN: dict[str, str] = {
     "h264": "avc1",
     "h.264": "avc1",
@@ -252,7 +215,6 @@ _VIDEO_CODEC_TOKEN: dict[str, str] = {
     "dolby vision": "dvhe",
     "dv": "dvhe",
 }
-
 _AUDIO_CODEC_TOKEN: dict[str, str] = {
     "aac": "mp4a",
     "mp4a": "mp4a",
@@ -272,6 +234,34 @@ _AUDIO_CODEC_TOKEN: dict[str, str] = {
     "ac4": "ac-4",
     "ac-4": "ac-4",
 }
+
+
+def infer_video_range(codecs: str) -> str:
+    """Infer the HDR/DV type from a codec string (shared by DASH and HLS parsers)."""
+    c = (codecs or "").lower()
+    for prefix in DV_CODEC_PREFIXES:
+        if c.startswith(prefix) or f",{prefix}" in c:
+            return "DV"
+    if re.search(r"hvc1\.2\.|hev1\.2\.", c):
+        return "HDR10"
+    if re.search(r"hvc1\.8\.|hev1\.8\.", c):
+        return "HDR10"
+    if re.search(r"av01\.[12]\.", c):
+        return "HDR10"
+    return ""
+
+
+def get_codec_extension(codec_str: str, default: str = "mp4") -> str:
+    """
+    Return the preferred file extension for a codec string.
+    """
+    if not codec_str:
+        return default
+    c = codec_str.strip().lower()
+    for prefix, ext in CODEC_EXTENSION_MAP.items():
+        if c.startswith(prefix):
+            return ext
+    return default
 
 
 def get_codec_token(user_codec: str, stream_type: str) -> str:

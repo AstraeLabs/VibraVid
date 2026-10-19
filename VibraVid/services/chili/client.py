@@ -40,6 +40,17 @@ CHILI_DOMAINS = [
     ".es.chili.com",
 ]
 
+PLAYREADY_LICENSE_URL_AVOD = "https://it.chili.com/flux-capacitor/api/v1/licensing/playready"
+WIDEVINE_LICENSE_URL_AVOD = "https://it.chili.com/flux-capacitor/api/v1/licensing/widevine"
+DEVICES = {
+    "lgui40": {"player": "lgui40:DASH-CENC:PR", "drm": "playready"},
+    "atvui40": {"player": "atvui40:DASH-CENC:WVM", "drm": "widevine"},
+    "web": {"player": "web:DASH-CENC:WVM", "drm": "widevine"},
+}
+APP_VERSION_LG = "v2.77.0"
+DEVICE_SERIAL_LG = "203WRMD8U920"
+GIZMO = "https://gizmo.chili.com/v3"
+
 
 def normalize_market(code: str | None) -> str:
     value = str(code or "").strip().lower()
@@ -693,8 +704,6 @@ class ChiliClient:
 
 
 _client_instance: ChiliClient | None = None
-PLAYREADY_LICENSE_URL_AVOD = "https://it.chili.com/flux-capacitor/api/v1/licensing/playready"
-WIDEVINE_LICENSE_URL_AVOD = "https://it.chili.com/flux-capacitor/api/v1/licensing/widevine"
 
 
 def _get_client(market: str | None = None) -> ChiliClient:
@@ -860,16 +869,6 @@ def get_me_streaming(
 def _credentials() -> tuple[str | None, str | None, str | None, str | None]:
     """Not used with cookie-based auth."""
     return None, None, None, None
-
-
-DEVICES = {
-    "lgui40": {"player": "lgui40:DASH-CENC:PR", "drm": "playready"},
-    "atvui40": {"player": "atvui40:DASH-CENC:WVM", "drm": "widevine"},
-    "web": {"player": "web:DASH-CENC:WVM", "drm": "widevine"},
-}
-APP_VERSION_LG = "v2.77.0"
-DEVICE_SERIAL_LG = "203WRMD8U920"
-GIZMO = "https://gizmo.chili.com/v3"
 
 
 def classification_id(market: str | None = None) -> str:

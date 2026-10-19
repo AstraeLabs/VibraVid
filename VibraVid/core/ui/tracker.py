@@ -744,6 +744,14 @@ class ContextTracker:
         self.local.resolve_only = value
 
     @property
+    def export_file(self):
+        return getattr(self.local, "export_file", None)
+
+    @export_file.setter
+    def export_file(self, value):
+        self.local.export_file = value
+
+    @property
     def capture(self):
         """Per-thread list collecting ``ResolvedMedia`` instead of downloading (remote server ``resolve``), else ``None``."""
         return getattr(self.local, "capture", None)

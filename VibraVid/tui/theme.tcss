@@ -1,248 +1,339 @@
-/* ── VibraVid TUI — Tokyo Night Modern Design System ──────────────────────
-   Built following the tui-design skill standards:
-   - Semantic color slots (bg.base, bg.surface, bg.overlay, fg.default, status.*)
-   - Background layering for depth (no unnecessary harsh borders)
-   - Clear focus management and visual indicators
-   - High information density with crisp typography
+/* ── VibraVid TUI — flat, minimal theme ───────────────────────────────────
+   Near-black background, no boxes: structure comes from spacing, a muted
+   secondary text colour and one violet accent. Rich markup in the Python
+   files uses the same colours (VibraVid/tui/palette.py).
    ──────────────────────────────────────────────────────────────────────── */
 
-/* ── Color System ──────────────────────────────────────────────────────── */
+$bg-base: #121212;
+$bg-surface: #1a1a1d;
+$bg-overlay: #242428;
+$bg-selection: #2b2745;
 
-$bg-base: #1a1b26;
-$bg-surface: #24283b;
-$bg-overlay: #2f3549;
-$bg-selection: #3b4261;
+$fg-default: #d4d4d8;
+$fg-muted: #71717a;
+$fg-emphasis: #ffffff;
 
-$fg-default: #c0caf5;
-$fg-muted: #565f89;
-$fg-emphasis: #7aa2f7;
+$accent-primary: #a78bfa;
+$accent-secondary: #c4b5fd;
 
-$accent-primary: #7aa2f7;
-$accent-secondary: #bb9af7;
+/* the five theme colors: purple (accent above), cyan, yellow, green, red */
+$status-success: #86efac;
+$status-warning: #fde047;
+$status-error: #f87171;
+$status-info: #67e8f9;
 
-$status-success: #9ece6a;
-$status-warning: #e0af68;
-$status-error: #f7768e;
-$status-info: #7dcfff;
+$cat-anime: #f87171;
+$cat-film_serie: #fde047;
+$cat-serie: #86efac;
+$cat-song: #a78bfa;
+$cat-tor: #67e8f9;
+$cat-global: #c4b5fd;
 
-/* Category badges */
-$cat-anime: #f7768e;
-$cat-film_serie: #e0af68;
-$cat-serie: #9ece6a;
-$cat-song: #9d7cd8;
-$cat-tor: #7dcfff;
-$cat-global: #bb9af7;
-
-/* ── Global Elements ──────────────────────────────────────────────────── */
+/* ── Base ─────────────────────────────────────────────────────────────── */
 
 Screen {
     background: $bg-base;
     color: $fg-default;
 }
 
-Header {
-    background: $bg-surface;
-    color: $fg-emphasis;
-    dock: top;
-    height: 1;
+* {
+    scrollbar-size-vertical: 1;
+    scrollbar-background: $bg-base;
+    scrollbar-background-hover: $bg-base;
+    scrollbar-background-active: $bg-base;
+    scrollbar-color: $bg-overlay;
+    scrollbar-color-hover: $fg-muted;
+    scrollbar-color-active: $accent-primary;
 }
 
-Footer, CustomFooter {
-    background: #1f2335;
-    color: #c0caf5;
+CustomFooter {
     dock: bottom;
-    height: 1;
-    padding: 0 1;
-    border: none;
+    height: auto;
+    background: $bg-base;
+    color: $fg-muted;
 }
+
+LoadingIndicator {
+    background: $bg-base;
+    color: $accent-primary;
+}
+
+/* ── Controls: flat chips and a single prompt line ────────────────────── */
 
 Button {
-    background: $bg-surface;
+    background: $bg-overlay;
     color: $fg-default;
-    border: round $bg-overlay;
-    min-width: 12;
-    height: 3;
-    padding: 0 1;
+    border: none;
+    min-width: 8;
+    height: 1;
+    padding: 0 2;
 }
 
 Button:hover {
-    background: $bg-overlay;
+    background: $bg-selection;
     color: $fg-emphasis;
-    border: round $accent-primary;
 }
 
 Button:focus {
-    background: $accent-primary;
-    color: #15161e;
-    text-style: bold;
-    border: round $accent-primary;
+    background: $bg-selection;
+    color: $accent-secondary;
+    text-style: bold underline;
 }
 
 Button.-primary {
     background: $accent-primary;
-    color: #15161e;
+    color: $bg-base;
     text-style: bold;
+}
+
+Button.-primary:hover, Button.-primary:focus {
+    background: $accent-secondary;
+    color: $bg-base;
 }
 
 Button.-error {
     background: $status-error;
-    color: #15161e;
+    color: $bg-base;
     text-style: bold;
 }
 
 Button.-warning {
     background: $status-warning;
-    color: #15161e;
+    color: $bg-base;
     text-style: bold;
+}
+
+Button:disabled {
+    background: $bg-surface;
+    color: $fg-muted;
 }
 
 Input {
     background: $bg-surface;
     color: $fg-default;
-    border: round $bg-overlay;
-    height: 3;
+    border: none;
+    border-left: thick $bg-overlay;
+    height: 1;
     padding: 0 1;
 }
 
 Input:focus {
-    border: round $accent-primary;
     background: $bg-surface;
+    border: none;
+    border-left: thick $accent-primary;
+}
+
+Input > .input--placeholder {
+    color: $fg-muted;
+}
+
+Switch {
+    background: $bg-base;
+    border: none;
+    padding: 0 1;
+    height: 1;
+}
+
+Switch > .switch--slider {
+    color: $fg-muted;
+    background: $bg-overlay;
+}
+
+Switch.-on > .switch--slider {
+    color: $status-success;
+}
+
+Switch:focus > .switch--slider {
+    color: $accent-secondary;
+}
+
+#settings-sections {
+    background: $bg-base;
+    height: 1fr;
+}
+
+.side-heading {
+    color: $fg-muted;
+    text-style: bold;
+    margin-top: 1;
+}
+
+ListItem:disabled {
+    opacity: 1;
+}
+
+.field-note {
+    margin: 0 0 1 32;
+    color: $fg-muted;
+}
+
+.settings-field.-noted {
+    margin-bottom: 0;
 }
 
 DataTable {
     background: $bg-base;
     color: $fg-default;
+    border: none;
 }
 
 DataTable > .datatable--header {
-    background: $bg-surface;
-    color: $accent-primary;
+    background: $bg-base;
+    color: $fg-muted;
     text-style: bold;
 }
 
 DataTable > .datatable--cursor {
     background: $bg-selection;
-    color: #ffffff;
-    text-style: bold;
+    color: $fg-emphasis;
 }
 
-OptionList {
+DataTable > .datatable--hover {
+    background: $bg-surface;
+}
+
+OptionList, ListView, SelectionList {
     background: $bg-base;
     color: $fg-default;
-    border: round $bg-overlay;
+    border: none;
+    padding: 0;
 }
 
-OptionList:focus {
-    border: round $accent-primary;
+OptionList:focus, ListView:focus, SelectionList:focus, DataTable:focus {
+    border: none;
+    background-tint: #000000 0%;
 }
 
-OptionList > .option-list--option-highlighted {
+OptionList > .option-list--option-highlighted,
+SelectionList > .option-list--option-highlighted {
     background: $bg-selection;
     color: $fg-emphasis;
-    text-style: bold;
+    text-style: none;
 }
 
-/* ── Category Styling ─────────────────────────────────────────────────── */
+OptionList > .option-list--option-hover,
+SelectionList > .option-list--option-hover {
+    background: $bg-surface;
+}
 
-.cat-anime { color: $cat-anime; text-style: bold; }
-.cat-film_serie { color: $cat-film_serie; text-style: bold; }
-.cat-serie { color: $cat-serie; text-style: bold; }
-.cat-song { color: $cat-song; text-style: bold; }
-.cat-tor { color: $cat-tor; text-style: bold; }
-.cat-global { color: $cat-global; text-style: bold; }
+ListItem {
+    background: $bg-base;
+    padding: 0 1;
+}
 
-/* ── Home Screen Search Engine Card Layout ────────────────────────────── */
+ListItem.-highlight, ListView:focus > ListItem.-highlight {
+    background: $bg-selection;
+    color: $fg-emphasis;
+}
+
+ListView > ListItem.-hovered {
+    background: $bg-surface;
+}
+
+/* ── Category colours ─────────────────────────────────────────────────── */
+
+.cat-anime { color: $cat-anime; }
+.cat-film_serie { color: $cat-film_serie; }
+.cat-serie { color: $cat-serie; }
+.cat-song { color: $cat-song; }
+.cat-tor { color: $cat-tor; }
+.cat-global { color: $cat-global; }
+
+/* ── Shared text roles ────────────────────────────────────────────────── */
+
+.panel-title, .box-title, .sub-title, .home-section-title {
+    color: $fg-default;
+    text-style: bold;
+    padding: 0;
+    margin-top: 1;
+}
+
+.muted { color: $fg-muted; }
+
+/* ── Home ─────────────────────────────────────────────────────────────── */
 
 #home-outer {
-    align: center middle;
+    align: center top;
     padding: 1 2;
 }
 
 #home-card {
-    width: 104;
-    max-width: 95%;
+    width: 100;
+    max-width: 100%;
     height: auto;
-    border: round $accent-primary;
-    background: $bg-surface;
-    padding: 1 3;
+    background: $bg-base;
+    border: none;
+    padding: 0;
 }
 
 #home-logo {
     text-align: center;
-    margin-bottom: 0;
+    margin-bottom: 1;
 }
 
 #home-tagline {
     text-align: center;
+    color: $fg-muted;
     margin-bottom: 1;
 }
 
 #home-search-bar {
-    height: 3;
+    height: 1;
     margin-bottom: 1;
-    align: center middle;
 }
 
 #main-search-input {
-    width: 4fr;
-    height: 3;
+    width: 1fr;
     margin-right: 1;
 }
 
 #btn-submit-search {
-    width: 1fr;
-    min-width: 14;
-    height: 3;
+    width: auto;
+    min-width: 12;
 }
 
 .home-section-title {
-    text-style: bold;
-    color: $accent-primary;
-    margin-top: 1;
-    margin-bottom: 1;
-    text-align: center;
+    text-align: left;
 }
 
 #home-provider-filter-bar {
-    height: 3;
+    height: 1;
     margin-bottom: 1;
-    align: center middle;
 }
 
 #provider-filter-input {
     width: 1fr;
-    height: 3;
 }
 
 /* Five pills side by side leave 8 usable cells each on an 80 column terminal,
    which is not enough for the labels: below that width they wrap onto two rows. */
 #home-scope-pills {
-    height: 3;
+    height: 1;
     margin-bottom: 1;
     grid-size: 5;
     grid-columns: 1fr 1fr 1fr 1fr 1fr;
-    grid-rows: 3;
+    grid-rows: 1;
     grid-gutter: 0 1;
 }
 
 #home-scope-pills.-narrow {
     grid-size: 3;
-    height: 6;
-    grid-gutter: 0 1;
+    height: 3;
+    grid-gutter: 1 1;
 }
 
 .scope-pill {
     width: 1fr;
-    height: 3;
+    height: 1;
     margin: 0;
 }
 
 #home-sites-box {
     height: auto;
     max-height: 10;
-    border: round $bg-overlay;
+    border: none;
     background: $bg-base;
-    padding: 1 2;
+    padding: 0;
     margin-bottom: 1;
 }
 
@@ -254,7 +345,7 @@ OptionList > .option-list--option-highlighted {
 .site-pill-row {
     height: 1;
     margin-bottom: 0;
-    align: center middle;
+    align: left middle;
 }
 
 .site-dot {
@@ -274,33 +365,30 @@ Button.site-pill {
 }
 
 Button.site-pill:hover {
-    color: $accent-primary;
-    background: $bg-overlay;
-    border: none;
+    color: $accent-secondary;
+    background: $bg-surface;
 }
 
 Button.site-pill:focus {
-    color: $accent-primary;
+    color: $accent-secondary;
     text-style: bold underline;
     background: $bg-selection;
-    border: none;
 }
 
 Button.site-pill.-primary {
     background: $accent-primary;
-    color: #15161e;
+    color: $bg-base;
     text-style: bold;
-    border: none;
 }
 
-/* ── Search Screen ────────────────────────────────────────────────────── */
+/* ── Search ───────────────────────────────────────────────────────────── */
 
 #search-panel {
     padding: 1 2;
 }
 
 #search-inputs-bar {
-    height: auto;
+    height: 1;
     margin-bottom: 1;
 }
 
@@ -313,40 +401,37 @@ Button.site-pill.-primary {
     width: 1fr;
 }
 
-/* Grid rather than a row: the pills share the width instead of overflowing it
-   when the labels or the counters grow. */
 #category-filter-pills {
-    height: auto;
+    height: 1;
     margin-bottom: 1;
     grid-size: 4;
     grid-columns: 1fr 1fr 1fr 1fr;
-    grid-rows: 3;
+    grid-rows: 1;
     grid-gutter: 0 1;
 }
 
 .filter-pill {
     width: 1fr;
-    height: 3;
+    height: 1;
     margin: 0;
 }
 
 #sort-btn {
     min-width: 16;
-    height: 3;
+    height: 1;
     margin-left: 1;
-    background: $bg-surface;
-    color: $accent-primary;
-    border: round $accent-primary;
+    background: $bg-overlay;
+    color: $accent-secondary;
 }
 
 #retry-failed-btn {
     min-width: 16;
-    height: 3;
+    height: 1;
     margin-left: 1;
 }
 
 #search-loading {
-    height: 3;
+    height: 1;
 }
 
 #search-status {
@@ -361,32 +446,26 @@ Button.site-pill.-primary {
 #results-container {
     width: 55%;
     height: 1fr;
-    padding-right: 1;
+    padding-right: 2;
 }
 
 #batch-actions-bar {
-    height: 3;
+    height: 1;
     margin-top: 1;
     align: left middle;
-    background: $bg-surface;
-    padding: 0 1;
-    border: round $status-success;
+    background: $bg-base;
+    padding: 0;
+    border: none;
 }
 
 #batch-count-label {
     width: auto;
     margin-right: 2;
-    text-style: bold;
     color: $status-success;
 }
 
 #btn-batch-enqueue {
     margin-right: 1;
-    height: 3;
-}
-
-#btn-batch-clear {
-    height: 3;
 }
 
 #preview-container {
@@ -396,14 +475,33 @@ Button.site-pill.-primary {
 
 #preview-box {
     height: 1fr;
-    border: round $accent-primary;
-    background: $bg-surface;
-    padding: 1 2;
+    border: none;
+    border-left: solid $bg-overlay;
+    background: $bg-base;
+    padding: 0 0 0 2;
+}
+
+#preview-head {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#preview-head.-stacked {
+    layout: vertical;
 }
 
 #search-preview-box {
+    width: 1fr;
     height: auto;
-    max-height: 14;
+    max-height: 16;
+}
+
+#preview-cover {
+    margin-right: 2;
+}
+
+#preview-head.-stacked #preview-cover {
+    margin-right: 0;
     margin-bottom: 1;
 }
 
@@ -413,42 +511,37 @@ Button.site-pill.-primary {
 }
 
 .preview-prov-title {
-    text-style: bold;
-    color: $accent-primary;
-    margin-bottom: 0;
+    color: $fg-muted;
+    text-style: none;
+    margin-top: 0;
 }
 
-/* Same grid treatment as the action row: the provider pills are created on demand,
-   so a plain row would overflow the column as soon as a title has several of them. */
 #preview-providers-wrap {
     height: auto;
-    margin-top: 0;
     grid-size: 2;
     grid-columns: 1fr 1fr;
-    grid-rows: 3;
+    grid-rows: 1;
     grid-gutter: 0 1;
 }
 
 .preview-prov-pill {
     width: 1fr;
-    height: 3;
+    height: 1;
     margin: 0;
 }
 
-/* 2x2 grid: the buttons follow the width of the preview column instead of
-   overflowing it, so none of them ends up cut off or off-screen. */
 #preview-actions-row {
     height: auto;
     margin-top: 1;
     grid-size: 2;
     grid-columns: 1fr 1fr;
-    grid-rows: 3;
-    grid-gutter: 0 1;
+    grid-rows: 1;
+    grid-gutter: 1 1;
 }
 
 #preview-actions-row Button {
     width: 1fr;
-    height: 3;
+    height: 1;
     margin: 0;
 }
 
@@ -467,16 +560,28 @@ FuzzyList {
     width: 1fr;
 }
 
-/* ── Detail Screen ────────────────────────────────────────────────────── */
+/* ── Detail ───────────────────────────────────────────────────────────── */
 
 #detail-panel {
     padding: 1 2;
 }
 
+#detail-head {
+    height: auto;
+}
+
+#detail-cover {
+    margin-right: 3;
+}
+
+#detail-info {
+    width: 1fr;
+    height: auto;
+}
+
 .detail-title {
     text-style: bold;
-    color: $accent-primary;
-    padding-top: 1;
+    color: $fg-emphasis;
 }
 
 .detail-meta {
@@ -489,7 +594,7 @@ FuzzyList {
 }
 
 #seasons-loading {
-    height: 3;
+    height: 1;
 }
 
 #series-browser {
@@ -497,104 +602,89 @@ FuzzyList {
 }
 
 #providers-box {
-    width: 25%;
-    border-right: solid $bg-overlay;
-    background: $bg-surface;
-    padding: 0 1;
+    width: 22%;
+    background: $bg-base;
+    padding: 0 2 0 0;
 }
 
 #seasons-box {
-    width: 25%;
-    border-right: solid $bg-overlay;
-    background: $bg-surface;
-    padding: 0 1;
+    width: 22%;
+    background: $bg-base;
+    padding: 0 2 0 0;
 }
 
 #episodes-box {
-    width: 50%;
-    padding: 0 1;
-}
-
-.box-title {
-    text-style: bold;
-    color: $accent-primary;
-    padding: 0 1;
+    width: 56%;
+    padding: 0;
 }
 
 .dsl-preview {
     color: $status-warning;
-    padding: 1 0;
-    text-style: bold;
+    padding: 1 0 0 0;
 }
 
 #actions-row {
     height: auto;
-    padding: 1 0;
+    padding: 1 0 0 0;
 }
 
 #actions-row Button {
     margin-right: 2;
 }
 
-/* ── Downloads Screen ─────────────────────────────────────────────────── */
+/* ── Downloads / Queue / History ──────────────────────────────────────── */
 
-#downloads-panel {
+#downloads-panel, #queue-panel, #history-panel {
     padding: 1 2;
 }
 
-#downloads-table {
+#downloads-table, #completed-table, #queue-table, #history-table {
     height: 1fr;
-    max-height: 45%;
-    border: round $bg-overlay;
+    max-height: 50%;
+    border: none;
     margin-bottom: 1;
 }
 
-#downloads-table:focus {
-    border: round $accent-primary;
-}
-
-#completed-table {
-    height: 1fr;
+#downloads-table, #completed-table {
     max-height: 45%;
-    border: round $bg-overlay;
-    margin-bottom: 1;
-}
-
-#completed-table:focus {
-    border: round $accent-primary;
 }
 
 #tasks-table {
     height: 1fr;
-    border: round $bg-overlay;
+    border: none;
 }
 
-#tasks-table:focus {
-    border: round $accent-primary;
+.queue-detail-box, .history-detail-box {
+    height: 5;
+    border: none;
+    border-left: solid $accent-primary;
+    background: $bg-base;
+    padding: 0 2;
 }
 
-#downloads-actions {
+#downloads-actions, #queue-actions, #history-actions {
     height: auto;
     padding-top: 1;
 }
 
-#downloads-actions Button {
+#downloads-actions Button, #queue-actions Button, #history-actions Button {
     margin-right: 2;
 }
 
-/* ── Settings Screen ──────────────────────────────────────────────────── */
+/* ── Settings ─────────────────────────────────────────────────────────── */
 
 #settings-sidebar {
-    width: 26;
+    width: 28;
     dock: left;
-    background: $bg-surface;
-    border-right: solid $bg-overlay;
-    padding: 1 1;
+    background: $bg-base;
+    border: none;
+    padding: 1 2 1 2;
 }
 
 #settings-content {
     width: 1fr;
     padding: 1 2;
+    border-left: solid $bg-overlay;
 }
 
 #settings-form {
@@ -603,12 +693,12 @@ FuzzyList {
 }
 
 .settings-banner {
-    border: round $status-warning;
-    background: $bg-surface;
+    border: none;
+    border-left: solid $status-warning;
+    background: $bg-base;
     color: $status-warning;
-    padding: 1;
+    padding: 0 2;
     margin-bottom: 1;
-    text-style: bold;
 }
 
 .settings-field {
@@ -619,15 +709,7 @@ FuzzyList {
 
 .field-label {
     width: 32;
-    text-style: bold;
-    color: $accent-primary;
-}
-
-.sub-title {
-    text-style: bold;
-    color: $accent-primary;
-    padding-top: 1;
-    padding-bottom: 1;
+    color: $fg-muted;
 }
 
 #settings-actions {
@@ -637,7 +719,7 @@ FuzzyList {
 }
 
 #settings-actions Button {
-    margin-right: 1;
+    margin-right: 2;
 }
 
 #settings-status {
@@ -645,7 +727,30 @@ FuzzyList {
     color: $status-success;
 }
 
-/* ── System Screen ────────────────────────────────────────────────────── */
+/* ── System ───────────────────────────────────────────────────────────── */
+
+TabbedContent, TabPane {
+    background: $bg-base;
+}
+
+Tabs {
+    background: $bg-base;
+}
+
+Tab {
+    background: $bg-base;
+    color: $fg-muted;
+}
+
+Tab.-active {
+    color: $accent-secondary;
+    text-style: bold;
+}
+
+Underline > .underline--bar {
+    color: $accent-primary;
+    background: $bg-overlay;
+}
 
 #tab-deps, #tab-logs, #tab-updates {
     padding: 1 2;
@@ -654,19 +759,16 @@ FuzzyList {
 #deps-table {
     height: auto;
     max-height: 12;
-    border: round $bg-overlay;
+    border: none;
     margin-bottom: 1;
-}
-
-#deps-table:focus {
-    border: round $accent-primary;
 }
 
 #drm-box {
     height: auto;
-    padding: 1;
-    border: round $bg-overlay;
-    background: $bg-surface;
+    padding: 0 2;
+    border: none;
+    border-left: solid $bg-overlay;
+    background: $bg-base;
     margin-bottom: 1;
 }
 
@@ -687,26 +789,23 @@ FuzzyList {
 #log-file-list {
     width: 32;
     dock: left;
-    background: $bg-surface;
-    border-right: solid $bg-overlay;
+    background: $bg-base;
+    border: none;
 }
 
 #log-viewer {
     width: 1fr;
     height: 1fr;
-    border: round $bg-overlay;
+    border: none;
     background: $bg-base;
-}
-
-#log-viewer:focus {
-    border: round $accent-primary;
 }
 
 #update-box {
     height: 1fr;
-    padding: 1;
-    border: round $bg-overlay;
-    background: $bg-surface;
+    padding: 0 2;
+    border: none;
+    border-left: solid $bg-overlay;
+    background: $bg-base;
 }
 
 #system-info-text {
@@ -718,84 +817,26 @@ FuzzyList {
     color: $status-info;
 }
 
-/* ── Queue Screen ─────────────────────────────────────────────────────── */
+/* ── Modals & help ────────────────────────────────────────────────────── */
 
-#queue-panel {
-    padding: 1 2;
-}
-
-#queue-table {
-    height: 1fr;
-    max-height: 50%;
-    border: round $bg-overlay;
-    margin-bottom: 1;
-}
-
-#queue-table:focus {
-    border: round $accent-primary;
-}
-
-.queue-detail-box {
-    height: 5;
-    border: round $accent-primary;
-    background: $bg-surface;
-    padding: 0 1;
-}
-
-#queue-actions {
-    height: auto;
-    padding-top: 1;
-}
-
-#queue-actions Button {
-    margin-right: 2;
-}
-
-/* ── History Screen ───────────────────────────────────────────────────── */
-
-#history-panel {
-    padding: 1 2;
-}
-
-#history-table {
-    height: 1fr;
-    max-height: 50%;
-    border: round $bg-overlay;
-    margin-bottom: 1;
-}
-
-#history-table:focus {
-    border: round $accent-primary;
-}
-
-.history-detail-box {
-    height: 5;
-    border: round $accent-primary;
-    background: $bg-surface;
-    padding: 0 1;
-}
-
-#history-actions {
-    height: auto;
-    padding-top: 1;
-}
-
-#history-actions Button {
-    margin-right: 2;
-}
-
-/* ── Overlay Modals & Help ────────────────────────────────────────────── */
-
-PlaceholderScreen, HelpScreen, EnqueueModal, RangeSelectModal {
+PlaceholderScreen, HelpScreen, EnqueueModal, RangeSelectModal, TrackSelectModal {
     align: center middle;
-    background: rgba(15, 16, 22, 0.8);
+    background: rgba(0, 0, 0, 0.75);
 }
 
-#placeholder-box, #enqueue-modal-box, #range-modal-box {
+#tracks-list {
+    height: auto;
+    max-height: 20;
+    margin: 1 0;
+    background: $bg-surface;
+}
+
+#placeholder-box, #enqueue-modal-box, #range-modal-box, #tracks-modal-box {
     width: 68;
     max-width: 90%;
     height: auto;
-    border: round $accent-primary;
+    border: none;
+    border-left: thick $accent-primary;
     padding: 1 2;
     background: $bg-surface;
 }
@@ -804,7 +845,8 @@ PlaceholderScreen, HelpScreen, EnqueueModal, RangeSelectModal {
     width: 74;
     max-width: 95%;
     max-height: 85%;
-    border: round $accent-primary;
+    border: none;
+    border-left: thick $accent-primary;
     padding: 1 2;
     background: $bg-surface;
 }
@@ -819,7 +861,7 @@ PlaceholderScreen, HelpScreen, EnqueueModal, RangeSelectModal {
 
 .placeholder-title {
     text-style: bold;
-    color: $accent-primary;
+    color: $fg-emphasis;
     padding-bottom: 1;
 }
 

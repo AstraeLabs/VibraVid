@@ -23,6 +23,7 @@ _DEFAULT_TIMEOUT = 10.0
 _MAX_MATCHED_SERVICES = 3
 _DEFAULT_RETRY_AFTER = 60.0
 _DEFAULT_SAVE_KEYS = False
+_instances_lock = threading.Lock()
 
 
 def _norm(value: str) -> str:
@@ -346,7 +347,6 @@ class UniversalVault(BaseVault):
 
 
 _instances: dict[tuple, UniversalVault] = {}
-_instances_lock = threading.Lock()
 
 
 def build_universal_vault(name: str, cfg: dict, known_urls: set[str] | None = None) -> UniversalVault | None:

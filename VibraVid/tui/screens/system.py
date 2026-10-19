@@ -15,7 +15,6 @@ from textual.screen import Screen
 from textual.widgets import (
     Button,
     DataTable,
-    Header,
     OptionList,
     RichLog,
     Static,
@@ -36,6 +35,7 @@ from VibraVid.setup.system import (
 )
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
+from VibraVid.tui.widgets.topbar import TopBar
 from VibraVid.utils import config_manager, get_log_file_path
 from VibraVid.utils.upload.update import check_for_updates, download_release_asset, get_execution_mode, update_command
 from VibraVid.utils.upload.version import __title__, __version__
@@ -57,7 +57,7 @@ class SystemScreen(Screen):
         self._update_downloading = False
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(t("nav_system"), t("ctx_system"))
         with TabbedContent():
             with TabPane(t("tab_deps"), id="tab-deps"):
                 yield Static(t("external_dependencies"), classes="panel-title")
@@ -80,7 +80,7 @@ class SystemScreen(Screen):
                     yield Button(t("check_for_updates"), variant="primary", id="btn-check-update")
                     yield Button(t("download_update"), variant="success", id="btn-download-update", disabled=True)
                     yield Static("", id="update-status")
-        yield CustomFooter()
+        yield CustomFooter([("tab", t("hint_field")), ("r", t("hint_refresh"))])
 
     def on_mount(self) -> None:
         table = self.query_one("#deps-table", DataTable)

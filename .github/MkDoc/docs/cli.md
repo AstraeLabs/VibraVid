@@ -125,12 +125,13 @@ python manual.py --down "https://example.com/manifest.json" -o "./Video/movie.mk
 
 `init` is a URL string, an object (`url`, `range`) or inline base64 (`data`). Placeholders support zero-padding (`$Number%05d$`); `$$` is a literal `$`.
 
-### Batch replay (`--down-json`)
+### Export and import (`--export`, `--import`)
 
-Runs every entry's `cmd` from a `TRACKS_JSON` debug file (`debug_track_json` in [Configuration](configuration.md)) in sequence:
+`--export [FILE]` resolves the tracks and keys like a normal run but **does not download**: it writes the result to a JSON file (default `.cache/export/<site>_<type>_<title>.json`). `--import FILE` downloads every entry of such a file, in sequence, with no search and (when the keys were exported) no CDM. Both work for MP4, HLS, DASH and ISM, from `--down` or from a service search (`-i SITE -s QUERY --export`).
 
 ```bash
-python manual.py --down-json "./debug/tracks_20260821.json"
+python manual.py --down "https://example.com/master.m3u8" --key "<KID>:<KEY>" --export ./movie.json
+python manual.py --import ./movie.json              # add -o to pick the output name (single entry)
 ```
 
 ### Metadata for a direct download (`--meta-*`)
@@ -191,7 +192,9 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--skip-sanitize` | Use `-o` verbatim (no transliteration of non-ASCII characters) |
 | `--no-manifest-info` | Don't print the manifest/streams table |
 | `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download outdated ones |
-| `--resolve-only` | Resolve and cache manifest/keys/license/playlist without downloading (pairs with `--down-json` / the queue) |
+| `--resolve-only` | Resolve and cache manifest/keys/license/playlist without downloading (pairs with the queue) |
+| `--export [FILE]` | Resolve tracks and keys, write them to a JSON file instead of downloading (see [Export and import](#export-and-import-export-import)) |
+| `--import <FILE>` | Download every entry of a file written by `--export`, no search and no CDM when the keys were exported |
 | `--tui` | Launch the Textual terminal UI |
 | `-UP`, `--update` | Auto-update to the latest release (binary builds only) |
 | `--check-update` | Print how to update for your installation (binary, source, Docker) and exit |

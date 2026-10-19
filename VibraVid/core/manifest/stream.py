@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from VibraVid.core.drm.system import DRMType, _DRMSystems
 
+logger = logging.getLogger(__name__)
+
 
 def track_label(s) -> str:
     """Build a short human-readable label for a stream/track (DRM reporting, decrypt-failure logs)."""
@@ -29,9 +31,6 @@ def track_label(s) -> str:
         return "audio"
 
     return stype or "stream"
-
-
-logger = logging.getLogger(__name__)
 
 
 def format_duration(seconds: float) -> str:

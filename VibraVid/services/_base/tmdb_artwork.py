@@ -16,6 +16,8 @@ _TV_MATCH_SITES = {
     "appletv",
     "primevideo",
     "disney",
+    "cs_chrome",
+    "nowtvit",
     "hbomax",
     "paramountplus",
     "discoveryplus",

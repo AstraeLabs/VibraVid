@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Button, DataTable, Header, Static
+from textual.widgets import Button, DataTable, Static
 
 from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
 from VibraVid.cli.command.queue import enqueue_argv
@@ -19,6 +19,7 @@ from VibraVid.core.ui.tracker import download_tracker
 from VibraVid.tui.formatting import format_time
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
+from VibraVid.tui.widgets.topbar import TopBar
 from VibraVid.utils.system_open import open_file, open_folder
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class HistoryScreen(Screen):
         self._history_items: list[dict[str, Any]] = []
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(t("nav_history"), t("ctx_history"))
         with Vertical(id="history-panel"):
             yield Static(t("download_history"), classes="panel-title")
             yield Static(
@@ -54,7 +55,7 @@ class HistoryScreen(Screen):
                 yield Button(f"📁 {t('open_folder')}", id="open-folder-history-btn")
                 yield Button(t("re_enqueue_item"), id="retry-history-btn")
                 yield Button(t("clear_history"), id="clear-history-btn")
-        yield CustomFooter()
+        yield CustomFooter([("↑↓", t("hint_move")), ("tab", t("hint_field"))])
 
     def on_mount(self) -> None:
         table = self.query_one("#history-table", DataTable)

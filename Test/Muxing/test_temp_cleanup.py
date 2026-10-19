@@ -46,3 +46,35 @@ def test_cleanup_disabled_in_config_never_deletes(monkeypatch, tmp_path, removed
     _downloader(tmp_path)._cleanup_temp_dir(verified)
 
     assert removed == []
+
+
+def _finalizing_downloader(tmp_path):
+    d = _downloader(tmp_path)
+    d.output_path = str(tmp_path / "episode.mkv")
+    d.copied_subtitles = []
+    d.copied_audios = []
+    d.download_id = None
+    return d
+
+
+def test_exception_after_verification_still_cleans_the_temp_folder(monkeypatch, tmp_path, removed):
+    """retag / sidecars / tracking failing after a verified mux must not leave the temp folder behind."""
+    monkeypatch.setattr(base, "CLEANUP_TMP", True)
+    monkeypatch.setattr(base, "retag_file", lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
+    d = _finalizing_downloader(tmp_path)
+
+    with pytest.raises(RuntimeError):
+        d._finalize(final_file="")
+
+    assert removed == [d.output_dir]
+
+
+def test_exception_before_verification_keeps_the_temp_folder(monkeypatch, tmp_path, removed):
+    monkeypatch.setattr(base, "CLEANUP_TMP", True)
+    d = _finalizing_downloader(tmp_path)
+    monkeypatch.setattr(d, "_move_copied_audios", lambda: (_ for _ in ()).throw(RuntimeError("boom")), raising=False)
+
+    with pytest.raises(RuntimeError):
+        d._finalize(final_file="")
+
+    assert removed == []

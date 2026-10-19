@@ -21,6 +21,7 @@ console = Console()
 logger = logging.getLogger(__name__)
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()
+_ytmusic_client = None
 
 
 @dataclass
@@ -32,9 +33,6 @@ class YTMusicTrack:
     duration: int
     thumbnail: str
     url: str
-
-
-_ytmusic_client = None
 
 
 def _get_ytmusic():

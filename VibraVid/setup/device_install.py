@@ -12,6 +12,11 @@ from .binary_paths import binary_paths
 console = Console()
 logger = logging.getLogger(__name__)
 
+CDM_SEARCH = "search"
+CDM_DEFAULT = "default"
+_RESERVED_CDM_IDS = (CDM_SEARCH, CDM_DEFAULT)
+CLI_ORIGIN = "--cdm"
+
 
 class DeviceSearcher:
     def __init__(self):
@@ -205,12 +210,6 @@ def describe_remote_cdm(cfg: dict) -> dict:
     if level is None and len(name) == 2 and name[0].upper() == "L" and name[1].isdigit():
         level = int(name[1])
     return {"name": name, "type": kind, "security_level": int(level) if str(level).isdigit() else None}
-
-
-CDM_SEARCH = "search"
-CDM_DEFAULT = "default"
-_RESERVED_CDM_IDS = (CDM_SEARCH, CDM_DEFAULT)
-CLI_ORIGIN = "--cdm"
 
 
 def parse_cdm_cli(values: list[str] | None) -> list | None:

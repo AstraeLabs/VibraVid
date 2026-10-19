@@ -135,11 +135,11 @@ def retag_file(path: str, tags: dict | None = None) -> bool:
         logger.debug(f"[retag] unsupported extension '{ext}', skipping")
         return False
 
-    tags = build_container_tags() if tags is None else tags
-    if not tags:
-        return False
-
     try:
+        tags = build_container_tags() if tags is None else tags
+        if not tags:
+            return False
+
         done = _retag_mkv(path, tags) if ext in _MKV_EXTENSIONS else _retag_mp4(path, tags)
     except Exception as e:
         logger.warning(f"[retag] failed for {os.path.basename(path)}: {e}")

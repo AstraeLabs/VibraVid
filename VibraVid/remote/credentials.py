@@ -11,6 +11,7 @@ from .models import RemoteError
 
 MAX_CREDENTIAL_BYTES = 256 * 1024
 LOCAL_ONLY_KEYS = ("cdm",)
+MAX_CACHE_BYTES = 4 * 1024 * 1024
 
 
 def _matches(name: str, site: str) -> bool:
@@ -187,9 +188,6 @@ def _validate(site: str, forwarded) -> dict:
         if not isinstance(name, str) or not isinstance(section, dict):
             raise RemoteError(f"credentials section '{name}' must be an object", 400)
     return forwarded
-
-
-MAX_CACHE_BYTES = 4 * 1024 * 1024
 
 
 def _validate_cache(cache) -> dict:

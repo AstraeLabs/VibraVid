@@ -855,6 +855,15 @@ def MP4_Downloader(
         record_mp4(url, headers, key, chapters, poster_url, context_tracker.capture)
         return path, False, None
 
+    if context_tracker.export_file is not None:
+        from VibraVid.core.downloader.util._export import write_export
+        from VibraVid.remote.capture import mp4_media
+
+        media = mp4_media(url, headers, key, chapters, poster_url)
+        media.site = site_name or context_tracker.site_name or None
+        write_export(media, context_tracker.export_file)
+        return path, False, None
+
     if context_tracker.resolve_only:
         from VibraVid.cli.command.queue import enqueue_down_from_context
 

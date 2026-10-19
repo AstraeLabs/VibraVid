@@ -13,12 +13,12 @@ from pathlib import Path
 from rich.console import Console
 from rich.prompt import Prompt
 
-from VibraVid.cli.command.download import handle_direct_download, handle_direct_download_json
+from VibraVid.cli.command.download import handle_direct_download, handle_import
 from VibraVid.cli.command.equivalent_command import equivalent_command_builder
 from VibraVid.cli.command.global_search import global_search as call_global_search
 from VibraVid.cli.command.limits import add_limit_arguments, apply_limits
 from VibraVid.cli.command.queue import add_queue_arguments, handle_queue_dispatch
-from VibraVid.core.downloader.base import get_written_track_files
+from VibraVid.core.downloader.util._export import get_written_exports
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import load_search_functions
@@ -175,6 +175,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--progress-interval", dest="progress_interval", type=float, metavar="SECONDS", help="Seconds between lines with --plain-progress (default 5)")
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
+    dl_opts.add_argument("--export", dest="export_file", nargs="?", const="", default=None, metavar="FILE", help="Resolve tracks and keys but don't download: write them to a JSON file (default: .cache/export/<site>_<type>_<title>.json) to download later with --import. Works with MP4/HLS/DASH/ISM. The file holds keys, cookies and auth headers")
 
     # ── Remote server
     remote_group = parser.add_argument_group("Remote server")
@@ -184,7 +185,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Direct download
     dl_group = parser.add_argument_group("Direct download (--down)")
     dl_group.add_argument("--down", metavar="URL", help="Stream URL to download directly (MP4 / HLS / DASH / ISM)")
-    dl_group.add_argument("--down-json", dest="down_json", metavar="PATH", help="Path to a TRACKS_JSON file (see debug_track_json) — runs every entry's 'cmd' automatically, in sequence.")
+    dl_group.add_argument("--import", dest="import_file", metavar="FILE", help="Download every entry of a JSON file written by --export, in sequence (no search, no CDM needed when the keys were exported).")
     dl_group.add_argument("--type", dest="stream_type", choices=["auto", "mp4", "hls", "dash", "ism", "yt-dlp"], default="auto", help="Force the stream type instead of auto-detecting (default: auto)")
     dl_group.add_argument("-o", "--output", metavar="PATH", help="Output file path (extension auto-appended if omitted)")
     dl_group.add_argument("--headers", action="append", metavar="Key:Value", help="HTTP header. Repeatable.")
@@ -702,13 +703,14 @@ def main():
         context_tracker.log_engine_output = getattr(args, "log_decryptor_output", None)
         context_tracker.anonymize_keys = bool(getattr(args, "abc", False))
         context_tracker.resolve_only = bool(getattr(args, "resolve_only", False))
+        context_tracker.export_file = getattr(args, "export_file", None)
         site_module_name = site_module.__name__.rsplit(".", 1)[-1] if site_module is not None else None
         context_tracker.site_options = build_site_options(args, parser, site_option_dests, site_module_name)
 
-        # ── Direct download (--down / --down-json) — handled before interactive site selection ──
-        down_json_handled, down_json_ok = handle_direct_download_json(args)
-        if down_json_handled:
-            sys.exit(0 if down_json_ok else 1)
+        # ── Direct download (--down / --import) — handled before interactive site selection ──
+        import_handled, import_ok = handle_import(args)
+        if import_handled:
+            sys.exit(0 if import_ok else 1)
 
         down_handled, down_ok = handle_direct_download(args)
         if down_handled:
@@ -793,8 +795,8 @@ def main():
         if log_file_path:
             console.print(f"\n[dim]Log: {log_file_path}[/dim]")
 
-        for track_file_path in get_written_track_files():
-            console.print(f"[dim]Json: {track_file_path}[/dim]")
+        for export_path in get_written_exports():
+            console.print(f"[dim]Exported: {export_path}[/dim]")
 
         logger.info("Script execution completed.")
         execute_hooks("post_run", context=get_last_hook_context("post_download") or get_last_hook_context("post_run"))

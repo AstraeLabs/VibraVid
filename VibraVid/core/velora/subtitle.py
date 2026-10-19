@@ -23,6 +23,21 @@ logger = logging.getLogger("SubtitleDownloader")
 VALID_SUBTITLE_FORMATS = {ext.lstrip(".") for ext in SUBTITLE_EXTENSIONS}
 VALID_AUDIO_FORMATS = {ext.lstrip(".") for ext in AUDIO_EXTENSIONS}
 
+_NAME_REGION_OVERRIDES = {
+    "es": [
+        (("latin", "419", "latino", "america", "américa"), "419"),
+        (("europe", "castil", "spain", "españa", "espana"), "ES"),
+    ],
+    "pt": [(("brazil", "brasil"), "BR"), (("portugal",), "PT")],
+    "zh": [(("simplified", "hans", "mainland"), "CN"), (("traditional", "hant", "taiwan", "hong kong"), "TW")],
+    "fr": [(("canad", "quebec", "québec"), "CA"), (("france",), "FR")],
+    "en": [(("british", "united kingdom", "(uk)", "(gb)"), "GB"), (("united states", "(us)"), "US")],
+    "pt-br": [],
+    "pt-pt": [],
+    "es-419": [],
+    "es-es": [],  # placeholders; primary subtag is used
+}
+
 
 def is_valid_format(fmt: str, track_type: str) -> bool:
     """Check if the detected format is valid for the given track type."""
@@ -86,22 +101,6 @@ def build_ext_track_label(track: dict, track_type: str, ext_override: str = None
     ext_tag = f"[yellow]\\[{ext}][/yellow]" if ext else ""
     pfx = "[bold cyan]Sub[/bold cyan]" if track_type == "subtitle" else "[bold cyan]Aud[/bold cyan]"
     return f"{pfx} {ext_tag} {' '.join(parts)}"
-
-
-_NAME_REGION_OVERRIDES = {
-    "es": [
-        (("latin", "419", "latino", "america", "américa"), "419"),
-        (("europe", "castil", "spain", "españa", "espana"), "ES"),
-    ],
-    "pt": [(("brazil", "brasil"), "BR"), (("portugal",), "PT")],
-    "zh": [(("simplified", "hans", "mainland"), "CN"), (("traditional", "hant", "taiwan", "hong kong"), "TW")],
-    "fr": [(("canad", "quebec", "québec"), "CA"), (("france",), "FR")],
-    "en": [(("british", "united kingdom", "(uk)", "(gb)"), "GB"), (("united states", "(us)"), "US")],
-    "pt-br": [],
-    "pt-pt": [],
-    "es-419": [],
-    "es-es": [],  # placeholders; primary subtag is used
-}
 
 
 def _apply_name_region(base_locale: str, name: str) -> str:

@@ -182,6 +182,7 @@ def test_overlay_does_not_leak_through_the_shared_cache(monkeypatch):
 
 def test_overlay_keeps_the_servers_provider_keys(monkeypatch):
     monkeypatch.setitem(config_manager.login._config_dict, "Provider", {"tmdb": "SERVER-TMDB"})
+    monkeypatch.delitem(config_manager.login._cache, "login.Provider.tmdb", raising=False)
 
     with scoped({}, "s"):
         assert config_manager.login.get("Provider", "tmdb") == "SERVER-TMDB"

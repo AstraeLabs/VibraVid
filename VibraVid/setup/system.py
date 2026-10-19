@@ -17,19 +17,6 @@ from .checker import (
 )
 from .device_install import check_device_prd_path, check_device_wvd_path
 
-
-def _is_alive(path) -> bool:
-    """Return True if a resolved binary path still points at an existing file."""
-    return bool(path) and os.path.isfile(path)
-
-
-def _drop_cached(*names: str) -> None:
-    """Forget any previously resolved location for the given binaries so the next check_* call re-scans disk"""
-    ext = ".exe" if binary_paths.system == "windows" else ""
-    for name in names:
-        binary_paths.invalidate_binary(f"{name}{ext}")
-
-
 is_binary_installation = getattr(sys, "frozen", False)
 _ffmpeg_path = None
 _ffprobe_path = None
@@ -42,6 +29,18 @@ _mkvpropedit_path = None
 _flux_path = None
 _initialized = False
 _init_lock = threading.Lock()
+
+
+def _is_alive(path) -> bool:
+    """Return True if a resolved binary path still points at an existing file."""
+    return bool(path) and os.path.isfile(path)
+
+
+def _drop_cached(*names: str) -> None:
+    """Forget any previously resolved location for the given binaries so the next check_* call re-scans disk"""
+    ext = ".exe" if binary_paths.system == "windows" else ""
+    for name in names:
+        binary_paths.invalidate_binary(f"{name}{ext}")
 
 
 def _initialize_paths():

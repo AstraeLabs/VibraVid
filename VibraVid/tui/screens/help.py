@@ -10,6 +10,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from VibraVid.tui.i18n import t
+from VibraVid.tui.palette import ACCENT, FG_DEFAULT, FG_MUTED
 
 _GLOBAL_KEYS = [
     ("F1 / H", "hk_home"),
@@ -65,20 +66,16 @@ class HelpScreen(ModalScreen):
         with Vertical(id="help-box"):
             yield Static(t("keyboard_help_guide"), classes="placeholder-title")
             with VerticalScroll(id="help-scroll"):
-                yield Static(f"[bold #7aa2f7]{t('global_navigation')}[/bold #7aa2f7]", classes="help-section-header")
+                yield Static(f"[bold {FG_DEFAULT}]{t('global_navigation')}[/]", classes="help-section-header")
                 for key, desc_key in _GLOBAL_KEYS:
-                    yield Static(f"[bold #7dcfff]{key:>10}[/bold #7dcfff]  [#c0caf5]{t(desc_key)}[/#c0caf5]")
+                    yield Static(f"[{ACCENT}]{key:>10}[/]  [{FG_MUTED}]{t(desc_key)}[/]")
 
-                yield Static(
-                    f"\n[bold #7aa2f7]{t('navigation_keyboard')}[/bold #7aa2f7]", classes="help-section-header"
-                )
+                yield Static(f"\n[bold {FG_DEFAULT}]{t('navigation_keyboard')}[/]", classes="help-section-header")
                 for key, desc_key in _NAV_KEYS:
-                    yield Static(f"[bold #7dcfff]{key:>10}[/bold #7dcfff]  [#c0caf5]{t(desc_key)}[/#c0caf5]")
+                    yield Static(f"[{ACCENT}]{key:>10}[/]  [{FG_MUTED}]{t(desc_key)}[/]")
 
-                yield Static(
-                    f"\n[bold #7aa2f7]{t('contextual_shortcuts')}[/bold #7aa2f7]", classes="help-section-header"
-                )
+                yield Static(f"\n[bold {FG_DEFAULT}]{t('contextual_shortcuts')}[/]", classes="help-section-header")
                 for key, desc_key in _CONTEXT_KEYS:
-                    yield Static(f"[bold #7dcfff]{key:>10}[/bold #7dcfff]  [#c0caf5]{t(desc_key)}[/#c0caf5]")
+                    yield Static(f"[{ACCENT}]{key:>10}[/]  [{FG_MUTED}]{t(desc_key)}[/]")
 
             yield Static(f"\n{t('press_esc_to_close')}", classes="placeholder-hint")

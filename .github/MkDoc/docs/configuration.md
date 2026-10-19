@@ -70,7 +70,6 @@ args = "--country es"
 
 ```toml
 [DEFAULT]
-debug_track_json = false
 log_level = "INFO"
 close_console = true
 show_message = true
@@ -79,12 +78,12 @@ disable_scraper_cache = false
 imp_service = ["default"]
 installation = ""
 metadata_provider = "tmdb,imdb"
+tui_images = "auto"
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `close_console` | `true` | Close the console after the download |
-| `debug_track_json` | `false` | Log a `TRACKS_JSON` payload (selected tracks, keys, manifest metadata) |
 | `log_level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `show_message` | `true` | Show the startup banner and clear the console first |
 | `fetch_domain_online` | `true` | Fetch the latest domains from GitHub |
@@ -92,6 +91,7 @@ metadata_provider = "tmdb,imdb"
 | `imp_service` | `["default"]` | Where to load site modules from: `"default"` (built-ins), local directories (each module needs `__init__.py` defining `indice` and `_useFor`), or a GitHub/Gitea repo URL. Custom modules override built-ins of the same name |
 | `installation` | `""` | Binaries downloaded at setup. `""`: FFmpeg, Velora, flux. `"yt"`: + yt-dlp, deno. `"full"`: + dovi_tool, mkvtoolnix, yt-dlp, deno |
 | `metadata_provider` | `tmdb,imdb` | Sidecar providers, tried in order (`tmdb`, `imdb`, `tvdb`). CLI: `--metadata-provider` |
+| `tui_images` | `auto` | TUI cover art: `auto`, `sixel`, `kitty` (real images, see [TUI](tui.md#cover-art)), `blocks` (drawn with characters, works anywhere) or `off` |
 
 ```toml
 imp_service = ["default", "/home/user/my_custom_sites"]                         # local folder

@@ -5,6 +5,23 @@ import re
 
 from rich.markup import escape
 
+_SYSTEMS_DATA = {
+    "WIDEVINE": ("edef8ba979d64acea3c827dcd51d21ed", "Widevine", "WV"),
+    "PLAYREADY": ("9a04f07998404286ab92e65be0885f95", "PlayReady", "PR"),
+    "FAIRPLAY": ("94ce86fb07ff4f43adb893d2fa968ca2", "FairPlay", "FP"),
+    "PRIMETIME": ("f239e769efa348509c16a903c6932efb", "Adobe Primetime", "PT"),
+    "NAGRA": ("adb41c242dbf4a6d958b4457c0d27b95", "Nagra", "NA"),
+    "CLEARKEY": ("1077efecc0b24d02ace33c1e52e2fb4b", "ClearKey", "CK"),
+    "CLEARKEY_V1": ("e2719d58a985b3c9781ab030af78d30e", "ClearKey (v0.1)", "CK"),
+    "IRDETO": ("644fe7b5260f4fad949a0762ffd8b0f4", "Irdeto", "IR"),
+    "CMLA": ("69f908af481646ea910ccd5dcccb0a3a", "CMLA (OMA DRM)", "CM"),
+    "ITTIAM": ("80a6be7e14484c379e70d5aebe04c8d2", "Ittiam", "IT"),
+    "SECUREMEDIA": ("3ea8778f77424bf9b18be834b2356d01", "SecureMedia", "SM"),
+    "MARLIN": ("5e629af538da4332a621485ea588cb3f", "Marlin", "ML"),
+    "MARLIN_MSB": ("29701fe43cc74a348c5bae90c7439a47", "Marlin", "ML"),
+}
+KNOWN_DRM_SYSTEMS = {data[0]: data[1] for data in _SYSTEMS_DATA.values()}
+
 
 def cdm_load_line(name: str, why: str | None = None, detail: tuple[str, object] | None = None) -> str:
     """The console line for the CDM in use: ``[+] <name>``, then an optional ``label: value`` (SysID / Model) and ``why`` it was picked when known."""
@@ -30,23 +47,6 @@ def accumulate_content_key(keys_list: list, extracted_kids: set, kid_raw, key_ra
     if formatted not in keys_list:
         keys_list.append(formatted)
         extracted_kids.add(kid)
-
-
-_SYSTEMS_DATA = {
-    "WIDEVINE": ("edef8ba979d64acea3c827dcd51d21ed", "Widevine", "WV"),
-    "PLAYREADY": ("9a04f07998404286ab92e65be0885f95", "PlayReady", "PR"),
-    "FAIRPLAY": ("94ce86fb07ff4f43adb893d2fa968ca2", "FairPlay", "FP"),
-    "PRIMETIME": ("f239e769efa348509c16a903c6932efb", "Adobe Primetime", "PT"),
-    "NAGRA": ("adb41c242dbf4a6d958b4457c0d27b95", "Nagra", "NA"),
-    "CLEARKEY": ("1077efecc0b24d02ace33c1e52e2fb4b", "ClearKey", "CK"),
-    "CLEARKEY_V1": ("e2719d58a985b3c9781ab030af78d30e", "ClearKey (v0.1)", "CK"),
-    "IRDETO": ("644fe7b5260f4fad949a0762ffd8b0f4", "Irdeto", "IR"),
-    "CMLA": ("69f908af481646ea910ccd5dcccb0a3a", "CMLA (OMA DRM)", "CM"),
-    "ITTIAM": ("80a6be7e14484c379e70d5aebe04c8d2", "Ittiam", "IT"),
-    "SECUREMEDIA": ("3ea8778f77424bf9b18be834b2356d01", "SecureMedia", "SM"),
-    "MARLIN": ("5e629af538da4332a621485ea588cb3f", "Marlin", "ML"),
-    "MARLIN_MSB": ("29701fe43cc74a348c5bae90c7439a47", "Marlin", "ML"),
-}
 
 
 class _DRMSystems(dict):
@@ -225,9 +225,6 @@ class _DRMSystems(dict):
         kid = normalize_kid(kid_hex)
         pssh = PSSH.new(system_id=PSSH.SystemId.Widevine, key_ids=[UUID(bytes=bytes.fromhex(kid))])
         return pssh.dumps()
-
-
-KNOWN_DRM_SYSTEMS = {data[0]: data[1] for data in _SYSTEMS_DATA.values()}
 
 
 class DRMType:

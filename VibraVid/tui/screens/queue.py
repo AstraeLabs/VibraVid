@@ -13,7 +13,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
 from textual.timer import Timer
-from textual.widgets import Button, DataTable, Header, Input, Static
+from textual.widgets import Button, DataTable, Input, Static
 
 from VibraVid.cli.command.queue import (
     _all_queue_paths,
@@ -29,6 +29,7 @@ from VibraVid.cli.command.queue import (
 )
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
+from VibraVid.tui.widgets.topbar import TopBar
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class QueueScreen(Screen):
         self._is_worker_running: bool = False
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(t("nav_queue"), t("ctx_queue"))
         with Vertical(id="queue-panel"):
             yield Static(t("batch_queue"), classes="panel-title")
             yield Static(t("loading"), id="queue-status-text", classes="detail-meta")
@@ -94,7 +95,7 @@ class QueueScreen(Screen):
                 yield Button(t("retry_failed"), id="retry-btn")
                 yield Button(t("clear_queue"), id="clear-queue-btn")
                 yield Button(t("clear_completed"), id="queue-btn-clear")
-        yield CustomFooter()
+        yield CustomFooter([("↑↓", t("hint_move")), ("tab", t("hint_field"))])
 
     def on_mount(self) -> None:
         table = self.query_one("#queue-table", DataTable)

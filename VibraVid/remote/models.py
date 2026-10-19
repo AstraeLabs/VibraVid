@@ -37,7 +37,7 @@ def _jsonable(value: Any) -> Any:
 @dataclass
 class ResolvedMedia:
     """Everything a downloader needs, captured on the server in place of running ``start()``."""
-    kind: str  # hls | dash | ism
+    kind: str  # hls | dash | ism | mp4
     url: str
     manifest_content: str | None = None
     headers: dict = field(default_factory=dict)
@@ -64,6 +64,15 @@ class ResolvedMedia:
     season: int = 0
     episode: int = 0
     episode_name: str | None = None
+    
+    # --export / --import only (the remote wire ignores them)
+    version: int = 1
+    site: str | None = None
+    desc: str | None = None
+    max_segments: Any = None
+    max_time: Any = None
+    exported_at: str | None = None
+    vibravid_version: str | None = None
 
     def to_wire(self) -> dict:
         data = _jsonable(asdict(self))

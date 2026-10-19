@@ -7,12 +7,13 @@ import logging
 import re
 from dataclasses import dataclass
 
-from textual import on, work
+from rich.markup import escape
+from textual import events, on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Header, Input, LoadingIndicator, Static
+from textual.widgets import Button, Input, LoadingIndicator, Static
 
 from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
 from VibraVid.cli.command.queue import (
@@ -23,13 +24,18 @@ from VibraVid.cli.command.queue import (
     enqueue_many,
 )
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
-from VibraVid.tui import bridge
+from VibraVid.tui import artwork, bridge
 from VibraVid.tui.i18n import t
+from VibraVid.tui.widgets.cover import CoverImage
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.tui.widgets.fuzzy_list import FuzzyItem, FuzzyList
+from VibraVid.tui.widgets.topbar import TopBar
 from VibraVid.utils.system_open import copy_to_clipboard
 
 logger = logging.getLogger(__name__)
+
+# below this width the preview column cannot hold the cover and the text side by side
+STACKED_PREVIEW_WIDTH = 120
 
 SORT_MODES = [
     "relevance",
@@ -212,7 +218,7 @@ class SearchScreen(Screen):
         self._last_query: str = ""
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(t("nav_search"), t("ctx_search"))
         with Vertical(id="search-panel"):
             title = t("search_on_site", site=self._site) if self._site else t("global_search_title")
             yield Static(title, classes="panel-title")
@@ -239,10 +245,12 @@ class SearchScreen(Screen):
                         yield Button(t("batch_clear_btn"), id="btn-batch-clear")
                 with Vertical(id="preview-container"):
                     with Vertical(id="preview-box"):
-                        yield Static(
-                            t("preview_initial_text"),
-                            id="search-preview-box",
-                        )
+                        with Horizontal(id="preview-head"):
+                            yield CoverImage(max_cells=(34, 20), reserve=20, id="preview-cover")
+                            yield Static(
+                                t("preview_initial_text"),
+                                id="search-preview-box",
+                            )
                         with Vertical(id="preview-providers-box"):
                             yield Static(
                                 t("active_provider_badge"), classes="preview-prov-title", id="preview-prov-title"
@@ -254,7 +262,11 @@ class SearchScreen(Screen):
                             yield Button(t("add_to_queue"), id="preview-queue-btn")
                             yield Button(t("copy_cli_btn"), id="preview-copy-btn")
                             yield Button(t("detail_sheet_btn"), id="preview-detail-btn")
-        yield CustomFooter()
+        yield CustomFooter([("enter", t("hint_open")), ("↑↓", t("hint_move")), ("/", t("hint_filter")), ("s", t("hint_sort")), ("d", t("hint_download")), ("q", t("hint_queue")), ("c", t("hint_copy")), ("i", t("hint_info"))])
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Cover beside the text when the preview column is wide enough for both, above it otherwise."""
+        self.query_one("#preview-head", Horizontal).set_class(event.size.width < STACKED_PREVIEW_WIDTH, "-stacked")
 
     def on_mount(self) -> None:
         self.query_one("#search-loading", LoadingIndicator).display = False
@@ -384,7 +396,7 @@ class SearchScreen(Screen):
 
         status = t("results_found_status", count=len(deduped))
         if errors:
-            failed_names = ", ".join(sorted(errors))
+            failed_names = ", ".join(f"{site} ({escape(message[:70])})" if message else site for site, message in sorted(errors.items()))
             status += t("sites_timed_out_status", count=len(errors), sites=failed_names)
         elif not deduped:
             status = t("no_results_status")
@@ -675,6 +687,7 @@ class SearchScreen(Screen):
 
         preview = self.query_one("#search-preview-box", Static)
         preview.update("\n".join(lines))
+        self.query_one("#preview-cover", CoverImage).show(lambda: artwork.cover_url(active_item, active_site))
 
         # Render provider switcher pills
         prov_box = self.query_one("#preview-providers-box", Vertical)

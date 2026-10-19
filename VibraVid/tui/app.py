@@ -89,6 +89,37 @@ class VibraVidApp(App):
     def on_mount(self) -> None:
         self.push_screen(HomeScreen())
         self._header_timer = self.set_interval(1.0, self._update_header_status)
+        self._asked_tokens: set[str] = set()
+        self._track_timer = self.set_interval(0.5, self._poll_track_requests)
+
+    def _poll_track_requests(self) -> None:
+        """Open the track picker for a download waiting on one (auto_select = false)."""
+        from VibraVid.core.ui.manual_tracks import TrackSelectionError, manual_track_broker
+        from VibraVid.tui.screens.tracks_modal import TrackSelectModal
+
+        if isinstance(self.screen, TrackSelectModal):
+            return
+        for request in manual_track_broker.list_pending():
+            token, download_id = request["token"], request["download_id"]
+            if token in self._asked_tokens:
+                continue
+            self._asked_tokens.add(token)
+            title = next(
+                (d.get("title") for d in download_tracker.get_active_downloads() if d.get("id") == download_id),
+                download_id,
+            )
+
+            def _answered(chosen: list[int] | None, download_id=download_id, token=token) -> None:
+                if chosen is None:
+                    download_tracker.request_stop(download_id)
+                    return
+                try:
+                    manual_track_broker.submit(download_id, token, chosen)
+                except TrackSelectionError as exc:
+                    self.notify(str(exc), severity="warning")
+
+            self.push_screen(TrackSelectModal(str(title), request["tracks"]), _answered)
+            return
 
     def _update_header_status(self) -> None:
         """Update subtitle with active download count and global speed."""

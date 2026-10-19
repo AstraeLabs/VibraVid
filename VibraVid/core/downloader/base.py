@@ -1,7 +1,6 @@
 # 2.03.26
 
 import glob
-import json
 import logging
 import os
 import re
@@ -43,12 +42,8 @@ EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
 MERGE_SUBTITLES = config_manager.config.get_bool("PROCESS", "merge_subtitle")
 MERGE_AUDIO = config_manager.config.get_bool("PROCESS", "merge_audio")
 CLEANUP_TMP = config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder")
-DEBUG_TRACK_JSON = config_manager.config.get_bool("DEFAULT", "debug_track_json")
 DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
 MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg")
-
-
-_written_track_files: list[str] = []
 
 
 class DownloadCancelled(RuntimeError):
@@ -79,39 +74,6 @@ class DownloadResult(NamedTuple):
             return cls(path, stopped, error)
         # A bare truthy value (e.g. a path string) -> treat as success.
         return cls(str(result), False, None)
-
-
-def get_written_track_files() -> list[str]:
-    """Paths of every TRACKS_JSON file written so far this run (see _append_tracks_json)."""
-    return list(dict.fromkeys(_written_track_files))
-
-
-def _append_tracks_json(payload: dict, service: str, media_type: str, title: str) -> None:
-    """Write *payload* to a JSON file under .cache/logs, named ``<service>_<type>_<title>.json``."""
-    try:
-        log_dir = Path(config_manager.base_path or ".") / ".cache" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        parts = [service or "unknown", media_type or "Film", title or payload.get("name") or "output"]
-        safe_name = re.sub(r'[\\/:*?"<>|]+', "_", "_".join(p for p in parts if p))
-        safe_name = re.sub(r"\s+", "_", safe_name).strip("_") or "output"
-
-        track_file = log_dir / f"{safe_name}.json"
-
-        entries = []
-        if track_file.exists():
-            try:
-                entries = json.loads(track_file.read_text(encoding="utf-8"))
-                if not isinstance(entries, list):
-                    entries = []
-            except Exception:
-                entries = []
-
-        entries.append(payload)
-        track_file.write_text(json.dumps(entries, indent=4, ensure_ascii=False), encoding="utf-8")
-        _written_track_files.append(str(track_file))
-    except Exception as e:
-        logger.error(f"Could not write TRACKS_JSON file: {e}")
 
 
 class BaseDownloader:
@@ -212,21 +174,6 @@ class BaseDownloader:
             return path.resolve().as_uri()
         return stripped
 
-    def _build_other_tracks(self) -> list:
-        """Return the normalized list of extra tracks attached to this download."""
-        other_tracks = []
-        for track in list(getattr(self, "other_tracks", []) or []):
-            if not isinstance(track, dict):
-                continue
-            normalized_track = {
-                "type": track.get("type"),
-                "url": track.get("url"),
-                "language": track.get("language"),
-            }
-            if normalized_track["type"] and normalized_track["url"]:
-                other_tracks.append(normalized_track)
-        return other_tracks
-
     def _format_keys(self, keys: list) -> list:
         """Return DRM keys formatted as ``kid:key`` strings."""
         formatted_keys = []
@@ -236,19 +183,6 @@ class BaseDownloader:
             else:
                 formatted_keys.append(str(k))
         return formatted_keys
-
-    def _build_download_cmd(self, name: str, manifest_url: str, formatted_keys: list) -> str:
-        """Build a ready-to-run ``python manual.py --down`` command that re-downloads this video"""
-        if not manifest_url:
-            return ""
-
-        safe_name = re.sub(r'[\\/:*?"<>|]+', "_", (name or "output")).strip() or "output"
-        parts = [f"python manual.py --down '{manifest_url}'"]
-        for k in formatted_keys:
-            parts.append(f"--key {k}")
-
-        parts.append(f"-o '{safe_name}'")
-        return " ".join(parts)
 
     def _build_tracks_desc(self, streams: list) -> str:
         """Human-readable summary of tracks"""
@@ -316,19 +250,23 @@ class BaseDownloader:
             context_tracker.capture_keys.extend(self._format_keys(keys))
             return
 
-        if not DEBUG_TRACK_JSON:
+        if context_tracker.export_file is None:
             return
 
-        title, media_type, site, name = self._resolve_track_info()
-        formatted_keys = self._format_keys(keys)
-        payload = {
-            "name": name,
-            "manifest": manifest_url,
-            "desc": self._build_tracks_desc(streams),
-            "other_tracks": self._build_other_tracks(),
-            "cmd": self._build_download_cmd(name, manifest_url, formatted_keys),
-        }
-        _append_tracks_json(payload, service=site, media_type=media_type, title=title)
+        from VibraVid.core.downloader.util._export import write_export
+        from VibraVid.remote.capture import media_from_downloader
+
+        try:
+            media, _ = media_from_downloader(self, key=self._format_keys(keys) or None)
+        except ValueError as exc:
+            console.print(f"[red]Cannot export this download: {exc}")
+            return
+
+        media.site = self._resolve_track_info()[2] or None
+        media.desc = self._build_tracks_desc(streams) or None
+        media.max_segments = getattr(self, "max_segments", None)
+        media.max_time = getattr(self, "max_time", None)
+        write_export(media, context_tracker.export_file)
 
     def _no_media_downloaded(self, status: dict) -> bool:
         """Return True when the download produced absolutely nothing."""
@@ -354,7 +292,7 @@ class BaseDownloader:
             return DownloadResult(self.output_path, False, None)
 
         # Key capture re-runs a download that may already exist on the server's disk: never short-circuit it.
-        if self.file_already_exists and context_tracker.capture_keys is None:
+        if self.file_already_exists and context_tracker.capture_keys is None and context_tracker.export_file is None:
             console.print("[yellow]File already exists.")
             return DownloadResult(self.output_path, False, None)
 
@@ -430,8 +368,8 @@ class BaseDownloader:
         return None
 
     def _skip_download_result(self) -> "DownloadResult":
-        """Result of the ``DOWNLOAD.skip_download`` switch: optional pause, then the (never downloaded) output path."""
-        if DELAY_SS > 0 and context_tracker.capture_keys is None:
+        """Result of the ``DOWNLOAD.skip_download`` switch (and of ``--export``): optional pause, then the (never downloaded) output path."""
+        if DELAY_SS > 0 and context_tracker.capture_keys is None and context_tracker.export_file is None:
             console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
             time.sleep(DELAY_SS)
         return DownloadResult(self.output_path, False, None)
@@ -837,6 +775,9 @@ class BaseDownloader:
             logger.warning(f"Output not verified: keeping the temporary files in {self.output_dir}")
             console.print(f"[yellow]Temporary files kept in [cyan]{self.output_dir}[yellow] (the output was not verified).")
             return
+        
+        # Sweep first: the folder trashed below is already being deleted by its own detached process
+        os_manager.sweep_trash(os.path.dirname(os.path.abspath(self.output_dir)))
         os_manager.fast_rmtree(self.output_dir)
 
     def _move_copied_subtitles(self) -> None:
@@ -1000,26 +941,29 @@ class BaseDownloader:
             except Exception as e:
                 console.print(f"[yellow]Warning: Dynamic rename failed: {e}")
 
-        self._move_copied_subtitles()
-        self._move_copied_audios()
-        verified_ok = self._verify_output()
-        if verified_ok:
-            retag_file(self.output_path)
-            Sidecars.write_for(self.output_path, getattr(self, "_sidecar_target", None))
+        # Unverified until proven otherwise: an exception before the check keeps the temp files, one after it (retag, sidecars, tracking) must not skip the cleanup
+        verified_ok = False
+        try:
+            self._move_copied_subtitles()
+            self._move_copied_audios()
+            verified_ok = self._verify_output()
+            if verified_ok:
+                retag_file(self.output_path)
+                Sidecars.write_for(self.output_path, getattr(self, "_sidecar_target", None))
 
-        if self.output_path and os.path.exists(self.output_path):
-            title, media_type, site, _ = self._resolve_track_info()
-            from VibraVid.utils.vault.default import default_vault
-            default_vault.track_download_async(title=title, media_type=media_type, service=site)
+            if self.output_path and os.path.exists(self.output_path):
+                title, media_type, site, _ = self._resolve_track_info()
+                from VibraVid.utils.vault.default import default_vault
+                default_vault.track_download_async(title=title, media_type=media_type, service=site)
 
-        if self.download_id:
-            download_tracker.complete_download(
-                self.download_id,
-                success=verified_ok,
-                path=os.path.abspath(self.output_path),
-                error=None if verified_ok else LAST_DOWNLOADER_ERROR,
-            )
-
-        self._cleanup_temp_dir(verified_ok)
+            if self.download_id:
+                download_tracker.complete_download(
+                    self.download_id,
+                    success=verified_ok,
+                    path=os.path.abspath(self.output_path),
+                    error=None if verified_ok else LAST_DOWNLOADER_ERROR,
+                )
+        finally:
+            self._cleanup_temp_dir(verified_ok)
 
         execute_hooks("post_run")

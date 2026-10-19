@@ -24,6 +24,10 @@ _guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
 _last_scope: dict[str, str] = {}
 
+_forgetters: list = []
+_guards_installed = False
+_job_state = threading.local()
+
 
 def site_lock(site: str) -> threading.Lock:
     """One lock per service: while it is held its module globals belong to a single identity."""
@@ -89,9 +93,6 @@ def reset_identity_state(site: str) -> int:
     return count
 
 
-_forgetters: list = []
-
-
 def on_forget(fn) -> None:
     """Register *fn(scope)*: it must drop whatever the caller keeps in memory for that identity (e.g. cached scrapers)."""
     _forgetters.append(fn)
@@ -113,9 +114,6 @@ def prepare(site: str, scope: str) -> None:
     if _last_scope.get(site) != scope:
         reset_identity_state(site)
         _last_scope[site] = scope
-
-_guards_installed = False
-_job_state = threading.local()
 
 
 def current_job():

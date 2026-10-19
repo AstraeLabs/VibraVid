@@ -79,11 +79,11 @@ class Sidecars:
 
     def write(self) -> list[str]:
         """Write the sidecars and return their paths (empty when nothing could be written)."""
-        source = get_provider(self.provider)
-        if not (self.video_path and os.path.isfile(self.video_path) and source and source.available()):
-            return []
-
         try:
+            source = get_provider(self.provider)
+            if not (self.video_path and os.path.isfile(self.video_path) and source and source.available()):
+                return []
+
             if self.media_type == "movie":
                 info = source.movie(self.item_id)
                 if info:

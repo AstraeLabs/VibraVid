@@ -1,20 +1,12 @@
 # 29.07.26
 # by @ManoloZocco
 
-"""Thin adapter between the TUI and the existing VibraVid service layer.
-
-Everything exposed here is blocking I/O and must be called from Textual
-worker threads (@work(thread=True)), never from the UI thread. The goal is
-zero changes to VibraVid/services and VibraVid/cli: the TUI reuses the
-Django-free adapter registry in GUI/searchapp/api (search / get_series_metadata
-/ start_download), the same uniform interface the web GUI is built on.
-"""
-
 import contextlib
 import io
 import logging
 import sys
 import threading
+import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import NamedTuple
@@ -114,14 +106,29 @@ def install_stdio_proxy() -> None:
         sys.stderr = _ThreadStdProxy("stderr")
 
 
+class ServiceExit(RuntimeError):
+    """A service called ``sys.exit()`` (failed login, missing config...): in the TUI that must be an error message, never the end of the app."""
+
+
+def _exit_message(exc: SystemExit, *buffers: io.StringIO) -> str:
+    """What the service said before exiting (its last printed lines), else a generic note."""
+    lines = [line.strip() for buf in buffers for line in buf.getvalue().splitlines() if line.strip()]
+    if lines:
+        return " / ".join(lines[-3:])
+    return f"the service stopped the run (exit code {exc.code})"
+
+
 @contextlib.contextmanager
 def capture_stdio() -> Iterator[tuple[io.StringIO, io.StringIO]]:
-    """Capture stdout/stderr of the CURRENT thread while running service code."""
+    """Capture stdout/stderr of the CURRENT thread while running service code; a ``SystemExit`` from it is re-raised as :class:`ServiceExit`."""
     out_buf, err_buf = io.StringIO(), io.StringIO()
     out_local = getattr(sys.stdout, "_local", None)
     err_local = getattr(sys.stderr, "_local", None)
     if out_local is None or err_local is None:
-        yield out_buf, err_buf  # proxy not installed (tests): passthrough
+        try:
+            yield out_buf, err_buf  # proxy not installed (tests): passthrough
+        except SystemExit as exc:
+            raise ServiceExit(_exit_message(exc, out_buf, err_buf)) from exc
         return
 
     prev_out = getattr(out_local, "capture", None)
@@ -129,6 +136,8 @@ def capture_stdio() -> Iterator[tuple[io.StringIO, io.StringIO]]:
     out_local.capture, err_local.capture = out_buf, err_buf
     try:
         yield out_buf, err_buf
+    except SystemExit as exc:
+        raise ServiceExit(_exit_message(exc, out_buf, err_buf)) from exc
     finally:
         out_local.capture, err_local.capture = prev_out, prev_err
         for name, buf in (("stdout", out_buf), ("stderr", err_buf)):
@@ -183,7 +192,7 @@ def search_global(query: str, sites: list[str] | None = None, max_workers: int =
                 if items:
                     results[site] = items
             except Exception as e:
-                logger.debug("global search failed on %s: %s", site, e)
+                logger.warning("global search failed on %s: %s", site, e)
                 errors[site] = str(e)
     return results, errors
 
@@ -195,11 +204,23 @@ def get_seasons(site: str, item) -> list | None:
 
 
 def start_download(site: str, item, season: str | None = None, episodes: str | None = None) -> bool:
-    """Start a download via the GUI adapter layer.
+    """Start a download via the GUI adapter layer."""
+    from VibraVid.core.ui.manual_tracks import manual_track_broker
+    from VibraVid.core.ui.tracker import context_tracker
+    from VibraVid.utils import config_manager
 
-    This reuses the same path as the web GUI: the adapter's start_download()
-    method, which calls the service's search() with direct_item + selections.
-    The download_tracker singleton is updated automatically by the service.
-    """
-    with capture_stdio():
-        return _get_api(site).start_download(item, season=season, episodes=episodes)
+    manual = not config_manager.config.get_bool("DOWNLOAD", "auto_select")
+    download_id = f"{site}_{uuid.uuid4().hex}" if manual else None
+    if manual:
+        context_tracker.manual_tracks = True
+        context_tracker.defer_manual_tracks = False
+        context_tracker.video_quality = None
+        context_tracker.download_id = download_id
+    try:
+        with capture_stdio():
+            return _get_api(site).start_download(item, season=season, episodes=episodes)
+    finally:
+        if manual:
+            context_tracker.manual_tracks = False
+            context_tracker.download_id = None
+            manual_track_broker.forget(download_id)

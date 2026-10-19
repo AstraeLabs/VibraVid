@@ -13,20 +13,22 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import (
     Button,
-    Header,
     ListItem,
     ListView,
     LoadingIndicator,
+    OptionList,
     SelectionList,
     Static,
 )
 from textual.widgets._selection_list import Selection
 
-from VibraVid.tui import bridge
+from VibraVid.tui import artwork, bridge
 from VibraVid.tui.i18n import t
 from VibraVid.tui.screens.range_modal import RangeSelectModal
+from VibraVid.tui.widgets.cover import CoverImage
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.tui.widgets.range_selection_list import RangeSelectionList, parse_range_expression
+from VibraVid.tui.widgets.topbar import TopBar
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +89,14 @@ class TitleDetailScreen(Screen):
         return bool(getattr(self._item, "is_movie", False) or getattr(self._item, "is_song", False))
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(str(getattr(self._item, "name", "?")), self._site)
         with Vertical(id="detail-panel"):
-            yield Static(str(getattr(self._item, "name", "?")), classes="detail-title")
-            yield Static(self._meta_line(), classes="detail-meta")
-            yield Static(self._desc_line(), classes="detail-meta")
+            with Horizontal(id="detail-head"):
+                yield CoverImage(max_cells=(40, 18), reserve=18, id="detail-cover")
+                with Vertical(id="detail-info"):
+                    yield Static(str(getattr(self._item, "name", "?")), classes="detail-title")
+                    yield Static(self._meta_line(), classes="detail-meta")
+                    yield Static(self._desc_line(), classes="detail-meta")
             with Vertical(id="series-area"):
                 yield Static(t("seasons_episodes_title"), classes="panel-title")
                 yield LoadingIndicator(id="seasons-loading")
@@ -109,7 +114,7 @@ class TitleDetailScreen(Screen):
                 with Horizontal(id="actions-row"):
                     yield Button(t("download_selected_episodes"), id="dl", variant="primary")
                     yield Button(t("add_to_queue"), id="queue")
-        yield CustomFooter()
+        yield CustomFooter([("a", t("select_all")), ("u", t("clear_selection")), ("r", t("range_selection")), ("v", t("visual_range")), ("i", t("invert_selection"))])
 
     def _meta_line(self) -> str:
         parts = [
@@ -128,7 +133,15 @@ class TitleDetailScreen(Screen):
         desc = str(getattr(self._item, "desc", "") or "").strip()
         return desc[:300] + ("..." if len(desc) > 300 else "") if desc else ""
 
+    def _show_cover(self, season: int | None = None, episode: int | None = None, own_image: str | None = None) -> None:
+        """Cover of the title, of one season or of one episode: the service's own image (a song's, an album track's) or TMDB and the other providers."""
+        item, site = self._item, self._site
+        self.query_one("#detail-cover", CoverImage).show(
+            lambda: artwork.cover_url(item, site, season=season, episode=episode, own_image=own_image)
+        )
+
     def on_mount(self) -> None:
+        self._show_cover()
         if self._is_single:
             self.query_one("#series-area", Vertical).display = False
             self.query_one("#dsl-preview", Static).update("selections = None (single item)")
@@ -165,6 +178,7 @@ class TitleDetailScreen(Screen):
         self._item = p_item
 
         self.query_one(".detail-meta", Static).update(self._meta_line())
+        self._show_cover()
 
         self.query_one("#seasons", ListView).clear()
         self.query_one("#episodes", SelectionList).clear_options()
@@ -342,6 +356,16 @@ class TitleDetailScreen(Screen):
             label = f"E{ep.number}  ·  {getattr(ep, 'name', '') or 'Episode'}"
             episodes.add_option(Selection(label, ep.number, initial_state=ep.number in selected))
         self._update_dsl()
+        self._show_cover(season=season.number, own_image=getattr(season, "image", None))
+
+    @on(OptionList.OptionHighlighted, "#episodes")
+    def _on_episode_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        season = next((s for s in self._seasons if s.number == self._current_season), None)
+        number = getattr(event.option, "value", None)
+        if season is None or number is None:
+            return
+        episode = next((e for e in (getattr(season, "episodes", []) or []) if e.number == number), None)
+        self._show_cover(season=season.number, episode=number, own_image=getattr(episode, "image", None) or getattr(season, "image", None))
 
     @on(ListView.Highlighted, "#seasons")
     def _on_season_highlighted(self, event: ListView.Highlighted) -> None:
