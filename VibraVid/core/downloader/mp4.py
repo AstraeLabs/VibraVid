@@ -862,6 +862,10 @@ def MP4_Downloader(
         media = mp4_media(url, headers, key, chapters, poster_url)
         media.site = site_name or context_tracker.site_name or None
         write_export(media, context_tracker.export_file)
+        if DELAY_SS > 0:
+            console.print(f"\n[yellow]Exported and sleeping {DELAY_SS} seconds...")
+            time.sleep(DELAY_SS)
+        
         return path, False, None
 
     if context_tracker.resolve_only:

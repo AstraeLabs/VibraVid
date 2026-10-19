@@ -369,9 +369,11 @@ class BaseDownloader:
 
     def _skip_download_result(self) -> "DownloadResult":
         """Result of the ``DOWNLOAD.skip_download`` switch (and of ``--export``): optional pause, then the (never downloaded) output path."""
-        if DELAY_SS > 0 and context_tracker.capture_keys is None and context_tracker.export_file is None:
-            console.print(f"\n[yellow]Skipping download as per configuration and sleeping {DELAY_SS} seconds...")
+        if DELAY_SS > 0 and context_tracker.capture_keys is None:
+            what = "Exported" if context_tracker.export_file is not None else "Skipping download as per configuration"
+            console.print(f"\n[yellow]{what} and sleeping {DELAY_SS} seconds...")
             time.sleep(DELAY_SS)
+        
         return DownloadResult(self.output_path, False, None)
 
     def _create_media_players(self) -> None:
