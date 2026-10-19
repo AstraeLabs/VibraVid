@@ -34,17 +34,29 @@ def _media(kind="dash", **kw):
 
 @pytest.mark.parametrize("kind", ["mp4", "hls", "dash", "ism"])
 def test_every_protocol_round_trips_through_the_file(kind, tmp_path):
-    big = "#EXTM3U\n" + "#EXT-X-SEGMENT\n" * 500  # big enough to be compressed on the wire
-    media = _media(kind, manifest_content=None if kind == "mp4" else big, key=[KEY], headers={"User-Agent": "x"}, cookies={"a": "b"}, desc="video: 1080p")
+    media = _media(kind, key=[KEY], desc="video: 1080p")
     file = tmp_path / "out.json"
 
     assert write_export(media, str(file)) == str(file)
     (back,) = read_export(str(file))
 
     assert (back.kind, back.url, back.title, back.site) == (kind, media.url, "Bunny", "appletv")
-    assert back.manifest_content == media.manifest_content
-    assert back.key == [KEY] and back.headers == {"User-Agent": "x"} and back.cookies == {"a": "b"}
+    assert back.key == [KEY]
     assert back.desc == "video: 1080p" and back.version == 1 and back.exported_at and back.vibravid_version
+
+
+def test_the_file_carries_the_import_command_and_only_what_a_download_needs(tmp_path):
+    media = _media("dash", manifest_content="<MPD/>", key=[KEY], headers={"User-Agent": "x"}, cookies={"a": "b"},
+                   license_url="https://lic", license_headers={"h": "v"}, license_data="d", license_certificate="c")
+    file = tmp_path / "out.json"
+    write_export(media, str(file))
+    (entry,) = json.loads(file.read_text(encoding="utf-8"))
+
+    assert entry["cmd"] == f"python manual.py --down '{media.url}' --key {KEY} -o 'Bunny'"
+    assert list(entry)[0] == "cmd"
+    for gone in ("manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate", "max_segments", "max_time"):
+        assert gone not in entry
+    assert entry["key"] == [KEY]
 
 
 def test_entries_of_one_run_pile_up_but_a_new_run_starts_afresh(tmp_path, monkeypatch):
@@ -142,3 +154,10 @@ def test_the_flags_are_parsed_and_the_old_one_is_gone():
     assert parser.parse_args(["--import", "a.json"]).import_file == "a.json"
     with pytest.raises(SystemExit):
         parser.parse_args(["--down-json", "a.json"])
+
+
+def test_the_command_names_a_tv_episode_and_repeats_every_key():
+    media = _media("hls", key=[KEY, "cc" * 16 + ":" + "dd" * 16], season=2, episode=5, episode_name="Pilot: Part\\1")
+    assert _export._download_command(media) == (
+        f"python manual.py --down '{media.url}' --key {KEY} --key {'cc' * 16}:{'dd' * 16} -o 'Bunny S2_E5 Pilot_ Part_1'"
+    )

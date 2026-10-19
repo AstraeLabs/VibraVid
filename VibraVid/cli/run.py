@@ -175,7 +175,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--progress-interval", dest="progress_interval", type=float, metavar="SECONDS", help="Seconds between lines with --plain-progress (default 5)")
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
-    dl_opts.add_argument("--export", dest="export_file", nargs="?", const="", default=None, metavar="FILE", help="Resolve tracks and keys but don't download: write them to a JSON file (default: .cache/export/<site>_<type>_<title>.json) to download later with --import. Works with MP4/HLS/DASH/ISM. The file holds keys, cookies and auth headers")
+    dl_opts.add_argument("--export", dest="export_file", nargs="?", const="", default=None, metavar="FILE", help="Resolve tracks and keys but don't download: write them to a JSON file (default: .cache/export/<site>_<type>_<title>.json) to download later with --import. Works with MP4/HLS/DASH/ISM. The file holds the keys")
 
     # ── Remote server
     remote_group = parser.add_argument_group("Remote server")

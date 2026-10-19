@@ -69,8 +69,6 @@ class ResolvedMedia:
     version: int = 1
     site: str | None = None
     desc: str | None = None
-    max_segments: Any = None
-    max_time: Any = None
     exported_at: str | None = None
     vibravid_version: str | None = None
 

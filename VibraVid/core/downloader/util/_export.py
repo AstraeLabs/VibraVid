@@ -13,6 +13,7 @@ from VibraVid.utils.upload.version import __version__
 logger = logging.getLogger(__name__)
 
 _written: list[str] = []
+_NOT_EXPORTED = ("manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate")
 
 
 def get_written_exports() -> list[str]:
@@ -26,6 +27,20 @@ def _default_path(media: ResolvedMedia) -> Path:
     safe_name = re.sub(r'[\\/:*?"<>|]+', "_", "_".join(p for p in parts if p))
     safe_name = re.sub(r"\s+", "_", safe_name).strip("_") or "output"
     return export_dir / f"{safe_name}.json"
+
+
+def _download_command(media: ResolvedMedia) -> str:
+    """A ready-to-run ``manual.py --down`` command that downloads *media* (the keys are in the command, no CDM needed)."""
+    name = media.title or "output"
+    if media.season or media.episode:
+        name = f"{name} S{media.season}_E{media.episode}" + (f" {media.episode_name}" if media.episode_name else "")
+    name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip() or "output"
+
+    keys = [media.key] if isinstance(media.key, str) else (media.key or [])
+    parts = [f"python manual.py --down '{media.url}'"]
+    parts += [f"--key {k}" for k in keys if k]
+    parts.append(f"-o '{name}'")
+    return " ".join(parts)
 
 
 def write_export(media: ResolvedMedia, file: str | None = None) -> str | None:
@@ -45,7 +60,8 @@ def write_export(media: ResolvedMedia, file: str | None = None) -> str | None:
             except Exception:
                 entries = []
 
-        entries.append(media.to_wire())
+        entry = {k: v for k, v in media.to_wire().items() if k not in _NOT_EXPORTED}
+        entries.append({"cmd": _download_command(media), **entry})
         path.write_text(json.dumps(entries, indent=4, ensure_ascii=False), encoding="utf-8")
         _written.append(str(path))
         return str(path)

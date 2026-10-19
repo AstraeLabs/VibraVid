@@ -264,8 +264,6 @@ class BaseDownloader:
 
         media.site = self._resolve_track_info()[2] or None
         media.desc = self._build_tracks_desc(streams) or None
-        media.max_segments = getattr(self, "max_segments", None)
-        media.max_time = getattr(self, "max_time", None)
         write_export(media, context_tracker.export_file)
 
     def _no_media_downloaded(self, status: dict) -> bool:
