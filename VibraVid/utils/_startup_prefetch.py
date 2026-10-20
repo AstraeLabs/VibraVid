@@ -8,7 +8,7 @@ from curl_cffi import requests
 logger = logging.getLogger(__name__)
 DOMAINS_URL = "https://raw.githubusercontent.com/AstraeLabs/Domains/refs/heads/main/domains_s.json"
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="startup-prefetch")
+_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="startup-prefetch")
 _futures: dict[str, Future] = {}
 
 
@@ -24,6 +24,14 @@ def _check_update():
     from VibraVid.utils.upload.update import check_for_updates
 
     return check_for_updates()
+
+
+def _warm_vault():
+    """Construct the default vault early: its constructor calls warm()."""
+    from VibraVid.utils.vault.default import default_vault
+
+    default_vault.warm()
+    return True
 
 
 _JOBS = {
@@ -42,6 +50,12 @@ def start_update_check() -> None:
     """Kick off the release check in the background (cached 24h). Idempotent, interactive CLI only."""
     if "update" not in _futures:
         _futures["update"] = _executor.submit(_check_update)
+
+
+def start_vault_warm() -> None:
+    """Wake the default vault (Worker + Postgres) while the user picks a title. Idempotent."""
+    if "vault" not in _futures:
+        _futures["vault"] = _executor.submit(_warm_vault)
 
 
 def collect(key: str, timeout: float | None = None):

@@ -620,6 +620,7 @@ def main():
             _startup_prefetch.start_update_check()
 
         if getattr(args, "tui", False):
+            _startup_prefetch.start_vault_warm()
             from VibraVid.tui.app import main as tui_main
 
             tui_main()
@@ -657,6 +658,7 @@ def main():
         # Execute pre-run hooks with context from post-download if available, otherwise with empty context
         execute_hooks("pre_run")
         start_message(False)
+        _startup_prefetch.start_vault_warm()
 
         # Attempt git update but continue even if it fails (e.g., no network, git not available)
         try:
