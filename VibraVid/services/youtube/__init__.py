@@ -12,7 +12,7 @@ from VibraVid.utils import TVShowManager
 
 from .downloader import download_video
 
-indice = 21
+indice = 20
 _useFor = "Film_Serie"
 console = Console()
 logger = logging.getLogger(__name__)

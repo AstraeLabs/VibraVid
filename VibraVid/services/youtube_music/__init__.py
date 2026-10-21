@@ -15,7 +15,7 @@ from VibraVid.utils import TVShowManager
 
 from .downloader import download_album_tracks, download_song
 
-indice = 20
+indice = 19
 _useFor = "Song"
 console = Console()
 logger = logging.getLogger(__name__)
