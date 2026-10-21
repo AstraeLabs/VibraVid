@@ -6,6 +6,32 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_EQUIVALENT_CMD_EXCLUDED_DESTS = {
+    "site",
+    "search",
+    "item",
+    "season",
+    "episode",
+    "down",
+    "stream_type",
+    "output",
+    "headers",
+    "license_url",
+    "license_headers",
+    "key",
+    "hls_method",
+    "hls_key",
+    "hls_iv",
+    "no_log",
+    "update",
+    "dep",
+    "queue_add",
+    "queue_run",
+    "queue_list",
+    "queue_remove",
+    "queue_clear",
+}
+
 
 class EquivalentCommandBuilder:
     _CONTEXT_TRACKER_FLAGS = (
@@ -160,29 +186,4 @@ class EquivalentCommandBuilder:
         return text
 
 
-_EQUIVALENT_CMD_EXCLUDED_DESTS = {
-    "site",
-    "search",
-    "item",
-    "season",
-    "episode",
-    "down",
-    "stream_type",
-    "output",
-    "headers",
-    "license_url",
-    "license_headers",
-    "key",
-    "hls_method",
-    "hls_key",
-    "hls_iv",
-    "no_log",
-    "update",
-    "dep",
-    "queue_add",
-    "queue_run",
-    "queue_list",
-    "queue_remove",
-    "queue_clear",
-}
 equivalent_command_builder = EquivalentCommandBuilder(excluded_dests=_EQUIVALENT_CMD_EXCLUDED_DESTS)

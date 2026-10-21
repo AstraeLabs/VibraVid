@@ -11,7 +11,7 @@
 
 	<div class="cn-page-hd">
 		<h1 class="cn-blast">Settings</h1>
-		<p>Providers, connected services, ARR and settings. Everything behind the scenes.</p>
+		<p>Providers, ARR and settings. Everything behind the scenes.</p>
 	</div>
 
 	<div class="cn-slab">
@@ -32,8 +32,8 @@
 
 	<div class="cn-switch" id="cn-tabs">
 		<button type="button" data-tab="view"   aria-selected="true">Overview</button>
-		<button type="button" data-tab="config" aria-selected="false">config.json</button>
-		<button type="button" data-tab="login"  aria-selected="false">login.json</button>
+		<button type="button" data-tab="config" aria-selected="false">config.toml</button>
+		<button type="button" data-tab="login"  aria-selected="false">login.toml</button>
 		<button type="button" data-tab="arr"    aria-selected="false">ARR</button>
 		<button type="button" data-tab="plug"   aria-selected="false">Extensions</button>
 	</div>
@@ -57,29 +57,14 @@
 				</div>
 			</div>
 
+			{% if disabled_sites %}
 			<div class="cn-box">
-				<h3>Connected services</h3>
-				<div class="cn-lines" style="gap:2px">
-					{% for s in services %}
-						<div class="cn-ln" style="background:var(--cn-surf-2);padding:11px 15px">
-							<span class="cn-grow">
-								<span class="cn-t" style="font-size:14px">{{ s.name }}</span>
-								<span class="cn-s">{{ s.detail }}</span>
-							</span>
-							<span class="cn-st {% if s.on %}is-done{% else %}is-wait{% endif %}">
-								{% if s.on %}Configured{% else %}Not configured{% endif %}
-							</span>
-						</div>
-					{% endfor %}
-				</div>
-
-				{% if disabled_sites %}
-					<h3 style="margin-top:24px">Disabled via .env</h3>
-					<p style="margin:0;color:var(--cn-mute);font-size:13px;line-height:1.8">
-						{% for d in disabled_sites %}<code>{{ d }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}
-					</p>
-				{% endif %}
+				<h3>Hidden services</h3>
+				<p style="margin:0;color:var(--cn-mute);font-size:13px;line-height:1.8">
+					{% for d in disabled_sites %}<code>{{ d }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}
+				</p>
 			</div>
+			{% endif %}
 
 			<div class="cn-box">
 				<h3>ARR <span class="cn-sp"></span>
@@ -126,34 +111,34 @@
 		</div>
 	</section>
 
-	{# ── config.json ─────────────────────────────────────────────────────── #}
+	{# ── config.toml ─────────────────────────────────────────────────────── #}
 	<section class="cn-panel" data-panel="config" hidden>
 		<p class="cn-msg">
-			The raw file. Saved only if it's valid JSON, and the previous copy
-			stays in <code>config.json.backup</code>.
+			The raw file, comments included. Saved only if it's valid TOML, and the previous copy
+			stays in <code>config.toml.backup</code>.
 		</p>
 		<textarea class="cn-area" id="cn-config" spellcheck="false"
-		          aria-label="config.json content"></textarea>
+		          aria-label="config.toml content"></textarea>
 		<div class="cn-row" style="margin-top:15px">
 			<p class="cn-sub" id="cn-config-msg" style="flex:1"></p>
 			<button class="cn-cta is-ghost" type="button" data-reset="config">Discard changes</button>
 			<button class="cn-cta is-ghost" type="button" data-reload="config">Reload config</button>
-			<button class="cn-cta" type="button" data-save="config">Save config.json</button>
+			<button class="cn-cta" type="button" data-save="config">Save config.toml</button>
 		</div>
 	</section>
 
-	{# ── login.json ──────────────────────────────────────────────────────── #}
+	{# ── login.toml ──────────────────────────────────────────────────────── #}
 	<section class="cn-panel" data-panel="login" hidden>
 		<p class="cn-msg">
-			Provider credentials. The raw file, saved only if it's valid JSON.
+			Provider credentials. The raw file, saved only if it's valid TOML.
 		</p>
 		<textarea class="cn-area" id="cn-login" spellcheck="false"
-		          aria-label="login.json content"></textarea>
+		          aria-label="login.toml content"></textarea>
 		<div class="cn-row" style="margin-top:15px">
 			<p class="cn-sub" id="cn-login-msg" style="flex:1"></p>
 			<button class="cn-cta is-ghost" type="button" data-reset="login">Discard changes</button>
 			<button class="cn-cta is-ghost" type="button" data-reload="login">Reload login</button>
-			<button class="cn-cta" type="button" data-save="login">Save login.json</button>
+			<button class="cn-cta" type="button" data-save="login">Save login.toml</button>
 		</div>
 	</section>
 
@@ -255,8 +240,8 @@
 		</div>
 
 		<div class="cn-warnbox">
-			ARR values end up in <b>config.json</b>: if you have unsaved changes
-			in the config.json tab, save them first or they'll be lost.
+			ARR values end up in <b>config.toml</b>: if you have unsaved changes
+			in the config.toml tab, save them first or they'll be lost.
 		</div>
 	</section>
 
@@ -322,10 +307,11 @@
 {% block scripts %}
 {% comment %}
 	I due file entrano in pagina come JSON in un <script type="application/json">,
-	non interpolati in una stringa JS: `config.json` è testo scritto dall'utente,
+	non interpolati in una stringa JS: `config.toml` è testo scritto dall'utente,
 	e dentro un template literal una sequenza `${...}` verrebbe eseguita.
 {% endcomment %}
 {{ config_content|json_script:"cn-src-config" }}
+{{ config_arr|json_script:"cn-src-arr" }}
 {{ login_content|json_script:"cn-src-login" }}
 {{ site_extra_args|json_script:"cn-src-extra-args" }}
 
@@ -394,17 +380,13 @@
 			var msg = fileMsg(which);
 
 			if (!content) { say(msg, "The file is empty.", "bad"); return; }
-			// Il controllo lo rifà anche il server: qui serve solo a non
-			// mandargli una richiesta che sappiamo già che rifiuterà.
-			try { JSON.parse(content); }
-			catch (err) { say(msg, "Invalid JSON: " + err.message, "bad"); return; }
-
+			// Il TOML lo valida il server (non c'è un parser TOML in pagina).
 			say(msg, "Saving…");
 			post(URL_SAVE, JSON.stringify({ file_type: which, content: content }), true)
 				.then(function (data) {
 					if (!data.success) { say(msg, data.error || "Not saved.", "bad"); return; }
-					original[which] = content;
-					if (which === "config") rememberArr(content);
+					original[which] = data.content || content;
+					if (which === "config") rememberArr(data.parsed && data.parsed.ARR);
 					say(msg, data.message || "Saved.", "good");
 				})
 				.catch(function (err) { say(msg, "Save failed: " + err.message, "bad"); });
@@ -486,16 +468,11 @@
 		return out;
 	}
 
-	function rememberArr(text) {
-		try {
-			var parsed = JSON.parse(text);
-			arrOriginal = JSON.parse(JSON.stringify(parsed.ARR || {}));
-			fillArr(arrOriginal);
-		} catch (err) {
-			say(arrMsg, "config.json is not readable: fix it in its tab.", "bad");
-		}
+	function rememberArr(arr) {
+		arrOriginal = JSON.parse(JSON.stringify(arr || {}));
+		fillArr(arrOriginal);
 	}
-	rememberArr(original.config);
+	rememberArr(source("cn-src-arr"));
 
 	el("cn-arr-reset").addEventListener("click", function () {
 		fillArr(arrOriginal);
@@ -503,20 +480,16 @@
 	});
 
 	el("cn-arr-save").addEventListener("click", function () {
-		var full;
-		try { full = JSON.parse(editor.config.value); }
-		catch (err) { say(arrMsg, "config.json is invalid: fix it first.", "bad"); return; }
-
-		full.ARR = merge(full.ARR, readArr());
-		var content = JSON.stringify(full, null, 4);
+		// Il server fonde ARR dentro config.toml senza toccare commenti e resto del file.
+		var arr = merge(arrOriginal, readArr());
 
 		say(arrMsg, "Saving…");
-		post(URL_SAVE, JSON.stringify({ file_type: "config", content: content }), true)
+		post(URL_SAVE, JSON.stringify({ file_type: "config", patch: { ARR: arr } }), true)
 			.then(function (data) {
 				if (!data.success) { say(arrMsg, data.error || "Not saved.", "bad"); return; }
-				editor.config.value = content;
-				original.config = content;
-				arrOriginal = JSON.parse(JSON.stringify(full.ARR));
+				editor.config.value = data.content;
+				original.config = data.content;
+				arrOriginal = JSON.parse(JSON.stringify(data.parsed.ARR || arr));
 				say(arrMsg, "ARR settings saved.", "good");
 			})
 			.catch(function (err) { say(arrMsg, "Save failed: " + err.message, "bad"); });
@@ -563,6 +536,7 @@
 
 	// ── Opzioni CLI personalizzate per provider ──────────────────────────────
 	var extraArgsState = source("cn-src-extra-args") || {};
+	var extraArgsSaved = JSON.parse(JSON.stringify(extraArgsState));  // what login.toml has now
 	var extraArgsMsg = el("cn-extra-args-msg");
 	var extraArgsList = el("cn-extra-args-list");
 	var extraArgsFields = el("cn-extra-args-fields");
@@ -697,30 +671,24 @@
 	renderExtraArgs();
 
 	function saveExtraArgs() {
-		var full;
-		try { full = JSON.parse(editor.login.value); }
-		catch (err) { say(extraArgsMsg, "login.json is invalid: fix it first.", "bad"); return; }
-
-		// Per-site "extra_args" key, alongside each site's other login.json fields.
-		// Drop it from sites no longer in extraArgsState, set/update it for the rest.
-		Object.keys(full).forEach(function (site) {
-			if (isObj(full[site]) && "extra_args" in full[site] && !(site in extraArgsState)) {
-				delete full[site].extra_args;
-			}
-		});
+		// Per-site "args" key, alongside each site's other login.toml fields.
+		// The server sets/updates it for the sites in extraArgsState and empties it (args = "")
+		// for the ones that had it and no longer do (extraArgsSaved), leaving the rest of the file as is.
+		var patch = {};
 		Object.keys(extraArgsState).forEach(function (site) {
-			full[site] = full[site] || {};
-			full[site].extra_args = extraArgsState[site];
+			patch[site] = { args: extraArgsState[site] };
 		});
-
-		var content = JSON.stringify(full, null, 4);
+		Object.keys(extraArgsSaved).forEach(function (site) {
+			if (!(site in extraArgsState)) patch[site] = { args: "" };
+		});
 
 		say(extraArgsMsg, "Saving…");
-		post(URL_SAVE, JSON.stringify({ file_type: "login", content: content }), true)
+		post(URL_SAVE, JSON.stringify({ file_type: "login", patch: patch, delete: [] }), true)
 			.then(function (data) {
 				if (!data.success) { say(extraArgsMsg, data.error || "Not saved.", "bad"); return; }
-				editor.login.value = content;
-				original.login = content;
+				editor.login.value = data.content;
+				original.login = data.content;
+				extraArgsSaved = JSON.parse(JSON.stringify(extraArgsState));
 				say(extraArgsMsg, "Saved.", "good");
 			})
 			.catch(function (err) { say(extraArgsMsg, "Save failed: " + err.message, "bad"); });

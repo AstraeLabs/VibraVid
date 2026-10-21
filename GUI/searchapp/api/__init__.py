@@ -9,28 +9,6 @@ from .base import BaseStreamingAPI
 logger = logging.getLogger(__name__)
 
 
-def _is_hidden(module_name: str) -> bool:
-    """Whether the underlying service module declares `_hide = True`."""
-    from VibraVid.services._base.site_loader import CompiledService
-
-    # A compiled service has no __init__.py: a plain import would cache a namespace package under its name
-    services_path = importlib.import_module("VibraVid.services").__path__[0]
-    compiled = CompiledService(module_name, os.path.join(services_path, module_name))
-    if os.path.isdir(compiled.service_dir) and compiled.is_candidate():
-        try:
-            return bool(getattr(compiled.load(f"VibraVid.services.{module_name}"), "_hide", False))
-        except Exception:
-            return False
-
-    for candidate in (f"VibraVid.services.{module_name}", module_name):
-        try:
-            service_module = importlib.import_module(candidate)
-        except Exception:
-            continue
-        return bool(getattr(service_module, "_hide", False))
-    return False
-
-
 _API_REGISTRY: dict[str, type] = {}
 _LOAD_ERRORS: list[str] = []
 _INITIALIZED = False
@@ -45,32 +23,35 @@ _PREFERRED_ORDER = [
     "paramountplus",
     "appletv",
     "nowtvit",
+    "netflix",
     "mediasetinfinity",
     "raiplay",
     "la7",
     "discoveryplus",
-    "discovery",
-    "dmax",
-    "nove",
-    "realtime",
-    "homegardentv",
-    "foodnetwork",
+    "aurora",
     "tubitv",
     "plutotv",
     "rakutentv",
     "chili",
     "timvision",
-    "amazon_music",
 ]
-_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax", "nowtvit"}
+_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "disney", "hbomax", "nowtvit", "netflix"}
 _SITE_CATEGORIES: dict[str, str] = {}
-_SITE_ALIASES: dict[str, str] = {}
+_SITE_ALIASES: dict[str, str] = {
+    "discovery": "aurora",
+    "nove": "aurora",
+    "foodnetwork": "aurora",
+    "homegardentv": "aurora",
+    "realtime": "aurora",
+    "dmax": "aurora",
+}
 
 
 def _disabled_sites() -> set:
-    """Site module names to exclude from the GUI, via VIBRAVID_DISABLED_SITES (comma-separated)."""
-    raw = os.environ.get("VIBRAVID_DISABLED_SITES", "")
-    return {s.strip().lower() for s in raw.split(",") if s.strip()}
+    """Site module names switched off by the user (`hidden_services` in config.toml, VIBRAVID_HIDDEN_SITES env): no adapter is loaded for them."""
+    from VibraVid.services._base.site_loader import hidden_services
+
+    return hidden_services()
 
 
 def _initialize_registry():
@@ -94,15 +75,12 @@ def _initialize_registry():
 
     # Build into a local dict first; only commit to _API_REGISTRY if we end up
     # with at least as many services as we already had.
-    previous_count = len(_API_REGISTRY)
+    previous_count = len([name for name in _API_REGISTRY if name not in disabled])  # hidden services are meant to disappear
     new_registry: dict[str, type] = {}
     load_errors: list[str] = []
     _LOAD_ERRORS.clear()
 
     for idx, module_name in enumerate(sorted_files):
-        if _is_hidden(module_name):
-            continue
-
         try:
             module = importlib.import_module(f".{module_name}", package=__package__)
             api_cls = None
@@ -136,6 +114,8 @@ def _initialize_registry():
     else:
         for k, v in new_registry.items():
             _API_REGISTRY[k] = v
+        for name in disabled:
+            _API_REGISTRY.pop(name, None)
         logger.warning("Reload produced fewer APIs (%d) than before (%d); kept old entries to avoid losing services.", len(new_registry), previous_count,)
 
     _LOAD_ERRORS.extend(load_errors)
@@ -205,7 +185,7 @@ def reset_site_categories_cache() -> None:
     _SITE_CATEGORIES = {}
 
 
-def _normalize_site(site: str) -> str:
+def normalize_site(site: str) -> str:
     """Return the canonical GUI provider identifier, accepting legacy aliases."""
     site_lower = site.lower().strip()
     return _SITE_ALIASES.get(site_lower, site_lower)
@@ -224,7 +204,7 @@ def get_api(site: str) -> BaseStreamingAPI:
     Raises:
         ValueError: If site is not supported
     """
-    site_lower = _normalize_site(site)
+    site_lower = normalize_site(site)
 
     if site_lower not in _API_REGISTRY:
         available = ", ".join(_API_REGISTRY.keys())
@@ -244,13 +224,14 @@ def is_site_available(site: str) -> bool:
     Returns:
         True if site is available
     """
-    return _normalize_site(site) in _API_REGISTRY
+    return normalize_site(site) in _API_REGISTRY
 
 
 __all__ = [
     "get_available_sites",
     "get_api",
     "is_site_available",
+    "normalize_site",
     "get_load_errors",
     "reset_site_categories_cache",
 ]

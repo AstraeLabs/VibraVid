@@ -310,6 +310,7 @@ def run_download_plan(
     results: list[dict[str, Any]] = []
     done_count = 0
     total_bytes = 0
+    shown_bytes = 0  # high-water mark of what the UI shows: in-flight bytes must not vanish when a segment completes
     speed_meter = SpeedWindow()
 
     try:
@@ -433,7 +434,8 @@ def run_download_plan(
                     logger.debug(_format_bridge_event(event))
 
                 live_bytes = int(event.get("total_bytes") or 0)
-                display_bytes = max(total_bytes, live_bytes)  # monotonic merge; does NOT mutate the ledger
+                shown_bytes = max(shown_bytes, total_bytes, live_bytes)  # monotonic merge; does NOT mutate the ledger
+                display_bytes = shown_bytes
 
                 speed = speed_meter.update(display_bytes)
                 _safe_progress_cb(progress_cb, done_count, total, display_bytes, speed)
@@ -469,9 +471,10 @@ def run_download_plan(
                 done_count += 1
                 bytes_written = int(event.get("bytes") or 0)
                 total_bytes += bytes_written
+                shown_bytes = max(shown_bytes, total_bytes)
 
-                speed = speed_meter.update(total_bytes)
-                _safe_progress_cb(progress_cb, done_count, total, total_bytes, speed)
+                speed = speed_meter.update(shown_bytes)
+                _safe_progress_cb(progress_cb, done_count, total, shown_bytes, speed)
 
                 progress_event = dict(event)
                 progress_event.setdefault("task_key", plan.get("task_key", "download"))
@@ -479,16 +482,20 @@ def run_download_plan(
                 progress_event.setdefault("display_label", plan.get("display_label", ""))
                 progress_event.setdefault("pct", int((done_count / total) * 100) if total else 100)
                 progress_event.setdefault("segments", f"{done_count}/{total}")
-                estimated_total = resolve_display_total(
-                    total_bytes, done_count, total,
-                    known_total=known_total,
-                    known_exact=known_exact,
+                estimated_total = max(
+                    resolve_display_total(
+                        total_bytes, done_count, total,
+                        known_total=known_total,
+                        known_exact=known_exact,
+                    ),
+                    shown_bytes,
                 )
-                progress_event.setdefault(
-                    "size",
-                    f"{format_size(total_bytes)}/{format_size(estimated_total)}"
+                
+                # Velora's own completed-event "size" is its ledger of finished segments: it would drop the in-flight bytes the last tick showed
+                progress_event["size"] = (
+                    f"{format_size(shown_bytes)}/{format_size(estimated_total)}"
                     if estimated_total
-                    else format_size(total_bytes),
+                    else format_size(shown_bytes)
                 )
                 progress_event.setdefault("final_size", format_size(bytes_written))
                 progress_event.setdefault("speed", format_speed(speed))

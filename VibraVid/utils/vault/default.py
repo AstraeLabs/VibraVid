@@ -29,8 +29,18 @@ class Vault_di_default(BaseVault):
 
         self.session = create_client(headers=self.headers, http2=True)
         self._session_lock = threading.Lock()
+        self._warm_lock = threading.Lock()
+        self._warm_started = False
         self.last_origins: dict[str, tuple[str, str | None, str | None]] = {}
-        self._prewarm(self.base_url, self._session_lock, "Claudio")
+        self.warm()
+
+    def warm(self) -> None:
+        """Wake the Worker and the Postgres behind it before the first lookup. Idempotent."""
+        with self._warm_lock:
+            if self._warm_started:
+                return
+            self._warm_started = True
+        self._prewarm(self.base_url, self._session_lock, "Claudio", path="health", timeout=5)
 
     @property
     def is_connected(self) -> bool:
@@ -107,16 +117,7 @@ class Vault_di_default(BaseVault):
                 continue
 
             kid, key = key_str.split(":", 1)
-            kid_clean = kid.strip()
-            kid_norm = kid_clean.lower().replace("-", "")
-            entry: dict = {"kid": kid_clean, "key": key.strip()}
-
-            if kid_to_label:
-                label = kid_to_label.get(kid_norm)
-                if label:
-                    entry["label"] = label
-
-            keys_payload.append(entry)
+            keys_payload.append({"kid": kid.strip(), "key": key.strip()})
 
         if not keys_payload:
             return 0

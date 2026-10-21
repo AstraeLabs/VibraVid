@@ -20,6 +20,11 @@ _CUE_IN_RE = re.compile(r"#EXT-X-CUE-IN")
 _DATERANGE_RE = re.compile(r"#EXT-X-DATERANGE:([^\r\n]+)")
 _MAP_URI_RE = re.compile(r'#EXT-X-MAP:[^\r\n]*URI="([^"]+)"')
 
+_ID_TS_SUFFIX_RE = re.compile(r"^(.*)-(\d{10,})$")
+_HLS_AD_URL_RE = re.compile(r"ad_bumper|ad%2f|/creative/|47_ad|[_/]dai[_/]|[_/]ssai[_/]|[_/]ad[_/]", re.IGNORECASE)
+_ISM_AD_ATTR_RE = re.compile(r"ad[_-]?bumper|preroll|midroll|postroll|/creative/|[_/]ads?[_/]|[_-]ads?[_-]", re.IGNORECASE)
+_CLIP_ID_RE = re.compile(r"/clip/([^/_]+)")
+
 
 def _parse_iso_duration(value: str | None) -> float:
     match = _DURATION_RE.match((value or "").strip())
@@ -38,9 +43,6 @@ def _parse_iso_duration(value: str | None) -> float:
 
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
-
-
-_ID_TS_SUFFIX_RE = re.compile(r"^(.*)-(\d{10,})$")
 
 
 def _period_id_prefix(period_id: str) -> str:
@@ -152,11 +154,6 @@ def _decide_dash_periods(content: str) -> dict:
 
     logger.info(f"pluto ads: DASH drop periods {sorted(drop)} ({'; '.join(reasons)})")
     return {"drop_period_idx": sorted(drop), "reason": "; ".join(reasons)}
-
-
-_HLS_AD_URL_RE = re.compile(r"ad_bumper|ad%2f|/creative/|47_ad|[_/]dai[_/]|[_/]ssai[_/]|[_/]ad[_/]", re.IGNORECASE)
-_ISM_AD_ATTR_RE = re.compile(r"ad[_-]?bumper|preroll|midroll|postroll|/creative/|[_/]ads?[_/]|[_-]ads?[_-]", re.IGNORECASE)
-_CLIP_ID_RE = re.compile(r"/clip/([^/_]+)")
 
 
 def _hls_range_asset_key(url: str) -> str:

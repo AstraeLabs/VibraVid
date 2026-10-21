@@ -14,7 +14,7 @@ KIND_TO_PATH = {"movie": "movies", "tv": "series"}
 
 
 def _configured_api_key() -> str | None:
-    """TheTVDB v4 key: TVDB_API_KEY env var first, then Conf/login.json Provider.tvdb."""
+    """TheTVDB v4 key: TVDB_API_KEY env var first, then Conf/login Provider.tvdb."""
     env_key = str(os.environ.get("TVDB_API_KEY") or "").strip()
     if env_key:
         return env_key

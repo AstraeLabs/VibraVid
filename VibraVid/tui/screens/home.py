@@ -19,8 +19,10 @@ from textual.widgets import Button, Input, Static
 
 from VibraVid.tui.bridge import SiteInfo, sites_by_category
 from VibraVid.tui.i18n import t
+from VibraVid.tui.palette import ACCENT
 from VibraVid.tui.screens.search import SearchScreen
 from VibraVid.tui.widgets.custom_footer import CustomFooter
+from VibraVid.tui.widgets.topbar import TopBar
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +36,13 @@ PILL_OVERHEAD = 4
 # below this width the five scope pills no longer leave room for their labels
 NARROW_WIDTH = 110
 
-ASCII_LOGO = """[bold cyan]
-██╗   ██╗██╗██████╗ ██████╗  █████╗ ██╗   ██╗██╗██████╗ 
+ASCII_LOGO = f"""[bold {ACCENT}]
+██╗   ██╗██╗██████╗ ██████╗  █████╗ ██╗   ██╗██╗██████╗
 ██║   ██║██║██╔══██╗██╔══██╗██╔══██╗██║   ██║██║██╔══██╗
 ██║   ██║██║██████╔╝██████╔╝███████║██║   ██║██║██║  ██║
 ╚██╗ ██╔╝██║██╔══██╗██╔══██╗██╔══██║╚██╗ ██╔╝██║██║  ██║
  ╚████╔╝ ██║██████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║██████╔╝
-[/bold cyan]"""
+[/bold {ACCENT}]"""
 
 
 class HomeScreen(Screen):
@@ -60,10 +62,7 @@ class HomeScreen(Screen):
         with VerticalScroll(id="home-outer"):
             with Container(id="home-card"):
                 yield Static(ASCII_LOGO, id="home-logo")
-                yield Static(
-                    f"[bold #7aa2f7]{t('home_tagline')}[/bold #7aa2f7]",
-                    id="home-tagline",
-                )
+                yield Static(t("home_tagline"), id="home-tagline")
 
                 with Horizontal(id="home-search-bar"):
                     yield Input(placeholder=t("search_placeholder"), id="main-search-input")
@@ -84,7 +83,8 @@ class HomeScreen(Screen):
                 with Container(id="home-sites-box"):
                     yield VerticalScroll(id="home-sites-wrap")
 
-        yield CustomFooter()
+        yield TopBar("VibraVid", t("ctx_home"))
+        yield CustomFooter([("enter", t("hint_search")), ("tab", t("hint_field"))])
 
     async def on_mount(self) -> None:
         self._grouped = sites_by_category()

@@ -75,10 +75,10 @@ def _fallback_sites() -> list[str]:
     try:
         from VibraVid.services._base.site_loader import load_search_functions
 
-        known = {alias[: -len("_search")] if alias.endswith("_search") else alias: lazy for alias, lazy in load_search_functions().items()}
+        known = {alias[: -len("_search")] if alias.endswith("_search") else alias for alias in load_search_functions()}
     except Exception:  # noqa: BLE001 - the loader failing only means no extra services
         return []
-    return sorted(name for name, lazy in known.items() if name not in get_available_sites() and not getattr(lazy, "hide", False))
+    return sorted(name for name in known if name not in get_available_sites())
 
 
 def _api(site: str):

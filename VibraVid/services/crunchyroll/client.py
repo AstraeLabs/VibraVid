@@ -3,10 +3,16 @@
 import base64
 import json
 import logging
+import math
+import threading
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import parse_qs, urlparse
 
 from rich.console import Console
 
+from VibraVid.core.utils.language import resolve_locale
 from VibraVid.services._base.login_status import Login
 from VibraVid.utils import config_manager, disk_cache
 from VibraVid.utils.http_client import create_client, get_my_location, get_userAgent
@@ -18,34 +24,29 @@ BASE_URL = "https://www.crunchyroll.com"
 API_BETA_BASE_URL = "https://beta-api.crunchyroll.com"
 PLAY_SERVICE_URL = "https://cr-play-service.prd.crunchyrollsvc.com"
 SKIP_EVENTS_URL = "https://static.crunchyroll.com/skip-events/production/{episode_id}.json"
-_COUNTRY_TO_LOCALE = {
+INTRO_DATALAB_URL = "https://static.crunchyroll.com/datalab-intro-v2/{episode_id}.json"
+_COUNTRIES_RESOLVED_BY_LANGUAGE = frozenset({"IT", "US", "GB", "AU", "DE", "FR", "BR", "JP", "RU", "TR", "TH", "ID"})
+_COUNTRY_LOCALE_OVERRIDES = {
     "IN": "en-IN",
-    "IT": "it-IT",
-    "US": "en-US",
-    "GB": "en-GB",
     "CA": "en-CA",
-    "AU": "en-AU",
     "IE": "en-IE",
     "NZ": "en-NZ",
-    "DE": "de-DE",
-    "FR": "fr-FR",
     "ES": "es-ES",
     "MX": "es-419",
     "AR": "es-419",
-    "BR": "pt-BR",
     "PT": "pt-PT",
-    "JP": "ja-JP",
     "SA": "ar-SA",
     "AE": "ar-SA",
-    "RU": "ru-RU",
-    "TR": "tr-TR",
-    "TH": "th-TH",
-    "ID": "id-ID",
     "PH": "en-PH",
     "SG": "en-SG",
 }
 _DEFAULT_LOCALE = "en-US"
 _resolved_locale_cache: str | None = None
+DEFAULT_RETRY_AFTER = 30.0
+MAX_COOLDOWN_WAIT = 120.0
+_cooldown_lock = threading.Lock()
+_cooldown_until = 0.0
+LICENSE_LOCK = threading.Lock()
 
 
 def resolve_crunchyroll_locale(force: bool = False) -> str:
@@ -58,8 +59,10 @@ def resolve_crunchyroll_locale(force: bool = False) -> str:
     try:
         location = get_my_location()
         country_code = location.get("country_code")
-        if country_code and country_code in _COUNTRY_TO_LOCALE:
-            locale = _COUNTRY_TO_LOCALE[country_code]
+        if country_code in _COUNTRY_LOCALE_OVERRIDES:
+            locale = _COUNTRY_LOCALE_OVERRIDES[country_code]
+        elif country_code in _COUNTRIES_RESOLVED_BY_LANGUAGE:
+            locale = resolve_locale(country_code.lower()) or locale
         city = location.get("city")
         logger.info(f"Crunchyroll locale resolved from region {country_code} ({city}): {locale}")
     except Exception as e:
@@ -71,6 +74,70 @@ def resolve_crunchyroll_locale(force: bool = False) -> str:
 
 class CrunchyrollError(Exception):
     """Crunchyroll refused playback (subscription, rate limit, endpoint error)."""
+
+
+class CrunchyrollRateLimitError(CrunchyrollError):
+    """HTTP 429: the server asked us to back off for ``retry_after`` seconds."""
+    def __init__(self, message: str, retry_after: float = 0.0) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def parse_retry_after(value, default: float = DEFAULT_RETRY_AFTER) -> float:
+    """Seconds from a Retry-After header: either a number of seconds or an HTTP date."""
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    try:
+        seconds = float(raw)
+        return max(1.0, seconds) if math.isfinite(seconds) else default
+    except ValueError:
+        pass
+    try:
+        deadline = parsedate_to_datetime(raw)
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return max(1.0, (deadline - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def note_rate_limit(retry_after: float) -> None:
+    """Start (or extend) the process-wide cooldown after a 429."""
+    global _cooldown_until
+    with _cooldown_lock:
+        _cooldown_until = max(_cooldown_until, time.monotonic() + retry_after)
+
+
+def cooldown_remaining() -> float:
+    with _cooldown_lock:
+        return max(0.0, _cooldown_until - time.monotonic())
+
+
+def wait_for_cooldown() -> None:
+    """Sleep until the current cooldown is over, so no new request goes out while the server asked for a pause."""
+    remaining = cooldown_remaining()
+    if remaining <= 0:
+        return
+    if remaining > MAX_COOLDOWN_WAIT:
+        raise CrunchyrollRateLimitError(f"Crunchyroll rate limited (HTTP 429); retry in {math.ceil(remaining)}s", remaining)
+    console.print(f"[yellow]Crunchyroll rate limit: waiting {math.ceil(remaining)}s before the next request")
+    logger.warning(f"Crunchyroll rate limit: waiting {math.ceil(remaining)}s before the next request")
+    time.sleep(remaining)
+
+
+def license_bytes(response) -> bytes:
+    """License payload from a response: raw bytes, or JSON with a base64 ``license`` / ``widevineLicense.license`` field."""
+    content = response.content or b""
+    if "application/json" in response.headers.get("content-type", "").lower() or content.lstrip().startswith(b"{"):
+        body = response.json()
+        value = body.get("license") or (body.get("widevineLicense") or {}).get("license")
+        if not isinstance(value, str) or not value:
+            raise CrunchyrollError("Crunchyroll returned no license in its JSON response")
+        return base64.b64decode(value)
+    if not content:
+        raise CrunchyrollError("Crunchyroll returned an empty license response")
+    return content
 
 
 class CrunchyrollClient:
@@ -446,6 +513,9 @@ class CrunchyrollClient:
                 if not is_rate_limited or attempt >= max_retries:
                     raise
 
+                if isinstance(e, CrunchyrollRateLimitError):
+                    continue  # the process-wide cooldown (Retry-After) is honoured by the next attempt
+
                 cleared = self.clear_all_sessions()
                 wait_time = min(5 * (2**attempt), 30)
                 if not cleared:
@@ -491,7 +561,13 @@ class CrunchyrollClient:
         """Single playback-data fetch attempt (no retry)."""
         pb_url = f"{self.play_service_url}/v3/{media_id}/web/chrome/play"
 
+        wait_for_cooldown()
         response = self.request("GET", pb_url, params={"locale": self.locale})
+
+        if response.status_code == 429:
+            retry_after = parse_retry_after(response.headers.get("Retry-After"))
+            note_rate_limit(retry_after)
+            raise CrunchyrollRateLimitError(f"Playback rate limited (HTTP 429), Retry-After {math.ceil(retry_after)}s", retry_after)
 
         if response.status_code == 403:
             raise CrunchyrollError("Playback Rejected: Subscription required")
@@ -573,6 +649,36 @@ class CrunchyrollClient:
             logger.error(f"Failed to deauth stream token: {e}")
             return False
 
+    def request_license(self, content_id: str, challenge: bytes, license_url: str) -> bytes:
+        """Request a license for the given content_id and challenge bytes."""
+        with LICENSE_LOCK:
+            data = self.get_streams(content_id)
+            token = data.get("token") or _find_token_recursive(data)
+            try:
+                playback_guid = (parse_qs(urlparse(data.get("url") or "").query).get("playbackGuid") or [token])[0]
+                if not playback_guid:
+                    raise CrunchyrollError("Playback session carries no token for the license request")
+
+                headers = {
+                    **self._get_headers(),
+                    "x-cr-content-id": content_id,
+                    "x-cr-video-token": playback_guid,
+                    "Content-Type": "application/octet-stream",
+                }
+                wait_for_cooldown()
+                response = self.session.post(license_url, data=challenge, headers=headers, cookies=self._get_cookies())
+                if response.status_code == 429:
+                    retry_after = parse_retry_after(response.headers.get("Retry-After"))
+                    note_rate_limit(retry_after)
+                    raise CrunchyrollRateLimitError(f"License rate limited (HTTP 429), Retry-After {math.ceil(retry_after)}s", retry_after)
+                if response.status_code != 200:
+                    raise CrunchyrollError(f"License request failed: HTTP {response.status_code}")
+                return license_bytes(response)
+            finally:
+                if token:
+                    self.deauth_video(content_id, token)
+
+
 def _find_token_recursive(obj) -> str | None:
     """Recursively search for 'token' field in playback response."""
     if isinstance(obj, dict):
@@ -649,7 +755,7 @@ def get_playback_session(
 
     # Extract relevant data
     mpd_url = playback_data.get("url")
-    audio_locale = playback_data.get("audio_locale") or playback_data.get("audio", {}).get("locale")
+    audio_locale = playback_data.get("audioLocale") or playback_data.get("audio_locale") or (playback_data.get("audio") or {}).get("locale")
     token = playback_data.get("token") or _find_token_recursive(playback_data)
 
     # Get subtitles: prefer main_guid for complete subtitles if available
@@ -683,13 +789,17 @@ def get_playback_session(
 
 def get_episode_chapters(client: CrunchyrollClient, episode_id: str) -> list[dict]:
     """Fetch intro/recap/credits/preview skip-events for an episode and turn them into chapter markers."""
-    try:
-        response = client.session.get(SKIP_EVENTS_URL.format(episode_id=episode_id))
-        if response.status_code != 200:
-            return []
-        data = response.json()
-    except Exception as e:
-        logger.warning(f"Failed to fetch chapters for {episode_id}: {e}")
+    data = None
+    for url in (SKIP_EVENTS_URL, INTRO_DATALAB_URL):
+        try:
+            response = client.session.get(url.format(episode_id=episode_id))
+            if response.status_code == 200:
+                data = response.json()
+                break
+        except Exception as e:
+            logger.warning(f"Failed to fetch chapters for {episode_id} from {url}: {e}")
+
+    if not isinstance(data, dict):
         return []
 
     special_chapters = []
@@ -703,6 +813,13 @@ def get_episode_chapters(client: CrunchyrollClient, episode_id: str) -> list[dic
             special_chapters.append({"start": start, "end": end, "name": chapter_type.capitalize()})
         except Exception:
             continue
+
+    # datalab-intro-v2 only knows the opening: {"startTime": s, "endTime": e}
+    if not special_chapters and "startTime" in data and "endTime" in data:
+        try:
+            special_chapters.append({"start": float(data["startTime"]), "end": float(data["endTime"]), "name": "Intro"})
+        except Exception:
+            pass
 
     if not special_chapters:
         return []

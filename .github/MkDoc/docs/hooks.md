@@ -1,105 +1,91 @@
 # Hook System
 
-Execute custom scripts at specific points in the download lifecycle. Hooks are configured in `config.json` under the `HOOKS` key.
+Run custom scripts at points of the download lifecycle, configured under `HOOKS` in `config.toml`.
 
-**Available stages:**
-- `pre_run` — runs before the main flow starts
-- `pre_download` — runs once per individual item, right before that movie/episode starts downloading
-- `post_download` — runs after each individual download completes (in the GUI, once per item)
-- `post_run` — runs once when the overall execution ends
+| Stage | Runs |
+|-------|------|
+| `pre_run` | before the main flow starts |
+| `pre_download` | once per item, right before that movie/episode starts |
+| `post_download` | after each individual download (GUI: once per item) |
+| `post_run` | once when the whole execution ends |
 
-```json
-{
-  "HOOKS": {
-    "pre_run": [
-      {
-        "name": "prepare-env",
-        "type": "python",
-        "path": "scripts/prepare.py",
-        "args": ["--clean"],
-        "env": { "MY_FLAG": "1" },
-        "cwd": "~",
-        "os": ["linux", "darwin"],
-        "timeout": 60,
-        "enabled": true,
-        "continue_on_error": true
-      }
-    ],
-    "pre_download": [
-      {
-        "name": "pre-download-env",
-        "type": "python",
-        "path": "/app/script.py",
-        "args": ["{download_title}"],
-        "timeout": 30,
-        "enabled": true,
-        "continue_on_error": true
-      }
-    ],
-    "post_download": [
-      {
-        "name": "post-download-env",
-        "type": "python",
-        "path": "/app/script.py",
-        "args": ["{download_path}"],
-        "env": { "MY_FLAG": "1" },
-        "cwd": "~",
-        "os": ["linux"],
-        "timeout": 60,
-        "enabled": true,
-        "continue_on_error": true
-      }
-    ],
-    "post_run": [
-      {
-        "name": "notify",
-        "type": "bash",
-        "command": "echo 'Download finished: {download_title}'",
-        "allow_inline_template": true
-      }
-    ]
-  }
-}
+```toml
+# Replace the matching "pre_run = []" / "pre_download = []" / ... line of [HOOKS] with these tables
+# (a key can't be declared twice in TOML).
+[[HOOKS.pre_run]]
+name = "prepare-env"
+type = "python"
+path = "scripts/prepare.py"
+args = ["--clean"]
+env = { MY_FLAG = "1" }
+cwd = "~"
+os = ["linux", "darwin"]
+timeout = 60
+enabled = true
+continue_on_error = true
+
+[[HOOKS.pre_download]]
+name = "pre-download-env"
+type = "python"
+path = "/app/script.py"
+args = ["{download_title}"]
+timeout = 30
+
+[[HOOKS.post_download]]
+name = "post-download-env"
+type = "python"
+path = "/app/script.py"
+args = ["{download_path}"]
+env = { MY_FLAG = "1" }
+cwd = "~"
+os = ["linux"]
+timeout = 60
+
+[[HOOKS.post_run]]
+name = "notify"
+type = "bash"
+command = "echo 'Download finished: {download_title}'"
+allow_inline_template = true
 ```
 
-## Hook Options
+## Options
 
 | Key | Description |
 |-----|-------------|
-| `name` | Descriptive label for the hook |
-| `type` | Script type: `python`, `bash`, `sh`, `shell`, `bat`, `cmd` |
-| `path` | Path to script file (alternative to `command`) |
-| `command` | Inline command to execute (alternative to `path`). Note: `args` are ignored when using `command` |
-| `allow_inline_template` | If `true`, expand `{download_title}`-style placeholders inside `command` itself (off by default — `command` is otherwise run verbatim, unlike `path`/`args`/`cwd` which always expand placeholders) |
-| `args` | List of arguments passed to the script |
-| `env` | Additional environment variables as key-value pairs |
-| `cwd` | Working directory for execution (supports `~` and env vars) |
-| `os` | Optional OS filter: `["windows"]`, `["darwin"]`, `["linux"]`, or any combination |
-| `timeout` | Maximum execution time in seconds (hook fails if exceeded) |
-| `enabled` | Enable or disable the hook without removing it |
-| `continue_on_error` | If `false`, stops execution when the hook fails |
+| `name` | Label |
+| `type` | `python`, `bash`, `sh`, `shell`, `bat`, `cmd` |
+| `path` | Script file (alternative to `command`) |
+| `command` | Inline command (alternative to `path`); `args` are ignored |
+| `allow_inline_template` | `true` expands `{download_title}`-style placeholders inside `command` (off by default: `command` runs verbatim, while `path`/`args`/`cwd` always expand) |
+| `args` | Arguments passed to the script |
+| `env` | Extra environment variables |
+| `cwd` | Working directory (supports `~` and env vars) |
+| `os` | Optional filter: any of `"windows"`, `"darwin"`, `"linux"` |
+| `timeout` | Max seconds (the hook fails if exceeded) |
+| `enabled` | Disable without removing |
+| `continue_on_error` | `false` = stop execution when the hook fails |
 
-## Hook Types
+## Types
 
-- **Python:** runs with the current Python interpreter
-- **Bash / sh / shell:** executed via `/bin/bash -c` on macOS/Linux
-- **Bat / cmd / shell:** executed via `cmd /c` on Windows
-- **Inline commands:** use `command` instead of `path` for simple one-liners
+- **Python**: current interpreter.
+- **Bash / sh / shell**: `/bin/bash -c` on macOS/Linux.
+- **Bat / cmd / shell**: `cmd /c` on Windows.
+- **Inline**: `command` instead of `path` for one-liners.
 
-## Context Placeholders
+## Placeholders
 
 | Placeholder | Description |
 |-------------|-------------|
 | `{download_path}` | Absolute path of the downloaded file |
-| `{download_dir}` | Directory containing the downloaded file |
-| `{download_filename}` | Filename of the downloaded file |
-| `{download_id}` | Internal download identifier |
-| `{download_title}` | Download title |
-| `{download_site}` | Source site name |
+| `{download_dir}` | Its directory |
+| `{download_filename}` | Its filename |
+| `{download_id}` | Internal download id |
+| `{download_title}` | Title |
+| `{download_site}` | Source site |
 | `{download_media_type}` | Media type |
-| `{download_status}` | Final download status |
+| `{download_status}` | Final status |
 | `{download_error}` | Error message, if any |
-| `{download_success}` | `1` on success, `0` on failure |
+| `{download_success}` | `1` success, `0` failure |
 | `{stage}` | Current hook stage |
 
-The same values are also exposed as environment variables with the `SC_` prefix (e.g. `SC_DOWNLOAD_PATH`, `SC_DOWNLOAD_SUCCESS`, `SC_HOOK_STAGE`).
+The same values are exposed as environment variables with an `SC_` prefix (`SC_DOWNLOAD_PATH`, `SC_DOWNLOAD_SUCCESS`, `SC_HOOK_STAGE`, ...).

@@ -71,7 +71,7 @@ def convert_subtitle(subtitle_path: str, target_format: str, chunk_offsets: list
         logger.info(f"Running convert_subtitle for {os.path.basename(subtitle_path)} with cmd: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0:
-            console.print(f"[yellow]    Converted subtitle to [cyan]{target_format}: [green]{os.path.basename(output_path)}")
+            logger.info(f"convert_subtitle OK -> {os.path.basename(output_path)}")
             return output_path
         else:
             console.print(f"[red]    Failed to convert subtitle to {target_format}: {result.stderr}")

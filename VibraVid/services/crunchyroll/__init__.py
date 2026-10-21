@@ -48,7 +48,6 @@ def _resolve_url_to_item(url: str):
         console.print(f"[red]Error resolving Crunchyroll URL: {e}")
         return None
 
-    console.print(f"[cyan]Detected series from URL: [green]{name}")
     return {"id": series_id, "name": name, "type": "tv", "url": f"https://www.crunchyroll.com/series/{series_id}", "image": None}
 
 
@@ -70,10 +69,7 @@ def title_search(query: str) -> int:
     cached = disk_cache.load("crunchyroll", "token")
     has_cache = bool(isinstance(cached, dict) and (cached.get("access_token") or cached.get("refresh_token")))
     if not (device_id or etp_rt or has_cache):
-        console.print(
-            "[yellow]\nWarning: Crunchyroll device_id/etp_rt are not set, search will return no results for this site.\n"
-            "[yellow]Set them in [cyan]Conf/login.json[/cyan] under [cyan]crunchyroll.device_id[/cyan] and [cyan]crunchyroll.etp_rt[/cyan]."
-        )
+        console.print("[yellow]\nWarning: Crunchyroll device_id/etp_rt are not set, search will return no results for this site.\n")
         return 0
 
     client = CrunchyrollClient()

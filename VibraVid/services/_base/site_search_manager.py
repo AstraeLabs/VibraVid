@@ -519,7 +519,7 @@ def make_search_entrypoints(
     Only the parts that actually vary per service are parameters: the
     ``download_*`` callables, an optional ``resolve_url`` prestep (``--url`` ->
     ``direct_item``), and — for the couple of services with bespoke routing
-    (e.g. monochrome album/song) — a ``process_result`` override.
+    — a ``process_result`` override.
 
     Canonical minimal call: ``services/streamingcommunity/__init__.py``.
 

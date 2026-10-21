@@ -15,7 +15,6 @@ from textual.screen import Screen
 from textual.widgets import (
     Button,
     DataTable,
-    Header,
     OptionList,
     RichLog,
     Static,
@@ -24,6 +23,7 @@ from textual.widgets import (
 )
 
 from VibraVid.cli.run import _probe_binary_version
+from VibraVid.setup import resolve_cdm
 from VibraVid.setup.system import (
     get_dovi_tool_path,
     get_ffmpeg_path,
@@ -31,12 +31,11 @@ from VibraVid.setup.system import (
     get_flux_path,
     get_mkvmerge_path,
     get_mkvpropedit_path,
-    get_prd_path,
     get_velora_path,
-    get_wvd_path,
 )
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
+from VibraVid.tui.widgets.topbar import TopBar
 from VibraVid.utils import config_manager, get_log_file_path
 from VibraVid.utils.upload.update import check_for_updates, download_release_asset, get_execution_mode, update_command
 from VibraVid.utils.upload.version import __title__, __version__
@@ -58,7 +57,7 @@ class SystemScreen(Screen):
         self._update_downloading = False
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield TopBar(t("nav_system"), t("ctx_system"))
         with TabbedContent():
             with TabPane(t("tab_deps"), id="tab-deps"):
                 yield Static(t("external_dependencies"), classes="panel-title")
@@ -81,7 +80,7 @@ class SystemScreen(Screen):
                     yield Button(t("check_for_updates"), variant="primary", id="btn-check-update")
                     yield Button(t("download_update"), variant="success", id="btn-download-update", disabled=True)
                     yield Static("", id="update-status")
-        yield CustomFooter()
+        yield CustomFooter([("tab", t("hint_field")), ("r", t("hint_refresh"))])
 
     def on_mount(self) -> None:
         table = self.query_one("#deps-table", DataTable)
@@ -130,23 +129,29 @@ class SystemScreen(Screen):
         box = self.query_one("#drm-box", Vertical)
         box.remove_children()
 
-        wvd = get_wvd_path()
-        prd = get_prd_path()
+        error = ""
+        try:
+            chosen = resolve_cdm(None)
+        except (FileNotFoundError, ValueError) as exc:
+            chosen = None
+            error = f"[red]{exc}[/]"
 
-        wvd_ok = bool(wvd and os.path.exists(wvd))
-        prd_ok = bool(prd and os.path.exists(prd))
+        def status(path: str | None, remote: dict | None) -> str:
+            if chosen is None:
+                return error
+            if remote:
+                return f"[green]Remote[/] ({remote.get('device_name') or remote.get('host') or '?'})"
+            return f"[green]OK[/] ({path})" if path and os.path.exists(path) else "[red]Missing[/]"
 
-        wvd_status = f"[green]OK[/] ({wvd})" if wvd_ok else "[red]Missing[/]"
-        prd_status = f"[green]OK[/] ({prd})" if prd_ok else "[red]Missing[/]"
+        wvd_status = status(chosen and chosen.wvd_path, chosen and chosen.widevine_remote)
+        prd_status = status(chosen and chosen.prd_path, chosen and chosen.playready_remote)
 
         use_cdm = config_manager.config.get_bool("DRM", "use_cdm", default=True)
-        prefer_remote = config_manager.config.get_bool("DRM", "prefer_remote_cdm", default=False)
         vault_url = config_manager.config.get_dict("DRM", "vault", default={}).get("supa", {}).get("url", "")
 
         box.mount(Static(f"[bold cyan]Widevine (WVD):[/] {wvd_status}"))
         box.mount(Static(f"[bold cyan]PlayReady (PRD):[/] {prd_status}"))
         box.mount(Static(f"[bold cyan]Local CDM Enabled:[/] {use_cdm}"))
-        box.mount(Static(f"[bold cyan]Prefer Remote CDM:[/] {prefer_remote}"))
         box.mount(Static(f"[bold cyan]DRM Vault URL:[/] {vault_url or 'None'}"))
 
     def _load_log_files(self) -> None:

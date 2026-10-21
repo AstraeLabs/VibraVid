@@ -21,6 +21,8 @@ console = Console()
 logger = logging.getLogger(__name__)
 folder_name = "services"
 imp_sources = config_manager.config.get_list("DEFAULT", "imp_service")
+_HIDDEN_SITES_ENV_VARS = ("VIBRAVID_HIDDEN_SITES", "VIBRAVID_DISABLED_SITES")
+_warned_unknown_hidden: set[str] = set()
 KNOWN_CONTENT_TYPES = ("Anime", "Film_Serie", "Serie", "Song", "Tor")
 current_site_var: "contextvars.ContextVar[str | None]" = contextvars.ContextVar("vibravid_current_site", default=None)
 _BINARY_MISMATCH_MARKERS = (
@@ -43,6 +45,22 @@ def _reraise_if_binary_mismatch(module_name: str, submodule: str, exc: Exception
             f"platform/Python version (looks like a .pyd/.so build made for a different OS, architecture, "
             f"or Python ABI). A build matching this system is required. Original error: {exc}"
         ) from exc
+
+
+def hidden_services() -> set[str]:
+    """Return the set of service names that are configured to be hidden."""
+    try:
+        configured = config_manager.config.get_list("DEFAULT", "hidden_services", default=[])
+    except Exception:
+        configured = []
+    if isinstance(configured, str):
+        configured = configured.split(",")
+
+    names = {str(name).strip().lower() for name in configured or []}
+    for var in _HIDDEN_SITES_ENV_VARS:
+        names.update(name.strip().lower() for name in os.environ.get(var, "").split(","))
+    names.discard("")
+    return names
 
 
 class CompiledService:
@@ -114,7 +132,6 @@ class LazySearchModule:
         source: str = "default",
         base_path: str = None,
         has_cli_args: bool = False,
-        hide: bool = False,
     ):
         """
         Lazy loader for a search module.
@@ -126,7 +143,6 @@ class LazySearchModule:
             source: Source of the module ('default' or custom path)
             base_path: Base path for custom sources
             has_cli_args: Whether the module's source defines register_cli_args
-            hide: Whether the module declares `_hide = True` (excluded from CLI/GUI/ARR listings)
         """
         self.module_name = module_name
         self.indice = indice
@@ -136,7 +152,6 @@ class LazySearchModule:
         self.source = source
         self.base_path = base_path
         self.has_cli_args = has_cli_args
-        self.hide = hide
 
     def _load_module(self):
         """Load the module on first access."""
@@ -272,7 +287,7 @@ def load_search_functions() -> dict[str, LazySearchModule]:
     loaded_module_names = set()
     total_service_dirs = 0  # [OPT #1] accumulated during the main loop, no second glob pass needed
 
-    # [OPT #2] Persisted metadata cache keyed by init_file path -> {mtime, size, indice, use_for, hide, has_cli_args}.
+    # [OPT #2] Persisted metadata cache keyed by init_file path -> {mtime, size, indice, use_for, has_cli_args}.
     # Lets a second process skip open()+parse for any __init__.py unchanged since the previous run.
     manifest = disk_cache.load("_site_loader", "manifest") or {}
     manifest_dirty = False
@@ -341,12 +356,10 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                 if cached and cached.get("mtime") == stat.st_mtime and cached.get("size") == stat.st_size:
                     indice = cached.get("indice")
                     use_for = cached.get("use_for")
-                    hide = cached.get("hide", False)
                     has_cli_args = cached.get("has_cli_args", False)
                 else:
                     indice = None
                     use_for = None
-                    hide = False
                     has_cli_args = False
 
                     if compiled is not None:
@@ -354,7 +367,6 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                         compiled_module = compiled.load(qualified)
                         indice = getattr(compiled_module, "indice", None)
                         use_for = getattr(compiled_module, "_useFor", None)
-                        hide = bool(getattr(compiled_module, "_hide", False))
                         has_cli_args = hasattr(compiled_module, "register_cli_args")
                     else:
                         with open(init_file, encoding="utf-8") as f:
@@ -373,16 +385,12 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                                         use_for = line.split("=")[1].strip().strip('"').strip("'")
                                     except IndexError as e:
                                         logger.warning(f"Module '{module_name}': Failed to parse _useFor value - {str(e)}")
-                                elif line.startswith("_hide =") or line.startswith("_hide="):
-                                    value = line.split("=")[1].split("#")[0].strip().lower()
-                                    hide = value == "true"
 
                     manifest[init_file] = {
                         "mtime": stat.st_mtime,
                         "size": stat.st_size,
                         "indice": indice,
                         "use_for": use_for,
-                        "hide": hide,
                         "has_cli_args": has_cli_args,
                     }
                     manifest_dirty = True
@@ -402,9 +410,9 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                     logger.warning(f"Module '{module_name}': unknown _useFor='{use_for}' (expected one of {', '.join(KNOWN_CONTENT_TYPES)})")
                     console.print(f"[yellow]Warning: Module '{module_name}' declares unknown _useFor='{use_for}' (expected: {', '.join(KNOWN_CONTENT_TYPES)})[/yellow]")
 
-                source_modules.append((module_name, indice, use_for, source_label, base_path, has_cli_args, hide))
+                source_modules.append((module_name, indice, use_for, source_label, base_path, has_cli_args))
                 loaded_module_names.add(module_name)
-                logger.debug(f"Found module '{module_name}' from source '{source_label}': use_for={use_for}, indice={indice}, hide={hide}")
+                logger.debug(f"Found module '{module_name}' from source '{source_label}': use_for={use_for}, indice={indice}")
 
             except Exception as e:
                 logger.error(f"Exception reading metadata from {module_name}: {str(e)}")
@@ -414,7 +422,7 @@ def load_search_functions() -> dict[str, LazySearchModule]:
 
     # Check for duplicate indice values
     indice_map = {}
-    for module_name, indice, _use_for, _source, _base_path, _has_cli_args, _hide in modules_metadata:
+    for module_name, indice, _use_for, _source, _base_path, _has_cli_args in modules_metadata:
         if indice in indice_map:
             existing_module = indice_map[indice]
             logger.warning(f"Duplicate indice detected: Both '{module_name}' and '{existing_module}' have indice={indice}")
@@ -422,22 +430,22 @@ def load_search_functions() -> dict[str, LazySearchModule]:
         else:
             indice_map[indice] = module_name
 
-    # Hidden modules (_hide = True) are excluded from CLI/GUI/ARR listings entirely and
-    # don't consume a slot in the renumbered index sequence.
-    visible_modules = [m for m in modules_metadata if not m[6]]
-    hidden_modules = [m for m in modules_metadata if m[6]]
-    for module_name, indice, use_for, source, base_path, has_cli_args, _hide in hidden_modules:
-        loaded_functions[f"{module_name}_search"] = LazySearchModule(
-            module_name, indice, use_for, source, base_path, has_cli_args, hide=True
-        )
-        logger.info(f"Module '{module_name}' is hidden (_hide = True); excluded from CLI/GUI/ARR listings.")
+    hidden = hidden_services()
+    unknown_hidden = hidden - {m[0].lower() for m in modules_metadata} - _warned_unknown_hidden
+    if unknown_hidden:
+        _warned_unknown_hidden.update(unknown_hidden)
+        logger.warning(f"hidden_services lists unknown service(s): {', '.join(sorted(unknown_hidden))} (use the folder names under '{folder_name}')")
 
-    # Sort by index and create lazy loaders with consecutive indices
-    sorted_modules = sorted(visible_modules, key=lambda x: x[1])
-    for new_indice, (module_name, old_indice, use_for, source, base_path, has_cli_args, _hide) in enumerate(sorted_modules):
-        loaded_functions[f"{module_name}_search"] = LazySearchModule(
-            module_name, new_indice, use_for, source, base_path, has_cli_args
-        )
+    sorted_modules = sorted(modules_metadata, key=lambda x: x[1])
+    visible_count = 0
+    for new_indice, (module_name, old_indice, use_for, source, base_path, has_cli_args) in enumerate(sorted_modules):
+        if module_name.lower() in hidden:
+            logger.info(f"Module '{module_name}' is in hidden_services: not loaded.")
+        else:
+            loaded_functions[f"{module_name}_search"] = LazySearchModule(
+                module_name, visible_count, use_for, source, base_path, has_cli_args
+            )
+            visible_count += 1
 
         # Update indice in __init__.py for each module only if changed and from default source
         if source.lower() == "default":
@@ -473,8 +481,9 @@ def load_search_functions() -> dict[str, LazySearchModule]:
                 console.print(f"[yellow]Warning: Could not update indice in {module_name}: {str(e)}")
 
     logger.debug(f"Successfully loaded {len(loaded_functions)} search functions from {len(imp_sources)} source(s)")
-    if total_service_dirs > len(loaded_functions):
-        skipped_count = total_service_dirs - len(loaded_functions)
+    hidden_count = len(sorted_modules) - visible_count
+    if total_service_dirs > len(loaded_functions) + hidden_count:
+        skipped_count = total_service_dirs - len(loaded_functions) - hidden_count
         logger.warning(f"{skipped_count} module(s) were found but not loaded due to configuration errors")
 
     # Prune manifest entries for service folders that no longer exist, then persist once.

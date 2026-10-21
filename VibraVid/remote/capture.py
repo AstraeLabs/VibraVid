@@ -35,6 +35,8 @@ def reject_if_capturing(label: str) -> str | None:
     """For downloaders with no remote form: while capturing, record why and return the message (else ``None``)."""
     buffer = context_tracker.capture
     if buffer is None:
+        if context_tracker.export_file is not None:
+            return f"{label} cannot be exported: --export covers MP4, HLS, DASH and ISM downloads"
         return None
     message = f"{context_tracker.site_name or 'this service'} uses {label}, which is not supported through a remote server"
     buffer.fail(message)
@@ -61,46 +63,57 @@ def _naming() -> dict:
     }
 
 
+def _wire_enc_override(override: dict | None) -> dict | None:
+    """``hls_enc_override`` carries the AES key as bytes: send it as hex (``build_downloader`` turns it back)."""
+    if not override:
+        return override
+    return {k: (v.hex() if isinstance(v, (bytes, bytearray)) else v) for k, v in override.items()}
+
+
+def media_from_downloader(downloader, *, key=None) -> tuple[ResolvedMedia, dict]:
+    """Snapshot an HLS/DASH/ISM downloader's inputs as ``(media, server-side callables)``; *key* replaces the manual key (``--export`` stores the resolved ones)."""
+    kind, url, content, headers = _kind_and_manifest(downloader)
+    hooks = {name: getattr(downloader, name, None) for name in SERVER_SIDE_CALLABLES}
+    hooks = {name: fn for name, fn in hooks.items() if fn is not None}
+    key = key or downloader.key
+    media = ResolvedMedia(
+        kind=kind,
+        url=url,
+        manifest_content=content,
+        headers=dict(headers or {}),
+        cookies=dict(getattr(downloader, "cookies", None) or {}),
+        license_url=downloader.license_url,
+        license_headers=dict(downloader.license_headers) if downloader.license_headers else None,
+        license_data=downloader.license_data,
+        license_certificate=downloader.license_certificate,
+        key=key,
+        drm_preference=downloader.drm_preference,
+        has_drm=bool(getattr(downloader, "has_drm", False) or downloader.license_url or key or hooks.get("license_request_fn")),
+        license_proxy=bool(hooks.get("license_request_fn")),
+        manifest_refresh=bool(hooks.get("manifest_refresh_fn")),
+        other_tracks=list(getattr(downloader, "other_tracks", None) or []),
+        custom_filters=dict(getattr(downloader, "custom_filters", None) or {}) or None,
+        display_selected_only=bool(getattr(downloader, "display_selected_only", False)),
+        hls_enc_override=_wire_enc_override(getattr(downloader, "hls_enc_override", None)),
+        chapters=getattr(downloader, "chapters", None),
+        poster_url=getattr(downloader, "poster_url", None),
+        **_naming(),
+    )
+    return media, hooks
+
+
 def record_downloader(downloader, buffer: CaptureBuffer) -> None:
     """Snapshot an HLS/DASH/ISM downloader's inputs into *buffer*."""
     try:
-        kind, url, content, headers = _kind_and_manifest(downloader)
+        media, hooks = media_from_downloader(downloader)
     except ValueError:
         buffer.fail(f"{context_tracker.site_name or 'service'} uses {type(downloader).__name__}, which is not supported through a remote server")
         return
-
-    hooks = {name: getattr(downloader, name, None) for name in SERVER_SIDE_CALLABLES}
-    hooks = {name: fn for name, fn in hooks.items() if fn is not None}
-    try:
-        buffer.add(
-            ResolvedMedia(
-                kind=kind,
-                url=url,
-                manifest_content=content,
-                headers=dict(headers or {}),
-                cookies=dict(getattr(downloader, "cookies", None) or {}),
-                license_url=downloader.license_url,
-                license_headers=dict(downloader.license_headers) if downloader.license_headers else None,
-                license_data=downloader.license_data,
-                license_certificate=downloader.license_certificate,
-                key=downloader.key,
-                drm_preference=downloader.drm_preference,
-                has_drm=bool(getattr(downloader, "has_drm", False) or downloader.license_url or downloader.key or hooks.get("license_request_fn")),
-                license_proxy=bool(hooks.get("license_request_fn")),
-                manifest_refresh=bool(hooks.get("manifest_refresh_fn")),
-                other_tracks=list(getattr(downloader, "other_tracks", None) or []),
-                custom_filters=dict(getattr(downloader, "custom_filters", None) or {}) or None,
-                display_selected_only=bool(getattr(downloader, "display_selected_only", False)),
-                hls_enc_override=getattr(downloader, "hls_enc_override", None),
-                chapters=getattr(downloader, "chapters", None),
-                poster_url=getattr(downloader, "poster_url", None),
-                **_naming(),
-            ),
-            hooks,
-        )
     except Exception as exc:
         logger.exception("capture failed")
-        buffer.fail(f"could not capture {kind} download: {exc}")
+        buffer.fail(f"could not capture {type(downloader).__name__} download: {exc}")
+        return
+    buffer.add(media, hooks)
 
 
 def record_post_process(kind: str, args: dict) -> bool:
@@ -114,19 +127,22 @@ def record_post_process(kind: str, args: dict) -> bool:
     return True
 
 
+def mp4_media(url: str, headers: dict | None, key, chapters, poster_url) -> ResolvedMedia:
+    """A plain MP4 download has no manifest: the URL (plus headers and key) is all there is."""
+    return ResolvedMedia(
+        kind="mp4",
+        url=url,
+        headers=dict(headers or {}),
+        key=key,
+        chapters=chapters,
+        poster_url=poster_url or context_tracker.poster_url,
+        **_naming(),
+    )
+
+
 def record_mp4(url: str, headers: dict | None, key, chapters, poster_url, buffer: CaptureBuffer) -> None:
     """Plain MP4 downloads have no manifest: the client can fetch the URL directly."""
-    buffer.add(
-        ResolvedMedia(
-            kind="mp4",
-            url=url,
-            headers=dict(headers or {}),
-            key=key,
-            chapters=chapters,
-            poster_url=poster_url or context_tracker.poster_url,
-            **_naming(),
-        )
-    )
+    buffer.add(mp4_media(url, headers, key, chapters, poster_url))
 
 
 @contextmanager

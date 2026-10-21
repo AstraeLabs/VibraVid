@@ -25,7 +25,7 @@ _config_dir = tempfile.mkdtemp(prefix="vibravid_bot_tests_")
 _state_dir = tempfile.mkdtemp(prefix="vibravid_bot_state_")
 atexit.register(shutil.rmtree, _config_dir, ignore_errors=True)
 atexit.register(shutil.rmtree, _state_dir, ignore_errors=True)
-os.environ.setdefault("VIBRAVID_CONFIG", os.path.join(_config_dir, "config.json"))
+os.environ.setdefault("VIBRAVID_CONFIG", os.path.join(_config_dir, "config.toml"))
 os.environ.setdefault("STATE_DIR", _state_dir)
 
 from docker.telegram_bot import common, state
@@ -184,9 +184,9 @@ def test_a_malformed_allow_list_never_opens_the_bot_to_everyone(monkeypatch):
     assert common.is_allowed(_event(99)) is False
 
 
-def test_config_precedence_config_json_then_environment(monkeypatch, tmp_path):
-    config_file = tmp_path / "config.json"
-    config_file.write_text(json.dumps({"TELEGRAM": {"gui_url": "http://gui:9000/", "max_results": 3}}), encoding="utf-8")
+def test_config_precedence_config_toml_then_environment(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[TELEGRAM]\ngui_url = "http://gui:9000/"\nmax_results = 3\n', encoding="utf-8")
     monkeypatch.setattr(state, "CONFIG_PATH", config_file)
     monkeypatch.setenv("TG_GUI_URL", "http://ignored")
     monkeypatch.setenv("TG_MAX_RESULTS", "50")
@@ -195,14 +195,14 @@ def test_config_precedence_config_json_then_environment(monkeypatch, tmp_path):
 
     assert cfg.gui_url == "http://gui:9000" and cfg.max_results == 3
 
-    config_file.write_text(json.dumps({"TELEGRAM": {}}), encoding="utf-8")
+    config_file.write_text("[TELEGRAM]\n", encoding="utf-8")
     os.utime(config_file, (1, 1))  # a different mtime triggers the hot reload
     cfg.refresh()
     assert cfg.gui_url == "http://ignored" and cfg.max_results == 50
 
 
 def test_config_defaults_when_nothing_is_set(monkeypatch, tmp_path):
-    monkeypatch.setattr(state, "CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(state, "CONFIG_PATH", tmp_path / "missing.toml")
     cfg = state.Config()
 
     assert cfg.gui_url == "http://vibravid:8000" and cfg.max_results == 8 and cfg.enabled is True

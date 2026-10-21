@@ -8,10 +8,11 @@ _state = threading.local()
 PASSTHROUGH_SECTIONS = frozenset({"Provider"})
 PASSTHROUGH_CACHE = frozenset({"_site_loader"})
 CACHE_PATH_PREFIX = "remote-cache://"
+_FIELDS = ("overlay", "scope", "wanted", "changed", "cache", "cache_changed", "cache_wanted")
 
 
 def current_overlay() -> dict | None:
-    """Per-thread login sections that replace ``Conf/login.json`` while a remote request is served, else ``None``."""
+    """Per-thread login sections that replace ``Conf/login`` while a remote request is served, else ``None``."""
     return getattr(_state, "overlay", None)
 
 
@@ -82,9 +83,6 @@ def cache_changes() -> dict:
 
 def cache_wanted() -> set:
     return set(getattr(_state, "cache_wanted", None) or ())
-
-
-_FIELDS = ("overlay", "scope", "wanted", "changed", "cache", "cache_changed", "cache_wanted")
 
 
 @contextmanager

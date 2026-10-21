@@ -664,6 +664,14 @@ class ContextTracker:
         self.local.bypass_vault_cache = value
 
     @property
+    def cdm_override(self):
+        return getattr(self.local, "cdm_override", None)
+
+    @cdm_override.setter
+    def cdm_override(self, value):
+        self.local.cdm_override = value
+
+    @property
     def http_version(self):
         return getattr(self.local, "http_version", None)
 
@@ -734,6 +742,14 @@ class ContextTracker:
     @resolve_only.setter
     def resolve_only(self, value):
         self.local.resolve_only = value
+
+    @property
+    def export_file(self):
+        return getattr(self.local, "export_file", None)
+
+    @export_file.setter
+    def export_file(self, value):
+        self.local.export_file = value
 
     @property
     def capture(self):

@@ -3,13 +3,14 @@
 import argparse
 import logging
 import shlex
+from contextlib import contextmanager
 
 from VibraVid.utils import config_manager
 
 from .site_loader import load_search_functions
 
 logger = logging.getLogger(__name__)
-_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "extra_args", "country", "region", "locale"}
+_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale"}
 
 
 def parse_site_extra_args(site: str, raw: str) -> dict:
@@ -34,7 +35,8 @@ def parse_site_extra_args(site: str, raw: str) -> dict:
     except (SystemExit, argparse.ArgumentError, ValueError) as e:
         raise ValueError(f"Invalid custom option for '{site}': {e}") from e
 
-    return {dest: getattr(parsed, dest) for dest in dests}
+    # dests such as season/episode are registered by the main parser, not by the mini parser
+    return {dest: getattr(parsed, dest) for dest in dests if hasattr(parsed, dest)}
 
 
 def get_site_extra_args_schema(site: str) -> list[dict]:
@@ -82,7 +84,7 @@ def _filled(value) -> bool:
 
 
 def get_site_login_status(site: str) -> dict | None:
-    """Determine whether this site has a login.json section, and if so whether all its required keys are present. """
+    """Determine whether this site has a login section, and if so whether all its required keys are present. """
     lazy = load_search_functions().get(f"{site}_search")
     module = lazy.get_module() if lazy else None
     spec = getattr(module, "LOGIN", None) if module else None
@@ -94,6 +96,8 @@ def get_site_login_status(site: str) -> dict | None:
     values = config_manager.login.get_section(site)
 
     credentials = {k: v for k, v in values.items() if str(k).strip().lower() not in _LOGIN_NON_CREDENTIAL_KEYS}
+    if values and not credentials:
+        return None  # only options (args, cdm, ...): the service has no login
     keys = [{"key": str(k).strip(), "present": _filled(v), "optional": False} for k, v in credentials.items()]
     present = any(k["present"] for k in keys)
     return {
@@ -129,18 +133,31 @@ def _login_status_from_spec(site: str, spec: dict) -> dict:
 
 def resolve_persisted_site_options(site: str) -> dict:
     """
-    Look up this site's persisted custom CLI args and parse them, so every future download for that site automatically picks them up without any per-download input.
+    Look up the `args` of this site in login.toml and parse them like command-line options, so every download of that site picks them up without any per-download input.
     """
     if not site:
         return {}
 
     section = config_manager.login.get_section(site) or config_manager.login.get_section(site.lower())
-    raw = (section or {}).get("extra_args", "")
+    raw = (section or {}).get("args", "")
     if not raw:
         return {}
 
     try:
         return parse_site_extra_args(site, raw)
     except ValueError:
-        logger.warning("Invalid persisted custom CLI args for site '%s': %r", site, raw)
+        logger.warning("Invalid 'args' in login.toml for site '%s': %r", site, raw)
         return {}
+
+
+@contextmanager
+def persisted_site_options(site: str):
+    """For GUI / TUI calls (search, seasons, download): the `args` of *site* in login.toml are the site options while the block runs, then the previous ones are restored."""
+    from VibraVid.core.ui.tracker import context_tracker
+
+    previous = context_tracker.site_options
+    context_tracker.site_options = resolve_persisted_site_options(site)
+    try:
+        yield
+    finally:
+        context_tracker.site_options = previous

@@ -392,7 +392,7 @@ def login(force: bool = False, market: str | None = None) -> dict:
 
     email, password = _credentials()
     if not email or not password:
-        raise RuntimeError("Rakuten TV email/password not set in Conf/login.json under 'rakutentv'.")
+        raise RuntimeError("Rakuten TV email/password not set in Conf/login under 'rakutentv'.")
 
     params = _base_params(market=market)
     body = {

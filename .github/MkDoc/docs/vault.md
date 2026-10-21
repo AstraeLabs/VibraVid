@@ -5,12 +5,19 @@ Most vaults need only a config entry under `DRM.vault`. See
 [Configuration → Multiple / self-hosted DRM vaults](configuration.md#multiple-self-hosted-drm-vaults)
 for the fields.
 
-```json
-"vault": {
-  "default": { "url": "https://drm-db.dev", "token": "" },
-  "myvault": { "url": "https://drm.example.com", "token": "...", "protocol": "custom" },
-  "public":  { "url": "https://vault.example.org", "token": "..." }
-}
+```toml
+[DRM.vault.default]
+url = "https://drm-db.dev"
+token = ""
+
+[DRM.vault.myvault]
+url = "https://drm.example.com"
+token = "..."
+protocol = "custom"
+
+[DRM.vault.public]
+url = "https://vault.example.org"
+token = "..."
 ```
 
 `protocol` is optional: without it VibraVid detects it once and caches it in

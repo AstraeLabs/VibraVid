@@ -26,9 +26,7 @@ def global_search(search_terms: str = None, selected_sites: list = None):
     Returns:
         dict: Consolidated search results from all searched sites.
     """
-    search_functions = {
-        alias: func for alias, func in load_search_functions().items() if not getattr(func, "hide", False)
-    }
+    search_functions = dict(load_search_functions())
     all_results = {}
 
     if search_terms is None:

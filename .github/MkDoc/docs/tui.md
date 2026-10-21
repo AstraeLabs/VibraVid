@@ -2,85 +2,66 @@
 
 ![VibraVid TUI Home Screen](assets/tui/tui_home.png)
 
-VibraVid includes a modern terminal-based user interface built with [Textual](https://github.com/Textualize/textual), providing a rich, interactive experience for managing downloads directly from the command line without requiring a web browser.
+Terminal interface built with [Textual](https://github.com/Textualize/textual); no browser needed.
 
-!!! tip
-    TMDB-based filename tokens and poster embedding require a TMDB API key — see
-    [TMDB API Key](configuration.md#tmdb-api-key) for setup.
-
-## Launching the TUI
+## Launch
 
 ```bash
-# Launch via python
-python tui.py
-
-# Or via uv package manager
-uv run python tui.py
+python tui.py          # or: uv run python tui.py  /  python manual.py --tui
 ```
 
-## Key Capabilities & Features
+## Layout
 
-- **Global Search Deduplication** — Aggregates search results across all configured streaming and music providers into a single result entry per title, eliminating duplicate search results while showing all available sources.
-- **Multi-Provider Detail Navigation** — Triple-column layout in title detail screens (`[Providers] → [Seasons] → [Episodes]`), allowing seamless switching between providers on the fly without returning to search results if episodes are missing.
-- **Automatic i18n Localization (IT / EN)** — Automatic OS system language detection (Italian and English) with full bilingual support across all UI screens, data tables, modals, action bars, and keyboard guides.
-- **Interactive Queue & Batch Manager** — Add, remove, reorder, and retry batch download jobs with custom CLI arguments and tags.
-- **Live Stream & Download Progress Tracking** — Real-time progress indicators, speed, segment counts, track/stream details, and completed file actions (Open Folder / Launch File).
-- **System & DRM Inspector** — Diagnostics tab inspecting external binary dependencies (`ffmpeg`, `flux`, `mkvmerge`, etc.), Widevine DRM CDM device status, an application log viewer, and an Updates tab (app version/info, release check cached for 24 hours, and a **Download update** button for binary builds that downloads the matching executable with SHA-256 verification without replacing the running one).
-- **Full Keyboard & Mouse Navigation** — Directional arrow key navigation, contextual shortcuts (`a` select all, `u` clear, `Space` toggle, `ESC` back, `?` help), and mouse click support.
+Every screen has the same frame: a top bar the content, and at the bottom the shortcuts of the current screen above the navigation bar (`[H] Home`, `[d] Downloads`, `[ESC] Back`, `[Ctrl+Q] Quit`...).
 
-## TUI Screen Map
+## Features
 
-| Shortcut | Screen | Description |
-|----------|--------|-------------|
-| `F1` / `H` | **Home** | Category selection (Film, Series, Anime, Music) and site filter shortcut cards |
-| `F2` | **Search** | Global search with deduplicated results and live metadata preview card |
-| `F3` / `d` | **Downloads** | Real-time progress table, track/stream inspector, and completed downloads |
-| `F4` / `q` | **Batch Queue** | Enqueue jobs, retry failed items, and manage CLI batch commands |
-| `F5` / `h` | **Download History** | Completed downloads table, output file path inspection, and re-queue actions |
-| `F6` / `,` | **Settings Editor** | Interactive section configuration editor with live save & reload |
-| `F7` / `s` | **System & DRM** | External binary checker, Widevine DRM device status, and log viewer |
-| `F8` / `F9` / `?` | **Help Guide** | Full keyboard shortcut reference and navigation guide |
+- **Global search deduplication**: one result per title across all providers, showing every source.
+- **Multi-provider detail**: `[Providers] -> [Seasons] -> [Episodes]` columns; switch provider without going back to search.
+- **i18n (IT / EN)**: detected from the OS language, across all screens.
+- **Queue & batch manager**: add, remove, reorder and retry jobs with custom CLI arguments and tags.
+- **Live progress**: progress, speed, segment counts, track details; open folder / launch file when done.
+- **System & DRM inspector**: external binaries (`ffmpeg`, `flux`, `mkvmerge`, ...), CDM device status, log viewer, and an Updates tab (version info, release check cached 24 h, **Download update** for binary builds: downloads the matching executable with SHA-256 verification without replacing the running one).
 
-## Screenshots
+## Cover art
 
-**Global search**, deduplicated across providers, with a live metadata preview card:
+Search and detail show the cover of the highlighted title: the film or series poster, the season poster or the episode still from TMDB (then IMDb/TVDB, see [`metadata_provider`](configuration.md#default)), the service's own image as a last resort, and for songs and albums the cover the service returned (YouTube Music...). Images are cached in `.cache/covers`.
 
-![VibraVid TUI Search Screen](assets/tui/tui_search.png)
+How it is drawn follows `tui_images` ([DEFAULT](configuration.md#default)):
 
-**Title detail** — triple-column `[Providers] → [Seasons] → [Episodes]` navigation:
+| Value | Result |
+|-------|--------|
+| `auto` | A real, scaled image if the terminal supports the Kitty or Sixel protocol and `textual-image` is installed, otherwise characters |
+| `sixel` / `kitty` | Force that protocol |
+| `blocks` | Half-block characters (two pixels per cell): works in any truecolor terminal but is coarse |
+| `off` | No covers |
 
-![VibraVid TUI Title Detail Screen](assets/tui/tui_detail.png)
+Real images work in Windows Terminal 1.22+, WezTerm, kitty and iTerm2, and in VS Code with `terminal.integrated.enableImages` turned on. They do not work in the legacy Windows console, GNOME Terminal or Warp, and inside `tmux` only with Sixel enabled. If the cover shows up black or garbled, set `tui_images = "blocks"`.
 
-**System & DRM Inspector** — external binary checker and DRM device/vault status:
+## Screens and shortcuts
 
-![VibraVid TUI System Screen](assets/tui/tui_system.png)
-
-**Help Guide** — full keyboard shortcut reference:
-
-![VibraVid TUI Help Screen](assets/tui/tui_help.png)
-
-## Keyboard Shortcuts
+| Key | Screen | Description |
+|-----|--------|-------------|
+| `F1` / `H` | **Home** | Category cards (Film, Series, Anime, Music) and site filter |
+| `F2` | **Search** | Global search, deduplicated results, metadata preview |
+| `F3` / `d` | **Downloads** | Live progress table, track inspector, completed downloads |
+| `F4` / `q` | **Batch Queue** | Enqueue jobs, retry failed items, manage CLI batch commands |
+| `F5` / `h` | **Download History** | Completed downloads, output path, re-queue |
+| `F6` / `,` | **Settings & Services** | `config.toml` sections and, below them, every service of `login.toml` with `✓` (a credential is set) or `·` (not set up yet), each field with a note on what it does; `Ctrl+S` saves the open page |
+| `F7` / `s` | **System & DRM** | Binary checker, CDM device status, logs (`r` refreshes) |
+| `F8` / `F9` / `?` | **Help** | Shortcut reference |
 
 | Key | Context | Action |
 |-----|---------|--------|
-| `F1` / `H` | Global | Jump to Home screen |
-| `F2` | Global | Jump to Search screen |
-| `F3` / `d` | Global | Open Active Downloads screen |
-| `F4` / `q` | Global | Open Batch Queue screen |
-| `F5` / `h` | Global | Open Download History screen |
-| `F6` / `,` | Global | Open Settings Editor screen |
-| `F7` / `s` | Global | Open System Diagnostics & DRM screen |
-| `F8` / `F9` / `?` | Global | Open Keyboard Help overlay |
-| `ESC` / `b` | Global | Go back one level / Close modal |
-| `Ctrl+Q` | Global | Quit TUI application |
-| `← / →` | Title Detail | Navigate between `[Providers] ↔ [Seasons] ↔ [Episodes] ↔ [Download]` |
-| `↑ / ↓` | Lists / Tables | Move selection highlight up / down |
-| `Space` | Title Detail | Toggle episode selection |
-| `a` | Title Detail | Select all episodes in current season |
-| `u` | Title Detail | Clear episode selections in current season |
-| `r` | Title Detail | Open range-selection modal |
+| `ESC` / `b` | Global | Back one level / close modal |
+| `Ctrl+Q` | Global | Quit |
+| `Enter` | Global | Confirm / open selected item |
+| `↑ / ↓` | Lists / tables | Move selection |
+| `← / →` | Title Detail | Move between `[Providers] ↔ [Seasons] ↔ [Episodes] ↔ [Download]` |
+| `Space` | Title Detail | Toggle episode |
+| `a` / `u` | Title Detail | Select all / clear episodes of the season |
+| `r` | Title Detail | Range-selection modal |
 | `v` | Title Detail | Toggle visual range anchor |
-| `i` | Title Detail | Invert episode selection |
-| `Ctrl+S` | Settings Editor | Save the currently open section |
-| `r` | System & DRM | Refresh diagnostics/DRM status |
-| `Enter` | Global | Confirm / Open selected item |
+| `i` | Title Detail | Invert selection |
+
+![VibraVid TUI Title Detail Screen](assets/tui/tui_detail.png)

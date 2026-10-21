@@ -8,6 +8,8 @@ from VibraVid.core.drm.system import _DRMSystems
 logger = logging.getLogger(__name__)
 ISM_TIMESCALE = 10_000_000  # PIFF / Smooth Streaming default (100-ns ticks)
 TRACK_ID = 1
+_PLAYREADY_SYSTEM_ID = bytes.fromhex(_DRMSystems.PLAYREADY)
+_WIDEVINE_SYSTEM_ID = bytes.fromhex(_DRMSystems.WIDEVINE)
 
 
 # ---------------------------------------------------------------------------
@@ -577,13 +579,6 @@ def make_trex(track_id: int = TRACK_ID) -> bytes:
 
 def build_mvex(duration: int, track_id: int = TRACK_ID) -> bytes:
     return make_box(b"mvex", make_mehd(duration) + make_trex(track_id=track_id))
-
-
-# ---------------------------------------------------------------------------
-# Optional pssh boxes (PlayReady / Widevine)
-# ---------------------------------------------------------------------------
-_PLAYREADY_SYSTEM_ID = bytes.fromhex(_DRMSystems.PLAYREADY)
-_WIDEVINE_SYSTEM_ID = bytes.fromhex(_DRMSystems.WIDEVINE)
 
 
 def make_pssh_playready(pro_bytes: bytes) -> bytes:

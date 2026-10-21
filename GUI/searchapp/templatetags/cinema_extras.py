@@ -4,26 +4,23 @@ from django import template
 
 register = template.Library()
 _PROVIDER_LABELS = {
-    "7movies": "7Movies",
     "animeunity": "AnimeUnity",
     "animeworld": "AnimeWorld",
     "annasarchive": "Anna's Archive",
     "appletv": "Apple TV",
+    "aurora": "Aurora",
     "chili": "CHILI",
     "discoveryplus": "Discovery+",
     "disney": "Disney+",
-    "dmax": "DMAX",
-    "foodnetwork": "Food Network",
     "hbomax": "HBO Max",
-    "homegardentv": "Home & Garden TV",
     "la7": "La7",
     "libgen": "Library Genesis",
     "mediasetinfinity": "Mediaset Infinity",
     "mostraguarda": "MostraGuarda",
+    "netflix": "Netflix",
     "nowtvit": "NOW",
     "primevideo": "Prime Video",
     "raiplay": "RaiPlay",
-    "realtime": "Real Time",
     "streamingcommunity": "StreamingCommunity",
     "tubitv": "Tubi TV"
 }

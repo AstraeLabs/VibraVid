@@ -120,6 +120,13 @@ def get_proxy_url() -> str | None:
     return proxies.get("https") or proxies.get("http") or next(iter(proxies.values()), None)
 
 
+def _resolve_session_proxies(proxies: dict[str, str] | None) -> dict[str, str]:
+    """Explicit proxies, else the configured ones, else empty strings: libcurl would otherwise fall back to HTTP(S)_PROXY from the environment."""
+    if proxies is not None:
+        return proxies
+    return _get_proxies() or {"http": "", "https": ""}
+
+
 def _default_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     headers = {}
 
@@ -172,9 +179,7 @@ def create_client(
     session.timeout = timeout if timeout is not None else _get_timeout()
     session.verify = _resolve_verify(verify)
 
-    proxy_value = proxies if proxies is not None else _get_proxies()
-    if proxy_value:
-        session.proxies = proxy_value
+    session.proxies = _resolve_session_proxies(proxies)
 
     if http2:
         session.http_version = CurlHttpVersion.V2TLS
@@ -343,9 +348,7 @@ async def create_async_client(
     session.timeout = timeout if timeout is not None else _get_timeout()
     session.verify = _resolve_verify(verify)
 
-    proxy_value = proxies if proxies is not None else _get_proxies()
-    if proxy_value:
-        session.proxies = proxy_value
+    session.proxies = _resolve_session_proxies(proxies)
 
     if http2:
         session.http_version = CurlHttpVersion.V2TLS

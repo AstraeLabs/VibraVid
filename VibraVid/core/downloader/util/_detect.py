@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_DOWNLOAD_DIR = "Video/MyDownloader"
+
 
 def _is_custom_manifest_url(url: str) -> bool:
     """True if *url* points at one of our custom JSON manifests (local file or HTTP)."""
@@ -115,9 +117,6 @@ def parse_keys(key_list: list | None) -> list | None:
     from VibraVid.core.decryptor import KeysManager
 
     return KeysManager(key_list).get_keys_list() or None
-
-
-DEFAULT_DOWNLOAD_DIR = "Video/MyDownloader"
 
 
 def derive_output_path(url: str, output: str | None, extension: str) -> str:

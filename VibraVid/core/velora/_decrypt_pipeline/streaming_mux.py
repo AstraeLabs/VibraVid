@@ -6,7 +6,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.muxing.helper.chapters import persist_chapters_file, sort_chapters, write_ffmetadata_chapters
+from VibraVid.core.muxing.helper.chapters import (
+    clamp_chapters,
+    persist_chapters_file,
+    sort_chapters,
+    write_ffmetadata_chapters,
+)
+from VibraVid.core.muxing.helper.font_embed import collect_font_attachments, ffmpeg_attach_args, mkv_subtitle_codec_args
 from VibraVid.core.muxing.helper.sub.convert import convert_subtitle, extract_vtt_from_wvtt_mp4
 from VibraVid.core.muxing.helper.sub.disposition import (
     SubtitleDispositionInfo,
@@ -265,12 +271,13 @@ class StreamingMuxMixin:
         chapter_input_idx: int | None = None
         raw_chapters = getattr(self, "_streaming_mux_chapters", None)
         if raw_chapters:
-            chapters = sort_chapters(raw_chapters)
+            media_duration = video_duration_cap or getattr(video_stream, "total_duration", None) or None
+            chapters = sort_chapters(clamp_chapters(raw_chapters, media_duration))
             if chapters[0]["seconds"] > 0:
                 chapters = [{"name": "Intro", "seconds": 0}] + chapters
 
             persist_chapters_file(chapters, getattr(self, "temp_dir", None))
-            self._streaming_mux_chapter_file = write_ffmetadata_chapters(chapters)
+            self._streaming_mux_chapter_file = write_ffmetadata_chapters(chapters, media_duration)
             chapter_input_idx = 1 + len(audio_paths) + len(subtitle_paths)
             cmd += ["-f", "ffmetadata", "-i", self._streaming_mux_chapter_file]
 
@@ -316,7 +323,8 @@ class StreamingMuxMixin:
 
         cmd += ["-c", "copy"]
         if subtitle_paths:
-            cmd += ["-c:s", "srt"]
+            cmd += mkv_subtitle_codec_args(subtitle_paths)
+            cmd += ffmpeg_attach_args(collect_font_attachments(subtitle_paths, output_path))
         if video_duration_cap:
             cmd += ["-t", f"{video_duration_cap:.3f}"]
         cmd += [str(output_path)]

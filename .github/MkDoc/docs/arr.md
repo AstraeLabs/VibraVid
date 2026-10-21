@@ -35,30 +35,40 @@ Media library
 
 ## Configuration reference
 
-```json
-{
-  "ARR": {
-    "enabled": false,
-    "enable_polling": false,
-    "enable_seerr_webhook": false,
-    "enable_sonarr_webhook": false,
-    "enable_radarr_webhook": false,
-    "polling_interval": 300,
-    "full_resync_interval": 21600,
-    "max_concurrent_downloads": 1,
-    "webhook_priority_enabled": true,
-    "native_webhook_priority_window_seconds": 120,
-    "seerr_fallback_delay_seconds": 20,
-    "download_italian_anime_default": true,
-    "provider_fallback": ["streamingcommunity", "animeunity"],
-    "path_mapping": {},
-    "sonarr": { "url": "", "api_key": "" },
-    "radarr": { "url": "", "api_key": "" },
-    "seerr": { "webhook_secret": "" },
-    "sonarr_webhook": { "webhook_secret": "" },
-    "radarr_webhook": { "webhook_secret": "" }
-  }
-}
+```toml
+[ARR]
+enabled = false
+enable_polling = false
+enable_seerr_webhook = false
+enable_sonarr_webhook = false
+enable_radarr_webhook = false
+polling_interval = 300
+full_resync_interval = 21600
+max_concurrent_downloads = 1
+webhook_priority_enabled = true
+native_webhook_priority_window_seconds = 120
+seerr_fallback_delay_seconds = 20
+download_italian_anime_default = true
+provider_fallback = ["streamingcommunity", "animeunity"]
+
+[ARR.path_mapping]
+
+[ARR.sonarr]
+url = ""
+api_key = ""
+
+[ARR.radarr]
+url = ""
+api_key = ""
+
+[ARR.seerr]
+webhook_secret = ""
+
+[ARR.sonarr_webhook]
+webhook_secret = ""
+
+[ARR.radarr_webhook]
+webhook_secret = ""
 ```
 
 | Key | Default | Description |
@@ -87,7 +97,7 @@ Media library
 
 !!! tip
     All ARR settings can also be edited directly from the VibraVid web GUI under
-    **Settings -> Configuration editor**, without touching `config.json` manually.
+    **Settings -> Configuration editor**, without touching `config.toml` manually.
 
 These keys can also be set via environment variables (useful in Docker):
 
@@ -114,7 +124,7 @@ ARR_NATIVE_WEBHOOK_PRIORITY_WINDOW_SECONDS=120  # native_webhook_priority_window
 ARR_SEERR_FALLBACK_DELAY_SECONDS=20   # seerr_fallback_delay_seconds
 ```
 
-Each of these mirrors the identically-named `ARR.*` key in `config.json` (comment shows the
+Each of these mirrors the identically-named `ARR.*` key in `config.toml` (comment shows the
 matching key) — set either the env var or the config key, not both.
 
 !!! tip
@@ -151,10 +161,10 @@ Each endpoint can be protected with its own webhook secret. Configure the same s
 | Triggers | On Series Add, On Episode File Delete |
 | Secret | any value mirrored in `sonarr_webhook.webhook_secret` |
 
-Then enable in `config.json`:
-```json
-"enable_sonarr_webhook": true,
-"enable_radarr_webhook": true
+Then enable in `config.toml`:
+```toml
+enable_sonarr_webhook = true
+enable_radarr_webhook = true
 ```
 
 !!! note
@@ -202,19 +212,14 @@ Configure `provider_fallback` with an ordered list of providers. VibraVid tries 
 
 Recommended full configuration (covers general content, anime, and niche services):
 
-```json
-"provider_fallback": [
+```toml
+provider_fallback = [
     "streamingcommunity",
     "animeunity",
     "discoveryplus",
-    "discovery",
-    "dmax",
-    "nove",
-    "realtime",
+    "aurora",
     "mediasetinfinity",
     "raiplay",
-    "homegardentv",
-    "foodnetwork",
     "animeworld",
     "crunchyroll",
     "primevideo",
@@ -228,8 +233,8 @@ If `provider_fallback` is empty or omitted, VibraVid tries `streamingcommunity` 
 
 When `true`, if the selected provider returns both an original-language version and an `(ITA)` dubbed version of the same title, VibraVid automatically picks the Italian dub. This applies regardless of which method selected the provider.
 
-```json
-"download_italian_anime_default": true
+```toml
+download_italian_anime_default = true
 ```
 
 ## Path mapping — essential for split environments
@@ -254,12 +259,11 @@ volumes:
 
 Without `path_mapping`, VibraVid reports `/media/Media/Film/my-movie` to Radarr. Radarr looks for that path inside its container — it does not exist there — and the import fails. With the mapping configured, VibraVid automatically translates the path before every API call:
 
-```json
-"path_mapping": {
-    "/media/Media/Film":   "/media/Film",
-    "/media/Media/Anime":  "/media/Anime",
-    "/media/Media/Series": "/media/Series"
-}
+```toml
+[ARR.path_mapping]
+"/media/Media/Film"   = "/media/Film"
+"/media/Media/Anime"  = "/media/Anime"
+"/media/Media/Series" = "/media/Series"
 ```
 
 Each key is a prefix as seen by VibraVid; the value is the equivalent prefix inside the Radarr/Sonarr container. Entries are checked in order and the first matching prefix is replaced. Leave `path_mapping` as `{}` when both services share the same filesystem view.

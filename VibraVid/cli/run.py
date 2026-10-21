@@ -13,16 +13,17 @@ from pathlib import Path
 from rich.console import Console
 from rich.prompt import Prompt
 
-from VibraVid.cli.command.download import handle_direct_download, handle_direct_download_json
+from VibraVid.cli.command.download import handle_direct_download, handle_import
 from VibraVid.cli.command.equivalent_command import equivalent_command_builder
 from VibraVid.cli.command.global_search import global_search as call_global_search
 from VibraVid.cli.command.limits import add_limit_arguments, apply_limits
 from VibraVid.cli.command.queue import add_queue_arguments, handle_queue_dispatch
-from VibraVid.core.downloader.base import get_written_track_files
+from VibraVid.core.downloader.util._export import get_written_exports
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import load_search_functions
 from VibraVid.services._base.site_extra_args import resolve_persisted_site_options
+from VibraVid.setup import CLI_ORIGIN, parse_cdm_cli, validate_cdm_settings
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.setup.system import (
     _initialize_paths,
@@ -158,6 +159,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument( "--proxy-scope", dest="proxy_scope", type=str, choices=["scrap", "down", "scrap+down"], metavar="scrap|down|scrap+down", help="Where to apply the proxy: scraping only, downloads only, or both")
     dl_opts.add_argument("--close-console", dest="close_console", type=str, choices=["true", "false"],metavar="true|false", help="Exit after last download (overrides config)")
     dl_opts.add_argument("--no-vault-cache", dest="bypass_vault_cache", action="store_const", const=True, default=None, help="Bypass DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)")
+    dl_opts.add_argument("--cdm", dest="cdm", action="append", metavar="CDM", default=None, help="CDM for this run, overriding login.toml and config.toml: a .wvd/.prd file name, 'search', or a remote CDM id. Repeatable (one per DRM system); JSON accepted for quality rules")
     dl_opts.add_argument("--http-version", dest="http_version", choices=["1.1", "2", "3"], default=None, help="HTTP version Velora uses for segment downloads (default: 1.1 — safest for ~99%% of CDNs). Use 2 for CDNs with aggressive anti-bot fingerprinting that block HTTP/1.1-only ALPN (e.g. phncdn/Pornhub)")
     dl_opts.add_argument("--max-speed", dest="max_speed_mbps", type=float, metavar="MB/s", default=None, help="Cap the segment download rate in MB/s (0 = unlimited). Applies to each stream (video/audio) separately. Useful for CDNs that throttle clients exceeding a speed threshold")
     dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
@@ -173,6 +175,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--progress-interval", dest="progress_interval", type=float, metavar="SECONDS", help="Seconds between lines with --plain-progress (default 5)")
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
+    dl_opts.add_argument("--export", dest="export_file", nargs="?", const="", default=None, metavar="FILE", help="Resolve tracks and keys but don't download: write them to a JSON file (default: .cache/export/<site>_<type>_<title>.json) to download later with --import. Works with MP4/HLS/DASH/ISM. The file holds the keys")
 
     # ── Remote server
     remote_group = parser.add_argument_group("Remote server")
@@ -182,7 +185,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Direct download
     dl_group = parser.add_argument_group("Direct download (--down)")
     dl_group.add_argument("--down", metavar="URL", help="Stream URL to download directly (MP4 / HLS / DASH / ISM)")
-    dl_group.add_argument("--down-json", dest="down_json", metavar="PATH", help="Path to a TRACKS_JSON file (see debug_track_json) — runs every entry's 'cmd' automatically, in sequence.")
+    dl_group.add_argument("--import", dest="import_file", metavar="FILE", help="Download every entry of a JSON file written by --export, in sequence (no search, no CDM needed when the keys were exported).")
     dl_group.add_argument("--type", dest="stream_type", choices=["auto", "mp4", "hls", "dash", "ism", "yt-dlp"], default="auto", help="Force the stream type instead of auto-detecting (default: auto)")
     dl_group.add_argument("-o", "--output", metavar="PATH", help="Output file path (extension auto-appended if omitted)")
     dl_group.add_argument("--headers", action="append", metavar="Key:Value", help="HTTP header. Repeatable.")
@@ -224,8 +227,6 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("--check-update", action="store_true", help="Check GitHub Releases for a newer version and exit (no download)")
     util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
-    util_group.add_argument("--amazon-music-login", dest="amazon_music_login", action="store_true", help="Log in to Amazon Music via direct API device registration (no proxy/CA needed).")
-    util_group.add_argument("--amazon-music-logout", dest="amazon_music_logout", action="store_true", help="Remove stored Amazon Music credentials from login.json.")
     util_group.add_argument("--clear", dest="clear", action="store_true", help="Delete the cached login/session tokens of the service selected with -i before running (use after changing account/cookies). Requires -i; never touches other services.")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
@@ -317,7 +318,7 @@ def _apply_interactive_site_options(selected_module_name, site_module_name):
 
 
 def build_site_options(args, parser, site_option_dests, site_module_name):
-    """Merge this run's site-specific CLI values with the site's persisted `extra_args` (login.json)"""
+    """Merge this run's site-specific CLI values with the site's `args` from login.toml"""
     persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
     site_options = {"drm": getattr(args, "drm", None)}
     for dest in site_option_dests:
@@ -343,8 +344,6 @@ def build_function_mappings(search_functions):
     for func in search_functions.values():
         module_name = func.module_name
         module_name_to_function[module_name.lower()] = func
-        if getattr(func, "hide", False):
-            continue
 
         site_index = str(func.indice)
         input_to_function[site_index] = func
@@ -552,6 +551,23 @@ def show_dependencies(search_functions):
         console.print(f"  {status} [yellow]{device_name}:[/] [white]{path_display}[/]")
 
 
+def _check_cdm_settings(args) -> None:
+    """Apply ``--cdm`` and report broken ``cdm`` settings now, instead of when the keys are first needed (a bad ``--cdm`` stops the run)."""
+    try:
+        context_tracker.cdm_override = parse_cdm_cli(getattr(args, "cdm", None))
+    except ValueError as exc:
+        console.print(f"[red]{exc}")
+        sys.exit(1)
+
+    problems = validate_cdm_settings(context_tracker.cdm_override)
+    cli_problems = [p for p in problems if f"in {CLI_ORIGIN}" in p]
+    for problem in problems:
+        logger.warning(problem)
+        console.print(f"[{'red' if problem in cli_problems else 'yellow'}]{problem}")
+    if cli_problems:
+        sys.exit(1)
+
+
 def main():
     try:
         argv = sys.argv[1:]
@@ -602,6 +618,7 @@ def main():
             _startup_prefetch.start_update_check()
 
         if getattr(args, "tui", False):
+            _startup_prefetch.start_vault_warm()
             from VibraVid.tui.app import main as tui_main
 
             tui_main()
@@ -609,18 +626,6 @@ def main():
 
         if hasattr(args, "dep") and args.dep:
             show_dependencies(search_functions)
-            return
-
-        if getattr(args, "amazon_music_login", False):
-            from VibraVid.provider.amazon import login as amazon_music_login
-
-            amazon_music_login()
-            return
-
-        if getattr(args, "amazon_music_logout", False):
-            from VibraVid.provider.amazon import logout as amazon_music_logout
-
-            amazon_music_logout()
             return
 
         clear_error = clear_args_error(args)
@@ -651,6 +656,7 @@ def main():
         # Execute pre-run hooks with context from post-download if available, otherwise with empty context
         execute_hooks("pre_run")
         start_message(False)
+        _startup_prefetch.start_vault_warm()
 
         # Attempt git update but continue even if it fails (e.g., no network, git not available)
         try:
@@ -686,6 +692,7 @@ def main():
         # Propagate CLI download limits to the service flow
         apply_limits(args)
         context_tracker.bypass_vault_cache = getattr(args, "bypass_vault_cache", None)
+        _check_cdm_settings(args)
         context_tracker.http_version = getattr(args, "http_version", None)
         DownloadBarManager.configure(getattr(args, "progress_mode", None), getattr(args, "progress_interval", None))
         context_tracker.skip_decrypt = bool(getattr(args, "skip_decrypt", False))
@@ -696,13 +703,14 @@ def main():
         context_tracker.log_engine_output = getattr(args, "log_decryptor_output", None)
         context_tracker.anonymize_keys = bool(getattr(args, "abc", False))
         context_tracker.resolve_only = bool(getattr(args, "resolve_only", False))
+        context_tracker.export_file = getattr(args, "export_file", None)
         site_module_name = site_module.__name__.rsplit(".", 1)[-1] if site_module is not None else None
         context_tracker.site_options = build_site_options(args, parser, site_option_dests, site_module_name)
 
-        # ── Direct download (--down / --down-json) — handled before interactive site selection ──
-        down_json_handled, down_json_ok = handle_direct_download_json(args)
-        if down_json_handled:
-            sys.exit(0 if down_json_ok else 1)
+        # ── Direct download (--down / --import) — handled before interactive site selection ──
+        import_handled, import_ok = handle_import(args)
+        if import_handled:
+            sys.exit(0 if import_ok else 1)
 
         down_handled, down_ok = handle_direct_download(args)
         if down_handled:
@@ -787,8 +795,8 @@ def main():
         if log_file_path:
             console.print(f"\n[dim]Log: {log_file_path}[/dim]")
 
-        for track_file_path in get_written_track_files():
-            console.print(f"[dim]Json: {track_file_path}[/dim]")
+        for export_path in get_written_exports():
+            console.print(f"[dim]Exported: {export_path}[/dim]")
 
         logger.info("Script execution completed.")
         execute_hooks("post_run", context=get_last_hook_context("post_download") or get_last_hook_context("post_run"))

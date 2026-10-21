@@ -8,6 +8,7 @@ from pathlib import Path
 workspace_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(workspace_root))
 
+import pytest
 from mock_streams import MockStream
 
 from VibraVid.core.utils.selector import StreamSelector
@@ -68,16 +69,52 @@ def _dragons_s03e06_ladder():
     ]
 
 
-def test_best_picks_dv_outright_when_it_has_highest_bitrate():
-    """select_video="best" ora sceglie letteralmente il bitrate/risoluzione piu' alto: se la DV
-    vince davvero (come nel ladder reale S03E06), deve essere selezionata come primaria."""
+def test_best_prefers_the_non_dv_stream_and_dv_auto_attaches_dv_as_companion():
+    """select_video="best" non usa la DV come video primario quando esiste un flusso non DV (anche se
+    la DV ha il bitrate piu' alto, come nel ladder reale S03E06): prende l'HDR10 migliore e con dv_auto
+    aggiunge la DV come companion."""
     streams = _dragons_s03e06_ladder()
     StreamSelector("best", "false", "false", dv_auto=True).apply(streams)
     video = [s for s in streams if s.type == "video" and s.selected]
     assert len(video) == 1
-    assert video[0].id == "dv"
-    # e' gia' native DV (profile 5): dv_auto non deve creare un companion inutile
+    assert video[0].id == "hdr10"
+    assert [s.id for s in streams if s.dv_companion] == ["dv"]
+
+
+def test_best_without_dv_auto_may_select_dv_when_it_is_the_best():
+    """Con dv_auto=False "best" non esclude la DV: vince il migliore per bitrate, anche se e' DV, e non c'e' companion."""
+    streams = _dragons_s03e06_ladder()
+    StreamSelector("best", "false", "false", dv_auto=False).apply(streams)
+    video = [s for s in streams if s.type == "video" and s.selected]
+    assert [s.id for s in video] == ["dv"]
     assert [s for s in streams if s.dv_companion] == []
+
+
+@pytest.mark.parametrize("codecs", ["dvh1.05.01", "dvh1.08.06", "dvhe.07.06", "dvhe.04.06", "dvh1.09.06"])
+@pytest.mark.parametrize("video_filter", ["best", "hybrid"])
+def test_dv_primary_never_gets_a_dv_companion(codecs, video_filter):
+    """Se il video scelto e' gia' DV (qualunque profilo) non serve un RPU da un'altra DV."""
+    streams = [
+        MockStream(type="video", height=2160, codecs=codecs, bitrate=15_000_000, video_range="DV", id="dv2160"),
+        MockStream(type="video", height=360, codecs=codecs, bitrate=500_000, video_range="DV", id="dv360"),
+    ]
+    StreamSelector(video_filter, "false", "false", dv_auto=True).apply(streams)
+    assert [s.id for s in streams if s.type == "video" and s.selected] == ["dv2160"]
+    assert [s for s in streams if s.dv_companion] == []
+
+
+def test_best_without_dv_auto_keeps_video_when_only_dv_is_available():
+    streams = [MockStream(type="video", height=1080, codecs="dvhe.05.06", bitrate=10_000_000, video_range="DV", id="dv")]
+    StreamSelector("best", "false", "false", dv_auto=False).apply(streams)
+    assert [s.id for s in streams if s.type == "video" and s.selected] == ["dv"]
+
+
+def test_explicit_dv_codec_filter_still_selects_dv():
+    """Chiedere esplicitamente un codec DV (dvhe / dv) mantiene la DV come video selezionato."""
+    streams = _dragons_s03e06_ladder()
+    StreamSelector("codec=dvhe", "false", "false", dv_auto=False).apply(streams)
+    video = [s for s in streams if s.type == "video" and s.selected]
+    assert [s.id for s in video] == ["dv"]
 
 
 def _dragons_s03e01_ladder():

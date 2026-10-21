@@ -1,163 +1,82 @@
-## CookieInspector: what the buttons do
+## CookieInspector
 
-Most services below need data copied from your logged-in browser session. The
-[CookieInspector] extension (from DISCORD) does it in a few clicks. Open the service's site,
-log in, click the extension icon, then use:
+Most services below need data from your logged-in browser session. Open the service's site, log in, click the [CookieInspector] extension (from DISCORD), then use:
 
-| Button | What it reads | Used for |
-|--------|---------------|----------|
-| **GET COOKIES** | The cookies of the current site | Crunchyroll, Discovery+, HBO Max, Prime Video, Apple TV |
-| **GET STORAGE** | Everything in the page's `localStorage` | Anything else you need to look up by hand |
-| **GET TOKEN** | Only `access_token` / `refresh_token`, found inside the page's `localStorage` | Disney+ |
+| Button | Reads | Used for |
+|--------|-------|----------|
+| **GET COOKIES** | Cookies of the current site | Crunchyroll, Discovery+, HBO Max, Prime Video, Apple TV |
+| **GET STORAGE** | Everything in `localStorage` | Mediaset Infinity, or anything to look up by hand |
+| **GET TOKEN** | Only `access_token` / `refresh_token` from `localStorage` | Disney+ |
 
-- The **filter** box keeps only the keys (or values) containing your text, e.g. `st`, and **COPY JSON**
-  copies exactly what is shown.
-- **COPY JSON** puts the JSON on a single line, so it can be pasted straight into `Conf/login.json`
-  without breaking it.
+- The **filter** box keeps only keys (or values) containing your text (e.g. `st`); **COPY JSON** copies exactly what is shown, on a single line.
+- In `login.toml` wrap copied JSON in triple **single** quotes (`cookies = '''{"key":"value"}'''`): the text stays exactly as copied (backslashes and `\n` are not interpreted), while plain TOML strings can't hold raw quotes.
+
+Every service section also has `args = ""`: options added to each download of that service (e.g. `args = "--quality 1080"`). See [Default options for a service](configuration.md#default-options-for-a-service-args).
 
 ---
 
-## Crunchyroll: Get Cookies via Extension
+## Cookie-based services
 
-### Prerequisites
+Open the site, log in, click the extension, **GET COOKIES** -> **COPY JSON**, and paste it in `Conf/login.toml`:
 
-- Install the [CookieInspector] browser extension from DISCORD
+| Service | Site | `login.toml` section |
+|---------|------|----------------------|
+| Crunchyroll | [crunchyroll.com](https://www.crunchyroll.com/) | `[crunchyroll]` |
+| Discovery+ [EU] | [play.discoveryplus.com](https://play.discoveryplus.com/) | `[discoveryplus]` |
+| HBO Max | [play.hbomax.com](https://play.hbomax.com/) | `[hbomax]` |
+| Amazon Prime Video [EU] | [primevideo.com](https://www.primevideo.com/) | `[primevideo]` |
+| Apple TV+ | [tv.apple.com](https://tv.apple.com/) | `[appletv]` |
 
-### Steps
+```toml
+[crunchyroll]
+cookies = '''<paste_copied_json_here>'''
+```
 
-1. **Open** [Crunchyroll](https://www.crunchyroll.com/) and **log in** with your credentials.
-2. **Click** the CookieInspector extension icon in your browser toolbar.
-3. **Click** "Get Cookies" button.
-4. **Click** "Copy JSON" to copy the authentication data.
-5. Add it to `Conf/login.json`:
-   ```json
-   "crunchyroll": <paste_copied_json_here>
-   ```
+**Discovery+ / HBO Max without the extension**: Developer Tools (<kbd>F12</kbd>) -> **Application** -> **Cookies**, find the `st` cookie and set `st = "<value>"` in the `[discoveryplus]` / `[hbomax]` section.
+
+![st location](assets/login/discoveryplus_eu_st.png)
 
 ---
 
 ## Mediaset Infinity
 
-### Steps
+1. Open [Mediaset](https://mediasetinfinity.mediaset.it/) and log in (pick your profile).
+2. Extension -> **GET STORAGE**, type `rtilogin_acd` in the **filter** box, **Copy JSON**.
+3. Add it to `Conf/login.toml`:
 
-1. **Open** [Mediaset](https://mediasetinfinity.mediaset.it/) and **log in** (pick your profile).
-2. **Click** the CookieInspector extension icon, then **GET STORAGE**.
-3. Type `rtilogin_acd` in the **filter** box and **click** "Copy JSON".
-4. Add it to `Conf/login.json`:
-   ```json
-   "mediasetinfinity": <paste_copied_json_here>
-   ```
-   The result looks like `"mediasetinfinity": {"rtilogin_acd": {"caToken": "...", "persona": {"id": "..."}, ...}}`.
+```toml
+[mediasetinfinity]
+rtilogin_acd = '''<paste_copied_value_here>'''
+```
 
-Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application** tab → **Local Storage** →
-`mediasetinfinity.mediaset.it`, copy the value of the `rtilogin_acd` key and put it in
-`"mediasetinfinity": {"rtilogin_acd": <value>}`.
+The template ships `rtilogin_acd = '''[paste here]'''`: replace `[paste here]` with the copied value, or leave it to log in anonymously.
 
----
-
-## Discovery+ [EU]
-
-### Steps
-
-1. **Open** [Discovery+](https://play.discoveryplus.com/) and **log in**.
-2. **Click** the CookieInspector extension icon, then **GET COOKIES**.
-3. **Click** "Copy JSON" and add it to `Conf/login.json` (only the `st` cookie is used):
-   ```json
-   "discoveryplus": <paste_copied_json_here>
-   ```
-
-Without the extension: open Developer Tools (<kbd>F12</kbd>) → **Application** tab → **Cookies**, search for
-the `st` cookie and copy its value into `"discoveryplus": {"st": "<value>"}`.
-
-### Screenshot Reference
-![st location](assets/login/discoveryplus_eu_st.png)
-
----
-
-## HBO Max
-
-### Steps
-
-1. **Open** [HBO Max](https://play.hbomax.com/) and **log in**.
-2. **Click** the CookieInspector extension icon, then **GET COOKIES**.
-3. **Click** "Copy JSON" and add it to `Conf/login.json` (only the `st` and `session` cookies are used):
-   ```json
-   "hbomax": <paste_copied_json_here>
-   ```
-
-Without the extension, copy the `st` cookie value by hand as shown for Discovery+ and write it to
-`"hbomax": {"st": "<value>"}`.
+Without the extension: <kbd>F12</kbd> -> **Application** -> **Local Storage** -> `mediasetinfinity.mediaset.it`, copy the `rtilogin_acd` value.
 
 ---
 
 ## Disney+
 
-### Steps
+1. Open [Disney+](https://www.disneyplus.com/) and log in.
+2. Extension -> **GET TOKEN** (shows only `access_token` and `refresh_token`) -> **Copy JSON**.
+3. Add it to `Conf/login.toml`:
 
-1. **Open** [Disney+](https://www.disneyplus.com/) and **log in**.
-2. **Click** the CookieInspector extension icon, then **GET TOKEN**. It reads the session out of the
-   page's storage and shows only `access_token` and `refresh_token`.
-3. **Click** "Copy JSON" and add it to `Conf/login.json`:
-   ```json
-   "disney": <paste_copied_json_here>
-   ```
+```toml
+[disney]
+token = "<access_token>"
+refresh_token = "<refresh_token>"
+```
 
-Disney+ accepts `access_token` or `token` for the session token, and uses `refresh_token` to renew it. After the
-first run the renewed values are saved back to the same `disney` section.
-
----
-
-## Amazon Prime Video [EU]: Get Cookies via Extension
-
-### Prerequisites
-
-- Install the [CookieInspector] browser extension from DISCORD
-
-### Steps
-
-1. **Open** [Prime Video](https://www.primevideo.com/) and **log in**.
-2. **Click** the CookieInspector extension icon in your browser toolbar.
-3. **Click** "Get Cookies" button.
-4. **Click** "Copy JSON" to copy the authentication data.
-5. Add it to `Conf/login.json`:
-   ```json
-   "primevideo": <paste_copied_json_here>
-   ```
+`access_token` or `token` both work for the session token; `refresh_token` renews it, and renewed values are saved back to the `disney` section after the first run.
 
 ---
 
-## Tubi TV: Plain Credentials
+## Tubi TV: plain credentials
 
-Unlike the cookie-based services above, Tubi TV authenticates with a plain email/password pair
-— no browser extension needed.
+Email/password, no extension. Without them, search returns no results for this site.
 
-### Steps
-
-1. Add your Tubi TV account credentials to `Conf/login.json`:
-   ```json
-   "tubitv": {
-     "email": "your@email.com",
-     "password": "your-password"
-   }
-   ```
-
-Without these set, search returns no results for this site.
-
----
-
-## Apple TV+: Get Cookies via Extension
-
-### Prerequisites
-
-- Install the [CookieInspector] browser extension from DISCORD
-
-### Steps
-
-1. **Open** [Apple TV+](https://tv.apple.com/) and **log in**.
-2. **Click** the CookieInspector extension icon in your browser toolbar.
-3. **Click** "Get Cookies" button.
-4. **Click** "Copy JSON" to copy the authentication data.
-5. Add it to `Conf/login.json`:
-   ```json
-   "appletv": <paste_copied_json_here>
-   ```
+```toml
+[tubi]
+email = "your@email.com"
+password = "your-password"
+```

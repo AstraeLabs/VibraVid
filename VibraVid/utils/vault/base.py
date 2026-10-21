@@ -60,15 +60,17 @@ class BaseVault:
         """Put *new_key* (proven right) in place of *old_key* (proven wrong). A vault with no replace concept just saves it."""
         return self.set_keys([f"{kid}:{new_key}"], license_url, pssh) > 0
 
-    def _prewarm(self, url: str, session_lock: threading.Lock, label: str) -> None:
-        """Open the TLS connection in a background thread so the first real lookup doesn't pay the handshake."""
+    def _prewarm(self, url: str, session_lock: threading.Lock, label: str, path: str = "", timeout: float = 10) -> None:
+        """Open the connection in a background thread so the first real lookup doesn't pay the handshake."""
         if not url:
             return
+
+        target = f"{url.rstrip('/')}/{path.lstrip('/')}" if path else url
 
         def _warm():
             try:
                 with session_lock:
-                    self.session.get(url, timeout=10)
+                    self.session.get(target, timeout=timeout)
                 logger.debug(f"{label} vault connection prewarmed")
             except Exception as e:
                 logger.debug(f"{label} vault prewarm skipped (non-fatal): {e}")

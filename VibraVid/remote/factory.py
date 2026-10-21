@@ -3,6 +3,16 @@
 from .models import RemoteError, ResolvedMedia
 
 
+def _enc_override(override):
+    """Bring an exported ``hls_enc_override`` back to what ``HLS_Downloader`` builds: the AES key as bytes (it travels as hex)."""
+    if not override:
+        return override
+    restored = dict(override)
+    if isinstance(restored.get("key_bytes"), str):
+        restored["key_bytes"] = bytes.fromhex(restored["key_bytes"])
+    return restored
+
+
 def build_downloader(
     media: ResolvedMedia,
     output_path: str,
@@ -42,7 +52,7 @@ def build_downloader(
             **common,
         )
         if media.hls_enc_override:
-            downloader.hls_enc_override = media.hls_enc_override
+            downloader.hls_enc_override = _enc_override(media.hls_enc_override)
     elif media.kind == "dash":
         downloader = DASH_Downloader(
             mpd_url=media.url,
@@ -67,3 +77,19 @@ def build_downloader(
         downloader.custom_filters = dict(media.custom_filters)  # what the service asked for, as it does after building its downloader
     downloader.display_selected_only = bool(media.display_selected_only)
     return downloader
+
+
+def download_media(media: ResolvedMedia, output_path: str, *, key=None, license_request_fn=None, manifest_refresh_fn=None):
+    """Download one ``ResolvedMedia`` of any kind (mp4 included) and return its ``DownloadResult``."""
+    from VibraVid.core.downloader.base import DownloadResult
+
+    if media.kind == "mp4":
+        from VibraVid.core.downloader import MP4_Downloader
+
+        result = MP4_Downloader(
+            media.url, output_path, headers=media.headers or None, key=key or media.key, chapters=media.chapters, poster_url=media.poster_url
+        )
+        return DownloadResult.from_raw(result)
+
+    downloader = build_downloader(media, output_path, key=key, license_request_fn=license_request_fn, manifest_refresh_fn=manifest_refresh_fn)
+    return DownloadResult.from_raw(downloader.start())

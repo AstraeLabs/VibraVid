@@ -583,7 +583,7 @@ def test_songs_are_named_for_the_music_folder_from_the_services_own_metadata():
 
     media = ResolvedMedia(kind="dash", url="amazon://B0.mpd", media_type="Film", title="x", post_process={"kind": "song", "args": SONG})
 
-    path = output_path_for(media, "amazon_music")
+    path = output_path_for(media, "youtube_music")
 
     assert "Music" in path and "Album" in path and "03. Song" in path  # the song_format of the client's config, in its music folder
     assert not path.endswith(".mkv")  # no extension: the post-processing sets the final one

@@ -68,5 +68,5 @@ class LoadmSource:
         finally:
             client.close()
 
-        url = data.get("cf") or data.get("source")
+        url = data.get("cfNative") or data.get("source") or data.get("cf")
         return url, {"Referer": self.player_url}

@@ -99,7 +99,7 @@ def _is_hdr10(s) -> bool:
 
 def _is_dv(s) -> bool:
     codecs = (getattr(s, "codecs", "") or "").lower()
-    if any(codecs.startswith(p) for p in DV_CODEC_PREFIXES):
+    if any(token.strip().startswith(DV_CODEC_PREFIXES) for token in codecs.split(",")):
         return True
     return (getattr(s, "video_range", "") or "").upper() == "DV"
 
@@ -111,9 +111,13 @@ def _native_dv_codec(s) -> str:
         if token.startswith(DV_CODEC_PREFIXES):
             return token
 
-    codecs = (getattr(s, "codecs", "") or "").lower().strip()
-    if codecs.startswith(DV_CODEC_PREFIXES) and codecs.split(".")[1:2] in (["05"], ["08"]):
-        return codecs.split(",")[0]
+    for codecs in (getattr(s, "codecs", "") or "").lower().split(","):
+        codecs = codecs.strip()
+        if codecs.startswith(DV_CODEC_PREFIXES):
+            return codecs
+
+    if (getattr(s, "video_range", "") or "").upper() == "DV":
+        return "dv"
 
     return ""
 
@@ -590,10 +594,13 @@ def _matches_codec(s, token: str) -> bool:
     """Prefix/substring match; unknown codec treated as matching."""
     if not token:
         return True
+    normalized_token = token.lower()
+    if normalized_token in {"dv", "dvh"} or normalized_token.startswith(DV_CODEC_PREFIXES):
+        return _is_dv(s)
     raw = _codecs(s)
     if not raw:
         return True
-    return raw.startswith(token.lower()) or token.lower() in raw
+    return raw.startswith(normalized_token) or normalized_token in raw
 
 
 def _strip_lang_flag_affixes(tag: str) -> str:
@@ -802,7 +809,7 @@ class StreamSelector:
         dv_top_tier_tolerance: float | None = None,
     ):
         raw_vf = _normalize_filter_value(video_filter, "best").strip()
-        self._hybrid = raw_vf.lower() == "hybrid"  # select_video in config.json
+        self._hybrid = raw_vf.lower() == "hybrid"
         self._vf = "best" if self._hybrid else raw_vf
         self._af = _normalize_filter_value(audio_filter, "best").strip()
         self._sf = _normalize_filter_value(subtitle_filter, "all").strip()
@@ -974,8 +981,15 @@ class StreamSelector:
         result = SelectionResult(select_best=spec.select_best, extra=dict(spec.extra))
         videos = [s for s in streams if getattr(s, "type", "") == "video"]
         videos = self._drop_unsupported_video(videos)
+        codec_filter = (spec.codec or "").lower()
+        explicit_dv_filter = codec_filter in {"dv", "dvh"} or codec_filter.startswith(DV_CODEC_PREFIXES)
         if self._dv_top_tier_tolerance is not None:
             videos = self._drop_rogue_top_tier(videos, self._dv_top_tier_tolerance)
+        if not self._hybrid:
+            if self._dv_auto and not explicit_dv_filter:
+                non_dv = [s for s in videos if not _is_dv(s)]
+                if non_dv:
+                    videos = non_dv
         if self._hybrid:
             non_dv = [s for s in videos if not _is_dv(s)]
             if non_dv:

@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any
 
-from VibraVid.utils import anime_id_map
+from VibraVid.utils import anime_id_map, config_manager
 
 from .clients.radarr_client import RadarrClient
 from .clients.sonarr_client import SonarrClient
@@ -434,12 +434,8 @@ class ArrDownloaderService:
         """
         if not path:
             return path
-        conf_path = pathlib.Path(__file__).parent.parent.parent.parent / "Conf" / "config.json"
         try:
-            with open(conf_path, encoding="utf-8") as _f:
-                mapping = json.load(_f).get("ARR", {}).get("path_mapping", {})
-                if not isinstance(mapping, dict):
-                    return path
+            mapping = config_manager.config.get_dict("ARR", "path_mapping", default={})
         except Exception:
             return path
 
@@ -1026,20 +1022,28 @@ class ArrDownloaderService:
 
     def _provider_order(self, primary_provider: str) -> list[str]:
         """Return primary provider followed by configured ARR provider fallbacks."""
-        conf_path = pathlib.Path(__file__).parent.parent.parent.parent / "Conf" / "config.json"
         try:
-            with open(conf_path, encoding="utf-8") as _f:
-                fallback_list: list = json.load(_f).get("ARR", {}).get("provider_fallback", [])
+            fallback_list: list = config_manager.config.get_list("ARR", "provider_fallback", default=[])
         except Exception as _exc:
             logger.warning(f"[fallback] Could not read provider_fallback from config: {_exc}")
             fallback_list = []
 
+        from searchapp.api import is_site_available, normalize_site
+
+        # Legacy names (e.g. "nove", "realtime") resolve to the merged provider: try it once
         providers = []
-        if primary_provider:
-            providers.append(primary_provider)
-        providers.extend(provider for provider in fallback_list if provider and provider not in providers)
+        for provider in [primary_provider, *fallback_list]:
+            provider = normalize_site(provider) if provider else provider
+            if not provider or provider in providers:
+                continue
+            if not is_site_available(provider):
+                logger.info(f"[fallback] Skipping '{provider}': hidden in hidden_services or not installed")
+                continue
+            providers.append(provider)
+
         if not providers:
             providers = ["streamingcommunity"]
+
         return providers
 
     def _search_with_fallback_titles(
@@ -1170,10 +1174,8 @@ class ArrDownloaderService:
             expected_tmdb_str = self._normalize_tmdb_id(tmdb_id)
             strict_tmdb = self._strict_tmdb_matching_enabled()
 
-            _conf_path = pathlib.Path(__file__).parent.parent.parent.parent / "Conf" / "config.json"
             try:
-                with open(_conf_path, encoding="utf-8") as _f:
-                    _prefer_ita = json.load(_f).get("ARR", {}).get("download_italian_anime_default", True)
+                _prefer_ita = config_manager.config.get_bool("ARR", "download_italian_anime_default", default=True)
             except Exception:
                 _prefer_ita = True
 

@@ -145,14 +145,14 @@ def test_season_selector_never_touches_anime_or_unknown_metadata(monkeypatch):
 def test_provider_lacks_season(monkeypatch):
     svc = ArrDownloaderService(None, None)
     monkeypatch.setattr(svc, "_provider_season_names", lambda provider, payload: PROVIDER_SEASONS)
-    assert svc._provider_lacks_season("nove", {}, 17) is True
-    assert svc._provider_lacks_season("nove", {}, 14) is False
+    assert svc._provider_lacks_season("aurora", {}, 17) is True
+    assert svc._provider_lacks_season("aurora", {}, 14) is False
     # anime entries are one-season-per-entry: never blocked
     assert svc._provider_lacks_season("animeworld", {}, 2) is False
     assert svc._provider_lacks_season("animeunity", {}, 2) is False
     # metadata unavailable: don't block
     monkeypatch.setattr(svc, "_provider_season_names", lambda provider, payload: None)
-    assert svc._provider_lacks_season("nove", {}, 17) is False
+    assert svc._provider_lacks_season("aurora", {}, 17) is False
 
 
 # ── TMDB id resolved from air dates ───────────────────────────────────────

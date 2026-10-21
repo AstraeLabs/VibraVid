@@ -17,6 +17,7 @@ from VibraVid.core.downloader.util._drm_probe import PROBE_BYTES_FAST, DRMProbe
 from VibraVid.core.drm.manager import DRMManager
 from VibraVid.core.drm.system import DRMType, normalize_kid
 from VibraVid.core.muxing import probe_media_file
+from VibraVid.core.muxing.helper.font_embed import collect_font_attachments, ffmpeg_attach_args, mkv_subtitle_codec_args
 from VibraVid.core.muxing.helper.sub.convert import convert_subtitle
 from VibraVid.core.muxing.helper.sub.disposition import (
     SubtitleDispositionInfo,
@@ -155,7 +156,7 @@ class Generic_Downloader(BaseDownloader):
             - max_time: cap downloaded duration, e.g. "01:00:00" or seconds.
             - cookies: default cookies applied to sources without their own.
             - custom_filters: optional {"video","audio","subtitle"} selector
-              overrides; otherwise the values from config.json are used.
+              overrides; otherwise the values from config are used.
             - chapters: Chapter markers to inject into the muxed output, e.g. [{"name": str, "seconds": int}]. Default: context_tracker.chapters.
             - poster_url: Poster/still image URL to embed in the muxed output. Default: context_tracker.poster_url.
         """
@@ -700,7 +701,8 @@ class Generic_Downloader(BaseDownloader):
 
         cmd += ["-c", "copy"]
         if subtitle_paths:
-            cmd += ["-c:s", "srt"]
+            cmd += mkv_subtitle_codec_args(subtitle_paths)
+            cmd += ffmpeg_attach_args(collect_font_attachments(subtitle_paths, output_path))
         cmd += [output_path]
 
         return cmd, output_path
@@ -1503,7 +1505,9 @@ class Generic_Downloader(BaseDownloader):
                 cmd += _lang_meta("s", k, sub_meta[sub_idx])
                 cmd += [f"-disposition:s:{k}", "0"]
             
-            cmd += ["-c", "copy", output_path]
+            cmd += ["-c", "copy"]
+            cmd += ffmpeg_attach_args(collect_font_attachments([p for _, p in sub_paths], output_path))
+            cmd += [output_path]
             return cmd
 
         muxer.audio_watch = audio_watch     # type: ignore[attr-defined]

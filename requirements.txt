@@ -12,7 +12,10 @@ pyplayready
 pycryptodomex
 mutagen
 textual
+textual-image
 Pillow
+tomlkit
+tomli; python_version < "3.11"
 pyyaml
 jsonpickle
 pycountry

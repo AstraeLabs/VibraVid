@@ -2,6 +2,8 @@
 
 import logging
 
+_buffer_handler = None
+
 
 class _StartupBufferHandler(logging.Handler):
     """Handler that stores records in memory instead of writing them out."""
@@ -12,9 +14,6 @@ class _StartupBufferHandler(logging.Handler):
 
     def emit(self, record):
         self.records.append(record)
-
-
-_buffer_handler = None
 
 
 def install_startup_buffer():

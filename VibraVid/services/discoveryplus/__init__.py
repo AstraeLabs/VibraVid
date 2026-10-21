@@ -13,7 +13,7 @@ from VibraVid.utils.http_client import create_client
 from .client import get_client
 from .downloader import download_film, download_live, download_series
 
-indice = 9
+indice = 8
 _useFor = "Film_Serie"
 console = Console()
 entries_manager = EntriesManager()
@@ -122,7 +122,6 @@ def _resolve_url_to_item(url: str):
         name = attrs.get("name", content_id)
         premiere_date = attrs.get("premiereDate", "")
         year = premiere_date.split("-")[0] if premiere_date else "9999"
-        console.print(f"[cyan]Detected series from URL: [green]{name}")
         return {"id": content_id, "name": name, "type": "tv", "url": url, "year": year}
 
     except Exception as e:

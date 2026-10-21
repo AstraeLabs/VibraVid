@@ -131,7 +131,7 @@ def test_factory_selects_backend_and_does_not_mutate_config(monkeypatch):
         build_remote_cdm({"device_type": "TOASTER"}, "widevine")
 
 
-def test_prefer_remote_cdm_wins_over_local_device_and_empty_challenge_skips_license(monkeypatch):
+def test_remote_cdm_wins_over_local_device_and_empty_challenge_skips_license(monkeypatch):
     http = FakeHttp(**{"get-request": [_cached((KID_A, KEY_A))]})
     real_factory = widevine.build_remote_cdm
 
@@ -151,7 +151,6 @@ def test_prefer_remote_cdm_wins_over_local_device_and_empty_challenge_skips_lice
         "https://license.test/wv",
         cdm_device_path="C:/does/not/exist.wvd",
         cdm_remote_api={"type": "custom_api_1", "secret": "k", "host": TEST_HOST, "device_name": "L3"},
-        prefer_remote_cdm=True,
     )
 
     assert keys is not None

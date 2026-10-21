@@ -16,15 +16,12 @@ _TV_MATCH_SITES = {
     "appletv",
     "primevideo",
     "disney",
+    "netflix",
+    "nowtvit",
     "hbomax",
     "paramountplus",
     "discoveryplus",
-    "realtime",
-    "nove",
-    "dmax",
-    "discovery",
-    "foodnetwork",
-    "homegardentv",
+    "aurora",
 }
 TRUSTED_TITLE_SIMILARITY = 0.92
 

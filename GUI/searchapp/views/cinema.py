@@ -6,6 +6,8 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from searchapp.api import get_available_sites, get_site_categories
 
+from VibraVid.utils.config import tomllib
+
 from .. import services_admin
 from .._download_infra import _get_scheduled_downloads
 from .._library_paths import titleize_name
@@ -59,18 +61,16 @@ def _watchlist_tiles(limit: int | None = None) -> list[dict]:
 
 
 def _site_extra_args_map() -> dict:
-    """``{site: "custom CLI-style options"}`` for the providers that have ``extra_args`` set in login.json."""
-    import json as _json
-
+    """``{site: "custom CLI-style options"}`` for the providers that have a non-empty ``args`` in login.toml."""
     try:
-        login_data = _json.loads(_conf_text("login.json") or "{}")
+        login_data = tomllib.loads(_conf_text("login.toml"))
         return {
-            site_name: block["extra_args"]
+            site_name: block["args"]
             for site_name, block in login_data.items()
-            if isinstance(block, dict) and block.get("extra_args")
+            if isinstance(block, dict) and block.get("args")
         }
     except Exception:
-        logger.exception("login.json non leggibile per site_extra_args")
+        logger.exception("login.toml non leggibile per site_extra_args")
         return {}
 
 
@@ -126,6 +126,14 @@ def cinema_watchlist(request: HttpRequest) -> HttpResponse:
     })
 
 
+def _conf_section(filename: str, section: str) -> dict:
+    """One section of a TOML config file as a dict (``{}`` when the file or the section can't be read), for the page's forms."""
+    try:
+        return tomllib.loads(_conf_text(filename)).get(section) or {}
+    except tomllib.TOMLDecodeError:
+        return {}
+
+
 def _conf_text(filename: str) -> str:
     """Return the content of a config file as text, or an error message if it can't be read."""
     import os as _os
@@ -141,9 +149,8 @@ def _conf_text(filename: str) -> str:
 
 
 def cinema_system(request: HttpRequest) -> HttpResponse:
-    """System: show providers, disabled sites, services, and config content."""
-    import os
-
+    """System: show providers, hidden services, and config content."""
+    from VibraVid.services._base.site_loader import hidden_services
     from VibraVid.utils.upload.version import __version__
 
     from ._shared import get_site_extra_args_schema
@@ -161,14 +168,7 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
         except Exception:
             logger.exception("Impossibile leggere le opzioni CLI per '%s'", p["name"])
 
-    disabled = [
-        s.strip() for s in (os.environ.get("VIBRAVID_DISABLED_SITES") or "").split(",") if s.strip()
-    ]
-
-    services = [
-        {"name": "Bypasser", "detail": "Turnstile for Amazon Music",
-         "on": bool(os.environ.get("BYPASSER_URL"))},
-    ]
+    disabled = sorted(hidden_services())
 
     arr = {}
     try:
@@ -194,13 +194,13 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
         "providers": providers,
         "cli_option_providers": cli_option_providers,
         "disabled_sites": disabled,
-        "services": services,
         "uploaded_services": services_admin.removable_services(),
         "arr": arr,
         "queued": queued,
         "app_version": __version__,
-        "config_content": _conf_text("config.json"),
-        "login_content": _conf_text("login.json"),
+        "config_content": _conf_text("config.toml"),
+        "login_content": _conf_text("login.toml"),
+        "config_arr": _conf_section("config.toml", "ARR"),
         "site_extra_args": _site_extra_args_map(),
     })
 

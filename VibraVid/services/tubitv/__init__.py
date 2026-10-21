@@ -12,7 +12,7 @@ from VibraVid.utils.http_client import check_region_availability, create_client,
 from .client import get_bearer_token, tubi_credentials
 from .downloader import download_film, download_series
 
-indice = 8
+indice = 7
 _useFor = "Film_Serie"
 _region = ["US"]
 console = Console()
@@ -62,10 +62,7 @@ def title_search(query: str) -> int:
 
     tubi_email, tubi_password = tubi_credentials()
     if not tubi_email or not tubi_password:
-        console.print(
-            "[yellow]\nWarning: Tubi TV email/password are not set, search will return no results for this site.\n"
-            "[yellow]Set them in [cyan]Conf/login.json[/cyan] under [cyan]tubi.email[/cyan] and [cyan]tubi.password[/cyan]."
-        )
+        console.print("[yellow]\nWarning: Tubi TV email/password are not set, search will return no results for this site.\n")
         return 0
 
     try:

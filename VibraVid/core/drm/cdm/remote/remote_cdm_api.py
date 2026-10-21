@@ -49,7 +49,7 @@ class RemoteCdmApi:
         """
         Args:
             secret: Remote CDM API key.
-            host: API host (required -- provider-specific, set it in config.json).
+            host: API host (required -- provider-specific, set it in config).
             device_name: Widevine: ChromeCDM, L1, L2 or L3. PlayReady: SL2 or SL3.
             device_type: Optional, "PLAYREADY" forces PlayReady mode.
             service_name: Optional service tag sent to the API for key caching.
@@ -274,7 +274,7 @@ class RemoteCdmApi:
 
 def build_remote_cdm(cfg: dict, system: str):
     """
-    Build the remote CDM described by a `DRM.widevine` / `DRM.playready` config dict.
+    Build the remote CDM described by a `DRM.remote_cdm.<id>` config dict.
     """
     cfg = dict(cfg)
     backend = str(cfg.pop("type", "")).lower()

@@ -184,6 +184,7 @@ jobs:
                   --hidden-import=rich._unicode_data \
                   --collect-all rich \
                   --collect-all textual \
+                  --collect-all textual_image \
                   --hidden-import=unidecode \
                   --hidden-import=editorconfig \
                   --hidden-import=six \

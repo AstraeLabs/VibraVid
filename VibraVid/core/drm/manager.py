@@ -7,7 +7,7 @@ from typing import Any
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.setup import binary_paths, get_prd_path, get_wvd_path, resolve_service_cdm
+from VibraVid.setup import binary_paths, resolve_cdm
 from VibraVid.utils import config_manager
 from VibraVid.utils.vault import DEFAULT_VAULT_KEYS, build_named_vault, build_universal_vault, default_vault
 from VibraVid.utils.vault._url_utils import clean_license_url
@@ -66,46 +66,41 @@ class DRMManager:
         self,
         widevine_device_path: str = None,
         playready_device_path: str = None,
-        widevine_remote_cdm_api: list[str] = None,
-        playready_remote_cdm_api: list[str] = None,
-        prefer_remote_cdm: bool = True,
-        prefer_remote_widevine: bool | None = None,
-        prefer_remote_playready: bool | None = None,
+        widevine_remote_cdm_api: dict = None,
+        playready_remote_cdm_api: dict = None,
     ):
         """Initialize DRM Manager with CDM paths and database connections."""
         self.widevine_device_path = widevine_device_path
         self.playready_device_path = playready_device_path
         self.widevine_remote_cdm_api = widevine_remote_cdm_api
         self.playready_remote_cdm_api = playready_remote_cdm_api
-        self.prefer_remote_cdm = prefer_remote_cdm
-        self.prefer_remote_widevine = prefer_remote_widevine
-        self.prefer_remote_playready = prefer_remote_playready
+        self.widevine_cdm_origin: str | None = None  # why this CDM was picked, printed with the key request
+        self.playready_cdm_origin: str | None = None
+        self._cdm_site: str | None = None
+        self._cdm_auto = False  # True when built by for_site(): select_cdm() may swap the CDM
         self._vaults: list[object] = self._build_vaults()
 
     @classmethod
-    def for_site(cls, site_name: str | None) -> "DRMManager":
-        """
-        Build the manager for a service, honouring the "cdm" entry of that service in login.json.
-        """
-        chosen = resolve_service_cdm(site_name)
-        drm = config_manager.config
+    def for_site(cls, site_name: str | None, height: int | None = None) -> "DRMManager":
+        """Build the manager for a service, with the CDM chosen by the "cdm" setting (login.toml, then config.toml DRM)."""
+        manager = cls()
+        manager._cdm_site = site_name
+        manager._cdm_auto = True
+        manager.select_cdm(height)
+        return manager
 
-        def _prefer(remote: dict | None, local_path: str | None) -> bool | None:
-            if remote:
-                return True
-            if local_path:
-                return False
-            return None
+    def select_cdm(self, height: int | None) -> None:
+        """Re-pick the CDM for the tallest video about to be downloaded (``min_height`` / ``max_height`` rules in "cdm")."""
+        if not self._cdm_auto:
+            return
 
-        return cls(
-            chosen.wvd_path or get_wvd_path(),
-            chosen.prd_path or get_prd_path(),
-            chosen.widevine_remote or drm.get_dict("DRM", "widevine", default={}),
-            chosen.playready_remote or drm.get_dict("DRM", "playready", default={}),
-            drm.get_bool("DRM", "prefer_remote_cdm"),
-            prefer_remote_widevine=_prefer(chosen.widevine_remote, chosen.wvd_path),
-            prefer_remote_playready=_prefer(chosen.playready_remote, chosen.prd_path),
-        )
+        chosen = resolve_cdm(self._cdm_site, height)
+        self.widevine_device_path = chosen.wvd_path
+        self.playready_device_path = chosen.prd_path
+        self.widevine_remote_cdm_api = chosen.widevine_remote
+        self.playready_remote_cdm_api = chosen.playready_remote
+        self.widevine_cdm_origin = chosen.widevine_origin
+        self.playready_cdm_origin = chosen.playready_origin
 
     def _display_keys(
         self,
@@ -562,7 +557,7 @@ class DRMManager:
 
             logger.error(f"All {drm_type} extraction methods failed")
             console.print(f"\n[red]All extraction methods failed for {drm_type}")
-            console.print(f"[yellow]Please place CDM files (.wvd for Widevine, .prd for PlayReady) in: {binary_paths.get_binary_directory()}[/yellow]")
+            console.print(f"[yellow]Please place CDM files (.wvd for Widevine in wvd, .prd for PlayReady in prd) in: {binary_paths.get_cdm_directory()}[/yellow]")
         else:
             if manual_keys:
                 return KeysManager(manual_keys)
@@ -624,8 +619,8 @@ class DRMManager:
                 key=key,
                 license_data=license_data,
                 license_certificate=license_certificate,
-                prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_widevine is None else self.prefer_remote_widevine,
                 license_request_fn=license_request_fn,
+                cdm_origin=self.widevine_cdm_origin,
             )
         if drm_type == "playready":
             return get_playready_keys, dict(
@@ -634,8 +629,8 @@ class DRMManager:
                 headers=headers,
                 key=key,
                 license_data=license_data,
-                prefer_remote_cdm=self.prefer_remote_cdm if self.prefer_remote_playready is None else self.prefer_remote_playready,
                 license_request_fn=license_request_fn,
+                cdm_origin=self.playready_cdm_origin,
             )
         return (lambda *args, **kwargs: None), {}
 

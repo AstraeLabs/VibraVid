@@ -2,8 +2,11 @@
 
 import logging
 import os
+import re
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -19,6 +22,9 @@ from unidecode import unidecode
 msg = Prompt()
 console = Console()
 logger = logging.getLogger(__name__)
+
+_TRASH_SUFFIX = re.compile(r"\.trash-(\d+)-[0-9a-f]{8}$")
+_WIN_LONG_PATH = 246
 
 
 class OsManager:
@@ -126,11 +132,16 @@ class OsManager:
         if not path or not os.path.isdir(path):
             return
 
+        path = os.path.abspath(path)
         trash_path = f"{path}.trash-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        if self.system == "windows" and len(trash_path) >= _WIN_LONG_PATH:
+            logger.warning(f"fast_rmtree: {len(trash_path)}-character path is over the Windows limit, using the extended-length form: {trash_path!r}")
+
+        src, dst = self._extended_path(path), self._extended_path(trash_path)
         last_exc: OSError | None = None
         for attempt in range(5):
             try:
-                os.rename(path, trash_path)
+                os.rename(src, dst)
                 last_exc = None
                 break
             except OSError as exc:
@@ -140,22 +151,128 @@ class OsManager:
 
         if last_exc is not None:
             logger.warning(f"fast_rmtree: could not rename {path!r} aside ({last_exc}) after 5 attempts -- falling back to a direct (blocking) delete")
-            shutil.rmtree(path, ignore_errors=True)
-            if os.path.isdir(path):
+            if not self._rmtree_logged(src):
                 logger.warning(f"fast_rmtree: {path!r} still exists after cleanup -- a file inside it is likely locked by another process")
             return
 
-        self._delete_detached(trash_path)
+        self._delete_detached(dst)
+
+    def _extended_path(self, path: str) -> str:
+        """Windows extended-length form (``\\\\?\\``) of an absolute *path* that is too long for the regular API; unchanged elsewhere and for short paths."""
+        if self.system != "windows" or len(path) < _WIN_LONG_PATH or path.startswith("\\\\?\\"):
+            return path
+        if path.startswith("\\\\"):
+            return "\\\\?\\UNC\\" + path[2:]
+        return "\\\\?\\" + path
+
+    def _rmtree_logged(self, path: str) -> bool:
+        """Blocking ``rmtree`` that clears read-only flags and retries, and logs every file it could not delete. Returns True once *path* is gone."""
+        def _on_error(func, failed_path, exc) -> None:
+            err = exc[1] if isinstance(exc, tuple) else exc  # onerror passes exc_info, onexc the exception
+            if isinstance(err, FileNotFoundError):
+                return  # already removed (e.g. by a concurrent detached delete)
+
+            if isinstance(err, PermissionError):
+                try:
+                    if os.name != "nt":
+                        os.chmod(os.path.dirname(failed_path), stat.S_IRWXU)
+                    os.chmod(failed_path, stat.S_IRWXU if os.path.isdir(failed_path) else stat.S_IWRITE | stat.S_IREAD)
+                    func(failed_path)
+                    return
+                except FileNotFoundError:
+                    return
+                except OSError as retry_exc:
+                    err = retry_exc
+
+            logger.warning(f"fast_rmtree: could not delete {failed_path!r}: {err} (errno={getattr(err, 'errno', None)}, winerror={getattr(err, 'winerror', None)}) -- the file is read-only, locked by another process (antivirus, indexer, Explorer preview) or access is denied")
+
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=_on_error)
+        else:
+            shutil.rmtree(path, onerror=_on_error)
+        return not os.path.isdir(path)
+
+    def sweep_trash(self, parent_dir: str, min_age: float = 60.0) -> None:
+        """Delete ``*.trash-<pid>-<id>`` folders that an earlier run's detached delete left in *parent_dir* (blocking, with every failure logged). Never raises."""
+        try:
+            if not parent_dir or not os.path.isdir(parent_dir):
+                return
+
+            now = time.time()
+            for entry in os.scandir(parent_dir):
+                match = _TRASH_SUFFIX.search(entry.name)
+                # This process's own trash is already being deleted by its detached `rd` / `rm`
+                if not match or int(match.group(1)) == os.getpid() or not entry.is_dir(follow_symlinks=False):
+                    continue
+                if now - entry.stat().st_mtime < min_age:
+                    continue
+
+                logger.info(f"fast_rmtree: removing leftover {entry.path!r} from an earlier run")
+                if not self._rmtree_logged(entry.path):
+                    logger.warning(f"fast_rmtree: leftover {entry.path!r} could not be fully removed")
+        except Exception as exc:
+            logger.warning(f"fast_rmtree: sweep of {parent_dir!r} failed: {exc}")
+
+    def _in_kill_on_close_job(self) -> bool:
+        """True when this process sits in a Windows Job object that kills its processes on close and forbids breakaway: a detached child would die with us."""
+        if self.system != "windows":
+            return False
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _BasicLimits(ctypes.Structure):
+                _fields_ = [
+                    ("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD),
+                ]
+
+            class _ExtendedLimits(ctypes.Structure):
+                _fields_ = [
+                    ("BasicLimitInformation", _BasicLimits), ("IoInfo", ctypes.c_uint64 * 6),
+                    ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t),
+                ]
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+            kernel32.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+            kernel32.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p]
+
+            in_job = wintypes.BOOL()
+            if not kernel32.IsProcessInJob(kernel32.GetCurrentProcess(), None, ctypes.byref(in_job)) or not in_job.value:
+                return False
+
+            info = _ExtendedLimits()
+            # JobObjectExtendedLimitInformation = 9; a NULL job handle means "the job of the calling process"
+            if not kernel32.QueryInformationJobObject(None, 9, ctypes.byref(info), ctypes.sizeof(info), None):
+                return False
+
+            flags = info.BasicLimitInformation.LimitFlags
+            kill_on_close, breakaway_ok, silent_breakaway_ok = 0x2000, 0x800, 0x1000
+            return bool(flags & kill_on_close) and not flags & (breakaway_ok | silent_breakaway_ok)
+        except Exception:
+            return False
 
     def _delete_detached(self, path: str) -> None:
         """Delete *path* in a process detached from this one, so it survives this process exiting."""
         try:
             if self.system == "windows":
-                subprocess.Popen(
-                    ["cmd", "/c", "rd", "/s", "/q", path],
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                    close_fds=True,
-                )
+                # cwd is pinned: cmd.exe cannot start in a UNC directory and would fall back to C:\Windows
+                kwargs = {"cwd": os.environ.get("SystemRoot") or None, "close_fds": True}
+                cmd = ["cmd", "/c", "rd", "/s", "/q", path]
+                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+                if self._in_kill_on_close_job():
+                    logger.warning(f"fast_rmtree: running inside a Job object that kills child processes on exit -- the background delete of {path!r} may be interrupted")
+                try:
+                    # Leave a Job object that allows it, otherwise the "detached" delete dies with its parent
+                    subprocess.Popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kwargs)
+                except OSError:
+                    subprocess.Popen(cmd, creationflags=flags, **kwargs)  # the job forbids breakaway
             else:
                 subprocess.Popen(["rm", "-rf", path], start_new_session=True, close_fds=True)
         except OSError as exc:

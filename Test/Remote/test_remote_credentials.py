@@ -182,6 +182,7 @@ def test_overlay_does_not_leak_through_the_shared_cache(monkeypatch):
 
 def test_overlay_keeps_the_servers_provider_keys(monkeypatch):
     monkeypatch.setitem(config_manager.login._config_dict, "Provider", {"tmdb": "SERVER-TMDB"})
+    monkeypatch.delitem(config_manager.login._cache, "login.Provider.tmdb", raising=False)
 
     with scoped({}, "s"):
         assert config_manager.login.get("Provider", "tmdb") == "SERVER-TMDB"
@@ -1229,19 +1230,19 @@ def test_scratch_space_logs_and_normal_runs_can_still_write(tmp_path, base):
 # ── services without a GUI adapter are served generically ─────────────────────────────────────────────────────────
 
 class _LazyStub:
-    hide = False
+    pass
 
 
 def test_loaded_services_without_an_adapter_are_offered(monkeypatch):
     import VibraVid.services._base.site_loader as loader
 
-    monkeypatch.setattr(loader, "load_search_functions", lambda: {"pornhub_search": _LazyStub(), "appletv_search": _LazyStub(), "secret_search": types.SimpleNamespace(hide=True)})
+    monkeypatch.setattr(loader, "load_search_functions", lambda: {"pornhub_search": _LazyStub(), "appletv_search": _LazyStub()})
     monkeypatch.setattr(api_remote, "get_available_sites", lambda: ["appletv"])
     monkeypatch.undo()  # the fixtures' fake site list must not hide the real helper under test
-    monkeypatch.setattr(loader, "load_search_functions", lambda: {"pornhub_search": _LazyStub(), "appletv_search": _LazyStub(), "secret_search": types.SimpleNamespace(hide=True)})
+    monkeypatch.setattr(loader, "load_search_functions", lambda: {"pornhub_search": _LazyStub(), "appletv_search": _LazyStub()})
     monkeypatch.setattr(api_remote, "get_available_sites", lambda: ["appletv"])
 
-    assert api_remote._fallback_sites() == ["pornhub"]  # appletv has its adapter, the hidden one stays hidden
+    assert api_remote._fallback_sites() == ["pornhub"]  # appletv has its adapter
 
 
 def test_the_generic_adapter_searches_and_has_no_series(monkeypatch):

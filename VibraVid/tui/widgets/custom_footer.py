@@ -1,7 +1,7 @@
 # 30.07.26
 # by @ManoloZocco
 
-"""Custom bracketed footer widget displaying interactive shortcut labels."""
+"""Custom bracketed footer widget displaying interactive shortcut labels, with the shortcuts of the current screen above them."""
 
 import logging
 
@@ -13,6 +13,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from VibraVid.tui.i18n import t
+from VibraVid.tui.palette import ACCENT, ACCENT_SOFT, FG_MUTED
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +31,26 @@ FOOTER_ITEMS: list[tuple[str, str, str, int]] = [
     ("foot-back", "ESC", "nav_back", 2),
     ("foot-quit", "Ctrl+Q", "nav_quit", 0),
 ]
+HINT_GAP = 3
 
 
 class CustomFooter(Widget):
-    """Custom footer displaying bracketed shortcut labels that highlight on hover and respond to mouse clicks."""
+    """Bracketed navigation labels that highlight on hover and respond to mouse clicks."""
 
     DEFAULT_CSS = """
     CustomFooter {
         dock: bottom;
-        height: 1;
-        background: #1f2335;
-        color: #c0caf5;
+        height: auto;
+        background: #121212;
+        color: #d4d4d8;
         padding: 0 1;
         border: none;
+    }
+    #foot-hints {
+        height: 1;
+        width: 100%;
+        content-align: center middle;
+        color: #71717a;
     }
     #custom-footer-bar {
         height: 1;
@@ -54,28 +62,49 @@ class CustomFooter(Widget):
         height: 1;
         padding: 0 1;
         margin: 0;
-        color: #7aa2f7;
+        color: #d4d4d8;
         background: transparent;
     }
     .foot-item:hover {
         color: #ffffff;
-        background: #2f3549;
+        background: #2b2745;
         text-style: bold;
     }
     """
 
+    def __init__(self, hints: list[tuple[str, str]] | None = None) -> None:
+        super().__init__()
+        self._hints = list(hints or [])
+
     def compose(self) -> ComposeResult:
+        if self._hints:
+            yield Static(self._hints_text(len(self._hints)), id="foot-hints")
         with Horizontal(id="custom-footer-bar"):
             for item_id, key, label_key, _ in FOOTER_ITEMS:
                 yield Static(
-                    f"[bold #7dcfff]\\[{key}][/bold #7dcfff] {t(label_key)}",
+                    f"[bold {ACCENT_SOFT}]\\[{key}][/] {t(label_key)}",
                     id=item_id,
                     classes="foot-item",
                 )
 
+    def _hints_text(self, count: int) -> str:
+        return "   ".join(f"[{ACCENT}]{key}[/] [{FG_MUTED}]{label}[/]" for key, label in self._hints[:count])
+
     def _item_width(self, key: str, label_key: str) -> int:
         """Rendered width of one entry: its plain text plus the .foot-item padding."""
         return cell_len(f"[{key}] {t(label_key)}") + 2
+
+    def _fit_hints(self, available: int) -> None:
+        """Show as many hints as fit, in order: the last ones would otherwise be cut off at the edge."""
+        if not self._hints:
+            return
+        used, count = 0, 0
+        for key, label in self._hints:
+            used += cell_len(f"{key} {label}") + (HINT_GAP if count else 0)
+            if used > available:
+                break
+            count += 1
+        self.query_one("#foot-hints", Static).update(self._hints_text(max(count, 1)))
 
     def on_resize(self, event: events.Resize) -> None:
         """Hide the least important entries when they no longer fit.
@@ -84,6 +113,7 @@ class CustomFooter(Widget):
         entries are laid out past the right edge and become invisible, quit included.
         """
         available = max(0, event.size.width - self.styles.gutter.width)
+        self._fit_hints(available)
         widths = {item_id: self._item_width(key, label_key) for item_id, key, label_key, _ in FOOTER_ITEMS}
         hidden: set[str] = set()
 

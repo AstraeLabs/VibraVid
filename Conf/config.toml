@@ -1,0 +1,230 @@
+# VibraVid - main configuration (config.toml)
+# Lines starting with # are comments. Change the values, not the key names.
+
+[DEFAULT]
+# DEBUG, INFO, WARNING or ERROR
+log_level = "INFO"
+close_console = true
+show_message = true
+# Download the updated list of site domains online
+fetch_domain_online = true
+disable_scraper_cache = false
+# Service folders to load. Windows paths go in single quotes: ["default", 'C:\more_service']
+imp_service = ["default"]
+# Services to switch off completely (CLI, TUI and GUI), by folder name: ["aurora", "tubitv"]
+hidden_services = []
+# Empty = automatic
+installation = ""
+# In order of preference: tmdb, imdb, tvdb (comma separated)
+metadata_provider = "tmdb,imdb"
+tui_images = "auto"
+
+
+[OUTPUT]
+root_path = "Video"
+movie_folder_name = "Movie"
+serie_folder_name = "Serie"
+anime_folder_name = "Anime"
+music_folder_name = "Music"
+live_folder_name = "Live"
+movie_format = "%(title_name) (%(title_year))/%(title_name) (%(title_year)) [%(quality)]"
+episode_format = "%(series_name)/S%(season:02d)/%(episode_name) S%(season:02d)E%(episode:02d) [%(quality)]"
+song_format = "%(album)/%(track_number:02d). %(title)"
+# Tag to write into files
+tag_format = "[VibraVid]"
+
+
+[DOWNLOAD]
+# Preview/metadata only, nothing is downloaded
+skip_download = false
+# Pick the best quality without asking
+auto_select = true
+# Faster on some sites
+use_curl_cffi_segments = false
+delay_after_download = 0
+thread_count = 10
+# MB/s, 0 = unlimited (10 Mbps is about 1.25 MB/s)
+max_speed_mbps = 0
+# Seconds between segments, plus a random jitter (helps against blocks)
+segment_delay_seconds = 0
+segment_delay_jitter_seconds = 0
+subtitle_resolve_workers = 4
+# "best", "worst" or a number
+select_video = "best"
+# Examples:
+#   "ita|eng"          languages in order of preference
+#   "1ita|2eng"        numbered slots, exclusive priority (skips the download if none is found)
+#   "ita|best"         language with fallback to the best track
+#   "ita,MP4A"         language + codec
+#   "b=64-192:f=best"  bitrate range (kbps)
+#   "best", "worst", "all", "default", "non-default", "false" (no audio)
+select_audio = "ita|eng"
+# Examples:
+#   "ita|eng"            languages in order of preference
+#   "ita_forced|eng_cc"  language with flag (forced, cc, sdh)
+#   "all", "default", "non-default", "false" (no subtitles)
+select_subtitle = "ita|eng"
+extract_embedded_cc = false
+# Live streams: stop after this many empty polls
+live_max_empty_polls = 8
+# Links that expire during the download are refreshed up to this many rounds
+max_token_refresh_rounds = 10
+token_refresh_backoff_seconds = 4.0
+token_refresh_stall_rounds = 3
+embed_poster = false
+# Write .nfo and poster next to the video (Jellyfin/Emby/Kodi)
+write_sidecars = false
+cleanup_tmp_folder = true
+
+
+[CODEC]
+# Detect Dolby Vision and handle the compatible layer
+dv_auto = true
+
+
+[PROCESS]
+engine = "ffmpeg"
+# Needs ffmpeg with hardware support
+use_gpu = false
+# ffmpeg arguments
+param_video = [
+    "-c:v",
+    "libx265",
+    "-crf",
+    "28",
+    "-preset",
+    "medium",
+]
+param_audio = [
+    "-c:a",
+    "libopus",
+    "-b:a",
+    "128k",
+]
+param_song = []
+param_final = [
+    "-c",
+    "copy",
+]
+# Track order, empty = automatic
+audio_order = []
+subtitle_order = []
+subtitle_disposition_language = "it-it_forced"
+merge_audio = true
+merge_subtitle = true
+# "auto", "on" or "off"
+force_subtitle = "auto"
+mux_dtsx = false
+# mkv, mp4, ...
+extension = "mkv"
+
+
+[REQUESTS]
+timeout = 15
+max_retry = 4
+# Check SSL certificates (recommended)
+verify = true
+use_proxy = false
+# "scrap+down" (scraping and download) or only part of it
+proxy_scope = "scrap+down"
+
+[REQUESTS.proxy]
+http = "http://localhost:8888"
+https = "http://localhost:8888"
+
+
+[DRM]
+use_cdm = true
+# Default CDM: "search" (first .wvd/.prd in the binary folder), a file name, a remote id or a list (see docs)
+cdm = "search"
+
+# Skip the vault and ask the CDM for a fresh key
+bypass_vault_cache = false
+log_engine_output = false
+
+# Vaults (key databases) are queried in the order they are declared: add as many as you want.
+# protocol: "custom" (default), "api", "json" or "query". Auto-detected if omitted.
+[DRM.vault.default]
+url = "https://drm-db.server66.workers.dev"
+token = ""
+
+# Extra vault (remove the # to enable):
+# [DRM.vault.myvault]
+# url = "https://drm.example.com"
+# token = "..."
+# protocol = "custom"
+
+# Remote CDMs with an id, chosen with cdm = "<id>" here or in login.toml.
+# Same fields as a pywidevine / pyplayready remote CDM, or type = "custom_api_1" for a hosted CDM.
+# [DRM.remote_cdm.my_widevine]
+# type = "custom_api_1"
+# host = "https://cdm.example.com"
+# secret = "..."
+
+
+[HOOKS]
+pre_run = []
+pre_download = []
+post_download = []
+post_run = []
+
+
+[ARR]
+enabled = false
+download_italian_anime_default = true
+anime_id_crosswalk_enabled = true
+# List of fallback providers in priority order
+provider_fallback = [
+    "streamingcommunity",
+    "animeunity",
+    "discoveryplus",
+    "aurora",
+    "mediasetinfinity",
+    "raiplay",
+    "animeworld",
+    "crunchyroll",
+    "primevideo",
+    "tubitv",
+]
+enable_polling = false
+enable_seerr_webhook = false
+enable_sonarr_webhook = false
+enable_radarr_webhook = false
+# Seconds (300 = 5 minutes)
+polling_interval = 300
+# Seconds (21600 = 6 hours)
+full_resync_interval = 21600
+# Simultaneous downloads started by ARR
+max_concurrent_downloads = 2
+webhook_priority_enabled = true
+# Seconds
+native_webhook_priority_window_seconds = 120
+seerr_fallback_delay_seconds = 20
+
+# Empty = no path mapping
+[ARR.path_mapping]
+
+[ARR.sonarr]
+url = ""
+api_key = ""
+
+[ARR.radarr]
+url = ""
+api_key = ""
+
+[ARR.seerr]
+webhook_secret = ""
+
+[ARR.sonarr_webhook]
+webhook_secret = ""
+
+[ARR.radarr_webhook]
+webhook_secret = ""
+
+
+[TELEGRAM]
+enabled = false
+# Address used for the links in notifications
+gui_url = "http://vibravid:8000"
+# Maximum results shown in a search
+max_results = 8
