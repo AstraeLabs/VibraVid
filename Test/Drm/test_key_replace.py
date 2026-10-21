@@ -22,6 +22,7 @@ KID = "0000000005b7aee80000000000000000"
 BAD = "bb6fd0935654c59d83a77963e36275b2"
 GOOD = "bb6fd0935654c59d83a779b3e36275b9"
 LIC = "https://netflix.com/license"
+LIC_HOST = "https://netflix.com"
 PSSH = "AAADzHBzc2gAAAAAmgTweZhAQoarkuZb4IhflQ"
 
 
@@ -69,8 +70,17 @@ def test_replace_key_payload_and_result():
 
     url, body = vault.session.posts[0]
     assert url == "https://vault.example/save-keys"
-    assert body["license_url"] == LIC and body["pssh"] == PSSH
+    assert body["license_url"] == LIC_HOST and body["pssh"] == PSSH
     assert (body["kid"], body["key"], body["replaces"]) == (KID, GOOD, BAD)
+
+
+def test_default_vault_sends_no_label():
+    vault = make_default_vault({"added": 1, "success": True})
+    assert vault.set_keys([f"{KID}:{GOOD}"], LIC, PSSH, {KID: "some label"}) == 1
+
+    url, body = vault.session.posts[0]
+    assert url == "https://vault.example/save-keys"
+    assert body["keys"] == [{"kid": KID, "key": GOOD}]
 
 
 @pytest.mark.parametrize(("reply", "expected"), [({"added": 1}, True), ({"unchanged": 1}, True), ({"replaced": 0, "locked": 1}, False), (None, False)])
@@ -105,7 +115,8 @@ def test_origin_ignored_when_the_key_differs():
     vault = make_default_vault({"warnings_recorded": 1})
     vault._flag_keys([{"kid": KID, "key": GOOD, "license_url": "https://other.example/lic", "pssh": "OTHERPSSH", "warning_count": 0}], LIC)
     vault.report_wrong_key(KID, BAD, LIC, PSSH)
-    assert vault.session.posts[0][1]["license_url"] == LIC and vault.session.posts[0][1]["pssh"] == PSSH
+    params = vault.session.posts[0][1]
+    assert params["license_url"] == LIC_HOST and params["pssh"] == PSSH
 
 
 def test_set_keys_warns_when_locked(caplog):

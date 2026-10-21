@@ -122,7 +122,6 @@ def _resolve_url_to_item(url: str):
         name = attrs.get("name", content_id)
         premiere_date = attrs.get("premiereDate", "")
         year = premiere_date.split("-")[0] if premiere_date else "9999"
-        console.print(f"[cyan]Detected series from URL: [green]{name}")
         return {"id": content_id, "name": name, "type": "tv", "url": url, "year": year}
 
     except Exception as e:

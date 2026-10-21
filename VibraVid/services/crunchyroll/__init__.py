@@ -48,7 +48,6 @@ def _resolve_url_to_item(url: str):
         console.print(f"[red]Error resolving Crunchyroll URL: {e}")
         return None
 
-    console.print(f"[cyan]Detected series from URL: [green]{name}")
     return {"id": series_id, "name": name, "type": "tv", "url": f"https://www.crunchyroll.com/series/{series_id}", "image": None}
 
 

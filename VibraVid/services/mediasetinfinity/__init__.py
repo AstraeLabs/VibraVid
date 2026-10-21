@@ -72,7 +72,6 @@ def _resolve_url_to_item(url: str):
         entry = get_metadata_by_guid(serie_id, "mediaset-prod-all-series-v2")
         name = entry.get("title") if entry else serie_id
         year = str(entry.get("year")) if entry and entry.get("year") else "9999"
-        console.print(f"[cyan]Detected series from URL: [green]{name}")
         return {"id": serie_id, "name": name, "type": "tv", "url": url, "year": year}
 
     film_match = _FILM_ID_RE.search(url)

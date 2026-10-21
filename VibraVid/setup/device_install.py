@@ -20,7 +20,7 @@ CLI_ORIGIN = "--cdm"
 
 class DeviceSearcher:
     def __init__(self):
-        self.base_dir = binary_paths.ensure_binary_directory()
+        self.base_dir = binary_paths.get_binary_directory()
         self.tools_dir = binary_paths.get_tools_directory()
         self.cdm_dir = binary_paths.get_cdm_directory()
         self.prd_dir = binary_paths.get_prd_directory()

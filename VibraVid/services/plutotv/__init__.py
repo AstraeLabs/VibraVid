@@ -40,7 +40,6 @@ def _resolve_url_to_item(url: str) -> dict | None:
     show_match = _SHOW_URL_RE.search(text)
     if show_match:
         slug = show_match.group("slug").rstrip("/")
-        console.print(f"[cyan]Detected series from URL: [green]{slug}")
         return {"id": slug, "name": slug, "type": "tv", "url": text, "year": None, "slug": slug}
 
     movie_match = _MOVIE_URL_RE.search(text)

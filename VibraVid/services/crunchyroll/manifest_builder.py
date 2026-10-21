@@ -18,7 +18,7 @@ class _KeyResolver:
     def __init__(self, license_url: str):
         self._dl = DASH_Downloader(license_url=license_url)
 
-    def resolve(self, mpd_url: str, headers: dict, license_headers: dict) -> tuple[list[Stream], list[str]]:
+    def resolve(self, mpd_url: str, headers: dict, license_headers: dict, license_request_fn=None) -> tuple[list[Stream], list[str]]:
         """Parse *mpd_url* and return (streams, ["kid:key", ...]). Empty keys if unprotected/unresolved."""
         parser = DashParser(mpd_url, headers=headers)
         if not parser.fetch_manifest():
@@ -36,6 +36,7 @@ class _KeyResolver:
             license_certificate=self._dl.license_certificate,
             headers=license_headers,
             key=None,
+            license_request_fn=license_request_fn,
         ) if drm_psshs[DRMType.WIDEVINE] else None
 
         return streams, list(keys.get_keys_list()) if keys else []
@@ -47,6 +48,22 @@ def _best(streams: list[Stream], stype: str) -> Stream | None:
     if not candidates:
         return None
     return max(candidates, key=lambda s: (s.avg_bitrate or s.bitrate or 0))
+
+
+def _videos(streams: list[Stream]) -> list[Stream]:
+    """Video renditions of *streams*, best first."""
+    return sorted((s for s in streams if s.type == "video"), key=lambda s: (s.avg_bitrate or s.bitrate or 0), reverse=True)
+
+
+def _video_track_id(stream: Stream, existing: list[dict]) -> str:
+    """Unique, readable id such as ``video-1080p-4861k`` (the manifest parser keys tracks by id)."""
+    base = f"video-{stream.height or 0}p-{(stream.avg_bitrate or stream.bitrate or 0) // 1000}k"
+    taken = {t["id"] for t in existing}
+    candidate, n = base, 2
+    while candidate in taken:
+        candidate = f"{base}-{n}"
+        n += 1
+    return candidate
 
 
 def _serialize_media_track(stream: Stream, track_id: str) -> dict:
@@ -127,8 +144,13 @@ def build_unified_manifest(
     subtitles: list[dict],
     license_url: str,
     base_url: str = "",
+    main_content_id: str | None = None,
+    license_request_factory=None,
 ) -> tuple[str, list[str]] | tuple[None, None]:
-    """Build one ``vibravid_manifest`` JSON covering the main-locale video"""
+    """Build a single JSON manifest containing all video/audio/subtitle tracks, and a list of KID:key strings for the license request."""
+    def _license_fn(content_id):
+        return license_request_factory(content_id) if license_request_factory and content_id else None
+
     resolver = _KeyResolver(license_url)
     merged_keys: dict[str, str] = {}
     tracks: list[dict] = []
@@ -138,15 +160,15 @@ def build_unified_manifest(
             kid = entry.split(":", 1)[0].strip().lower()
             merged_keys.setdefault(kid, entry)
 
-    main_streams, main_keys = resolver.resolve(main_mpd_url, main_mpd_headers, main_license_headers)
+    main_streams, main_keys = resolver.resolve(main_mpd_url, main_mpd_headers, main_license_headers, _license_fn(main_content_id))
     if not main_streams:
         console.print(f"[red]Could not resolve main locale {main_locale}, aborting manifest build.")
         return None, None
     _merge(main_keys)
 
-    video = _best(main_streams, "video")
-    if video is not None:
-        tracks.append(_serialize_media_track(video, "video"))
+    # Every rendition goes in, so select_video / --select-video can pick among them (the selector falls back to the nearest one)
+    for video in _videos(main_streams):
+        tracks.append(_serialize_media_track(video, _video_track_id(video, tracks)))
 
     main_audio = _best(main_streams, "audio")
     if main_audio is not None:
@@ -157,7 +179,7 @@ def build_unified_manifest(
         locale = spec.get("locale")
         console.print(f"[dim]Resolving audio ({locale}) ...")
         try:
-            streams, keys = resolver.resolve(spec.get("mpd_url"), spec.get("headers"), spec.get("license_headers"))
+            streams, keys = resolver.resolve(spec.get("mpd_url"), spec.get("headers"), spec.get("license_headers"), _license_fn(spec.get("content_id")))
         except Exception as e:
             console.print(f"[yellow]Could not resolve audio {locale}: {e}")
             continue

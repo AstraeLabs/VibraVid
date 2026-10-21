@@ -122,6 +122,14 @@ def parse_select_audio_filter(select_audio: str) -> list:
     return groups
 
 
+def _make_license_request_fn(client: CrunchyrollClient, content_id: str):
+    """``license_request_fn`` that gets the license through a playback session opened just for it."""
+    def license_request_fn(challenge: bytes, item: dict) -> bytes:
+        return client.request_license(content_id, challenge, CR_LICENSE_URL)
+
+    return license_request_fn
+
+
 def _build_license_headers(base_headers: dict, content_id: str, mpd_url: str, fallback_token: str) -> dict:
     """Build Widevine license request headers."""
     query_params = parse_qs(urlparse(mpd_url).query)
@@ -295,6 +303,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
             extra_locales.append(
                 {
                     "locale": locale,
+                    "content_id": guid,
                     "mpd_url": ex_mpd_url,
                     "headers": ex_hdrs,
                     "license_headers": ex_license_hdrs,
@@ -316,6 +325,8 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         extra_locales=extra_locales,
         subtitles=all_subtitles,
         license_url=CR_LICENSE_URL,
+        main_content_id=main_id,
+        license_request_factory=lambda content_id: _make_license_request_fn(client, content_id),
     )
 
     if not manifest_json:

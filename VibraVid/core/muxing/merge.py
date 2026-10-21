@@ -31,6 +31,9 @@ from .helper.audio import (
     has_unsupported_ffmpeg_audio_codec,
 )
 from .helper.chapters import (
+    clamp_chapters as _clamp_chapters,
+)
+from .helper.chapters import (
     dedupe_chapters as _dedupe_chapters,
 )
 from .helper.chapters import (
@@ -44,6 +47,11 @@ from .helper.chapters import (
 )
 from .helper.chapters import (
     write_ogm_chapters as _write_ogm_chapters,
+)
+from .helper.font_embed import (
+    collect_font_attachments,
+    ffmpeg_attach_args,
+    mkvmerge_attach_args,
 )
 from .helper.sub import (
     SubtitleDispositionInfo,
@@ -422,7 +430,8 @@ def inject_chapters(file_path: str, chapters: list | None = None, temp_dir: str 
     if not chapters:
         return file_path, {}
 
-    chapters = _sort_chapters(chapters)
+    total_duration = get_video_duration(file_path)
+    chapters = _sort_chapters(_clamp_chapters(chapters, total_duration))
     if chapters[0]["seconds"] > 0:
         chapters = [{"name": "Intro", "seconds": 0}] + chapters
 
@@ -440,11 +449,10 @@ def inject_chapters(file_path: str, chapters: list | None = None, temp_dir: str 
         chapter_file = _write_ogm_chapters(chapters)
         cmd = [get_mkvmerge_path(), "-o", tmp_out, "--chapters", chapter_file, file_path]
         logger.info(f"Running chapter injection (mkvmerge) command: {' '.join(cmd)}")
-        total_duration = get_video_duration(file_path)
         print("")
         result_json = capture_ffmpeg_real_time(cmd, "[yellow]MKVMERGE [cyan]Add chapters", total_duration)
     else:
-        chapter_file = _write_ffmetadata_chapters(chapters)
+        chapter_file = _write_ffmetadata_chapters(chapters, total_duration)
         ffmpeg_cmd = [get_ffmpeg_path()]
         if is_mpegts_file(file_path):
             ffmpeg_cmd += ["-f", "mpegts"]
@@ -467,7 +475,6 @@ def inject_chapters(file_path: str, chapters: list | None = None, temp_dir: str 
         ]
 
         logger.info(f"Running chapter injection (ffmpeg) command: {' '.join(ffmpeg_cmd)}")
-        total_duration = get_video_duration(file_path)
         result_json = capture_ffmpeg_real_time(ffmpeg_cmd, "[yellow]FFMPEG [cyan]Add chapters", total_duration)
         if context_tracker.should_print:
             print()
@@ -555,15 +562,17 @@ def embed_poster(file_path: str, image_url: str | None = None):
             print("")
             result_json = capture_ffmpeg_real_time(cmd, "[yellow]MKVMERGE [cyan]Embed poster", total_duration)
         else:
+            # `-map 0` keeps the attachments already in the file (embedded fonts): tag only the new cover stream, never all `t` streams
+            existing_attachments = sum(1 for s in (get_stream_codecs(file_path) or []) if s.get("codec_type") == "attachment")
             cmd = [
                 get_ffmpeg_path(),
                 "-i",
                 file_path,
                 "-attach",
                 tmp_cover_path,
-                "-metadata:s:t",
+                f"-metadata:s:t:{existing_attachments}",
                 "mimetype=image/jpeg",
-                "-metadata:s:t",
+                f"-metadata:s:t:{existing_attachments}",
                 "filename=cover.jpg",
                 "-map",
                 "0",
@@ -791,7 +800,7 @@ def join_media(
         subtitle_tracks = _prepare_subtitle_tracks(video_path, subtitle_tracks, limit_duration_diff)
 
     if chapters:
-        chapters = _dedupe_chapters(_sort_chapters(chapters))
+        chapters = _dedupe_chapters(_sort_chapters(_clamp_chapters(chapters, get_video_duration(video_path))))
         if chapters[0]["seconds"] > 0:
             chapters = [{"name": "Intro", "seconds": 0}] + chapters
         _persist_chapters_file(chapters, os.path.dirname(video_path))
@@ -947,7 +956,7 @@ def _join_media_ffmpeg(
     chapter_file = None
     chapter_input_idx = None
     if chapters:
-        chapter_file = _write_ffmetadata_chapters(chapters)
+        chapter_file = _write_ffmetadata_chapters(chapters, get_video_duration(video_path))
         chapter_input_idx = 1 + len(audio_tracks) + len(subtitle_tracks)
         ffmpeg_cmd += ["-f", "ffmetadata", "-i", chapter_file]
 
@@ -978,13 +987,7 @@ def _join_media_ffmpeg(
         # First (highest-priority) audio track is default; others reset to 0
         ffmpeg_cmd.extend([f"-disposition:a:{i}", "default" if i == 0 else "0"])
 
-    if output_ext == ".mp4":
-        subtitle_codec = "mov_text"
-    elif output_ext == ".mkv":
-        subtitle_codec = "srt"
-    else:
-        subtitle_codec = "copy"
-
+    subtitle_codec_args: list[str] = []
     _disposition_config_lang = (SUBTITLE_DISPOSITION_LANGUAGE or "").lower().strip()
     for idx, subtitle in enumerate(subtitle_tracks):
         sub_path = subtitle["path"]
@@ -1000,16 +1003,16 @@ def _join_media_ffmpeg(
             console.print(f"[yellow]      Setting disposition: [red]{subtitle.get('language')}")
 
         if output_ext == ".mp4":
-            ffmpeg_cmd += [f"-c:s:{idx}", "mov_text"]
+            subtitle_codec_args += [f"-c:s:{idx}", "mov_text"]
         elif output_ext == ".mkv":
             if sub_ext in ("srt", "vtt"):
-                ffmpeg_cmd += [f"-c:s:{idx}", "srt"]
+                subtitle_codec_args += [f"-c:s:{idx}", "srt"]
             elif sub_ext in ("ass", "ssa"):
-                ffmpeg_cmd += [f"-c:s:{idx}", "ass"]
+                subtitle_codec_args += [f"-c:s:{idx}", "ass"]
             else:
-                ffmpeg_cmd += [f"-c:s:{idx}", "copy"]
+                subtitle_codec_args += [f"-c:s:{idx}", "copy"]
         else:
-            ffmpeg_cmd += [f"-c:s:{idx}", "copy"]
+            subtitle_codec_args += [f"-c:s:{idx}", "copy"]
 
         ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"title={lang_display}"]
         ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"language={lang_iso}"]
@@ -1025,7 +1028,7 @@ def _join_media_ffmpeg(
             cc_lang_iso = resolve_iso639_2(cc_base)
             cc_title = f"{cc_base}_cc"
             console.print(f"[yellow]    - [cyan]Subtitle lang [red]{cc_title} [cyan](embedded {cc['codec_name']})")
-            ffmpeg_cmd += [f"-c:s:{cc_idx}", "mov_text"]
+            subtitle_codec_args += [f"-c:s:{cc_idx}", "mov_text"]
             ffmpeg_cmd += [f"-metadata:s:s:{cc_idx}", f"title={cc_title}"]
             ffmpeg_cmd += [f"-metadata:s:s:{cc_idx}", f"language={cc_lang_iso}"]
             ffmpeg_cmd += [f"-metadata:s:s:{cc_idx}", f"handler_name={cc_title}"]
@@ -1037,8 +1040,7 @@ def _join_media_ffmpeg(
             console.print(f"[yellow]    - [red]{_format_timestamp(chapter['seconds'])}[cyan]: [red]{chapter.get('name', '')}")
 
     add_encoding_params(ffmpeg_cmd)
-    if subtitle_tracks:
-        ffmpeg_cmd.extend(["-c:s", subtitle_codec])
+    ffmpeg_cmd.extend(subtitle_codec_args)
     _maybe_tag_hevc_for_mkv(ffmpeg_cmd, video_path, out_path, _is_video_copied())
 
     if use_shortest:
@@ -1066,6 +1068,8 @@ def _join_media_ffmpeg(
             SUBTITLE_DISPOSITION_LANGUAGE,
         )
     )
+
+    ffmpeg_cmd.extend(ffmpeg_attach_args(collect_font_attachments([s["path"] for s in subtitle_tracks], out_path)))
 
     ffmpeg_cmd.extend(_build_global_metadata_flags())
     if chapter_input_idx is not None:
@@ -1159,6 +1163,8 @@ def _join_media_mkvmerge(
         cmd += _mkvmerge_add_track(
             "subtitle", sub_path, lang_iso, lang_display, default=is_default, forced=is_forced, hearing_impaired=is_hi
         )
+
+    cmd += mkvmerge_attach_args(collect_font_attachments([s["path"] for s in subtitle_tracks], out_path))
 
     if chapters:
         logger.info(f"Adding {len(chapters)} chapter(s) inline...")

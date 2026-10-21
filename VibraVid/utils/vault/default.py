@@ -117,16 +117,7 @@ class Vault_di_default(BaseVault):
                 continue
 
             kid, key = key_str.split(":", 1)
-            kid_clean = kid.strip()
-            kid_norm = kid_clean.lower().replace("-", "")
-            entry: dict = {"kid": kid_clean, "key": key.strip()}
-
-            if kid_to_label:
-                label = kid_to_label.get(kid_norm)
-                if label:
-                    entry["label"] = label
-
-            keys_payload.append(entry)
+            keys_payload.append({"kid": kid.strip(), "key": key.strip()})
 
         if not keys_payload:
             return 0
