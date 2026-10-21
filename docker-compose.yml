@@ -1,16 +1,4 @@
 services:
-  bypasser:
-    profiles: ["bypasser"]
-    build:
-      context: ./docker/bypasser
-    container_name: ${BYPASSER_CONTAINER_NAME:-bypasser}
-    shm_size: "1gb"
-    ports:
-      - "8192:8192"
-    networks:
-      - vibravid_network
-    restart: unless-stopped
-
   vibravid:
     image: ghcr.io/astraelabs/vibravid:${VIBRAVID_TAG:-latest}
     build:
@@ -27,12 +15,6 @@ services:
       - 8.8.8.8
     networks:
       - vibravid_network
-
-    ### Service dependencies
-    depends_on:
-      bypasser:
-        condition: service_started
-        required: false
 
     ### Volumes - Persistent Data
     volumes:
@@ -80,9 +62,6 @@ services:
       ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1,vibravid}"
       CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
 
-      # ── Turnstile solver sidecar ──
-      BYPASSER_URL: "http://bypasser:8192"
-      
       # Uncomment for private network deployment (behind reverse proxy)
       # USE_X_FORWARDED_HOST: "true"
       # SECURE_PROXY_SSL_HEADER_ENABLED: "true"
@@ -91,6 +70,9 @@ services:
 
       # Optional: Watchlist Auto-Download Interval (seconds)
       # WATCHLIST_AUTO_INTERVAL_SECONDS: "14400"
+
+      # Optional: services to switch off (comma-separated folder names), added to hidden_services in config.toml
+      # VIBRAVID_HIDDEN_SITES: "${VIBRAVID_HIDDEN_SITES:-}"
 
       # ── ARR Integration (Sonarr / Radarr / Overseerr) ──
       TMDB_API_KEY: "${TMDB_API_KEY:-}"

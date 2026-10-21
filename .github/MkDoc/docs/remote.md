@@ -83,8 +83,8 @@ A service works unchanged if it reads its login when needed (`config_manager.log
 A service's own login runs on the server while the account stays with you:
 
 ```bash
-python manual.py --server home -i amazon_music --login tv
-python manual.py --server home -i amazon_music --logout
+python manual.py --server home -i <service> --login
+python manual.py --server home -i <service> --logout
 ```
 
 * Output (pairing link and code, progress) appears in your terminal; links are not opened on the server.

@@ -11,7 +11,7 @@ from VibraVid.utils import TVShowManager
 from .downloader import download_film, download_series
 from .scrapper import search_guardoseries
 
-indice = 21
+indice = 16
 _useFor = "Film_Serie"
 msg = Prompt()
 console = Console()

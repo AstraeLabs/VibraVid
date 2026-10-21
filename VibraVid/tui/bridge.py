@@ -46,7 +46,6 @@ def list_sites(refresh: bool = False) -> list[SiteInfo]:
             source=func.source,
         )
         for func in search_functions.values()
-        if not getattr(func, "hide", False)
     ]
     sites.sort(key=lambda s: (s.indice, s.name))
     logger.debug("TUI bridge loaded %d sites", len(sites))

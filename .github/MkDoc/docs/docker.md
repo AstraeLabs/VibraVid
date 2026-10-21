@@ -30,22 +30,12 @@ Key variables (full list in `.env.example`):
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Comma-separated hostnames Django accepts |
 | `CSRF_TRUSTED_ORIGINS` | `http://localhost:8000,...` | Origins for CSRF validation |
 | `PUID` / `PGID` | unset | User/group ID the container process runs as — set these to your host user's `id -u`/`id -g` so downloaded files aren't owned by root (see the [NAS guide](nas.md) for the full walkthrough) |
+| `VIBRAVID_HIDDEN_SITES` | unset | Comma-separated service folder names to switch off (CLI, TUI and GUI), added to `hidden_services` in `config.toml` (see [Configuration](configuration.md#default)). Uncomment it in `docker-compose.yml` |
 | `WATCHLIST_AUTO_INTERVAL_SECONDS` | `14400` (4h) | Initial interval (min 900) of the watchlist auto-download loop. An interval saved from the GUI's Watchlist page takes precedence after that |
 
-## Optional sidecar (Bypasser)
+## Optional sidecar (Telegram bot)
 
-Monochrome (Amazon Music) needs the **Bypasser** sidecar reachable to solve its Cloudflare
-Turnstile challenge — there's no in-process fallback. It ships as a separate Compose service
-gated behind a **profile**, so it's not started by default:
-
-```bash
-docker-compose --profile bypasser up -d
-```
-
-The app container talks to it via `BYPASSER_URL` (already wired to the sidecar hostname in the
-shipped `docker-compose.yml`). Its live status is shown on the GUI's Settings page.
-
-The [Telegram bot](telegram.md) is likewise an opt-in Compose service behind the `telegram`
+The [Telegram bot](telegram.md) is an opt-in Compose service behind the `telegram`
 profile (`docker-compose --profile telegram up -d`) — see that guide for its own environment
 variables.
 

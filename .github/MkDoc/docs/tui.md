@@ -25,7 +25,7 @@ Every screen has the same frame: a top bar the content, and at the bottom the sh
 
 ## Cover art
 
-Search and detail show the cover of the highlighted title: the film or series poster, the season poster or the episode still from TMDB (then IMDb/TVDB, see [`metadata_provider`](configuration.md#default)), the service's own image as a last resort, and for songs and albums the cover the service returned (Amazon Music, YouTube Music...). Images are cached in `.cache/covers`.
+Search and detail show the cover of the highlighted title: the film or series poster, the season poster or the episode still from TMDB (then IMDb/TVDB, see [`metadata_provider`](configuration.md#default)), the service's own image as a last resort, and for songs and albums the cover the service returned (YouTube Music...). Images are cached in `.cache/covers`.
 
 How it is drawn follows `tui_images` ([DEFAULT](configuration.md#default)):
 

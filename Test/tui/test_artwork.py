@@ -42,8 +42,8 @@ def test_songs_and_albums_use_the_service_cover(enabled, monkeypatch, flag):
 
     monkeypatch.setattr(artwork, "_from_tmdb", boom)
     item = _item(image="http://amazon/cover.jpg", **{flag: True})
-    assert artwork.cover_url(item, "amazon_music") == "http://amazon/cover.jpg"
-    assert artwork.cover_url(item, "amazon_music", own_image="http://amazon/track.jpg") == "http://amazon/track.jpg"
+    assert artwork.cover_url(item, "youtube_music") == "http://amazon/cover.jpg"
+    assert artwork.cover_url(item, "youtube_music", own_image="http://amazon/track.jpg") == "http://amazon/track.jpg"
 
 
 def test_movie_prefers_tmdb_over_the_service_image(enabled, monkeypatch):

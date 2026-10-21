@@ -149,9 +149,8 @@ def _conf_text(filename: str) -> str:
 
 
 def cinema_system(request: HttpRequest) -> HttpResponse:
-    """System: show providers, disabled sites, services, and config content."""
-    import os
-
+    """System: show providers, hidden services, and config content."""
+    from VibraVid.services._base.site_loader import hidden_services
     from VibraVid.utils.upload.version import __version__
 
     from ._shared import get_site_extra_args_schema
@@ -169,14 +168,7 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
         except Exception:
             logger.exception("Impossibile leggere le opzioni CLI per '%s'", p["name"])
 
-    disabled = [
-        s.strip() for s in (os.environ.get("VIBRAVID_DISABLED_SITES") or "").split(",") if s.strip()
-    ]
-
-    services = [
-        {"name": "Bypasser", "detail": "Turnstile for Amazon Music",
-         "on": bool(os.environ.get("BYPASSER_URL"))},
-    ]
+    disabled = sorted(hidden_services())
 
     arr = {}
     try:
@@ -202,7 +194,6 @@ def cinema_system(request: HttpRequest) -> HttpResponse:
         "providers": providers,
         "cli_option_providers": cli_option_providers,
         "disabled_sites": disabled,
-        "services": services,
         "uploaded_services": services_admin.removable_services(),
         "arr": arr,
         "queued": queued,

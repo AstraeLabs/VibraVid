@@ -12,7 +12,7 @@ from VibraVid.utils.http_client import check_region_availability, create_client,
 from .client import get_bearer_token, tubi_credentials
 from .downloader import download_film, download_series
 
-indice = 8
+indice = 7
 _useFor = "Film_Serie"
 _region = ["US"]
 console = Console()

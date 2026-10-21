@@ -11,7 +11,7 @@
 
 	<div class="cn-page-hd">
 		<h1 class="cn-blast">Settings</h1>
-		<p>Providers, connected services, ARR and settings. Everything behind the scenes.</p>
+		<p>Providers, ARR and settings. Everything behind the scenes.</p>
 	</div>
 
 	<div class="cn-slab">
@@ -57,29 +57,14 @@
 				</div>
 			</div>
 
+			{% if disabled_sites %}
 			<div class="cn-box">
-				<h3>Connected services</h3>
-				<div class="cn-lines" style="gap:2px">
-					{% for s in services %}
-						<div class="cn-ln" style="background:var(--cn-surf-2);padding:11px 15px">
-							<span class="cn-grow">
-								<span class="cn-t" style="font-size:14px">{{ s.name }}</span>
-								<span class="cn-s">{{ s.detail }}</span>
-							</span>
-							<span class="cn-st {% if s.on %}is-done{% else %}is-wait{% endif %}">
-								{% if s.on %}Configured{% else %}Not configured{% endif %}
-							</span>
-						</div>
-					{% endfor %}
-				</div>
-
-				{% if disabled_sites %}
-					<h3 style="margin-top:24px">Disabled via .env</h3>
-					<p style="margin:0;color:var(--cn-mute);font-size:13px;line-height:1.8">
-						{% for d in disabled_sites %}<code>{{ d }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}
-					</p>
-				{% endif %}
+				<h3>Hidden services</h3>
+				<p style="margin:0;color:var(--cn-mute);font-size:13px;line-height:1.8">
+					{% for d in disabled_sites %}<code>{{ d }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}
+				</p>
 			</div>
+			{% endif %}
 
 			<div class="cn-box">
 				<h3>ARR <span class="cn-sp"></span>

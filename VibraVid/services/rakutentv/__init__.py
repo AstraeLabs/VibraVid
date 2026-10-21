@@ -12,7 +12,7 @@ from VibraVid.utils.http_client import check_region_availability
 from . import client as api
 from .downloader import download_film, download_live, download_series
 
-indice = 16
+indice = 11
 _useFor = "Film_Serie"
 _region = api.REGIONS
 console = Console()

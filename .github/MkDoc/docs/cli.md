@@ -12,6 +12,8 @@ python manual.py -i streamingcommunity --search "interstellar" --no-log   # no l
 python manual.py --dep                                                    # show dependency paths
 ```
 
+Site index numbers follow the services that are switched on: services listed in [`hidden_services`](configuration.md#default) are not loaded and the others are renumbered without gaps, so check `-h` for the current numbers (names never change).
+
 ## Series and year
 
 `--season` / `--episode` skip the prompts. Values: a number, a range `"1-5"`, or `"*"` for all.

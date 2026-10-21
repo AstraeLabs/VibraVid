@@ -1028,12 +1028,22 @@ class ArrDownloaderService:
             logger.warning(f"[fallback] Could not read provider_fallback from config: {_exc}")
             fallback_list = []
 
+        from searchapp.api import is_site_available, normalize_site
+
+        # Legacy names (e.g. "nove", "realtime") resolve to the merged provider: try it once
         providers = []
-        if primary_provider:
-            providers.append(primary_provider)
-        providers.extend(provider for provider in fallback_list if provider and provider not in providers)
+        for provider in [primary_provider, *fallback_list]:
+            provider = normalize_site(provider) if provider else provider
+            if not provider or provider in providers:
+                continue
+            if not is_site_available(provider):
+                logger.info(f"[fallback] Skipping '{provider}': hidden in hidden_services or not installed")
+                continue
+            providers.append(provider)
+
         if not providers:
             providers = ["streamingcommunity"]
+
         return providers
 
     def _search_with_fallback_titles(

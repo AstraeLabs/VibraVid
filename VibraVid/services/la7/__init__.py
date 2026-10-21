@@ -16,7 +16,7 @@ from VibraVid.utils.http_client import create_client, get_userAgent
 
 from .downloader import download_film, download_series
 
-indice = 15
+indice = 10
 _useFor = "Film_Serie"
 console = Console()
 entries_manager = EntriesManager()

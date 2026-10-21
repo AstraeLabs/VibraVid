@@ -11,6 +11,8 @@ fetch_domain_online = true
 disable_scraper_cache = false
 # Service folders to load. Windows paths go in single quotes: ["default", 'C:\more_service']
 imp_service = ["default"]
+# Services to switch off completely (CLI, TUI and GUI), by folder name: ["aurora", "tubitv"]
+hidden_services = []
 # Empty = automatic
 installation = ""
 # In order of preference: tmdb, imdb, tvdb (comma separated)
@@ -125,8 +127,6 @@ verify = true
 use_proxy = false
 # "scrap+down" (scraping and download) or only part of it
 proxy_scope = "scrap+down"
-# For sites protected by anti-bot
-bypasser_url = "http://localhost:8192"
 
 [REQUESTS.proxy]
 http = "http://localhost:8888"
@@ -178,14 +178,9 @@ provider_fallback = [
     "streamingcommunity",
     "animeunity",
     "discoveryplus",
-    "discovery",
-    "dmax",
-    "nove",
-    "realtime",
+    "aurora",
     "mediasetinfinity",
     "raiplay",
-    "homegardentv",
-    "foodnetwork",
     "animeworld",
     "crunchyroll",
     "primevideo",

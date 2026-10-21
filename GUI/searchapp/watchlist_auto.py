@@ -9,7 +9,7 @@ import threading
 from django.db import close_old_connections
 from django.utils import timezone
 
-from .api import get_api
+from .api import get_api, is_site_available
 from .api.base import Entries
 from .models import WatchlistItem
 
@@ -91,6 +91,10 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
 
     `force` requests a check now; local files still determine completed targets.
     """
+    if not is_site_available(item.source_alias):
+        WatchlistItem.objects.filter(pk=item.pk).update(auto_status="Service hidden or not installed; skipped")
+        return
+
     try:
         from .views import _run_download_in_thread
         api = get_api(item.source_alias)

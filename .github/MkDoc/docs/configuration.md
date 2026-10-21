@@ -76,6 +76,7 @@ show_message = true
 fetch_domain_online = true
 disable_scraper_cache = false
 imp_service = ["default"]
+hidden_services = []
 installation = ""
 metadata_provider = "tmdb,imdb"
 tui_images = "auto"
@@ -89,6 +90,7 @@ tui_images = "auto"
 | `fetch_domain_online` | `true` | Fetch the latest domains from GitHub |
 | `disable_scraper_cache` | `false` | GUI only: disable the 15-minute per-title scraper cache |
 | `imp_service` | `["default"]` | Where to load site modules from: `"default"` (built-ins), local directories (each module needs `__init__.py` defining `indice` and `_useFor`), or a GitHub/Gitea repo URL. Custom modules override built-ins of the same name |
+| `hidden_services` | `[]` | Services to switch off completely, by folder name (e.g. `["aurora", "tubitv"]`): they are not loaded, so they disappear from the CLI menu and `-i`, the TUI and the GUI, and ARR / the watchlist skip them. The remaining services are renumbered without gaps, but the `indice` in the service files is never touched. The `VIBRAVID_HIDDEN_SITES` env var (comma-separated, see `docker-compose.yml`) adds to this list. Saved from the GUI Settings page it applies without a restart |
 | `installation` | `""` | Binaries downloaded at setup. `""`: FFmpeg, Velora, flux. `"yt"`: + yt-dlp, deno. `"full"`: + dovi_tool, mkvtoolnix, yt-dlp, deno |
 | `metadata_provider` | `tmdb,imdb` | Sidecar providers, tried in order (`tmdb`, `imdb`, `tvdb`). CLI: `--metadata-provider` |
 | `tui_images` | `auto` | TUI cover art: `auto`, `sixel`, `kitty` (real images, see [TUI](tui.md#cover-art)), `blocks` (drawn with characters, works anywhere) or `off` |
@@ -302,7 +304,6 @@ max_retry = 4
 verify = true
 use_proxy = false
 proxy_scope = "scrap+down"
-bypasser_url = "http://localhost:8192"
 
 [REQUESTS.proxy]
 http = "http://localhost:8888"
@@ -317,7 +318,6 @@ https = "http://localhost:8888"
 | `use_proxy` | `false` | Enable the proxy |
 | `proxy_scope` | `scrap+down` | `scrap` (VibraVid's HTTP client: search, metadata, manifests, licenses), `down` (Velora segment downloads) or `scrap+down`. Invalid values fall back to `scrap+down`. CLI: `--proxy-scope` |
 | `proxy.http`, `proxy.https` | - | Proxy URL for HTTP / HTTPS targets (the key is the *target* scheme, not the proxy protocol) |
-| `bypasser_url` | `http://localhost:8192` | **Required** bypasser sidecar that solves monochrome.tf's Cloudflare Turnstile for the **monochrome** Amazon Music download (no in-process fallback). Docker: overridden by `BYPASSER_URL` in `docker-compose.yml` |
 
 The proxy can be HTTP or SOCKS5. Use `socks5h://` to resolve DNS through the proxy (geo-restricted sites, no DNS leaks); `user:pass@` is supported:
 

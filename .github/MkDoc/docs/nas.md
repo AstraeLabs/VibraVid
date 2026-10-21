@@ -69,15 +69,6 @@ The container entrypoint will remap `appuser` to these IDs at startup so all dow
 docker compose up -d
 ```
 
-If you plan to use `monochrome` (Amazon Music), start the optional Bypasser sidecar alongside
-the main app instead — it's off by default:
-
-```bash
-docker compose --profile bypasser up -d
-```
-
-See the [Docker guide](docker.md#optional-sidecar-bypasser) for details.
-
 On first start, the container automatically:
 - Seeds `/app/Conf` from the image defaults if the volume is empty
 - Runs Django database migrations

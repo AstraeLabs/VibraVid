@@ -11,7 +11,7 @@ import zipfile
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
-from VibraVid.services._base.site_loader import CompiledService
+from VibraVid.services._base.site_loader import CompiledService, hidden_services
 from VibraVid.services._base.tv_display_manager import refresh_output_formats
 from VibraVid.utils import config_manager
 from VibraVid.utils.config import tomllib
@@ -302,6 +302,8 @@ def save_settings(request: HttpRequest) -> JsonResponse:
                     "error": f"TOML non valido: {str(e)}"
                 }, status=400)
 
+        hidden_before = hidden_services() if file_type == 'config' else None
+
         backup_path = file_path + ".backup"
         if os.path.exists(file_path):
             try:
@@ -331,6 +333,10 @@ def save_settings(request: HttpRequest) -> JsonResponse:
                 refresh_output_formats()
             except Exception as exc:
                 logger.exception("Failed to reload config cache after save: %s", exc)
+
+            if hidden_services() != hidden_before:  # services hidden/shown from the settings page apply without a restart
+                for err in _reload_service_registries([]):
+                    logger.warning("hidden_services reload: %s", err)
 
         elif file_type == 'login' and patch is None:
             try:

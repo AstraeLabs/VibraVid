@@ -344,8 +344,6 @@ def build_function_mappings(search_functions):
     for func in search_functions.values():
         module_name = func.module_name
         module_name_to_function[module_name.lower()] = func
-        if getattr(func, "hide", False):
-            continue
 
         site_index = str(func.indice)
         input_to_function[site_index] = func

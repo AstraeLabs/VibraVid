@@ -23,7 +23,7 @@ indice = 900            # position in the CLI/GUI site list; pick a free number,
 _useFor = "Film_Serie"  # Anime, Film_Serie, Serie, Song or Tor
 ```
 
-`_hide = True` loads the module but hides it from CLI/GUI/ARR listings (useful while building).
+To keep a service out of the CLI, TUI and GUI while you build it, list its folder name in `hidden_services` ([configuration](configuration.md#default)); it is not loaded at all until you remove it.
 
 The folder name must be a valid Python identifier if any code references it with a literal import (`from VibraVid.services.<name>.scrapper import X`). The loader itself works with any name; for other names resolve submodules dynamically with `resolve_service_submodule(module_name, submodule)` (`VibraVid/services/_base/site_loader.py`), see the GUI adapter below.
 
@@ -103,16 +103,16 @@ class MyService(GenericStreamingAPI):
 
 Auto-discovered like the CLI module (`GUI/searchapp/api/__init__.py` scans the package); no registration and no logo asset needed. `search()` and `get_series_metadata()` already call your CLI-side `search()`/scrapper; override `_build_entry`/`_map_episode` only if the default mapping doesn't fit.
 
-If `<name>` isn't a valid identifier, resolve the submodule dynamically (real example: `GUI/searchapp/api/7movies.py`):
+If `<name>` isn't a valid identifier, resolve the submodule dynamically (see `GUI/searchapp/api/appletv.py`):
 
 ```python
 from VibraVid.services._base.site_loader import resolve_service_submodule
 
 class MyService(GenericStreamingAPI):
-    site_name = "7movies"
+    site_name = "3dservice"
 
     def _build_scraper(self, media_item: Entries):
-        scrapper = resolve_service_submodule("7movies", "scrapper")
+        scrapper = resolve_service_submodule("3dservice", "scrapper")
         return scrapper.GetSerieInfo(media_item.id)
 ```
 

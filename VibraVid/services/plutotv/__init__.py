@@ -12,7 +12,7 @@ from VibraVid.utils.http_client import create_client
 from .client import get_api, hub_search
 from .downloader import download_film, download_series
 
-indice = 14
+indice = 9
 _useFor = "Serie"
 _region = ["IT"]
 console = Console()

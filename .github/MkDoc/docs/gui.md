@@ -21,7 +21,7 @@ Open `http://<host>:8000`. For Docker/NAS use the [Docker](docker.md) and [NAS](
 - **Home** (`/`): pick a site and search.
 - **Results** (`/search/`): download, add to the watchlist, or open the series-detail view (seasons/episodes).
 - **Start download** (`/download/`): queues the movie or episodes. Track selection follows the `config.toml` filters, like the CLI. Tick **Choose tracks manually** (overrides the Quality picker) to pause the download and pick tracks in the **Choose tracks** panel on the Downloads page: select tracks (at least one), press **Download selected tracks**, or **Stop** to cancel. A download waiting for your choice doesn't use a concurrent-download slot. GUI only: not available for watchlist auto-downloads.
-- `VIBRAVID_DISABLED_SITES` (comma-separated module names) hides sites from the GUI only (CLI/TUI keep them).
+- `hidden_services` in `config.toml` (or `VIBRAVID_HIDDEN_SITES`, comma-separated, for Docker) switches services off in the CLI, TUI and GUI alike ([details](configuration.md#default)). `VIBRAVID_DISABLED_SITES` is still read as an alias.
 
 ![Search results](assets/gui/results.png)
 
@@ -58,7 +58,6 @@ Open `http://<host>:8000`. For Docker/NAS use the [Docker](docker.md) and [NAS](
 
 - `ARR.max_concurrent_downloads` applies live; most other settings need a **reload** (`api/reload-config/`) or a restart.
 - **Custom CLI options** sets a service's `args` ([details](configuration.md#default-options-for-a-service-args)); removing them leaves `args = ""` in `login.toml`.
-- Shows the status of the optional Bypasser sidecar (`BYPASSER_URL`, see [Docker](docker.md)).
 
 ![Settings overview](assets/gui/settings.png)
 
