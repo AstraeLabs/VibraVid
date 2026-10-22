@@ -273,6 +273,7 @@ def convert_ttml_to_format(
         # restart and needs re-basing.
         has_exact_offsets = bool(chunk_offsets) and len(chunk_offsets) >= len(ttml_blocks)
         cumulative_offset = 0.0
+        failed_blocks = 0
         _RESTART_TOLERANCE_SECONDS = 5.0
 
         for index, block in enumerate(ttml_blocks, start=1):
@@ -313,11 +314,15 @@ def convert_ttml_to_format(
                         all_captions.append(content)
 
             except Exception as e:
+                failed_blocks += 1
                 console.print(f"[yellow]Warning: Failed to process TTML block {index}/{len(ttml_blocks)}: {e}")
                 continue
 
         if not all_captions:
-            console.print(f"[red]No valid TTML blocks processed from {ttml_path}")
+            if failed_blocks:
+                console.print(f"[red]No valid TTML blocks processed from {ttml_path}")
+            else:
+                console.print(f"[yellow]Subtitle track has no captions ({len(ttml_blocks)} empty block(s)), skipped: {os.path.basename(ttml_path)}")
             return False
 
         # Combine output

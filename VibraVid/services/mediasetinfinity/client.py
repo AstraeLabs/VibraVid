@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -21,6 +22,7 @@ from .regions import get_region, region_conf
 logger = logging.getLogger(__name__)
 console = Console()
 _api_by_region = {}
+_api_lock = threading.Lock()
 
 
 def _decode_jwt_payload(token: str) -> dict:
@@ -254,12 +256,17 @@ def get_client():
     """Get or create the MediasetAPI singleton."""
     region = (get_region(), current_scope())
     api = _api_by_region.get(region)
-    if api is None or not _is_token_valid(api.getBearerToken()):
-        if api is not None:
-            console.print("[yellow]adminBeToken expired, re-authenticating...")
-        api = MediasetAPI(region_conf())
-        _api_by_region[region] = api
-    return api
+    if api is not None and _is_token_valid(api.getBearerToken()):
+        return api
+
+    with _api_lock:
+        api = _api_by_region.get(region)
+        if api is None or not _is_token_valid(api.getBearerToken()):
+            if api is not None:
+                console.print("[yellow]adminBeToken expired, re-authenticating...")
+            api = MediasetAPI(region_conf())
+            _api_by_region[region] = api
+        return api
 
 
 def get_playback_url(CONTENT_ID):

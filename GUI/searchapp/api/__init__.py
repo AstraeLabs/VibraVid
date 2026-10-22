@@ -34,8 +34,9 @@ _PREFERRED_ORDER = [
     "rakutentv",
     "chili",
     "timvision",
+    "amazon_music",
 ]
-_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "disney", "hbomax", "nowtvit", "netflix"}
+_OPTIONAL_EXTERNAL = {"primevideo", "appletv", "paramountplus", "amazon_music", "disney", "hbomax", "nowtvit", "netflix"}
 _SITE_CATEGORIES: dict[str, str] = {}
 _SITE_ALIASES: dict[str, str] = {
     "discovery": "aurora",

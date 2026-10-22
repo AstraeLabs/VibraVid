@@ -740,7 +740,7 @@ def _prepare_subtitle_tracks(
         corrected_path = convert_subtitle(original_path, FORCE_SUBTITLE)
         if not corrected_path:
             logger.warning(f"join_subtitles: conversion failed for '{os.path.basename(original_path)}', skipping (raw file is not mux-safe)")
-            console.print(f"[red]    Skipping subtitle (conversion failed): [yellow]{os.path.basename(original_path)}")
+            console.print(f"[yellow]    Skipping subtitle (no usable captions): {os.path.basename(original_path)}")
             continue
         sub = dict(subtitle)
         sub["path"] = corrected_path

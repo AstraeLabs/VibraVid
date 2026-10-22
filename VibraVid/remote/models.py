@@ -68,9 +68,8 @@ class ResolvedMedia:
     # --export / --import only (the remote wire ignores them)
     version: int = 1
     site: str | None = None
-    desc: str | None = None
-    exported_at: str | None = None
     vibravid_version: str | None = None
+    tracks: list | None = None
 
     def to_wire(self) -> dict:
         data = _jsonable(asdict(self))

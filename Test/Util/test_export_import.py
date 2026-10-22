@@ -34,7 +34,7 @@ def _media(kind="dash", **kw):
 
 @pytest.mark.parametrize("kind", ["mp4", "hls", "dash", "ism"])
 def test_every_protocol_round_trips_through_the_file(kind, tmp_path):
-    media = _media(kind, key=[KEY], desc="video: 1080p")
+    media = _media(kind, key=[KEY], has_drm=True, post_process={"kind": "song"})
     file = tmp_path / "out.json"
 
     assert write_export(media, str(file)) == str(file)
@@ -42,7 +42,7 @@ def test_every_protocol_round_trips_through_the_file(kind, tmp_path):
 
     assert (back.kind, back.url, back.title, back.site) == (kind, media.url, "Bunny", "appletv")
     assert back.key == [KEY]
-    assert back.desc == "video: 1080p" and back.version == 1 and back.exported_at and back.vibravid_version
+    assert back.version == 1 and back.vibravid_version
 
 
 def test_the_file_carries_the_import_command_and_only_what_a_download_needs(tmp_path):
@@ -54,7 +54,9 @@ def test_the_file_carries_the_import_command_and_only_what_a_download_needs(tmp_
 
     assert entry["cmd"] == f"python manual.py --down '{media.url}' --key {KEY} -o 'Bunny'"
     assert list(entry)[0] == "cmd"
-    for gone in ("manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate", "max_segments", "max_time"):
+    for gone in ("manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate", "max_segments", "max_time",
+                 "desc", "exported_at", "post_process", "hls_enc_override", "display_selected_only", "custom_filters", "manifest_refresh",
+                 "license_proxy", "has_drm", "drm_preference"):
         assert gone not in entry
     assert entry["key"] == [KEY]
 

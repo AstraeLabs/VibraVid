@@ -119,7 +119,7 @@ def handle_direct_download(args) -> bool:
     output = (getattr(args, "output", None) or "").strip() or None
     lic_url = (getattr(args, "license_url", None) or "").strip() or None
     lic_hdr = parse_headers(getattr(args, "license_headers", None))
-    drm_pref = (getattr(args, "drm", None) or "auto").strip().lower()
+    drm_pref = (getattr(args, "drm", None) or "").strip().lower()
     max_segs = getattr(args, "max_segments", None)
     max_time = getattr(args, "max_time", None)
     skip_content_check = bool(getattr(args, "skip_content_check", False))

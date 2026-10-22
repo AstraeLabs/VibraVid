@@ -3,7 +3,6 @@
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 from VibraVid.remote.models import ResolvedMedia
@@ -13,12 +12,55 @@ from VibraVid.utils.upload.version import __version__
 logger = logging.getLogger(__name__)
 
 _written: list[str] = []
-_NOT_EXPORTED = ("manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate")
+_NOT_EXPORTED = (
+    "manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate",
+    "drm_preference", "has_drm", "license_proxy", "manifest_refresh", "custom_filters", "display_selected_only",
+    "hls_enc_override", "post_process", "desc", "exported_at",
+)
 
 
 def get_written_exports() -> list[str]:
     """Paths of every ``--export`` file written so far this run, in order."""
     return list(dict.fromkeys(_written))
+
+
+def is_synthetic(media: ResolvedMedia) -> bool:
+    """True when the manifest only exists as `manifest_content` and `url` is a made-up address (``custom://``, ``amazon://``...)."""
+    return bool(media.manifest_content) and not str(media.url or "").lower().startswith(("http://", "https://"))
+
+
+def track_links(streams: list) -> list[dict]:
+    """The selected streams with their direct links: for a manifest with a single file per track (Netflix) this is the mp4 link."""
+    tracks = []
+    for stream in streams or []:
+        if not getattr(stream, "selected", False):
+            continue
+
+        media = [seg for seg in stream.segments if seg.seg_type == "media" and seg.url]
+        if not media:
+            continue
+        init = next((seg for seg in stream.segments if seg.seg_type == "init" and seg.url), None)
+
+        track = {
+            "type": stream.type,
+            "language": stream.language if stream.type != "video" else "",
+            "resolution": stream.resolution,
+            "codecs": stream.codecs,
+            "bitrate": stream.bitrate,
+            "url": media[0].url,
+            "init": {"url": init.url, "range": init.byte_range} if init else None,
+        }
+        tracks.append({k: v for k, v in track.items() if v not in ("", 0, None)})
+    return tracks
+
+
+def primary_link(tracks: list[dict] | None) -> str | None:
+    """The link shown as the entry's address: the video track's (the audio one for music), else the first track's."""
+    for wanted in ("video", "audio"):
+        link = next((t["url"] for t in tracks or [] if t.get("type") == wanted), None)
+        if link:
+            return link
+    return next((t["url"] for t in tracks or [] if t.get("url")), None)
 
 
 def _default_path(media: ResolvedMedia) -> Path:
@@ -49,7 +91,6 @@ def write_export(media: ResolvedMedia, file: str | None = None) -> str | None:
         path = Path(file.strip()) if file and file.strip() else _default_path(media)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        media.exported_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         media.vibravid_version = __version__
 
         entries: list = []
@@ -60,8 +101,13 @@ def write_export(media: ResolvedMedia, file: str | None = None) -> str | None:
             except Exception:
                 entries = []
 
-        entry = {k: v for k, v in media.to_wire().items() if k not in _NOT_EXPORTED}
-        entries.append({"cmd": _download_command(media), **entry})
+        wire = media.to_wire()
+        entry = {k: v for k, v in wire.items() if k not in _NOT_EXPORTED and not (k == "tracks" and v is None)}
+        if is_synthetic(media):
+            entry["url"] = primary_link(media.tracks) or media.url
+            entries.append(entry)
+        else:
+            entries.append({"cmd": _download_command(media), **entry})
         path.write_text(json.dumps(entries, indent=4, ensure_ascii=False), encoding="utf-8")
         _written.append(str(path))
         return str(path)

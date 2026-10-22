@@ -184,46 +184,6 @@ class BaseDownloader:
                 formatted_keys.append(str(k))
         return formatted_keys
 
-    def _build_tracks_desc(self, streams: list) -> str:
-        """Human-readable summary of tracks"""
-        video_res: list[str] = []
-        audio_langs: list[str] = []
-        sub_langs: list[str] = []
-
-        for stream in streams or []:
-            stype = getattr(stream, "type", "")
-            if stype == "video":
-                if not getattr(stream, "selected", False):
-                    continue
-                res = getattr(stream, "resolution", "")
-                codec = stream.get_short_codec() if hasattr(stream, "get_short_codec") else ""
-                bitrate = ""
-                if hasattr(stream, "bitrate_display"):
-                    bitrate = stream.bitrate_display if stream.bitrate else ""
-                elif hasattr(stream, "bandwidth"):
-                    bw = stream.bandwidth
-                    bitrate = "" if bw in ("0 bps", "N/A") else bw
-                label = " ".join(p for p in (res, codec, bitrate) if p)
-                if label and label not in video_res:
-                    video_res.append(label)
-            elif stype == "audio":
-                lang = getattr(stream, "language", "")
-                if lang and lang not in ("und", "") and lang not in audio_langs:
-                    audio_langs.append(lang)
-            elif stype == "subtitle":
-                lang = getattr(stream, "language", "")
-                if lang and lang not in ("und", "") and lang not in sub_langs:
-                    sub_langs.append(lang)
-
-        parts = []
-        if video_res:
-            parts.append("video: " + ", ".join(video_res))
-        if audio_langs:
-            parts.append("audio: " + ", ".join(audio_langs))
-        if sub_langs:
-            parts.append("subtitle: " + ", ".join(sub_langs))
-        return " | ".join(parts)
-
     def _resolve_track_info(self) -> tuple[str, str, str, str]:
         """Emit a TRACKS_JSON logger.info and trigger Supabase download tracking."""
         season = context_tracker.season or 0
@@ -253,7 +213,7 @@ class BaseDownloader:
         if context_tracker.export_file is None:
             return
 
-        from VibraVid.core.downloader.util._export import write_export
+        from VibraVid.core.downloader.util._export import is_synthetic, track_links, write_export
         from VibraVid.remote.capture import media_from_downloader
 
         try:
@@ -263,7 +223,8 @@ class BaseDownloader:
             return
 
         media.site = self._resolve_track_info()[2] or None
-        media.desc = self._build_tracks_desc(streams) or None
+        if is_synthetic(media):
+            media.tracks = track_links(streams) or None
         write_export(media, context_tracker.export_file)
 
     def _no_media_downloaded(self, status: dict) -> bool:

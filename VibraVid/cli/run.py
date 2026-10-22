@@ -53,6 +53,7 @@ _VERSION_FLAGS = {
     "yt-dlp": ["--version"],
     "deno": ["--version"],
 }
+_DRM_ALIASES = {"wv": "widevine", "pr": "playready"}
 
 
 def run_function(func: Callable[..., None], search_terms: str | None = None, selections: dict | None = None) -> None:
@@ -113,6 +114,12 @@ def _print_site_only_help(site_value, site_module):
     register(mini_parser)
     mini_parser.print_help()
     raise SystemExit(0)
+
+
+def _drm_name(value: str) -> str:
+    """argparse type for --drm: lower-case, with wv/pr as short names."""
+    value = str(value).strip().lower()
+    return _DRM_ALIASES.get(value, value)
 
 
 def setup_argument_parser(search_functions, site_module=None, extra_site_modules=None):
@@ -192,7 +199,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--license-url", dest="license_url", metavar="URL", help="DRM license server URL (Widevine / PlayReady)")
     dl_group.add_argument("--license-headers", dest="license_headers", action="append", metavar="Key:Value", help="HTTP header for DRM license request. Repeatable.")
     dl_group.add_argument("--key", action="append", metavar="KID:KEY", help="Decryption key in KID:KEY hex format. Repeatable.")
-    dl_group.add_argument("--drm", choices=["widevine", "playready", "auto"], default="auto", help="DRM system (default: auto)")
+    dl_group.add_argument("--drm", type=_drm_name, choices=["widevine", "playready"], default=None, help="DRM system: widevine (wv) or playready (pr) (default: widevine)")
     dl_group.add_argument("--hls-method", dest="hls_method", choices=["AES_128", "NONE"], default=None, help="Override the HLS segment encryption method, ignoring the manifest's own #EXT-X-KEY tag (or supplying one when it has none). NONE forces every segment to be treated as already clear (skips decrypt); AES_128 forces AES-128-CBC (pair with --hls-key/--hls-iv).")
     dl_group.add_argument("--hls-key", dest="hls_key", metavar="HEX|BASE64|FILE", default=None, help="Raw AES-128 key to use instead of fetching URI= from the manifest's #EXT-X-KEY tag.")
     dl_group.add_argument("--hls-iv", dest="hls_iv", metavar="HEX", default=None, help="IV to use instead of the manifest's IV=0x... (or the implicit per-segment IV).")

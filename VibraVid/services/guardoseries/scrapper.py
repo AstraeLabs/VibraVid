@@ -29,7 +29,6 @@ _SEARCH_MAX_PAGES = 1
 _URL_CACHE: dict[str, str | None] = {}
 _UQLOAD_PAGE_RE = re.compile(r'https?://(?:www\.)?uqload\.(?:vc|io)/([a-zA-Z0-9]+)\.html')
 _EPISODE_LINK_RE = re.compile(r'href="([^"]*/episodio/[^"]*?)/?"')
-_IFRAME_RE = re.compile(r'<iframe[^>]+(?:data-src|src)=["\']([^"\']+)["\']', re.IGNORECASE)
 _pw_browser = None
 _pw_lock = threading.Lock()
 
@@ -80,9 +79,10 @@ def _server_iframes(html: str) -> list[tuple[str, str]]:
         return []
     servers = []
     seen = set()
-    for m in _IFRAME_RE.finditer(html):
-        src = m.group(1)
-        if src in seen:
+    soup = BeautifulSoup(html, "html.parser")
+    for iframe in soup.find_all("iframe"):
+        src = (iframe.get("data-src") or iframe.get("src") or "").strip()
+        if not src or src.startswith("data:") or src in seen:
             continue
         seen.add(src)
         low = src.lower()
