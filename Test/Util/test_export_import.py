@@ -26,6 +26,7 @@ def _fresh_run(monkeypatch):
     monkeypatch.setattr(_export, "_written", [])
     yield
     context_tracker.export_file = None
+    context_tracker.export_minimal = False
 
 
 def _media(kind="dash", **kw):
@@ -178,3 +179,41 @@ def test_the_command_names_a_tv_episode_and_repeats_every_key():
     assert _export._download_command(media) == (
         f"python manual.py --down '{media.url}' --key {KEY} --key {'cc' * 16}:{'dd' * 16} -o 'Bunny S2_E5 Pilot_ Part_1'"
     )
+
+
+def test_minimal_export_leaves_out_every_link_and_the_tracks(tmp_path):
+    media = _media("dash", manifest_content="<MPD/>", key=[KEY], tracks=[{"type": "video", "url": "https://cdn.example/v.mp4", "resolution": "1920x1080"}])
+    media.url = "custom://svc/1"
+    context_tracker.export_minimal = True
+    file = tmp_path / "out.json"
+    write_export(media, str(file))
+    (entry,) = json.loads(file.read_text(encoding="utf-8"))
+
+    for gone in ("url", "cmd", "tracks"):
+        assert gone not in entry
+    assert entry["key"] == [KEY] and entry["title"] == "Bunny" and entry["kind"] == "dash"
+
+
+def test_minimal_export_also_hides_the_command_of_a_plain_manifest(tmp_path):
+    context_tracker.export_minimal = True
+    file = tmp_path / "out.json"
+    write_export(_media("hls", key=[KEY]), str(file))
+    (entry,) = json.loads(file.read_text(encoding="utf-8"))
+    assert "cmd" not in entry and "url" not in entry
+
+
+def test_a_normal_export_keeps_links_and_tracks(tmp_path):
+    media = _media("dash", manifest_content="<MPD/>", tracks=[{"type": "video", "url": "https://cdn.example/v.mp4"}])
+    media.url = "custom://svc/1"
+    file = tmp_path / "out.json"
+    write_export(media, str(file))
+    (entry,) = json.loads(file.read_text(encoding="utf-8"))
+    assert entry["url"] == "https://cdn.example/v.mp4" and entry["tracks"]
+
+
+def test_export_minimal_flag_is_parsed():
+    parser, _ = setup_argument_parser({})
+    assert parser.parse_args([]).export_minimal is False
+    assert parser.parse_args(["--export", "--export-minimal"]).export_minimal is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--export-no-url"])

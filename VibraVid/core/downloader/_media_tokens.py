@@ -9,13 +9,41 @@ MEDIA_PLACEHOLDERS = (
     "%(audio_codec)",
     "%(audio_flags)",
     "%(sub_flags)",
+    "%(fps)",
+    "%(video_bitrate)",
+    "%(hdr)",
+    "%(bit_depth)",
+    "%(audio_channels)",
 )
+FILE_PROBE_KEYS = ("fps", "video_bitrate", "hdr", "bit_depth", "audio_channels")
+
+
+def media_token_values(metadata: dict) -> dict:
+    """Value of every media placeholder from probed *metadata*, ready for a file name ("" when unknown, so the token and its brackets are dropped)"""
+    fps = float(metadata.get("fps") or 0)
+    bitrate = int(metadata.get("video_bitrate") or 0)
+    depth = int(metadata.get("bit_depth") or 0)
+    hdr = metadata.get("hdr") or ""
+    return {
+        "quality": metadata.get("quality", ""),
+        "language": metadata.get("language", ""),
+        "video_codec": metadata.get("video_codec", ""),
+        "audio_codec": metadata.get("audio_codec", ""),
+        "audio_flags": metadata.get("audio_flags", ""),
+        "sub_flags": metadata.get("sub_flags", ""),
+        "fps": f"{fps:g}fps" if fps else "",
+        "video_bitrate": f"{round(bitrate / 1000)}kbps" if bitrate else "",
+        "hdr": "" if hdr == "SDR" else hdr,
+        "bit_depth": f"{depth}bit" if depth else "",
+        "audio_channels": metadata.get("audio_channels", ""),
+    }
 
 
 def resolve_media_tokens(root: str, metadata: dict) -> str:
     """Fill the media-token placeholders of a name *root* (no extension) from probed *metadata*; drop the empty ones with their brackets"""
+    values = media_token_values(metadata)
     for placeholder in MEDIA_PLACEHOLDERS:
-        value = metadata.get(placeholder[2:-1], "")
+        value = values.get(placeholder[2:-1], "")
         if value:
             root = root.replace(placeholder, str(value))
         else:

@@ -145,6 +145,9 @@ Defaults: `movie_format` = `"%(title_name) (%(title_year))/%(title_name) (%(titl
 | `%(quality)`, `%(language)` | x | x | Video resolution, audio languages |
 | `%(video_codec)`, `%(audio_codec)` | x | x | Codecs |
 | `%(audio_flags)`, `%(sub_flags)` | x | x | Track flags, e.g. `DEFAULT`, `CC-SDH-FORCED` |
+| `%(fps)`, `%(video_bitrate)` | x | x | Frame rate and average video bit rate of the muxed file, e.g. `23.976fps`, `1212kbps` |
+| `%(hdr)`, `%(bit_depth)` | x | x | `HDR10`, `HDR10+`, `HLG` or `DV` (empty for SDR); video bit depth, e.g. `10bit` |
+| `%(audio_channels)` | x | x | Channels of the first audio track, e.g. `2.0`, `5.1` |
 | `%(original_title)`, `%(original_language)` | x | x | Original title / language code (e.g. `ja`) (TMDB key) |
 | `%(tmdb_id)`, `%(tmdb_title)`, `%(imdb_id)` | x | x | TMDB id, TMDB title in the lookup language, IMDb id e.g. `tt0409591` (TMDB key) |
 | `%(tmdb_episode_title)` | | x | TMDB episode title, from `tmdb_id` + season/episode (TMDB key) |

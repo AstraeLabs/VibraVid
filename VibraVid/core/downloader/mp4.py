@@ -13,7 +13,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
+from VibraVid.core.downloader._media_tokens import FILE_PROBE_KEYS, MEDIA_PLACEHOLDERS, media_token_values, strip_media_tokens
 from VibraVid.core.muxing import embed_poster, inject_chapters, retag_file
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
@@ -768,20 +768,16 @@ class MP4FileDownloader:
 
         try:
             if self._early_metadata is not None:
-                metadata = self._early_metadata
+                metadata = dict(self._early_metadata)
+                if any(f"%({key})" in template for key in FILE_PROBE_KEYS):
+                    probed = get_media_metadata(self.path)
+                    metadata.update({key: probed.get(key) for key in FILE_PROBE_KEYS})
                 logger.info(f"Reusing early-probed metadata for dynamic rename: {metadata}")
             else:
                 metadata = get_media_metadata(self.path)
                 logger.info(f"Metadata for dynamic rename: {metadata}")
 
-            replacements = {
-                "quality": metadata.get("quality", ""),
-                "language": metadata.get("language", ""),
-                "video_codec": metadata.get("video_codec", ""),
-                "audio_codec": metadata.get("audio_codec", ""),
-                "audio_flags": metadata.get("audio_flags", ""),
-                "sub_flags": metadata.get("sub_flags", ""),
-            }
+            replacements = media_token_values(metadata)
 
             new_root = os.path.splitext(template)[0]
             cur_ext = os.path.splitext(self.path)[1]

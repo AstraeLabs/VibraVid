@@ -643,7 +643,7 @@ class VodStreamMixin:
             self._skip_stream_wrong_key(stream, poisoned, bar_manager)
             return
 
-        effective_live = self._session_live_decrypt
+        effective_live = self._session_live_decrypt and getattr(stream, "supports_live_decryption", True)
 
         if self.manifest_type == "HLS":
             if stream.is_live:

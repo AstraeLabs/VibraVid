@@ -8,7 +8,7 @@ import shutil
 import threading
 import time
 import zipfile
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
@@ -25,6 +25,24 @@ _staging: set[str] = set()
 _default_branches: dict[str, str] = {}
 
 
+def _headers() -> dict[str, str]:
+    """Browser-like headers plus the ngrok one: a git server behind a free ngrok tunnel answers a browser client with an HTML warning page instead of the API / archive."""
+    return {**get_headers(), "ngrok-skip-browser-warning": "1"}
+
+
+def _effective_scheme(client, scheme: str, netloc: str, timeout: float) -> str:
+    """``https`` when an ``http`` server redirects to it: the client drops the credentials when it follows a scheme change itself."""
+    if scheme != "http":
+        return scheme
+    try:
+        response = client.get(f"http://{netloc}/", timeout=timeout, allow_redirects=False)
+        if response.status_code in (301, 302, 307, 308) and response.headers.get("location", "").lower().startswith(f"https://{netloc.lower()}"):
+            return "https"
+    except Exception as e:
+        logger.debug(f"Could not probe {netloc} for an https redirect: {e}")
+    return scheme
+
+
 def is_remote_source(source: str) -> bool:
     """True if `source` is an http(s) URL to a GitHub/Gitea repository rather than a local path."""
     try:
@@ -33,10 +51,23 @@ def is_remote_source(source: str) -> bool:
         return False
 
 
+def _normalize_source(source: str) -> str:
+    """Percent-encode the credentials of a source URL, so a raw ``?``, ``#`` or ``%`` in a password cannot split the URL."""
+    scheme, sep, rest = source.partition("://")
+    if not sep:
+        return source
+    authority, slash, tail = rest.partition("/")
+    userinfo, at, host = authority.rpartition("@")
+    if not at:
+        return source
+    user, colon, password = userinfo.partition(":")
+    return f"{scheme}://{quote(unquote(user), safe='')}{colon}{quote(unquote(password), safe='')}@{host}{slash}{tail}"
+
+
 def redact(source: str) -> str:
     """Strip any embedded credentials from a source URL, for safe logging."""
     try:
-        parsed = urlparse(source)
+        parsed = urlparse(_normalize_source(source))
         netloc = parsed.hostname or parsed.netloc.rsplit("@", 1)[-1]
         if parsed.port:
             netloc = f"{netloc}:{parsed.port}"
@@ -53,9 +84,9 @@ def _repo_from_path(path: str) -> tuple[str, str] | None:
     parts = [p for p in path.split("/") if p]
     if len(parts) < 2:
         return None
-    owner, repo = parts[0], parts[1]
-    repo = repo[:-4] if repo.endswith(".git") else repo
-    return owner, repo
+
+    repo = parts[-1][:-4] if parts[-1].endswith(".git") else parts[-1]
+    return parts[-2], repo
 
 
 def _cache_dir(netloc: str, owner: str, repo: str, ref: str) -> str:
@@ -124,7 +155,7 @@ def _remote_commit_sha(client, api_base: str, owner: str, repo: str, ref: str, i
 def _archive_url(scheme: str, netloc: str, owner: str, repo: str, ref: str, is_github: bool) -> str:
     if is_github:
         return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{ref}"
-    return f"{scheme}://{netloc}/{owner}/{repo}/archive/{ref}.zip"
+    return f"{scheme}://{netloc}/api/v1/repos/{owner}/{repo}/archive/{ref}.zip"
 
 
 def _extract_single_root(zip_path: str, dest_dir: str) -> str | None:
@@ -197,7 +228,7 @@ def _stage_update(archive_url: str, auth, cache_dir: str, manifest_path: str, re
     """Background: download the new commit into `<cache_dir>.new`; it goes live at the next start or on an explicit refresh."""
     stage_dir = cache_dir + _STAGE_SUFFIX
     try:
-        with create_client(headers=get_headers()) as client:
+        with create_client(headers=_headers()) as client:
             response = client.get(archive_url, auth=auth, timeout=_request_timeout())
             response.raise_for_status()
 
@@ -237,7 +268,7 @@ def _start_staging(archive_url: str, auth, cache_dir: str, manifest_path: str, r
 def _resolve(source: str, force_refresh: bool = False) -> tuple[str | None, bool, str | None]:
     """Returns (local directory, updated now, commit sha) for an imp_service git `source`."""
     try:
-        parsed = urlparse(source)
+        parsed = urlparse(_normalize_source(source))
     except Exception as e:
         logger.error(f"Invalid imp_service git source: {e}")
         return None, False, None
@@ -253,15 +284,16 @@ def _resolve(source: str, force_refresh: bool = False) -> tuple[str | None, bool
         netloc = f"{netloc}:{parsed.port}"
     clean_url = urlunparse((parsed.scheme, netloc, f"/{owner}/{repo}", "", "", ""))
     is_github = netloc.lower() in ("github.com", "www.github.com")
-    api_base = f"{parsed.scheme}://{netloc}"
 
-    username, password = parsed.username, parsed.password
+    username, password = unquote(parsed.username or ""), unquote(parsed.password or "")
     auth = (username, password or "") if username else None
 
     ref = parsed.fragment.strip() or None
     timeout = _request_timeout()
 
-    with create_client(headers=get_headers()) as client:
+    with create_client(headers=_headers()) as client:
+        scheme = _effective_scheme(client, parsed.scheme, netloc, timeout)
+        api_base = f"{scheme}://{netloc}"
         if ref is None:
             ref = _default_branch(client, api_base, owner, repo, is_github, auth, timeout)
 
@@ -281,7 +313,7 @@ def _resolve(source: str, force_refresh: bool = False) -> tuple[str | None, bool
             manifest = _promote_pending(cache_dir, manifest_path, manifest)
             have_cache = os.path.isdir(manifest.get("base_path", ""))
 
-        archive_url = _archive_url(parsed.scheme, netloc, owner, repo, ref, is_github)
+        archive_url = _archive_url(scheme, netloc, owner, repo, ref, is_github)
 
         if have_cache:
             age = time.time() - manifest.get("fetched_at", 0)

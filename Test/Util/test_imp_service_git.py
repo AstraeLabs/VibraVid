@@ -145,3 +145,32 @@ def test_loader_skips_empty_imp_service_entries(monkeypatch, tmp_path):
 
     monkeypatch.setattr(site_loader, "imp_sources", ["", "   "])
     assert site_loader.load_search_functions() == {}
+
+
+# ── self-hosted Gitea behind http/ngrok ──────────────────────────────────────
+
+@pytest.mark.parametrize("source", [
+    "http://tester:pa?ss%23@host.example/admin/repo#main",
+    "http://tester:pa%3Fss%2523@host.example/admin/repo#main",
+])
+def test_credentials_with_reserved_characters_stay_in_the_userinfo(source):
+    parsed = git_source.urlparse(git_source._normalize_source(source))
+    assert parsed.hostname == "host.example" and parsed.path == "/admin/repo" and parsed.fragment == "main"
+    assert git_source.unquote(parsed.username) == "tester"
+    assert git_source.redact(source) == "http://host.example/admin/repo"
+
+
+def test_raw_and_encoded_question_mark_give_the_same_credentials():
+    raw = git_source.urlparse(git_source._normalize_source("http://tester:asd1235e?1@host.example/admin/repo"))
+    encoded = git_source.urlparse(git_source._normalize_source("http://tester:asd1235e%3F1@host.example/admin/repo"))
+    assert git_source.unquote(raw.password) == git_source.unquote(encoded.password) == "asd1235e?1"
+
+
+def test_non_github_archive_uses_the_api_route():
+    url = git_source._archive_url("https", "git.example", "admin", "repo", "main", False)
+    assert url == "https://git.example/api/v1/repos/admin/repo/archive/main.zip"
+
+
+def test_repo_from_path_strips_dot_git_and_keeps_the_last_two_segments():
+    assert git_source._repo_from_path("/admin/repo.git") == ("admin", "repo")
+    assert git_source._repo_from_path("/git/admin/repo") == ("admin", "repo")

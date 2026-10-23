@@ -22,6 +22,18 @@ _EMPTY_MEDIA_INFO: dict = {
     "language": "",
     "video_codec": "",
     "video_bitrate": 0,
+    "video_bitrate_source": "",
+    "fps": 0.0,
+    "hdr": "",
+    "bit_depth": 0,
+    "video_profile": "",
+    "video_level": 0,
+    "pix_fmt": "",
+    "aspect_ratio": "",
+    "field_order": "",
+    "duration": 0.0,
+    "size": 0,
+    "audio_channels": "",
     "audio_codec": "",
     "audio_tracks": [],
     "audio_flags": "",
@@ -173,6 +185,8 @@ def _flux_media_metadata(report: dict) -> dict:
             info["quality"] = classify_resolution(stream.get("width"), stream.get("height"))
             info["video_codec"] = get_short_codec("video", codec_string)
             info["video_bitrate"] = stream.get("avg_bitrate") or 0
+            info["video_bitrate_source"] = "flux" if info["video_bitrate"] else ""
+            info["duration"] = float(stream.get("duration_seconds") or 0)
 
         elif stype == "audio":
             short = get_short_codec("audio", codec_string)
@@ -180,7 +194,10 @@ def _flux_media_metadata(report: dict) -> dict:
                 languages_found.append(lang_up)
             if short and short not in acodecs_found:
                 acodecs_found.append(short)
-            audio_tracks.append({"language": lang_up or "UND", "codec": short})
+            
+            channels = int(stream.get("num_channels") or 0)
+            channels_label = {1: "1.0", 2: "2.0", 6: "5.1", 8: "7.1"}.get(channels, f"{channels}.0" if channels else "")
+            audio_tracks.append({"language": lang_up or "UND", "codec": short, "channels": channels_label, "sample_rate": int(stream.get("sampling_frequency") or 0)})
 
         elif stype in ("subtitle", "text"):
             if not info["sub_codec"]:
@@ -192,6 +209,7 @@ def _flux_media_metadata(report: dict) -> dict:
     info["language"] = "-".join(languages_found)
     info["audio_codec"] = "-".join(acodecs_found)
     info["audio_tracks"] = audio_tracks
+    info["audio_channels"] = audio_tracks[0]["channels"] if audio_tracks else ""
     info["sub_language"] = "-".join(sub_languages_found)
     info["subtitle_tracks"] = subtitle_tracks
     return info

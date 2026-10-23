@@ -37,7 +37,10 @@ def refresh_output_formats() -> None:
     SONG_FORMAT = config_manager.config.get("OUTPUT", "song_format", default=None)
 
 
-_MEDIA_TOKENS = {"quality", "language", "video_codec", "audio_codec"}
+_MEDIA_TOKENS = {
+    "quality", "language", "video_codec", "audio_codec", "audio_flags", "sub_flags",
+    "fps", "video_bitrate", "hdr", "bit_depth", "audio_channels",
+}
 _TMDB_TOKENS = (
     "%(tmdb_id)",
     "%(imdb_id)",

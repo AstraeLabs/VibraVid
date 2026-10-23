@@ -110,14 +110,21 @@ class StreamingMuxFeeder:
 
         def _feed_loop() -> None:
             assert self._proc is not None and self._proc.stdin is not None
+            discard = False
             while True:
                 item = self._feed_queue.get()
                 if item is _SENTINEL:
                     break
+                if discard:
+                    continue
                 try:
                     self._proc.stdin.write(item)
                     self._proc.stdin.flush()
                 except (BrokenPipeError, OSError) as exc:
+                    if self._ffmpeg_done():
+                        logger.debug("streaming_mux: ffmpeg finished before the input ended (-t reached) -- discarding the rest of the input")
+                        discard = True
+                        continue
                     self._mark_failed(f"stdin write failed: {exc}")
                     break
 
@@ -128,6 +135,14 @@ class StreamingMuxFeeder:
 
         self._feeder_thread = threading.Thread(target=_feed_loop, daemon=True)
         self._feeder_thread.start()
+
+    def _ffmpeg_done(self) -> bool:
+        """True when ffmpeg closed its stdin because it had finished (exit 0), e.g. the ``-t`` cap was reached while more input was still being downloaded."""
+        assert self._proc is not None
+        try:
+            return self._proc.wait(timeout=5.0) == 0
+        except subprocess.TimeoutExpired:
+            return False
 
     def _mark_failed(self, reason: str) -> None:
         if not self._failed.is_set():

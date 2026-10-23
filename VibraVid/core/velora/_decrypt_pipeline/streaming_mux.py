@@ -271,7 +271,7 @@ class StreamingMuxMixin:
         chapter_input_idx: int | None = None
         raw_chapters = getattr(self, "_streaming_mux_chapters", None)
         if raw_chapters:
-            media_duration = video_duration_cap or getattr(video_stream, "total_duration", None) or None
+            media_duration = video_duration_cap or getattr(video_stream, "duration", None) or None
             chapters = sort_chapters(clamp_chapters(raw_chapters, media_duration))
             if chapters[0]["seconds"] > 0:
                 chapters = [{"name": "Intro", "seconds": 0}] + chapters

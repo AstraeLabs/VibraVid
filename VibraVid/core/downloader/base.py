@@ -12,7 +12,7 @@ from typing import NamedTuple
 
 from rich.console import Console
 
-from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, strip_media_tokens
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, media_token_values, strip_media_tokens
 from VibraVid.core.downloader.drm_keys import build_key_fallback
 from VibraVid.core.muxing import (
     build_hybrid_output,
@@ -866,14 +866,7 @@ class BaseDownloader:
                 metadata = get_media_metadata(self.output_path)
                 logger.info(f"Metadata for dynamic rename: {metadata}")
 
-                replacements = {
-                    "quality": metadata.get("quality", ""),
-                    "language": metadata.get("language", ""),
-                    "video_codec": metadata.get("video_codec", ""),
-                    "audio_codec": metadata.get("audio_codec", ""),
-                    "audio_flags": metadata.get("audio_flags", ""),
-                    "sub_flags": metadata.get("sub_flags", ""),
-                }
+                replacements = media_token_values(metadata)
 
                 # Resolve placeholders on the template's name root
                 new_root = os.path.splitext(template)[0]

@@ -188,6 +188,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--abc", dest="abc", action="store_true", help="Anonymize printed kid/key pairs, masking alternating characters with '?'")
     dl_opts.add_argument("--resolve-only", dest="resolve_only", action="store_true",help="Only resolve & cache the master playlist without downloading.",)
     dl_opts.add_argument("--export", dest="export_file", nargs="?", const="", default=None, metavar="FILE", help="Resolve tracks and keys but don't download: write them to a JSON file (default: .cache/export/<site>_<type>_<title>.json) to download later with --import. Works with MP4/HLS/DASH/ISM. The file holds the keys")
+    dl_opts.add_argument("--export-minimal", dest="export_minimal", action="store_true", help="With --export: leave every link (manifest, mp4 and per-track) and the track list out of the file. The file can then no longer be used with --import")
 
     # ── Remote server
     remote_group = parser.add_argument_group("Remote server")
@@ -719,6 +720,7 @@ def main():
         context_tracker.anonymize_keys = bool(getattr(args, "abc", False))
         context_tracker.resolve_only = bool(getattr(args, "resolve_only", False))
         context_tracker.export_file = getattr(args, "export_file", None)
+        context_tracker.export_minimal = bool(getattr(args, "export_minimal", False))
         site_module_name = site_module.__name__.rsplit(".", 1)[-1] if site_module is not None else None
         context_tracker.site_options = build_site_options(args, parser, site_option_dests, site_module_name)
 

@@ -12,7 +12,7 @@ from VibraVid.utils.http_client import create_client, get_userAgent
 
 console = Console()
 logger = logging.getLogger(__name__)
-ENABLE_VIXCLOUD_API_V2 = False
+ENABLE_VIXCLOUD_API_V2 = True
 
 
 class VideoSource:

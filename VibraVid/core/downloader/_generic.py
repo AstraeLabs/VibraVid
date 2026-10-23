@@ -1577,7 +1577,7 @@ class Generic_Downloader(BaseDownloader):
             md._session_live_decrypt = (
                 bool(sel)
                 and not context_tracker.skip_decrypt
-                and all(getattr(s, "supports_live_decryption", False) for s in sel)
+                and MediaDownloader.all_support_live_decryption(sel)
             )
             md._prepare_labels()
 
@@ -1696,7 +1696,7 @@ class Generic_Downloader(BaseDownloader):
             md._session_live_decrypt = (
                 bool(sel)
                 and not context_tracker.skip_decrypt
-                and all(getattr(s, "supports_live_decryption", False) for s in sel)
+                and MediaDownloader.all_support_live_decryption(sel)
             )
             md._prepare_labels()
 

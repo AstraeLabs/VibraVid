@@ -130,6 +130,12 @@ class MediaDownloader(
         # skip the separate mkvmerge/ffmpeg _inject_chapters() post-processing step.
         self.streaming_mux_chapters_injected: bool = False
 
+    @staticmethod
+    def all_support_live_decryption(streams) -> bool:
+        """True when every video/audio stream is truly segmented. Subtitles don't count: a single-file VTT never goes through the live pipeline (its own download stays on the post-download path, see _download_stream) and must not take the video/audio off it."""
+        media = [s for s in streams if s.type != "subtitle"]
+        return bool(media) and all(getattr(s, "supports_live_decryption", False) for s in media)
+
     def enable_streaming_mux(self, output_path: str, chapters: list | None = None) -> None:
         self._streaming_mux_output_path = output_path
         self._streaming_mux_chapters = list(chapters or [])
@@ -240,7 +246,7 @@ class MediaDownloader(
             and not s.is_external
             and s.type in ("video", "audio", "subtitle")
         ]
-        all_support_live = all(s.supports_live_decryption for s in selected_media) if selected_media else False
+        all_support_live = self.all_support_live_decryption(selected_media)
         flux_available = bool(get_flux_path())
 
         # Live (in-flight) decryption is automatic: it engages whenever every

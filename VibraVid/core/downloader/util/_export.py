@@ -5,6 +5,7 @@ import logging
 import re
 from pathlib import Path
 
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.remote.models import ResolvedMedia
 from VibraVid.utils import config_manager
 from VibraVid.utils.upload.version import __version__
@@ -109,9 +110,14 @@ def write_export(media: ResolvedMedia, file: str | None = None) -> str | None:
         entry = {k: v for k, v in wire.items() if k not in _NOT_EXPORTED and not (k == "tracks" and v is None)}
         if is_synthetic(media):
             entry["url"] = primary_link(media.tracks) or media.url
-            entries.append(entry)
         else:
-            entries.append({"cmd": _download_command(media), **entry})
+            entry = {"cmd": _download_command(media), **entry}
+
+        if context_tracker.export_minimal:
+            for key in ("url", "cmd", "tracks"):
+                entry.pop(key, None)
+
+        entries.append(entry)
         path.write_text(json.dumps(entries, indent=4, ensure_ascii=False), encoding="utf-8")
         _written.append(str(path))
         return str(path)
