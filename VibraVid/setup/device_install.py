@@ -25,7 +25,7 @@ class DeviceSearcher:
         self.cdm_dir = binary_paths.get_cdm_directory()
         self.prd_dir = binary_paths.get_prd_directory()
         self.wvd_dir = binary_paths.get_wvd_directory()
-        self.previous_dir = binary_paths.get_legacy_binary_directory()
+        self.previous_dir = None if binary_paths.binary_dir_override else os.path.dirname(self.base_dir)
 
     def _fallback_dirs(self) -> list[str]:
         """Flat directories searched after the dedicated CDM directory: the binary root, then the pre-tools one."""
@@ -138,6 +138,13 @@ class DeviceSearcher:
             path = self._check_existing(ext)
             if path:
                 return path
+
+            # The dedicated folder may be one the user pointed to (wvd_dir / prd_dir) and may hold sub-folders
+            dedicated = self._cdm_dir_for_ext(ext)
+            if dedicated and os.path.isdir(dedicated):
+                path = self._find_recursively(ext=ext, start_dir=dedicated)
+                if path:
+                    return path
             return self._find_recursively(ext=ext, start_dir=self.base_dir)
 
 

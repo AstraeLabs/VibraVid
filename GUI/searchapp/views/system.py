@@ -110,7 +110,11 @@ def check_updates(request: HttpRequest) -> JsonResponse:
     """Return current and latest version info, with a 1-hour in-memory cache."""
     import urllib.request
 
+    from VibraVid.utils.upload.update import auto_check_enabled
     from VibraVid.utils.upload.version import __version__
+
+    if not auto_check_enabled():
+        return JsonResponse({"disabled": True})
 
     cached = _update_check_cache
     if cached and time.monotonic() - cached.get("ts", 0) < _UPDATE_CHECK_TTL:
@@ -160,6 +164,25 @@ def trigger_binaries_update(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
+def refresh_external_import(request: HttpRequest) -> JsonResponse:
+    """Check the git sources of `imp_service` now, apply any newer commit and reload the services."""
+    from VibraVid.services._base.site_loader import refresh_external_sources
+
+    from .settings_view import _reload_service_registries
+
+    try:
+        results = refresh_external_sources()
+        if any(r["updated"] for r in results):
+            for err in _reload_service_registries([]):
+                logger.warning("imp_service reload: %s", err)
+    except Exception as exc:
+        logger.exception("External import refresh failed")
+        return JsonResponse({"success": False, "message": str(exc)}, status=500)
+
+    return JsonResponse({"success": True, "results": results})
+
+
+@require_http_methods(["POST"])
 def trigger_update(request: HttpRequest) -> JsonResponse:
     """Perform an in-app update appropriate to how VibraVid is running."""
     from ..self_update import perform_update
@@ -174,5 +197,5 @@ def trigger_update(request: HttpRequest) -> JsonResponse:
 
 __all__ = [
     'registry_status', 'site_cli_options_schema', 'reload_config',
-    'check_updates', 'trigger_binaries_update', 'trigger_update',
+    'check_updates', 'trigger_binaries_update', 'refresh_external_import', 'trigger_update',
 ]

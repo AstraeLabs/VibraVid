@@ -83,7 +83,7 @@ Settings -> *Providers* -> **Add a provider** installs a site module ZIP (`api/u
 
 ### Updates
 
-A banner appears when a newer release exists (`api/version/check/`, cached 1 h); `api/version/update/` applies it ([Docker one-click](docker.md)). `api/binaries/update/` is the GUI counterpart of `--binary-update`.
+A banner appears when a newer release exists (`api/version/check/`, cached 1 h); `api/version/update/` applies it ([Docker one-click](docker.md)). `api/binaries/update/` is the GUI counterpart of `--binary-update`. `api/imp-service/refresh/` (the **Refresh external import** button) pulls the newest commit of the `imp_service` repositories and reloads the services. `auto_check_update = false` hides the banner.
 
 ### ARR stack page
 

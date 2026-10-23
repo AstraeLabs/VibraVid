@@ -50,6 +50,10 @@ class DownloadCancelled(RuntimeError):
     """User-initiated abort (Ctrl+C): unwinds straight to the CLI for a clean exit with no traceback."""
 
 
+class DownloadFailed(RuntimeError):
+    """Expected failure (e.g. every episode of a season failed): the CLI prints the message only, no traceback."""
+
+
 class DownloadResult(NamedTuple):
     """Outcome of a downloader ``start()``."""
     path: str | None

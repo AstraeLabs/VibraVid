@@ -187,15 +187,32 @@ class MediasetAPI:
         with create_client(headers=headers) as client:
             return client.get(self.conf["home_url"]).text
 
+    _HASH_PAIR_RE = re.compile(r"([a-f0-9]{64}):\$(\w+)")
+    _HASH_KEY_RE = re.compile(r"(?<![0-9a-f])([a-f0-9]{64}):")
+
     def find_relevant_script(self, html):
+        """Return inline scripts that carry the GraphQL persisted-query map."""
         soup = BeautifulSoup(html, "html.parser")
-        return [s.get_text() for s in soup.find_all("script") if "imageEngines" in s.get_text()]
+        scripts = [s.get_text() for s in soup.find_all("script")]
+
+        with_map = [s for s in scripts if "hashMap" in s]
+        if with_map:
+            return with_map
+
+        with_pairs = [s for s in scripts if self._HASH_PAIR_RE.search(s.replace('\\"', ""))]
+        if with_pairs:
+            return with_pairs
+
+        return [s for s in scripts if "imageEngines" in s]
 
     def extract_pairs_from_scripts(self, scripts):
-        relevant_part = scripts[0].replace('\\"', "").split("...Option")[1].split("imageEngines")[0]
         pairs = {}
-        for match in re.finditer(r"([a-f0-9]{64}):\$(\w+)", relevant_part):
-            pairs[match.group(1)] = f"${match.group(2)}"
+        for script in scripts:
+            text = script.replace('\\"', "")
+            for match in self._HASH_PAIR_RE.finditer(text):
+                pairs.setdefault(match.group(1), f"${match.group(2)}")
+            for match in self._HASH_KEY_RE.finditer(text):
+                pairs.setdefault(match.group(1), "")
         return pairs
 
     def _is_valid_search_hash(self, sha256_hash: str) -> bool:
@@ -219,7 +236,7 @@ class MediasetAPI:
         with create_client(headers=self.headers) as client:
             html = client.get(self.conf["home_url"]).text
 
-        scripts = self.find_relevant_script(html)[0:1]
+        scripts = self.find_relevant_script(html)
         if not scripts:
             return None
 

@@ -297,6 +297,18 @@
 					<button class="cn-cta" type="button" id="cn-binaries">Update binaries</button>
 				</div>
 			</div>
+
+			<div class="cn-box">
+				<h3>External services</h3>
+				<p class="cn-sub" style="margin-bottom:15px">
+					Git repositories listed in <code>imp_service</code> are checked at every start and a newer
+					commit is downloaded in the background. Refresh here to apply it now, without a restart.
+				</p>
+				<div class="cn-row">
+					<p class="cn-sub" id="cn-import-msg" style="flex:1"></p>
+					<button class="cn-cta" type="button" id="cn-import">Refresh external import</button>
+				</div>
+			</div>
 		</div>
 	</section>
 
@@ -326,6 +338,7 @@
 	var URL_UPLOAD   = "{% url 'upload_service_zip' %}";
 	var URL_REMOVE   = "{% url 'remove_service' %}";
 	var URL_BINARIES = "{% url 'trigger_binaries_update' %}";
+	var URL_IMPORT = "{% url 'refresh_external_import' %}";
 	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
 	var CSRF         = "{{ csrf_token }}";
 
@@ -840,6 +853,32 @@
 					return tool + ": " + data.results[tool].message;
 				});
 				say(msg, lines.join(" | "), "good");
+			})
+			.catch(function (err) { say(msg, "Failed: " + err.message, "bad"); })
+			.finally(function () { btn.disabled = false; });
+	});
+
+	// ── External import (imp_service git sources) ─────────────────────────────
+	el("cn-import").addEventListener("click", function () {
+		var btn = this, msg = el("cn-import-msg");
+		btn.disabled = true;
+		say(msg, "Checking…");
+		post(URL_IMPORT, null, false)
+			.then(function (data) {
+				if (!data || !data.success) {
+					say(msg, (data && data.message) || "Refresh failed.", "bad");
+					return;
+				}
+				if (!data.results.length) {
+					say(msg, "No git repository in imp_service.");
+					return;
+				}
+				var lines = data.results.map(function (r) {
+					if (r.error) { return r.source + ": " + r.error; }
+					return r.source + ": " + (r.updated ? "updated to " : "already up to date, ") + (r.commit || "");
+				});
+				var failed = data.results.some(function (r) { return r.error; });
+				say(msg, lines.join(" | "), failed ? "bad" : "good");
 			})
 			.catch(function (err) { say(msg, "Failed: " + err.message, "bad"); })
 			.finally(function () { btn.disabled = false; });

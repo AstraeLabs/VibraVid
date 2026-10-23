@@ -294,6 +294,9 @@ def load_search_functions() -> dict[str, LazySearchModule]:
     seen_init_files = set()
 
     for source in imp_sources:
+        if not source.strip():
+            continue
+
         source_label = source
         if source.lower() == "default":
             if get_is_binary_installation():
@@ -497,6 +500,20 @@ def load_search_functions() -> dict[str, LazySearchModule]:
         disk_cache.save("_site_loader", "manifest", manifest)
 
     return loaded_functions
+
+
+def refresh_external_sources() -> list[dict]:
+    """Refresh every git `imp_service` source now; services of a source that changed are dropped from `sys.modules` so the next use re-imports them."""
+    results = git_source.refresh_remote_sources(imp_sources)
+    if not any(r["updated"] for r in results):
+        return results
+
+    external = [name for name, lazy in load_search_functions().items() if lazy.source.lower() != "default"]
+    for alias in external:
+        name = alias[: -len("_search")]
+        for mod_name in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod_name]
+    return results
 
 
 def get_folder_name() -> str:

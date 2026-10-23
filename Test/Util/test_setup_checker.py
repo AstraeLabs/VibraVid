@@ -45,6 +45,17 @@ class FakeBinaryPaths:
         self.download_result = None
         self.download_calls = []
         self.local_lookups = []
+        self.versions = {}  # group -> recorded local version
+        self.remote_versions = {}  # group -> version published upstream
+
+    def get_local_tool_version(self, group):
+        return self.versions.get(group)
+
+    def get_remote_tool_version(self, group):
+        return self.remote_versions.get(group)
+
+    def set_local_tool_version(self, group, version):
+        self.versions[group] = version
 
     def get_binary_path(self, group, exec_name):
         self.local_lookups.append((group, exec_name))
@@ -263,3 +274,61 @@ def test_mkvmerge_and_mkvpropedit_are_independent_lookups(env):
 def test_installation_levels(monkeypatch, level, group, expected):
     monkeypatch.setattr(checker.config_manager, "config", type("C", (), {"get": staticmethod(lambda section, key: level)})())
     assert checker._should_download(group) is expected
+
+
+def test_check_ffmpeg_without_download_reports_each_binary_on_its_own(tmp_path, monkeypatch):
+    from VibraVid.setup import checker
+
+    probe = tmp_path / "ffprobe.exe"
+    probe.write_bytes(b"x" * (2 * 1024 * 1024))
+    monkeypatch.setattr(checker.shutil, "which", lambda name: None)
+    monkeypatch.setattr(checker.binary_paths, "get_binary_path", lambda group, name: str(probe) if name.startswith("ffprobe") else None)
+
+    ffmpeg, ffprobe = checker.check_ffmpeg(download=False)
+    assert ffmpeg is None
+    assert ffprobe == str(probe)
+
+
+def test_fresh_download_records_the_published_version(env):
+    env.paths.download_result = "/bin/flux"
+    env.paths.remote_versions["flux"] = "0.5.2"
+
+    assert checker.check_flux() == "/bin/flux"
+    assert env.paths.versions == {"flux": "0.5.2"}
+
+
+def test_fresh_ffmpeg_download_records_the_published_version(env):
+    env.paths.download_result = "/bin/tool"
+    env.paths.remote_versions["ffmpeg"] = "9.0.1"
+
+    assert checker.check_ffmpeg() == ("/bin/tool", "/bin/tool")
+    assert env.paths.versions == {"ffmpeg": "9.0.1"}
+
+
+def test_download_keeps_an_already_recorded_version(env):
+    env.paths.download_result = "/bin/flux"
+    env.paths.versions["flux"] = "0.4.0"
+    env.paths.remote_versions["flux"] = "0.5.2"
+
+    checker.check_flux()
+    assert env.paths.versions == {"flux": "0.4.0"}
+
+
+def test_ffmpeg_pointer_file_in_path_is_ignored_and_downloaded_again(env, tmp_path):
+    pointer = tmp_path / "ffmpeg"
+    pointer.write_text("version https://git-lfs.github.com/spec/v1 oid sha256:abc size 144862208")
+    env.on_path["ffmpeg"] = str(pointer)
+    env.on_path["ffprobe"] = str(pointer)
+    env.paths.download_result = "/bin/tool"
+
+    assert checker.check_ffmpeg() == ("/bin/tool", "/bin/tool")
+    assert env.paths.download_calls == [("ffmpeg", "ffmpeg"), ("ffmpeg", "ffprobe")]
+
+
+def test_small_files_are_only_suspicious_for_ffmpeg(env, tmp_path):
+    small = tmp_path / "mp4decrypt"
+    small.write_bytes(b"x" * 366_080)
+    env.on_path["mp4decrypt"] = str(small)
+
+    assert checker._which("mp4decrypt", "mp4decrypt") == str(small)
+    assert checker._which("ffmpeg", "mp4decrypt") is None

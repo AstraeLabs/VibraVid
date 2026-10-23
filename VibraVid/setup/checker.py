@@ -9,7 +9,7 @@ from rich.console import Console
 
 from VibraVid.utils import config_manager
 
-from .binary_paths import binary_paths
+from .binary_paths import binary_paths, is_broken_binary
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -38,9 +38,18 @@ def _executable_name(name: str) -> str:
     return f"{name}.exe" if binary_paths.system == "windows" else name
 
 
+def _which(group: str, name: str) -> str | None:
+    """`shutil.which` that ignores a broken file (Git LFS pointer, truncated download) shadowing the real binary."""
+    found = shutil.which(name)
+    if found and is_broken_binary(group, found):
+        logger.warning(f"Ignoring {found} found in PATH: too small to be a working {group} binary")
+        return None
+    return found
+
+
 def _find_installed(group: str, binary_exec: str) -> str | None:
     """STEP 1 and 2: system PATH, then the local binary directory."""
-    binary_path = shutil.which(binary_exec)
+    binary_path = _which(group, binary_exec)
     if binary_path:
         logger.debug(f"Found {binary_exec} in system PATH ({binary_path})")
         return binary_path
@@ -53,10 +62,24 @@ def _find_installed(group: str, binary_exec: str) -> str | None:
     return None
 
 
+def _local_file(path: str | None) -> str | None:
+    return path if path and os.path.isfile(path) and not is_broken_binary("ffmpeg", path) else None
+
+
+def _record_installed_version(group: str) -> None:
+    """Remember the published version a fresh install corresponds to, so the periodic update check does not download it again."""
+    if binary_paths.get_local_tool_version(group):
+        return
+    remote = binary_paths.get_remote_tool_version(group)
+    if remote:
+        binary_paths.set_local_tool_version(group, remote)
+
+
 def _download_binary(group: str, binary_exec: str) -> str | None:
     """STEP 3: download the binary from AstraeLabs/Binary and report a failure."""
     binary_downloaded = binary_paths.download_binary(group, binary_exec)
     if binary_downloaded:
+        _record_installed_version(group)
         logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
         return binary_downloaded
 
@@ -79,6 +102,7 @@ def _check_binary(group: str, name: str, download: bool = True, termux: str = _T
         if termux != _TERMUX_MANUAL and _should_download(group):
             binary_downloaded = binary_paths.download_binary(group, binary_exec)
             if binary_downloaded:
+                _record_installed_version(group)
                 logger.debug(f"Downloaded {binary_exec} to {binary_downloaded}")
                 return binary_downloaded
 
@@ -112,8 +136,8 @@ def check_ffmpeg(download: bool = True) -> tuple[str | None, str | None]:
     ffprobe_name = "ffprobe.exe" if system_platform == "windows" else "ffprobe"
 
     # STEP 1: Check system PATH
-    ffmpeg_path = shutil.which(ffmpeg_name)
-    ffprobe_path = shutil.which(ffprobe_name)
+    ffmpeg_path = _which("ffmpeg", ffmpeg_name)
+    ffprobe_path = _which("ffmpeg", ffprobe_name)
     if ffmpeg_path and ffprobe_path:
         logger.debug(f"Found ffmpeg ({ffmpeg_path}) and ffprobe ({ffprobe_path}) in system PATH")
         return ffmpeg_path, ffprobe_path
@@ -121,12 +145,12 @@ def check_ffmpeg(download: bool = True) -> tuple[str | None, str | None]:
     # STEP 2: Check binary directory
     ffmpeg_local = binary_paths.get_binary_path("ffmpeg", ffmpeg_name)
     ffprobe_local = binary_paths.get_binary_path("ffmpeg", ffprobe_name)
-    if ffmpeg_local and os.path.isfile(ffmpeg_local) and ffprobe_local and os.path.isfile(ffprobe_local):
+    if _local_file(ffmpeg_local) and _local_file(ffprobe_local):
         logger.debug(f"Found ffmpeg ({ffmpeg_local}) and ffprobe ({ffprobe_local}) in local binary directory")
         return ffmpeg_local, ffprobe_local
 
     if not download:
-        return None, None
+        return ffmpeg_path or _local_file(ffmpeg_local), ffprobe_path or _local_file(ffprobe_local)
 
     # Termux-specific check
     if is_termux():
@@ -141,6 +165,7 @@ def check_ffmpeg(download: bool = True) -> tuple[str | None, str | None]:
     ffmpeg_downloaded = binary_paths.download_binary("ffmpeg", ffmpeg_name)
     ffprobe_downloaded = binary_paths.download_binary("ffmpeg", ffprobe_name)
     if ffmpeg_downloaded and ffprobe_downloaded:
+        _record_installed_version("ffmpeg")
         logger.debug(f"Downloaded ffmpeg ({ffmpeg_downloaded}) and ffprobe ({ffprobe_downloaded})")
         return ffmpeg_downloaded, ffprobe_downloaded
 

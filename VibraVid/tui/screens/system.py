@@ -33,11 +33,18 @@ from VibraVid.setup.system import (
     get_mkvpropedit_path,
     get_velora_path,
 )
+from VibraVid.tui import bridge
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.tui.widgets.topbar import TopBar
 from VibraVid.utils import config_manager, get_log_file_path
-from VibraVid.utils.upload.update import check_for_updates, download_release_asset, get_execution_mode, update_command
+from VibraVid.utils.upload.update import (
+    auto_check_enabled,
+    check_for_updates,
+    download_release_asset,
+    get_execution_mode,
+    update_command,
+)
 from VibraVid.utils.upload.version import __title__, __version__
 
 logger = logging.getLogger(__name__)
@@ -80,6 +87,8 @@ class SystemScreen(Screen):
                     yield Button(t("check_for_updates"), variant="primary", id="btn-check-update")
                     yield Button(t("download_update"), variant="success", id="btn-download-update", disabled=True)
                     yield Static("", id="update-status")
+                    yield Button(t("refresh_external_import"), variant="default", id="btn-refresh-import")
+                    yield Static("", id="import-status")
         yield CustomFooter([("tab", t("hint_field")), ("r", t("hint_refresh"))])
 
     def on_mount(self) -> None:
@@ -94,7 +103,10 @@ class SystemScreen(Screen):
         self._load_drm_status()
         self._load_log_files()
         self._load_system_info()
-        self._run_update_check()
+        if auto_check_enabled():
+            self._run_update_check()
+        else:
+            self.query_one("#update-status", Static).update(f"[dim]{t('update_check_disabled')}[/]")
 
     def action_refresh_all(self) -> None:
         self._load_dependencies()
@@ -260,6 +272,44 @@ class SystemScreen(Screen):
             self.app.call_from_thread(self._display_update_result, result)
         except (NoMatches, RuntimeError):
             logger.debug("Update check finished after the System screen was closed")
+
+    @on(Button.Pressed, "#btn-refresh-import")
+    def action_refresh_import(self) -> None:
+        self.query_one("#btn-refresh-import", Button).disabled = True
+        self.query_one("#import-status", Static).update(f"[bold yellow]{t('refresh_import_checking')}[/]")
+        self._run_import_refresh()
+
+    def _display_import_result(self, results: list[dict] | None) -> None:
+        if not self.is_attached:
+            return
+        self.query_one("#btn-refresh-import", Button).disabled = False
+        if results is None:
+            message = f"[bold red]{t('refresh_import_failed')}[/]"
+        elif not results:
+            message = f"[yellow]{t('refresh_import_none')}[/]"
+        else:
+            lines = []
+            for r in results:
+                if r["error"]:
+                    lines.append(f"[red]{r['source']}: {r['error']}[/]")
+                elif r["updated"]:
+                    lines.append(f"[bold green]{r['source']}: {t('refresh_import_updated')} {r['commit'] or ''}[/]")
+                else:
+                    lines.append(f"[green]{r['source']}: {t('refresh_import_current')} {r['commit'] or ''}[/]")
+            message = "\n".join(lines)
+        self.query_one("#import-status", Static).update(message)
+
+    @work(thread=True, exclusive=True, group="import-refresh")
+    def _run_import_refresh(self) -> None:
+        try:
+            results = bridge.refresh_external_import()
+        except Exception as e:
+            logger.error(f"External import refresh failed: {e}")
+            results = None
+        try:
+            self.app.call_from_thread(self._display_import_result, results)
+        except (NoMatches, RuntimeError):
+            logger.debug("Import refresh finished after the System screen was closed")
 
     @on(Button.Pressed, "#btn-download-update")
     def action_download_update(self) -> None:

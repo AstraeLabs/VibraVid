@@ -48,7 +48,7 @@ python manual.py
 
 ## Update
 
-At interactive CLI startup VibraVid checks GitHub Releases in the background (cached 24 h) and prints the command for your installation if a newer release exists. `VibraVid --check-update` checks on demand; `--skip-update-check` disables the startup check.
+At interactive CLI startup VibraVid checks GitHub Releases in the background (cached 24 h) and prints the command for your installation if a newer release exists. `VibraVid --check-update` checks on demand; `--skip-update-check` disables the startup check (`auto_check_update = false` in `config.toml` for good).
 
 | Installation | Update |
 |---|---|

@@ -17,8 +17,18 @@ logger = logging.getLogger(__name__)
 
 VERSIONS_FILENAME = ".versions.json"
 LFS_TOOLS = {"ffmpeg"}
+MIN_BINARY_SIZE = {"ffmpeg": 1024 * 1024}
 
 DOWNLOAD_CHUNK_SIZE = 256 * 1024
+
+
+def is_broken_binary(tool: str, path: str | None) -> bool:
+    """True if *path* exists but is too small to be a working binary of *tool* (see MIN_BINARY_SIZE)."""
+    minimum = MIN_BINARY_SIZE.get(tool, 0)
+    try:
+        return bool(path) and minimum > 0 and os.path.isfile(path) and os.path.getsize(path) < minimum
+    except OSError:
+        return False
 
 
 def _format_size(n: float) -> str:
@@ -185,14 +195,26 @@ class BinaryPaths:
         else:  # linux
             return os.path.join(self.home_dir, ".local", "bin", "binary", "VibraVid")
 
-    def get_legacy_binary_directory(self) -> str | None:
-        """Flat directory used before the tools/wvd/prd layout (``<base>/binary``), or None when there is none to fall back to."""
-        if self.binary_dir_override:
+    @staticmethod
+    def _configured_dir(key: str) -> str | None:
+        """Folder set in ``[DEFAULT] <key>`` of config.toml ("" = default). ``~`` and ``$VAR`` are expanded, a relative path starts from the program folder."""
+        try:
+            from VibraVid.utils import config_manager
+
+            value = str(config_manager.config.get("DEFAULT", key, default="") or "").strip()
+            if not value:
+                return None
+
+            value = os.path.expanduser(os.path.expandvars(value))
+            if not os.path.isabs(value):
+                value = os.path.join(config_manager.base_path, value)
+            return os.path.normpath(value)
+        except Exception as e:
+            logger.debug(f"Could not read '{key}' from config: {e}")
             return None
-        return os.path.dirname(self.get_binary_directory())
 
     def get_tools_directory(self) -> str:
-        """Directory degli eseguibili di supporto (ffmpeg, yt-dlp, deno, velora, flux, ...)."""
+        """Directory degli eseguibili di supporto (ffmpeg, yt-dlp, deno, velora, flux, ...): ``<binary_dir>/tools``."""
         return os.path.join(self.get_binary_directory(), "tools")
 
     def get_cdm_directory(self) -> str:
@@ -200,12 +222,12 @@ class BinaryPaths:
         return self.get_binary_directory()
 
     def get_wvd_directory(self) -> str:
-        """Directory per i file Widevine (.wvd)."""
-        return os.path.join(self.get_binary_directory(), "wvd")
+        """Directory per i file Widevine (.wvd); ``[DEFAULT] wvd_dir`` overrides ``<binary_dir>/wvd``."""
+        return self._configured_dir("wvd_dir") or os.path.join(self.get_binary_directory(), "wvd")
 
     def get_prd_directory(self) -> str:
-        """Directory per i file PlayReady (.prd)."""
-        return os.path.join(self.get_binary_directory(), "prd")
+        """Directory per i file PlayReady (.prd); ``[DEFAULT] prd_dir`` overrides ``<binary_dir>/prd``."""
+        return self._configured_dir("prd_dir") or os.path.join(self.get_binary_directory(), "prd")
 
     def ensure_binary_directory(self, mode: int = 0o755) -> str:
         """Create the binary directory if it does not already exist."""
@@ -243,35 +265,28 @@ class BinaryPaths:
 
         Lookup order:
         1. in-memory cache (``_resolved``)
-        2. ``<binary_dir>/tools/<binary_name>`` (nuova posizione ordinata)
-        3. ``<binary_dir>/<binary_name>`` (posizione legacy piatta, per compatibilità)
-        4. ``<parent of binary_dir>/<binary_name>`` (cartella piatta delle versioni precedenti, es. ``C:/binary``)
+        2. ``<tools dir>/<binary_name>``
         """
         if binary_name in self._resolved:
             return self._resolved[binary_name]
 
         local_path = os.path.join(self.get_tools_directory(), binary_name)
-        if os.path.isfile(local_path):
+        if self._is_usable_file(tool, local_path):
             logger.debug(f"Found local binary {binary_name} at {local_path}")
             self._resolved[binary_name] = local_path
             return local_path
 
-        # Backward compatibility: binaries downloaded by previous versions lay flat in the binary dir.
-        legacy_path = os.path.join(self.get_binary_directory(), binary_name)
-        if os.path.isfile(legacy_path):
-            logger.debug(f"Found legacy local binary {binary_name} at {legacy_path}")
-            self._resolved[binary_name] = legacy_path
-            return legacy_path
-
-        previous_dir = self.get_legacy_binary_directory()
-        if previous_dir:
-            previous_path = os.path.join(previous_dir, binary_name)
-            if os.path.isfile(previous_path):
-                logger.debug(f"Found binary {binary_name} in the pre-tools directory {previous_path}")
-                self._resolved[binary_name] = previous_path
-                return previous_path
-
         return None
+
+    @staticmethod
+    def _is_usable_file(tool: str, path: str) -> bool:
+        """A regular file that is not obviously broken: a broken one is skipped (and replaced on the next download)."""
+        if not os.path.isfile(path):
+            return False
+        if is_broken_binary(tool, path):
+            logger.warning(f"Ignoring {path}: only {os.path.getsize(path)} bytes, not a working {tool} binary (Git LFS pointer or interrupted download)")
+            return False
+        return True
 
     def invalidate_binary(self, binary_name: str) -> None:
         """Drop the cached resolution for *binary_name* so the next lookup re-resolves it."""
@@ -295,10 +310,6 @@ class BinaryPaths:
     def _versions_file(self) -> str:
         return os.path.join(self.get_tools_directory(), VERSIONS_FILENAME)
 
-    def _legacy_tool_version_file(self, tool: str) -> str:
-        """Pre-consolidation per-tool version file (one ".<tool>.version" file each)."""
-        return os.path.join(self.get_tools_directory(), f".{tool}.version")
-
     def _read_versions(self) -> dict:
         try:
             with open(self._versions_file(), encoding="utf-8") as f:
@@ -318,26 +329,7 @@ class BinaryPaths:
     def get_local_tool_version(self, tool: str) -> str | None:
         """Return the version we last recorded as installed for *tool*, or None if never recorded."""
         with self._version_lock:
-            versions = self._read_versions()
-            if tool in versions:
-                return versions[tool] or None
-
-            # One-time migration from the legacy per-tool ".<tool>.version" file, if present.
-            legacy_path = self._legacy_tool_version_file(tool)
-            try:
-                with open(legacy_path, encoding="utf-8") as f:
-                    legacy_version = f.read().strip() or None
-            except OSError:
-                return None
-
-            if legacy_version:
-                versions[tool] = legacy_version
-                try:
-                    self._write_versions(versions)
-                    os.remove(legacy_path)
-                except OSError as e:
-                    logger.warning(f"Failed to migrate legacy version file for {tool}: {e}")
-            return legacy_version
+            return self._read_versions().get(tool) or None
 
     def set_local_tool_version(self, tool: str, version: str) -> None:
         """Record the version currently installed for *tool*."""
@@ -415,7 +407,7 @@ class BinaryPaths:
                 return self._resolved[binary_name]
 
             # The file may also be present on disk even if not in the cache (e.g. left over from a previous application session).
-            if os.path.isfile(local_path) and os.path.getsize(local_path) > 0:
+            if self._is_usable_file(tool, local_path) and os.path.getsize(local_path) > 0:
                 logger.info(f"Binary {binary_name} already on disk, skipping download")
                 self._resolved[binary_name] = local_path
                 return local_path
@@ -444,7 +436,7 @@ class BinaryPaths:
 
                 # Fallback: the file may have been installed manually or by a previous session
                 # even though the remote manifest is unavailable (e.g. HTTP 404 / network error).
-                if os.path.isfile(local_path) and os.path.getsize(local_path) > 0:
+                if self._is_usable_file(tool, local_path) and os.path.getsize(local_path) > 0:
                     logger.info(f"Manifest unavailable but binary {binary_name} found on disk, using it")
                     self._resolved[binary_name] = local_path
                     return local_path

@@ -134,3 +134,19 @@ def test_launchers_and_console_script_use_the_bootstrap():
 def test_the_cli_bootstrap_does_not_pull_the_tui_into_the_frozen_binary():
     """PyInstaller freezes manual.py: nothing reachable from it may import the TUI (textual)."""
     assert "VibraVid.tui" not in (workspace_root / "VibraVid" / "cli" / "bootstrap.py").read_text(encoding="utf-8")
+
+
+def test_an_expected_download_failure_prints_the_message_without_a_traceback(calls, capsys):
+    from VibraVid.core.downloader.base import DownloadFailed
+
+    def failed():
+        raise DownloadFailed("1 episode(s) failed for season 51")
+
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap.run_guarded(failed)
+
+    err = capsys.readouterr().err
+    assert excinfo.value.code == 1
+    assert calls == ["fix", "pause"]
+    assert "Error: 1 episode(s) failed for season 51" in err
+    assert "Traceback" not in err

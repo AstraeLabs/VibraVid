@@ -7,7 +7,7 @@ from typing import Any
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.setup import binary_paths, resolve_cdm
+from VibraVid.setup import resolve_cdm
 from VibraVid.utils import config_manager
 from VibraVid.utils.vault import DEFAULT_VAULT_KEYS, build_named_vault, build_universal_vault, default_vault
 from VibraVid.utils.vault._url_utils import clean_license_url
@@ -250,8 +250,8 @@ class DRMManager:
                 found.append((k, vdb.name))
         return found
 
-    def _cdm_extract(self, pssh_list: list[dict], license_url: str, kids: list[str], cdm_fn, cdm_kwargs: dict, drm_type: str) -> list[str]:
-        """Call the CDM backend to extract keys for the given KID(s) from the PSSH(s)."""
+    def _cdm_extract(self, pssh_list: list[dict], license_url: str, kids: list[str], cdm_fn, cdm_kwargs: dict, drm_type: str, extras_out: list[str] | None = None) -> list[str]:
+        """Call the CDM backend to extract keys for the given KID(s) from the PSSH(s); the keys of other KIDs are not returned (so never stored), only appended to *extras_out* to be shown."""
         missing_pssh_list = [item for item in pssh_list if normalize_kid(item.get("kid", "")) in kids] or pssh_list  # safety: if filtering gives empty, use full list
         logger.info(f"{drm_type} CDM extraction for {len(kids)} missing KID(s): {kids}")
         cdm_result = cdm_fn(missing_pssh_list, license_url, **cdm_kwargs)
@@ -264,7 +264,8 @@ class DRMManager:
         filtered_cdm_keys = [k for k in cdm_keys if k.split(":", 1)[0].strip().lower() in requested_kids]
         dropped = len(cdm_keys) - len(filtered_cdm_keys)
         if dropped:
-            logger.warning(f"{drm_type} CDM returned {dropped} extra key(s) not matching the requested KID(s) for this PSSH; discarding before store")
+            if extras_out is not None:
+                extras_out.extend(k for k in cdm_keys if k not in filtered_cdm_keys)
         return filtered_cdm_keys
 
     def report_wrong_keys(self, pairs: list[str], license_url: str | None, pssh: str | None = None) -> threading.Thread | None:
@@ -493,9 +494,13 @@ class DRMManager:
                 missing_kids = [kid for kid in resolve_kids if kid not in vault_covered]
 
                 cdm_keys: list[str] = []
+                extra_keys: list[str] = []
                 if missing_kids:
                     cdm_kwargs = {**cdm_kwargs, "key": None} if manual_keys else cdm_kwargs
-                    cdm_keys = self._cdm_extract(pssh_list, license_url, missing_kids, cdm_fn, cdm_kwargs, drm_type)
+                    cdm_keys = self._cdm_extract(pssh_list, license_url, missing_kids, cdm_fn, cdm_kwargs, drm_type, extras_out=extra_keys)
+
+                def show_extra_keys() -> None:
+                    self._display_keys(extra_keys, [], drm_type, pssh_val, None, header=False, default_label="cdm", required_kids=set(all_kids))
 
                 if cdm_keys:
                     # Merge: vault keys + CDM keys
@@ -512,6 +517,7 @@ class DRMManager:
                         default_label="cdm",
                         required_kids=set(all_kids),
                     )
+                    show_extra_keys()
 
                     for vault_name, vault_bypass_keys in bypassed.items():
                         self._display_keys(
@@ -538,6 +544,7 @@ class DRMManager:
                         header=False,
                         required_kids=set(all_kids),
                     )
+                    show_extra_keys()
                     return KeysManager(self._merge_manual(manual_keys, vault_keys))
 
                 elif manual_keys:
@@ -545,7 +552,6 @@ class DRMManager:
                     return KeysManager(manual_keys)
 
                 logger.error(f"{drm_type} CDM extraction returned no keys")
-                console.print("[yellow]CDM extraction returned no keys")
 
             except Exception as e:
                 logger.error(f"{drm_type} CDM error: {e}")
@@ -556,8 +562,7 @@ class DRMManager:
                 return KeysManager(manual_keys)
 
             logger.error(f"All {drm_type} extraction methods failed")
-            console.print(f"\n[red]All extraction methods failed for {drm_type}")
-            console.print(f"[yellow]Please place CDM files (.wvd for Widevine in wvd, .prd for PlayReady in prd) in: {binary_paths.get_cdm_directory()}[/yellow]")
+            console.print(f"[red]All extraction methods failed for {drm_type}")
         else:
             if manual_keys:
                 return KeysManager(manual_keys)
