@@ -53,6 +53,7 @@ class _SegmentDownloadContext:
     seg_errors: list[str] = field(default_factory=list)
     decrypt_aborted_reason: str | None = None
     decrypt_threads: list[threading.Thread] = field(default_factory=list)
+    decrypt_stop: threading.Event = field(default_factory=threading.Event)
     key_sanity_checked: bool = False
 
     # Live merge / streaming mux

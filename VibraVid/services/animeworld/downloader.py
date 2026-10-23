@@ -50,7 +50,7 @@ def download_film(select_title: Entries):
     return MP4_Downloader(url=str(mp4_link).strip(), path=os.path.join(mp4_path, mp4_name))
 
 
-def download_episode(episode_data, index_select, scrape_serie):
+def download_episode(episode_data, index_select, scrape_serie, season_number=1):
     """
     Downloads a specific episode from the specified season.
     """
@@ -63,14 +63,14 @@ def download_episode(episode_data, index_select, scrape_serie):
     print_episode_header(series_name, episode=episode_number)
 
     # Add episode information to context tracker
-    context_tracker.season = 1
+    context_tracker.season = season_number
     context_tracker.episode = episode_number
     context_tracker.episode_name = episode_name
 
     path_components, filename = map_episode_path(
         series_name=series_name,
         series_year=None,
-        season_number=1,
+        season_number=season_number,
         episode_number=episode_number,
         episode_name=episode_name,
         absolute_number=episode_number,
@@ -115,11 +115,12 @@ def download_series(
         last_command = episode_selection
 
     list_episode_select = manage_selection(last_command, len(episodes))
+    season_number = int(season_selection) if str(season_selection or "").isdigit() and int(season_selection) > 0 else 1
 
     # Download selected episodes
     if len(list_episode_select) == 1 and last_command != "*":
         obj_episode = episodes[list_episode_select[0] - 1]
-        return download_episode(obj_episode, list_episode_select[0] - 1, scrape_serie)
+        return download_episode(obj_episode, list_episode_select[0] - 1, scrape_serie, season_number)
     else:
         for i_episode in list_episode_select:
             if _is_user_stop_requested():
@@ -128,7 +129,7 @@ def download_series(
 
             obj_episode = episodes[i_episode - 1]
             try:
-                path, kill_handler, msg_error = download_episode(obj_episode, i_episode - 1, scrape_serie)
+                path, kill_handler, msg_error = download_episode(obj_episode, i_episode - 1, scrape_serie, season_number)
             except Exception as e:
                 console.print(f"[red]Error in episode {i_episode}: {e}")
                 continue

@@ -481,6 +481,24 @@ class DecryptPipelineMixin(
                 return not thread.is_alive()
             thread.join(timeout=min(poll, remaining))
 
+    def _drain_decrypt_workers(self, ctx: _SegmentDownloadContext, stall_timeout: float = 30.0) -> None:
+        """Wait for the decrypt workers to empty their queue. The wait lasts as long as the queue keeps shrinking (decrypt can trail a fast download by a lot), and only gives up after *stall_timeout* seconds without progress: the workers are then told to skip what is left and the in-flight segment is awaited, so none is still running once the live merge is closed."""
+        last_size = ctx.decrypt_queue.qsize()
+        last_progress = time.monotonic()
+        while any(t.is_alive() for t in ctx.decrypt_threads):
+            for t in ctx.decrypt_threads:
+                self._join_interruptible(t, timeout=0.5)
+
+            size = ctx.decrypt_queue.qsize()
+            if size < last_size:
+                last_size, last_progress = size, time.monotonic()
+            elif time.monotonic() - last_progress >= stall_timeout:
+                logger.warning(f"{ctx.protocol.upper()} decrypt workers made no progress for {stall_timeout:.0f}s ({size} item(s) left) -- stopping them")
+                ctx.decrypt_stop.set()
+                for t in ctx.decrypt_threads:
+                    self._join_interruptible(t, timeout=stall_timeout)
+                return
+
     def _stop_decrypt_workers(self, ctx: _SegmentDownloadContext) -> bool:
         """Drain and join the workers, close the decryptors and the live merger; returns True when the live merge produced the whole track."""
         stream = ctx.stream
@@ -489,8 +507,7 @@ class DecryptPipelineMixin(
         if ctx.decrypt_threads:
             for _ in ctx.decrypt_threads:
                 ctx.decrypt_queue.put(None)
-            for t in ctx.decrypt_threads:
-                self._join_interruptible(t, timeout=30.0)
+            self._drain_decrypt_workers(ctx)
 
         if ctx.mux_setup_thread is not None:
             self._join_interruptible(ctx.mux_setup_thread, timeout=min(ctx.mux_join_timeout, 60.0))

@@ -27,13 +27,14 @@ class _LiveMerger:
         self._fh = open(out_path, "wb")
         self._failed = False
         self._adopted = False
+        self._closed = False
         self._on_chunk = on_chunk
         self._png_wrapped = 0
         self._gzip_count = 0
 
     def submit(self, key: Any, path: Path) -> None:
         with self._lock:
-            if self._failed or self._adopted:
+            if self._failed or self._adopted or self._closed:
                 return
             self._pending[key] = path
             while self._cursor < len(self._expected) and self._expected[self._cursor] in self._pending:
@@ -138,10 +139,13 @@ class _LiveMerger:
             return self._failed
 
     def close(self) -> None:
-        if self._adopted:
-            return
+        # Under the lock: a worker still inside submit() finishes its segment first, and any later submit() sees _closed and returns instead of writing to a closed file.
+        with self._lock:
+            self._closed = True
+            if self._adopted:
+                return
 
-        try:
-            self._fh.close()
-        except Exception:
-            pass
+            try:
+                self._fh.close()
+            except Exception:
+                pass

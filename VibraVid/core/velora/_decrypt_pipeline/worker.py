@@ -64,7 +64,7 @@ class WorkerMixin:
             if item is None:
                 break
             try:
-                if ctx.decrypt_aborted_reason is not None:
+                if ctx.decrypt_stop.is_set() or ctx.decrypt_aborted_reason is not None:
                     continue
                 poisoned = self._kids_poisoned(self._stream_kids(ctx.stream))
                 if poisoned is not None:

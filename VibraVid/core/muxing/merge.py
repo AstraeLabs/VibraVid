@@ -386,7 +386,7 @@ def mkvmerge_subtitle_args(subtitle_tracks: list[dict[str, Any]]) -> list[str]:
     args: list[str] = []
     infos = [SubtitleDispositionInfo.from_track(s) for s in subtitle_tracks]
     default_idx = find_default_subtitle(infos, SUBTITLE_DISPOSITION_LANGUAGE)  # none by default
-    for idx, (subtitle, info) in enumerate(zip(subtitle_tracks, infos)):
+    for idx, (subtitle, info) in enumerate(zip(subtitle_tracks, infos, strict=True)):
         sub_path = subtitle["path"]
         sub_ext = os.path.splitext(sub_path)[1].lower().lstrip(".")
         lang_display = subtitle.get("lang", subtitle.get("language", "unknown"))

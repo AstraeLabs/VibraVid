@@ -36,7 +36,7 @@ def download_film(select_title: Entries):
     return download_episode(obj_episode, 0, scrape_serie, video_source)
 
 
-def download_episode(obj_episode, index_select, scrape_serie, video_source):
+def download_episode(obj_episode, index_select, scrape_serie, video_source, season_number=1):
     """
     Downloads a specific episode from the specified season.
     """
@@ -55,12 +55,6 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source):
         else:
             episode_number = 1
         episode_name = f"Episode {obj_episode.number}"
-
-        season_number = getattr(context_tracker, "season", None) or 1
-        try:
-            season_number = int(season_number)
-        except (TypeError, ValueError):
-            season_number = 1
 
         # Add episode information to context tracker
         context_tracker.season = season_number
@@ -128,6 +122,7 @@ def download_series(
         scrape_serie.setup(None, select_title.id, select_title.slug)
 
     video_source = VideoSourceAnime(site_constants.FULL_URL)
+    season_number = int(season_selection) if str(season_selection or "").isdigit() and int(season_selection) > 0 else 1
 
     # Get episode information
     episoded_count = scrape_serie.get_count_episodes()
@@ -156,7 +151,7 @@ def download_series(
         if obj_episode is None:
             return None, False, f"Episode {list_episode_select[0]} not found"
         path, _, msg_error = unpack_download_result(
-            download_episode(obj_episode, index_select, scrape_serie, video_source)
+            download_episode(obj_episode, index_select, scrape_serie, video_source, season_number)
         )
 
         if msg_error:
@@ -177,7 +172,7 @@ def download_series(
 
             try:
                 _, _kill, msg_error = unpack_download_result(
-                    download_episode(obj_episode, index_select, scrape_serie, video_source)
+                    download_episode(obj_episode, index_select, scrape_serie, video_source, season_number)
                 )
             except Exception as e:
                 console.print(f"[red]Error in episode {i_episode}: {e}")
