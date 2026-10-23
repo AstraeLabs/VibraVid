@@ -64,9 +64,19 @@ class GetSerieInfo:
         self.series_name = ""
         self.stagioni_disponibili = []
         try:
-            self.disable_filters = bool((context_tracker.site_options or {}).get("disable_filters"))
+            site_options = context_tracker.site_options or {}
+            self.disable_filters = bool(site_options.get("disable_filters"))
+            self.categories = [c.strip().lower() for c in (site_options.get("categories") or "").split(",") if c.strip()]
         except Exception:
             self.disable_filters = False
+            self.categories = []
+
+    def _category_allowed(self, category_name: str) -> bool:
+        """--categories keeps only the named categories (and lifts the BAD_WORDS filter for them), otherwise BAD_WORDS applies unless --disable."""
+        name = (category_name or "").lower()
+        if self.categories:
+            return any(c in name for c in self.categories)
+        return self.disable_filters or not any(w.lower() in name for w in self.BAD_WORDS)
 
     def close(self):
         """Close the HTTP client session."""
@@ -200,7 +210,7 @@ class GetSerieInfo:
                     if category_title
                     else carousel_link.get_text(" ", strip=True) or "Unnamed"
                 )
-                if not self.disable_filters and any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
+                if not self._category_allowed(category_name):
                     continue
 
                 href = carousel_link["href"]
@@ -227,7 +237,7 @@ class GetSerieInfo:
     def _get_season_episodes(self, season, sb_id, category_name, client=None):
         """Get episodes for a specific season"""
         logger.debug(f"Getting episodes for season {season['tvSeasonNumber']} category {category_name} sb_id {sb_id}")
-        if not self.disable_filters and any(w.lower() in category_name.lower() for w in self.BAD_WORDS):
+        if not self._category_allowed(category_name):
             return []
 
         if "tutti" in category_name.lower() or category_name.lower().startswith("all"):
@@ -255,6 +265,19 @@ class GetSerieInfo:
         logger.debug(f"Found {len(episodes)} episodes for season {season['tvSeasonNumber']} ({category_name})")
         return episodes
 
+    @classmethod
+    def _find_items_connection(cls, node):
+        """First itemsConnection in a listing page: it sits under areaContainers > areas > sections > collections."""
+        if isinstance(node, dict):
+            if node.get("itemsConnection"):
+                return node["itemsConnection"]
+            node = list(node.values())
+        for child in node if isinstance(node, list) else ():
+            found = cls._find_items_connection(child)
+            if found:
+                return found
+        return None
+
     def _extract_episodes_from_graphql_listing(self, sb_id, season_number, category_name, client=None):
         """Extract episodes from the Mediaset GraphQL listing feed."""
         client = client or self.client
@@ -263,7 +286,8 @@ class GetSerieInfo:
             return []
 
         api = get_client()
-        if not api.getHash256():
+        listing_hash = api.getListingHash()
+        if not listing_hash:
             return []
 
         try:
@@ -281,7 +305,7 @@ class GetSerieInfo:
                 }
             )
             extensions = json.dumps(
-                {"persistedQuery": {"version": 1, "sha256Hash": api.getHash256()}}, separators=(",", ":")
+                {"persistedQuery": {"version": 1, "sha256Hash": listing_hash}}, separators=(",", ":")
             )
             context = '{"a":{"flags":["SHOW_TITLE"],"layout":"GRID","template":"KEYFRAME"},"pt":"listing"}'
 
@@ -315,7 +339,7 @@ class GetSerieInfo:
                 if not result:
                     return []
 
-                items_connection = result.get("itemsConnection") or {}
+                items_connection = self._find_items_connection(result) or {}
                 items = items_connection.get("items") or []
                 page_info = items_connection.get("pageInfo") or {}
                 end_cursor = page_info.get("endCursor")
@@ -674,7 +698,7 @@ class GetSerieInfo:
                 (season, category)
                 for season in self.stagioni_disponibili
                 for category in season.get("categories", [])
-                if self.disable_filters or not any(w.lower() in category["name"].lower() for w in self.BAD_WORDS)
+                if self._category_allowed(category["name"])
             ]
 
             def _fetch_task(task):
@@ -706,7 +730,7 @@ class GetSerieInfo:
                 for season, fallback_episodes in zip(seasons_missing_full_episodes, fallback_results, strict=True):
                     existing_ids = {ep.id for ep in season["episodes"]}
                     for ep in fallback_episodes:
-                        if ep.id not in existing_ids:
+                        if ep.id not in existing_ids and (not self.categories or self._category_allowed(ep.category)):
                             season["episodes"].append(ep)
                             existing_ids.add(ep.id)
 

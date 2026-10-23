@@ -18,6 +18,13 @@ NON_MUXABLE_AUDIO_CODECS = frozenset({"dtsx"})
 NON_MUXABLE_AUDIO_ID_PREFIXES = ("dts-x", "atmos")
 _UNSUPPORTED_VIDEO_CODEC_PREFIXES = ("vp09", "vp90", "vp08", "av01", "av1")
 _LANG_FLAG_AFFIXES = frozenset({"forced", "cc", "sdh"})
+_CODEC_FAMILIES = {
+    "hevc": ("hvc1", "hev1", "hevc", "h265"),
+    "avc": ("avc1", "avc3", "avc", "h264"),
+    "av1": ("av01", "av1"),
+    "vp9": ("vp09", "vp9"),
+}
+
 
 
 def split_audio_slots(raw: str) -> dict[int, str] | None:
@@ -88,9 +95,14 @@ def _is_unmuxable_audio(s, mux_dtsx: bool = False) -> bool:
         return False
     return not mux_dtsx
 
+def _codec_family(codecs: str) -> str:
+    """The codec family a codec string or user token belongs to ("hvc1.2.4" and "H265" -> "hevc"), "" when unknown."""
+    codecs = (codecs or "").strip().lower()
+    return next((family for family, prefixes in _CODEC_FAMILIES.items() if codecs.startswith(prefixes)), "")
+
 
 def _is_h265(s) -> bool:
-    return _codecs(s).startswith(("hvc1", "hev1", "hevc", "h265"))
+    return _codec_family(_codecs(s)) == "hevc"
 
 
 def _is_hdr10(s) -> bool:
@@ -807,6 +819,7 @@ class StreamSelector:
         mux_dtsx: bool = False,
         drop_clear_av: bool = False,
         dv_top_tier_tolerance: float | None = None,
+        codec_priority: list[str] | None = None,
     ):
         raw_vf = _normalize_filter_value(video_filter, "best").strip()
         self._hybrid = raw_vf.lower() == "hybrid"
@@ -824,6 +837,7 @@ class StreamSelector:
         self._mux_dtsx = mux_dtsx
         self._drop_clear_av = drop_clear_av
         self._dv_top_tier_tolerance = dv_top_tier_tolerance
+        self._codec_priority = [family for family in map(_codec_family, codec_priority or []) if family]
         self.no_match = False
 
     def apply(self, streams: list) -> tuple[str, str, str]:
@@ -1078,7 +1092,7 @@ class StreamSelector:
                 return result
 
         had_constraints = bool(spec.res or spec.codec)
-        if spec.select_best and (self._prefer_h265 or self._prefer_hdr10):
+        if spec.select_best and (self._prefer_h265 or self._prefer_hdr10 or self._codec_priority):
             pick_exact = self._best_with_preferences
         else:
             pick_exact = _best if spec.select_best else _worst
@@ -1139,6 +1153,11 @@ class StreamSelector:
                 result.matched_res = str(actual_h)
         return result
 
+    def _codec_rank(self, stream) -> int:
+        """Position of the stream's codec family in the requested priority, higher is better; unlisted families rank last."""
+        family = _codec_family(_codecs(stream))
+        return len(self._codec_priority) - self._codec_priority.index(family) if family in self._codec_priority else 0
+
     def _best_with_preferences(self, streams: list):
         return max(
             streams,
@@ -1146,6 +1165,7 @@ class StreamSelector:
                 int(self._prefer_hdr10 and _is_hdr10(stream)),
                 int(self._prefer_h265 and _is_h265(stream)),
                 _height(stream),
+                self._codec_rank(stream),
                 _bitrate(stream),
             ),
         ) if streams else None

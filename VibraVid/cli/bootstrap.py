@@ -24,8 +24,9 @@ def _is_expected_failure(exc: BaseException) -> bool:
     """True for a failure already explained on screen (lazy import like above)."""
     try:
         from VibraVid.core.downloader.base import DownloadFailed
+        from VibraVid.utils.config import LoginConfigError
 
-        return isinstance(exc, DownloadFailed)
+        return isinstance(exc, (DownloadFailed, LoginConfigError))
     except Exception:
         return False
 

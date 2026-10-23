@@ -13,6 +13,26 @@ class SubtitleDispositionInfo:
     sdh: bool = False
     cc: bool = False
 
+    @classmethod
+    def from_track(cls, track: dict) -> "SubtitleDispositionInfo":
+        """From a muxer subtitle dict (``language`` plus the optional ``forced`` / ``sdh`` / ``cc`` booleans)."""
+        return cls(
+            language=track.get("language", ""),
+            forced=bool(track.get("forced")),
+            sdh=bool(track.get("sdh")),
+            cc=bool(track.get("cc")),
+        )
+
+    @property
+    def is_forced(self) -> bool:
+        lang_lower = (self.language or "").lower()
+        return self.forced or "_forced" in lang_lower or "-forced" in lang_lower
+
+    @property
+    def is_hearing_impaired(self) -> bool:
+        lang_lower = (self.language or "").lower()
+        return self.sdh or self.cc or any(f"{sep}{flag}" in lang_lower for sep in "_-" for flag in ("sdh", "cc"))
+
 
 def get_configured_disposition_language() -> str:
     """PROCESS.subtitle_disposition_language, normalized to a single string (config can return a list)."""
@@ -37,6 +57,17 @@ def disposition_lang_matches(subtitle_lang_raw: str, config_lang_raw: str, track
     return cfg_flags.issubset(sub_flags)
 
 
+def find_default_subtitle(tracks: list[SubtitleDispositionInfo], config_lang_raw: str = "") -> int | None:
+    """Index of the first track matching PROCESS.subtitle_disposition_language (e.g. "ita_forced"), if any."""
+    config_lang = (config_lang_raw or "").lower().strip()
+    if not config_lang:
+        return None
+    for idx, t in enumerate(tracks):
+        if disposition_lang_matches(t.language, config_lang, {"forced": t.forced, "sdh": t.sdh, "cc": t.cc}):
+            return idx
+    return None
+
+
 def build_subtitle_disposition_args(tracks: list[SubtitleDispositionInfo], config_lang_raw: str = "") -> list[str]:
     """Build the -disposition:s:N ffmpeg args for a set of subtitle tracks.
 
@@ -50,28 +81,22 @@ def build_subtitle_disposition_args(tracks: list[SubtitleDispositionInfo], confi
         args += [f"-disposition:s:{idx}", "0"]
 
     for idx, t in enumerate(tracks):
-        lang_lower = (t.language or "").lower()
-        is_forced = "_forced" in lang_lower or t.forced
-        is_hi = "_sdh" in lang_lower or "_cc" in lang_lower or t.sdh or t.cc
-        if is_forced or is_hi:
+        if t.is_forced or t.is_hearing_impaired:
             disp_parts = []
-            if is_forced:
+            if t.is_forced:
                 disp_parts.append("forced")
-            if is_hi:
+            if t.is_hearing_impaired:
                 disp_parts.append("hearing_impaired")
             args += [f"-disposition:s:{idx}", "+".join(disp_parts)]
 
-    config_lang = (config_lang_raw or "").lower().strip()
-    if config_lang and tracks:
-        for idx, t in enumerate(tracks):
-            track_info = {"forced": t.forced, "sdh": t.sdh, "cc": t.cc}
-            if disposition_lang_matches(t.language, config_lang, track_info):
-                disp = "default"
-                if "_forced" in config_lang or "-forced" in config_lang:
-                    disp += "+forced"
-                if "_sdh" in config_lang or "_cc" in config_lang or "-sdh" in config_lang or "-cc" in config_lang:
-                    disp += "+hearing_impaired"
-                args += [f"-disposition:s:{idx}", disp]
-                break
+    default_idx = find_default_subtitle(tracks, config_lang_raw)
+    if default_idx is not None:
+        config_lang = config_lang_raw.lower().strip()
+        disp = "default"
+        if "_forced" in config_lang or "-forced" in config_lang:
+            disp += "+forced"
+        if "_sdh" in config_lang or "_cc" in config_lang or "-sdh" in config_lang or "-cc" in config_lang:
+            disp += "+hearing_impaired"
+        args += [f"-disposition:s:{default_idx}", disp]
 
     return args

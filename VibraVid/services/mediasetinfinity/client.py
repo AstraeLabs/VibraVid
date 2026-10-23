@@ -97,6 +97,9 @@ class MediasetAPI:
 
         self.sha256Hash = None
         self._hash_attempted = False
+        self.listingHash = None
+        self._listing_hash_attempted = False
+        self._listing_hash_lock = threading.Lock()
 
     def _account_name(self) -> str:
         """
@@ -232,16 +235,41 @@ class MediasetAPI:
             logger.debug(f"_is_valid_search_hash: probe failed for {sha256_hash[:12]}...: {e}")
             return False
 
-    def getHash2c(self):
+    def _is_valid_listing_hash(self, sha256_hash: str) -> bool:
+        """The persisted query answers under its operation name: only the listing one answers with getListingPage."""
+        params = {
+            "extensions": f'{{"persistedQuery":{{"version":1,"sha256Hash":"{sha256_hash}"}}}}',
+            "variables": '{"first":1,"id":"-","pageType":"listing","context":"{}"}',
+        }
+        try:
+            with create_client(headers=self.generate_request_headers()) as client:
+                response = client.get(self.conf["graphql_url"], params=params)
+            return response.status_code == 200 and "getListingPage" in (response.json().get("data") or {})
+        except Exception as e:
+            logger.debug(f"_is_valid_listing_hash: probe failed for {sha256_hash[:12]}...: {e}")
+            return False
+
+    def getListingHash(self):
+        """Persisted-query hash of the listing page (GetListingPage), the query behind the /browse/ carousels."""
+        with self._listing_hash_lock:
+            if self.listingHash is None and not self._listing_hash_attempted:
+                self._listing_hash_attempted = True
+                try:
+                    self.listingHash = next((k for k in self._hash_candidates() if self._is_valid_listing_hash(k)), None)
+                except Exception as e:
+                    logger.debug(f"getListingHash unavailable for region {get_region()}: {e}")
+            return self.listingHash
+
+    def _hash_candidates(self) -> list[str]:
+        """Persisted-query hashes the site ships in its home page, in page order."""
         with create_client(headers=self.headers) as client:
             html = client.get(self.conf["home_url"]).text
 
         scripts = self.find_relevant_script(html)
-        if not scripts:
-            return None
+        return list(self.extract_pairs_from_scripts(scripts)) if scripts else []
 
-        pairs = self.extract_pairs_from_scripts(scripts)
-        keys = list(pairs.keys())
+    def getHash2c(self):
+        keys = self._hash_candidates()
         if not keys:
             return None
 

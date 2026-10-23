@@ -83,7 +83,7 @@ class EquivalentCommandBuilder:
         parts = ["python", self._program_name, "-i", str(site)]
         parts += self._context_tracker_parts(context_tracker)
         parts += self._standard_flag_parts(args, parser, site_option_dests)
-        parts += self._site_option_parts(context_tracker)
+        parts += self._site_option_parts(context_tracker, parser)
 
         return " ".join(parts)
 
@@ -163,12 +163,13 @@ class EquivalentCommandBuilder:
             parts += self._flag_and_value(action.option_strings[-1], value)
         return parts
 
-    def _site_option_parts(self, context_tracker) -> list[str]:
+    def _site_option_parts(self, context_tracker, parser) -> list[str]:
+        flags = {action.dest: action.option_strings[-1] for action in parser._actions if action.option_strings}
         parts = []
         for dest, value in (getattr(context_tracker, "site_options", None) or {}).items():
             if dest == "drm" or value in (None, False):
                 continue
-            flag = "--" + dest.replace("_", "-")
+            flag = flags.get(dest) or "--" + dest.replace("_", "-")
             parts += self._flag_and_value(flag, value)
         return parts
 

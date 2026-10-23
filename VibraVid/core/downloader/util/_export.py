@@ -15,7 +15,7 @@ _written: list[str] = []
 _NOT_EXPORTED = (
     "manifest_content", "headers", "cookies", "license_url", "license_headers", "license_data", "license_certificate",
     "drm_preference", "has_drm", "license_proxy", "manifest_refresh", "custom_filters", "display_selected_only",
-    "hls_enc_override", "post_process", "desc", "exported_at",
+    "hls_enc_override", "post_process", "chapters", "version", "desc", "exported_at",
 )
 
 
@@ -39,16 +39,16 @@ def track_links(streams: list) -> list[dict]:
         media = [seg for seg in stream.segments if seg.seg_type == "media" and seg.url]
         if not media:
             continue
-        init = next((seg for seg in stream.segments if seg.seg_type == "init" and seg.url), None)
 
         track = {
             "type": stream.type,
             "language": stream.language if stream.type != "video" else "",
             "resolution": stream.resolution,
             "codecs": stream.codecs,
+            "video_range": stream.video_range if stream.type == "video" else "",
+            "profile": stream.name,
             "bitrate": stream.bitrate,
             "url": media[0].url,
-            "init": {"url": init.url, "range": init.byte_range} if init else None,
         }
         tracks.append({k: v for k, v in track.items() if v not in ("", 0, None)})
     return tracks
@@ -88,18 +88,22 @@ def _download_command(media: ResolvedMedia) -> str:
 def write_export(media: ResolvedMedia, file: str | None = None) -> str | None:
     """Add *media* to the ``--export`` JSON array (*file*, or ``.cache/export/<site>_<type>_<title>.json`` when empty)."""
     try:
-        path = Path(file.strip()) if file and file.strip() else _default_path(media)
+        explicit = bool(file and file.strip())
+        path = Path(file.strip()) if explicit else _default_path(media)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         media.vibravid_version = __version__
 
         entries: list = []
-        if str(path) in _written and path.exists():
+        if (str(path) in _written or not explicit) and path.exists():
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
                 entries = loaded if isinstance(loaded, list) else []
             except Exception:
                 entries = []
+            
+            if not explicit:
+                entries = [e for e in entries if (e.get("season"), e.get("episode")) != (media.season, media.episode)]
 
         wire = media.to_wire()
         entry = {k: v for k, v in wire.items() if k not in _NOT_EXPORTED and not (k == "tracks" and v is None)}

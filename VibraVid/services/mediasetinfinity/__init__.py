@@ -43,7 +43,8 @@ def register_cli_args(parser) -> list:
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Mediaset Infinity title URL.")
     group.add_argument("--country", dest="country", default="it", choices=["it", "es"])
     group.add_argument("--disable", dest="disable_filters", action="store_true", help="Disable the 10-minute duration filter and the BAD_WORDS category filter.",)
-    return ["url", "country", "disable_filters"]
+    group.add_argument("--categories", dest="categories", default=None, metavar="NAMES", help="Keep only these categories, comma separated, case-insensitive partial match (e.g. daytime,primetime). Also lifts the BAD_WORDS filter for them.")
+    return ["url", "country", "disable_filters", "categories"]
 
 
 def _resolve_es_url(url: str):

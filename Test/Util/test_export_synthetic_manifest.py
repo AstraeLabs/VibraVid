@@ -47,9 +47,16 @@ def test_only_a_made_up_url_with_a_manifest_is_synthetic():
 def test_track_links_lists_the_selected_streams_with_their_direct_url():
     video, audio = _export.track_links(_streams())  # the unselected 720p is left out
 
-    assert video == {"type": "video", "resolution": "1920x1080", "codecs": "hvc1", "bitrate": 5_000_000,
-                     "url": "https://cdn.example/v1.mp4", "init": {"url": "https://cdn.example/v1.mp4", "range": "0-999"}}
-    assert audio["language"] == "ita" and audio["url"] == "https://cdn.example/a1.mp4" and "init" not in audio
+    assert video == {"type": "video", "resolution": "1920x1080", "codecs": "hvc1", "bitrate": 5_000_000, "url": "https://cdn.example/v1.mp4"}
+    assert audio["language"] == "ita" and audio["url"] == "https://cdn.example/a1.mp4"
+
+
+def test_track_links_carries_the_video_range_and_the_profile_of_a_video():
+    stream = Stream(type="video", id="v1", resolution="1920x1080", video_range="DV", name="hevc-dv5-main10-L40-dash-cenc-prk-do", selected=True,
+                    segments=[Segment(url="https://cdn.example/v1.mp4", number=1, seg_type="media")])
+    (video,) = _export.track_links([stream])
+
+    assert video["video_range"] == "DV" and video["profile"] == "hevc-dv5-main10-L40-dash-cenc-prk-do"
 
 
 def test_export_shows_the_track_link_in_one_file_without_the_manifest(tmp_path):

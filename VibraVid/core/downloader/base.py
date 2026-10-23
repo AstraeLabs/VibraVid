@@ -640,10 +640,11 @@ class BaseDownloader:
                 subtitle_tracks=subtitle_tracks,
                 output_path=self.output_path,
                 filename_base=self.filename_base,
+                chapters=getattr(self, "chapters", None),
             )
             if hybrid_file:
                 self.last_merge_result = {"hybrid": True, "output": hybrid_file}
-                return self._embed_poster(self._inject_chapters(hybrid_file))
+                return self._embed_poster(hybrid_file)
 
         audio_tracks_to_merge: list = []
         if audio_tracks:

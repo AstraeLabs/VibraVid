@@ -58,15 +58,15 @@ from .helper.sub import (
     build_subtitle_disposition_args,
     convert_subtitle,
     extract_vtt_from_wvtt_mp4,
+    find_default_subtitle,
+    get_configured_disposition_language,
     get_subtitle_duration,
     trim_subtitle_to_duration,
-)
-from .helper.sub import (
-    disposition_lang_matches as _disposition_lang_matches,
 )
 from .helper.video import (
     convert_ts_to_mp4,
     detect_ts_timestamp_issues,
+    get_media_metadata,
     get_stream_codecs,
     is_mpegts_file,
     resolve_compatible_extension,
@@ -79,9 +79,7 @@ logger = logging.getLogger(__name__)
 USE_GPU = config_manager.config.get_bool("PROCESS", "use_gpu")
 EXTRACT_EMBEDDED_CC = config_manager.config.get_bool("DOWNLOAD", "extract_embedded_cc", default=False)
 FORCE_SUBTITLE = config_manager.config.get("PROCESS", "force_subtitle")
-SUBTITLE_DISPOSITION_LANGUAGE = config_manager.config.get("PROCESS", "subtitle_disposition_language")
-if isinstance(SUBTITLE_DISPOSITION_LANGUAGE, list):
-    SUBTITLE_DISPOSITION_LANGUAGE = SUBTITLE_DISPOSITION_LANGUAGE[0] if SUBTITLE_DISPOSITION_LANGUAGE else ""
+SUBTITLE_DISPOSITION_LANGUAGE = get_configured_disposition_language()
 
 _GPU_TYPE_CACHE = None
 MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower()
@@ -377,6 +375,35 @@ def _mkvmerge_add_track(
     return args
 
 
+def video_track_name(video_path: str, hybrid: bool = False, quality: str = "") -> str:
+    """Title of the video track in the final file: its resolution (e.g. ``1080p``), plus ``(HYBRID)`` for a DV + HDR10 mux."""
+    quality = quality or get_media_metadata(video_path).get("quality", "")
+    return " ".join(part for part in (quality, "(HYBRID)" if hybrid else "") if part)
+
+
+def mkvmerge_subtitle_args(subtitle_tracks: list[dict[str, Any]]) -> list[str]:
+    """mkvmerge args appending every subtitle track, with language, forced / hearing-impaired flags and the configured default."""
+    args: list[str] = []
+    infos = [SubtitleDispositionInfo.from_track(s) for s in subtitle_tracks]
+    default_idx = find_default_subtitle(infos, SUBTITLE_DISPOSITION_LANGUAGE)  # none by default
+    for idx, (subtitle, info) in enumerate(zip(subtitle_tracks, infos)):
+        sub_path = subtitle["path"]
+        sub_ext = os.path.splitext(sub_path)[1].lower().lstrip(".")
+        lang_display = subtitle.get("lang", subtitle.get("language", "unknown"))
+        lang_iso = resolve_ietf(lang_display)  # mkvmerge language-ietf: keep region, strip flags
+        console.print(f"[yellow]    - [cyan]Subtitle lang [red]{lang_display}.{sub_ext}")
+
+        is_default = idx == default_idx
+        if is_default:
+            console.print(f"[yellow]    Setting disposition: [red]{lang_display}")
+
+        args += _mkvmerge_add_track(
+            "subtitle", sub_path, lang_iso, lang_display,
+            default=is_default, forced=info.is_forced, hearing_impaired=info.is_hearing_impaired,
+        )
+    return args
+
+
 def _strip_drm_boxes(src_path: str) -> str:
     """Strips DRM boxes (enca/encv/sinf/pssh) from an ISOBMFF/MP4 file using ffmpeg -c copy."""
     base, ext = os.path.splitext(src_path)
@@ -414,6 +441,27 @@ def _format_timestamp(seconds) -> str:
     return internet_manager.format_time(seconds, add_hours=True)
 
 
+def prepare_chapters(chapters: list, duration: float | None, temp_dir: str | None = None) -> list:
+    """Sort, dedupe and clamp *chapters* to the media *duration*, start them at 0:00 and persist the ``chapters.txt`` sidecar in *temp_dir*."""
+    chapters = _dedupe_chapters(_sort_chapters(_clamp_chapters(chapters, duration)))
+    if chapters[0]["seconds"] > 0:
+        chapters = [{"name": "Intro", "seconds": 0}] + chapters
+    _persist_chapters_file(chapters, temp_dir)
+    return chapters
+
+
+def mkvmerge_chapters_args(chapters: list | None) -> tuple[list[str], str | None]:
+    """``(["--chapters", file], file)`` for mkvmerge, or ``([], None)`` without chapters; the caller deletes the file."""
+    if not chapters:
+        return [], None
+    chapter_file = _write_ogm_chapters(chapters)
+    logger.info(f"Adding {len(chapters)} chapter(s) inline...")
+    console.print(f"[cyan]\nMerging [red]{len(chapters)} [cyan]chapter(s)...")
+    for chapter in chapters:
+        console.print(f"[yellow]    - [red]{_format_timestamp(chapter['seconds'])}[cyan]: [red]{chapter.get('name', '')}")
+    return ["--chapters", chapter_file], chapter_file
+
+
 def inject_chapters(file_path: str, chapters: list | None = None, temp_dir: str | None = None):
     """
     Injects chapters into an already-muxed file.
@@ -431,11 +479,7 @@ def inject_chapters(file_path: str, chapters: list | None = None, temp_dir: str 
         return file_path, {}
 
     total_duration = get_video_duration(file_path)
-    chapters = _sort_chapters(_clamp_chapters(chapters, total_duration))
-    if chapters[0]["seconds"] > 0:
-        chapters = [{"name": "Intro", "seconds": 0}] + chapters
-
-    _persist_chapters_file(chapters, temp_dir)
+    chapters = prepare_chapters(chapters, total_duration, temp_dir)
 
     logger.info(f"Injecting {len(chapters)} chapter(s) as final mux step")
     console.print(f"[cyan]\nInject [red]{len(chapters)} [cyan]chapter(s)...")
@@ -602,6 +646,24 @@ def embed_poster(file_path: str, image_url: str | None = None):
     return file_path, result_json
 
 
+def order_audio_tracks(audio_tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort *audio_tracks* by PROCESS.audio_order (unchanged when not configured)."""
+    audio_order = _get_audio_order()
+    if not audio_order:
+        return audio_tracks
+    logger.info(f"Applying configured audio order: {audio_order}")
+    return _sort_tracks_by_order(audio_tracks, audio_order, ["language", "name", "lang"])
+
+
+def order_subtitle_tracks(subtitle_tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort *subtitle_tracks* by PROCESS.subtitle_order (unchanged when not configured)."""
+    subtitle_order = _get_subtitle_order()
+    if not subtitle_order:
+        return subtitle_tracks
+    logger.info(f"Applying configured subtitle order: {subtitle_order}")
+    return _sort_tracks_by_order(subtitle_tracks, subtitle_order, ["language", "lang", "name"])
+
+
 def _prepare_audio_tracks(
     video_path: str, audio_tracks: list[dict[str, str]], limit_duration_diff: float = 3
 ) -> tuple[list[dict[str, str]], bool]:
@@ -612,11 +674,7 @@ def _prepare_audio_tracks(
         tuple: (valid_audio_tracks, use_shortest)
     """
     use_shortest = False
-
-    audio_order = _get_audio_order()
-    if audio_order:
-        audio_tracks = _sort_tracks_by_order(audio_tracks, audio_order, ["language", "name", "lang"])
-        logger.info(f"Applying configured audio order: {audio_order}")
+    audio_tracks = order_audio_tracks(audio_tracks)
 
     # Check and convert audio tracks if TS with issues
     temp_audio_paths = []
@@ -701,10 +759,7 @@ def _prepare_subtitle_tracks(
         list: the processed subtitle tracks (empty list if none survive preprocessing).
     """
     video_duration = get_video_duration(video_path)
-    subtitle_order = _get_subtitle_order()
-    if subtitle_order:
-        subtitles_list = _sort_tracks_by_order(subtitles_list, subtitle_order, ["language", "lang", "name"])
-        logger.info(f"Applying configured subtitle order: {subtitle_order}")
+    subtitles_list = order_subtitle_tracks(subtitles_list)
 
     # De-duplicate by resolved path (guards against any upstream double-add)
     seen_paths: set = set()
@@ -800,10 +855,7 @@ def join_media(
         subtitle_tracks = _prepare_subtitle_tracks(video_path, subtitle_tracks, limit_duration_diff)
 
     if chapters:
-        chapters = _dedupe_chapters(_sort_chapters(_clamp_chapters(chapters, get_video_duration(video_path))))
-        if chapters[0]["seconds"] > 0:
-            chapters = [{"name": "Intro", "seconds": 0}] + chapters
-        _persist_chapters_file(chapters, os.path.dirname(video_path))
+        chapters = prepare_chapters(chapters, get_video_duration(video_path), os.path.dirname(video_path))
 
     if MUX_ENGINE != "mkvmerge" and get_mkvmerge_path() and has_unsupported_ffmpeg_audio_codec(audio_tracks):
         logger.warning("Audio track uses a codec ffmpeg's demuxer can't parse (e.g. DTS:X) -- using mkvmerge directly")
@@ -962,6 +1014,8 @@ def _join_media_ffmpeg(
 
     # `?` makes the map optional so a hard-to-probe TS input (no readable stream info) doesn't abort option parsing with "Invalid argument".
     ffmpeg_cmd.extend(["-map", "0:v:0?"])
+    if video_name := video_track_name(video_path):
+        ffmpeg_cmd.extend(["-metadata:s:v:0", f"title={video_name}"])
     if not audio_tracks and has_audio(video_path):
         ffmpeg_cmd.extend(["-map", "0:a?"])
 
@@ -988,7 +1042,7 @@ def _join_media_ffmpeg(
         ffmpeg_cmd.extend([f"-disposition:a:{i}", "default" if i == 0 else "0"])
 
     subtitle_codec_args: list[str] = []
-    _disposition_config_lang = (SUBTITLE_DISPOSITION_LANGUAGE or "").lower().strip()
+    default_sub_idx = find_default_subtitle([SubtitleDispositionInfo.from_track(s) for s in subtitle_tracks], SUBTITLE_DISPOSITION_LANGUAGE)
     for idx, subtitle in enumerate(subtitle_tracks):
         sub_path = subtitle["path"]
         sub_ext = os.path.splitext(sub_path)[1].lower().lstrip(".")
@@ -999,7 +1053,7 @@ def _join_media_ffmpeg(
         lang_iso = resolve_iso639_2(lang_display)
 
         console.print(f"[yellow]    - [cyan]Subtitle lang [red]{lang_display}.{sub_ext}")
-        if _disposition_config_lang and _disposition_lang_matches(subtitle.get("language", ""), _disposition_config_lang, subtitle):
+        if idx == default_sub_idx:
             console.print(f"[yellow]      Setting disposition: [red]{subtitle.get('language')}")
 
         if output_ext == ".mp4":
@@ -1056,15 +1110,7 @@ def _join_media_ffmpeg(
 
     ffmpeg_cmd.extend(
         build_subtitle_disposition_args(
-            [
-                SubtitleDispositionInfo(
-                    language=subtitle.get("language", ""),
-                    forced=bool(subtitle.get("forced")),
-                    sdh=bool(subtitle.get("sdh")),
-                    cc=bool(subtitle.get("cc")),
-                )
-                for subtitle in subtitle_tracks
-            ],
+            [SubtitleDispositionInfo.from_track(subtitle) for subtitle in subtitle_tracks],
             SUBTITLE_DISPOSITION_LANGUAGE,
         )
     )
@@ -1122,10 +1168,11 @@ def _join_media_mkvmerge(
     if title:
         cmd += ["--title", title]
 
-    chapter_file = _write_ogm_chapters(chapters) if chapters else None
-    if chapter_file:
-        cmd += ["--chapters", chapter_file]
+    chapter_args, chapter_file = mkvmerge_chapters_args(chapters)
+    cmd += chapter_args
 
+    if video_name := video_track_name(video_path):
+        cmd += ["--track-name", f"0:{video_name}"]
     cmd += ["--no-audio", "--no-subtitles", "--no-attachments", video_path]
 
     for i, audio_track in enumerate(audio_tracks):
@@ -1134,43 +1181,8 @@ def _join_media_mkvmerge(
         clean_audio_path = _strip_drm_boxes(audio_track["path"])
         cmd += _mkvmerge_add_track("audio", clean_audio_path, lang_code, track_name, default=(i == 0))
 
-    config_lang = (SUBTITLE_DISPOSITION_LANGUAGE or "").lower().strip()
-    default_assigned = False
-    for subtitle in subtitle_tracks:
-        sub_path = subtitle["path"]
-        sub_ext = os.path.splitext(sub_path)[1].lower().lstrip(".")
-        lang_display = subtitle.get("lang", subtitle.get("language", "unknown"))
-        lang_iso = resolve_ietf(lang_display)  # mkvmerge language-ietf: keep region, strip flags
-        lang_lower = subtitle.get("language", "").lower()
-
-        is_forced = "_forced" in lang_lower or "-forced" in lang_lower or bool(subtitle.get("forced"))
-        is_hi = (
-            "_sdh" in lang_lower
-            or "_cc" in lang_lower
-            or "-sdh" in lang_lower
-            or "-cc" in lang_lower
-            or bool(subtitle.get("sdh"))
-            or bool(subtitle.get("cc"))
-        )
-        console.print(f"[yellow]    - [cyan]Subtitle lang [red]{lang_display}.{sub_ext}")
-
-        # default track: segui SUBTITLE_DISPOSITION_LANGUAGE, altrimenti mai default
-        is_default = bool(config_lang and not default_assigned and _disposition_lang_matches(subtitle.get("language", ""), config_lang, subtitle))
-        if is_default:
-            console.print(f"[yellow]    Setting disposition: [red]{lang_display}")
-            default_assigned = True
-
-        cmd += _mkvmerge_add_track(
-            "subtitle", sub_path, lang_iso, lang_display, default=is_default, forced=is_forced, hearing_impaired=is_hi
-        )
-
+    cmd += mkvmerge_subtitle_args(subtitle_tracks)
     cmd += mkvmerge_attach_args(collect_font_attachments([s["path"] for s in subtitle_tracks], out_path))
-
-    if chapters:
-        logger.info(f"Adding {len(chapters)} chapter(s) inline...")
-        console.print(f"[cyan]\nMerging [red]{len(chapters)} [cyan]chapter(s)...")
-        for chapter in chapters:
-            console.print(f"[yellow]    - [red]{_format_timestamp(chapter['seconds'])}[cyan]: [red]{chapter.get('name', '')}")
 
     logger.info(f"Running Join Media (mkvmerge) command: {' '.join(cmd)}")
     total_duration = get_video_duration(video_path)

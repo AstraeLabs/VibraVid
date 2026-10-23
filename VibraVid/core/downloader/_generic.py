@@ -1178,6 +1178,7 @@ class Generic_Downloader(BaseDownloader):
             mux_dtsx=bool(f.get("mux_dtsx", configured_mux_dtsx())),
             drop_clear_av=bool(f.get("drop_clear_av")),
             dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
+            codec_priority=f.get("codec_priority"),
         )
 
     def _setup_dv_companion(self) -> None:

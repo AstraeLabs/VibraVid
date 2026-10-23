@@ -19,8 +19,18 @@ from VibraVid.core.muxing.helper._ffprobe_cache import ffprobe_cached
 from VibraVid.core.muxing.helper.audio.probe import get_video_duration
 from VibraVid.core.muxing.helper.info import Mediainfo
 from VibraVid.core.muxing.helper.video import get_media_metadata, is_mpegts_file
+from VibraVid.core.muxing.merge import (
+    _mkvmerge_add_track,
+    _mkvmerge_lang_flag,
+    _mkvmerge_track_name,
+    mkvmerge_chapters_args,
+    mkvmerge_subtitle_args,
+    order_audio_tracks,
+    order_subtitle_tracks,
+    prepare_chapters,
+    video_track_name,
+)
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.core.utils.language import resolve_ietf
 from VibraVid.setup import get_dovi_tool_path, get_ffmpeg_path, get_ffprobe_path, get_mkvmerge_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.proc import run_logged
@@ -155,15 +165,6 @@ def _run_progress_command(
             logger.error(f"{label} failed: {stderr[:800]}")
         return ok
     return bool(result)
-
-
-def _track_language(track: dict[str, Any]) -> str:
-    return resolve_ietf(track.get("language") or track.get("lang") or "und")
-
-
-def _track_name(track: dict[str, Any], fallback: str) -> str:
-    name = (track.get("name") or track.get("title") or fallback or "").strip()
-    return name or fallback or "und"
 
 
 @ffprobe_cached
@@ -346,8 +347,9 @@ def build_hybrid_output(
     subtitle_tracks: list[dict[str, Any]],
     output_path: str,
     filename_base: str,
+    chapters: list | None = None,
 ) -> str | None:
-    """Build a hybrid DV + HDR10 output when the media probes match the script workflow."""
+    """Build a hybrid DV + HDR10 output when the media probes match the script workflow; *chapters* are baked into the same mkvmerge command."""
     if not video_track:
         return None
 
@@ -489,7 +491,7 @@ def build_hybrid_output(
         "--language",
         "0:und",
         "--track-name",
-        "0:Hybrid DV+HDR10",
+        f"0:{video_track_name(str(base_path), hybrid=True, quality=base_probe.get('quality', ''))}",
         "--compression",
         "0:none",
     ]
@@ -501,7 +503,7 @@ def build_hybrid_output(
         logger.info(f"Hybrid: restoring source video start-time offset ({video_start_time_ms} ms)")
     mux_cmd.append(str(hybrid_hevc))
 
-    for idx, track in enumerate(audio_tracks):
+    for idx, track in enumerate(order_audio_tracks(audio_tracks)):
         track_path_str = str(track.get("path") or "").strip()
         if not track_path_str:
             continue
@@ -510,7 +512,7 @@ def build_hybrid_output(
             continue
 
         # Strip residual enca wrapper boxes left by live CENC segment decryption.
-        lang_token = _track_language(track).replace("-", "_")
+        lang_token = _mkvmerge_lang_flag(track).replace("-", "_")
         clean_audio = work_dir / f"{filename_base}_aud{idx}_{lang_token}.mp4"
         logger.info(f"Hybrid audio[{idx}] strip-enca: {track_path.name} → {clean_audio.name}")
         if _strip_enca(track_path, clean_audio) and clean_audio.exists() and clean_audio.stat().st_size > 0:
@@ -520,36 +522,21 @@ def build_hybrid_output(
             logger.warning(f"Hybrid audio[{idx}] strip-enca failed — using original: {track_path.name}")
 
         mux_cmd.extend(
-            [
-                "--language",
-                f"0:{_track_language(track)}",
-                "--track-name",
-                f"0:{_track_name(track, _track_language(track))}",
-                str(track_path),
-            ]
+            _mkvmerge_add_track("audio", str(track_path), _mkvmerge_lang_flag(track), _mkvmerge_track_name(track), default=(idx == 0))
         )
 
-    for track in subtitle_tracks:
-        track_path_str = str(track.get("path") or "").strip()
-        if not track_path_str:
-            continue
+    mux_cmd.extend(mkvmerge_subtitle_args(order_subtitle_tracks([t for t in subtitle_tracks if Path(str(t.get("path") or "")).is_file()])))
 
-        track_path = Path(track_path_str)
-        if not track_path.exists():
-            continue
-
-        mux_cmd.extend(
-            [
-                "--language",
-                f"0:{_track_language(track)}",
-                "--track-name",
-                f"0:{_track_name(track, _track_language(track))}",
-                str(track_path),
-            ]
-        )
+    if chapters:
+        chapters = prepare_chapters(chapters, get_video_duration(str(base_path)), str(output_file.parent))
+    chapter_args, chapter_file = mkvmerge_chapters_args(chapters)
+    mux_cmd.extend(chapter_args)
 
     mkv_label = f"[cyan]Mux[/cyan] [green]{output_file.name}[/green] - [yellow]MKVMerge[/yellow]"
-    if not _run_progress_command(mux_cmd, mkv_label, hybrid_hevc, output_file, accept_warnings=True):
+    muxed = _run_progress_command(mux_cmd, mkv_label, hybrid_hevc, output_file, accept_warnings=True)
+    if chapter_file:
+        Path(chapter_file).unlink(missing_ok=True)
+    if not muxed:
         return None
 
     if not output_file.exists() or output_file.stat().st_size <= 0:

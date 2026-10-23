@@ -12,6 +12,7 @@ from .disposition import (
     SubtitleDispositionInfo,
     build_subtitle_disposition_args,
     disposition_lang_matches,
+    find_default_subtitle,
     get_configured_disposition_language,
 )
 from .sanitize import get_subtitle_duration, sanitize_srt_file, sanitize_vtt_file, trim_subtitle_to_duration
@@ -34,5 +35,6 @@ __all__ = [
     "SubtitleDispositionInfo",
     "build_subtitle_disposition_args",
     "disposition_lang_matches",
+    "find_default_subtitle",
     "get_configured_disposition_language",
 ]

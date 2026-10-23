@@ -508,6 +508,7 @@ class BaseMediaDownloader:
             mux_dtsx=bool(f.get("mux_dtsx", configured_mux_dtsx())),
             drop_clear_av=bool(f.get("drop_clear_av", False)),
             dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
+            codec_priority=f.get("codec_priority"),
         )
         selectable = self.streams
         if requested_quality:

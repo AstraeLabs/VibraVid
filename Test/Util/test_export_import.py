@@ -72,6 +72,21 @@ def test_entries_of_one_run_pile_up_but_a_new_run_starts_afresh(tmp_path, monkey
     assert [m.kind for m in read_export(file)] == ["ism"]
 
 
+def test_the_default_file_collects_episodes_across_runs_and_replaces_a_repeated_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(_export.config_manager, "base_path", str(tmp_path), raising=False)
+
+    def episode(n, kind):
+        return ResolvedMedia(kind=kind, url=f"https://cdn.example/{n}", title="Show", media_type="Serie", site="netflix", season=1, episode=n)
+
+    write_export(episode(1, "hls"), "")
+    monkeypatch.setattr(_export, "_written", [])
+    path = write_export(episode(2, "dash"), "")
+    monkeypatch.setattr(_export, "_written", [])
+    write_export(episode(1, "ism"), "")
+
+    assert [(m.episode, m.kind) for m in read_export(path)] == [(2, "dash"), (1, "ism")]
+
+
 def test_the_default_file_is_named_after_site_type_and_title(tmp_path, monkeypatch):
     monkeypatch.setattr(_export.config_manager, "base_path", str(tmp_path), raising=False)
     path = write_export(_media("hls"), "")

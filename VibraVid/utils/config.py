@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -35,6 +36,17 @@ DOMAIN_REFRESH_INTERVAL_SECONDS = 1800
 _MISSING = object()
 _PASTE_PLACEHOLDER = "[paste here]"
 
+class LoginConfigError(ValueError):
+    """A login.toml value the user has to fix: reported as a plain message, without a traceback."""
+    HINTS = (
+        ("Unterminated string", "a closing quote is missing on that line"),
+        ("Expecting ',' delimiter", "a comma or a closing quote is missing at the end of the line above or on this one"),
+        ("Invalid control character", "there is a line break or tab inside a value"),
+        ("Illegal trailing comma", "there is an extra comma before the closing brace"),
+        ("Expecting property name", "there is an extra comma before the closing brace"),
+        ("Expecting value", "a value is missing after a colon or a comma"),
+    )
+
 
 class ConfigAccessor:
     def __init__(
@@ -62,6 +74,18 @@ class ConfigAccessor:
             return {}
         return overlay[section]
 
+    @staticmethod
+    def _loads_login_json(field: str, text: str):
+        """json.loads for a login.toml value, failing with the line, the key and the likely cause instead of a bare parser error."""
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            lines = text.splitlines()
+            key = re.match(r'\s*"([^"]+)"', lines[exc.lineno - 1]) if exc.lineno <= len(lines) else None
+            hint = next((h for msg, h in LoginConfigError.HINTS if exc.msg.startswith(msg)), exc.msg)
+            where = f"line {exc.lineno}, column {exc.colno}" + (f' (key "{key.group(1)}")' if key else "")
+            raise LoginConfigError(f'login "{field}" is not valid JSON at {where}: {hint}') from exc
+
     def _normalize_login_section(self, section_data: dict | None) -> dict:
         """Decode JSON cookie/token fields into the mapping consumed by service clients."""
         if self._cache_prefix != "login" or not isinstance(section_data, dict):
@@ -73,10 +97,7 @@ class ConfigAccessor:
             if not cookie_data.strip() or cookie_data.strip() == _PASTE_PLACEHOLDER:
                 cookie_data = _MISSING
             else:
-                try:
-                    cookie_data = json.loads(cookie_data)
-                except json.JSONDecodeError as exc:
-                    raise ValueError("login cookies must contain valid JSON") from exc
+                cookie_data = self._loads_login_json("cookies", cookie_data)
 
         if cookie_data is not _MISSING:
             if isinstance(cookie_data, dict):
@@ -111,10 +132,7 @@ class ConfigAccessor:
         if isinstance(token_data, str) and token_data.strip() == _PASTE_PLACEHOLDER:
             normalized.pop("rtilogin_acd")  # untouched template value: same as not logged in
         elif isinstance(token_data, str) and token_data.lstrip().startswith(("{", "[")):
-            try:
-                token_data = json.loads(token_data)
-            except json.JSONDecodeError as exc:
-                raise ValueError("login rtilogin_acd must contain valid JSON") from exc
+            token_data = self._loads_login_json("rtilogin_acd", token_data)
             if isinstance(token_data, list):
                 token_data = next(
                     (
@@ -125,17 +143,11 @@ class ConfigAccessor:
                     None,
                 )
                 if isinstance(token_data, str):
-                    try:
-                        token_data = json.loads(token_data)
-                    except json.JSONDecodeError as exc:
-                        raise ValueError("login rtilogin_acd must contain valid JSON") from exc
+                    token_data = self._loads_login_json("rtilogin_acd", token_data)
             elif isinstance(token_data, dict) and "rtilogin_acd" in token_data and "caToken" not in token_data:
                 token_data = token_data["rtilogin_acd"]
                 if isinstance(token_data, str):
-                    try:
-                        token_data = json.loads(token_data)
-                    except json.JSONDecodeError as exc:
-                        raise ValueError("login rtilogin_acd must contain valid JSON") from exc
+                    token_data = self._loads_login_json("rtilogin_acd", token_data)
 
             if not isinstance(token_data, dict):
                 raise ValueError("login rtilogin_acd JSON must contain an object")
@@ -146,10 +158,7 @@ class ConfigAccessor:
 
         token_data = normalized.get("token")
         if isinstance(token_data, str) and token_data.lstrip().startswith("{"):
-            try:
-                token_data = json.loads(token_data)
-            except json.JSONDecodeError as exc:
-                raise ValueError("login token must contain valid JSON") from exc
+            token_data = self._loads_login_json("token", token_data)
             if not isinstance(token_data, dict):
                 raise ValueError("login token JSON must be an object")
             access_token = token_data.get("access_token") or token_data.get("token")
@@ -512,7 +521,7 @@ class ConfigManager:
 
         name = os.path.basename(path)
         logger.info(f"{name} not found, downloading it from GitHub")
-        console.print(f"[yellow]{name} not found, downloading it from GitHub...")
+        logger.info(f"[yellow]{name} not found, downloading it from GitHub...")
         try:
             self._download_file(url, path)
         except Exception as e:
