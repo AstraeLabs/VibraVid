@@ -21,7 +21,7 @@ Every screen has the same frame: a top bar the content, and at the bottom the sh
 - **i18n (IT / EN)**: detected from the OS language, across all screens.
 - **Queue & batch manager**: add, remove, reorder and retry jobs with custom CLI arguments and tags.
 - **Live progress**: progress, speed, segment counts, track details; open folder / launch file when done.
-- **System & DRM inspector**: external binaries (`ffmpeg`, `flux`, `mkvmerge`, ...), CDM device status, log viewer, and an Updates tab (version info, release check cached 24 h, **Download update** for binary builds: downloads the matching executable with SHA-256 verification without replacing the running one).
+- **System & DRM inspector**: external binaries (`ffmpeg`, `flux`, `mkvmerge`, ...), CDM device status, log viewer, and a **Refresh external import** button (applies the newest commit of the `imp_service` repositories at once) and an Updates tab (version info, release check cached 24 h, skipped with `auto_check_update = false`, **Download update** for binary builds: downloads the matching executable with SHA-256 verification without replacing the running one).
 
 ## Cover art
 

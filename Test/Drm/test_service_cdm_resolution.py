@@ -1,6 +1,8 @@
 # 09.10.26
 
+import re
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -288,3 +290,28 @@ def test_named_device_in_the_managed_folder_wins_over_a_copy_in_a_subfolder(tmp_
     other.mkdir(parents=True)
     (other / "phone.wvd").write_bytes(b"x")
     assert searcher.search(filename="phone.wvd") == str(managed / "wvd" / "phone.wvd")
+
+
+def test_cdm_keys_of_other_kids_are_not_returned_but_handed_back_to_be_shown():
+    used, extra = "a" * 32, "b" * 32
+    manager = object.__new__(DRMManager)
+    cdm_fn = lambda *a, **k: types.SimpleNamespace(get_keys_list=lambda: [f"{used}:{'1' * 32}", f"{extra}:{'2' * 32}"])
+    extras = []
+
+    kept = manager._cdm_extract([{"kid": used}], "http://lic", [used], cdm_fn, {}, "widevine", extras_out=extras)
+
+    assert kept == [f"{used}:{'1' * 32}"]
+    assert extras == [f"{extra}:{'2' * 32}"]
+
+
+def test_a_key_of_an_unused_kid_is_shown_without_the_star(capsys):
+    used, extra = "a" * 32, "b" * 32
+    manager = object.__new__(DRMManager)
+    manager._display_keys([f"{used}:{'1' * 32}"], [], "widevine", None, None, header=False, default_label="cdm", required_kids={used})
+    manager._display_keys([f"{extra}:{'2' * 32}"], [], "widevine", None, None, header=False, default_label="cdm", required_kids={used})
+
+    # CI forces colors and a narrow terminal: drop the ANSI codes and the wrapping
+    out = "".join(re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out).split())
+    assert out.count("*cdm") == 1
+    assert out.index(used) < out.index("*cdm") < out.index(extra)
+    assert out.count("cdm") == 2

@@ -1,5 +1,6 @@
 ﻿# 21.05.24
 
+import logging
 import re
 
 from rich.console import Console
@@ -18,6 +19,7 @@ _useFor = "Film_Serie"
 _region = ["IT", "ES"]
 _live_mux = True
 console = Console()
+logger = logging.getLogger(__name__)
 entries_manager = EntriesManager()
 table_show_manager = TVShowManager()
 
@@ -25,6 +27,14 @@ _SERIES_ID_RE = re.compile(r"(SE\d+)")
 _FILM_ID_RE = re.compile(r"(F\d{6,})")
 _ES_CONTENT_ID_RE = re.compile(r'"?app-reference-id"?[^M]{0,40}(M\d{10,})')
 _ES_FINDER_ID_RE = re.compile(r"finder/esp/(M\d{10,})")
+
+_FEED_SEARCH_LIMIT = 24
+_FEED_SEARCH_FIELDS = "guid,title,year,programType,thumbnails,mediasetprogram$pageUrl"
+_FEED_SEARCH_SOURCES = (
+    ("mediaset-prod-all-series-v2", "tv", "series"),
+    ("mediaset-prod-all-programs-v2", "film", "movie"),
+)
+_FEED_IMAGE_KEYS = ("image_vertical-264x396", "image_vertical-192x288", "image_vertical-168x252")
 
 
 def register_cli_args(parser) -> list:
@@ -91,6 +101,67 @@ def _resolve_url_to_item(url: str):
     return None
 
 
+def _feed_query(base_url: str, feed: str, query: str) -> list:
+    """Query one public ThePlatform catalog feed, retrying with a prefix wildcard."""
+    headers = {"user-agent": get_userAgent()}
+    params = {"range": f"1-{_FEED_SEARCH_LIMIT}", "fields": _FEED_SEARCH_FIELDS}
+    terms = [query] if query.endswith("*") else [query, f"{query}*"]
+
+    for term in terms:
+        try:
+            with create_client(headers=headers) as client:
+                response = client.get(f"{base_url}/{feed}", params={**params, "q": term})
+                response.raise_for_status()
+                entries = response.json().get("entries") or []
+        except Exception as e:
+            logger.debug(f"Feed search failed for '{term}' on {feed}: {e}")
+            entries = []
+        if entries:
+            return entries
+    return []
+
+
+def _feed_search(query: str) -> int:
+    """Search the public ThePlatform catalog feeds."""
+    if get_region() != "it":
+        return 0
+
+    conf = region_conf()
+    base_url = f"https://feed.entertainment.tv.theplatform.eu/f/{conf['feed_public_id']}"
+    seen = set()
+
+    for feed, item_type, program_type in _FEED_SEARCH_SOURCES:
+        for item in _feed_query(base_url, feed, query):
+            if item.get("programType") != program_type:
+                continue
+            guid = item.get("guid")
+            if not guid or guid in seen:
+                continue
+            seen.add(guid)
+
+            thumbnails = item.get("thumbnails") or {}
+            image = next(
+                (thumbnails[key].get("url", "") for key in _FEED_IMAGE_KEYS if thumbnails.get(key, {}).get("url")),
+                "",
+            )
+            page_url = item.get("mediasetprogram$pageUrl") or ""
+            if page_url.startswith("//"):
+                page_url = f"https:{page_url}"
+
+            entries_manager.add(
+                Entries(
+                    id=guid,
+                    name=item.get("title", ""),
+                    type=item_type,
+                    image=image,
+                    year=item.get("year") or None,
+                    url=page_url or guid,
+                )
+            )
+
+    return len(entries_manager)
+
+
 def title_search(query: str) -> int:
     """
     Search for titles based on a search query.
@@ -108,6 +179,11 @@ def title_search(query: str) -> int:
         return 0
 
     conf = region_conf()
+    if get_region() == "it":
+        found = _feed_search(query)
+        if found:
+            return found
+
     api = get_client()
     if not api.getHash256():
         console.print("[yellow]Search not available for this region; use --url instead.")

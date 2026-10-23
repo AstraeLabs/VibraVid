@@ -193,14 +193,14 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--skip-content-check` | Skip the HEAD content-type check for MP4 downloads (`--type mp4`), for single-use URLs |
 | `--skip-sanitize` | Use `-o` verbatim (no transliteration of non-ASCII characters) |
 | `--no-manifest-info` | Don't print the manifest/streams table |
-| `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download outdated ones |
+| `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download outdated ones (the CLI also does it every 2 days: `auto_update_binaries`) |
 | `--resolve-only` | Resolve and cache manifest/keys/license/playlist without downloading (pairs with the queue) |
 | `--export [FILE]` | Resolve tracks and keys, write them to a JSON file instead of downloading (see [Export and import](#export-and-import-export-import)) |
 | `--import <FILE>` | Download every entry of a file written by `--export`, no search and no CDM when the keys were exported |
 | `--tui` | Launch the Textual terminal UI |
 | `-UP`, `--update` | Auto-update to the latest release (binary builds only) |
 | `--check-update` | Print how to update for your installation (binary, source, Docker) and exit |
-| `--skip-update-check` | Skip the background startup check (cached 24h; failures retried after 30 min) |
+| `--skip-update-check` | Skip the background startup check (cached 24h; failures retried after 30 min); `auto_check_update = false` in `config.toml` turns it off for good |
 | `--version` | Print the version and exit |
 
 ```bash

@@ -53,6 +53,16 @@ def list_sites(refresh: bool = False) -> list[SiteInfo]:
     return sites
 
 
+def refresh_external_import() -> list[dict]:
+    """Check the git `imp_service` sources now and apply any newer commit; returns one result per source."""
+    from VibraVid.services._base.site_loader import refresh_external_sources
+
+    with capture_stdio():
+        results = refresh_external_sources()
+        list_sites(refresh=True)
+    return results
+
+
 def sites_by_category() -> dict[str, list[SiteInfo]]:
     """Group visible sites by their _useFor category, preserving index order."""
     grouped: dict[str, list[SiteInfo]] = {}
@@ -60,12 +70,6 @@ def sites_by_category() -> dict[str, list[SiteInfo]]:
         grouped.setdefault(site.use_for or "other", []).append(site)
     return grouped
 
-
-# ── stdio capture ─────────────────────────────────────────────────────────
-# Service code (and the GUI adapters) print to stdout/stderr through rich or
-# plain print(); inside a running Textual app that would corrupt the display.
-# Textual's driver renders through sys.__stderr__, so replacing the dynamic
-# sys.stdout/sys.stderr with a thread-aware proxy is safe.
 
 class _ThreadStdProxy:
     """sys.stdout/sys.stderr replacement with per-thread capture buffers."""

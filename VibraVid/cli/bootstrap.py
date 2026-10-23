@@ -20,6 +20,16 @@ def _is_download_cancelled(exc: BaseException) -> bool:
     return type(exc).__name__ == "DownloadCancelled"
 
 
+def _is_expected_failure(exc: BaseException) -> bool:
+    """True for a failure already explained on screen (lazy import like above)."""
+    try:
+        from VibraVid.core.downloader.base import DownloadFailed
+
+        return isinstance(exc, DownloadFailed)
+    except Exception:
+        return False
+
+
 def run_guarded(entry: Callable[[], None]) -> None:
     """Run *entry* after fixing the library path; an unhandled error prints the traceback, pauses if needed and exits with 1."""
     fix_ld_library_path()
@@ -33,6 +43,12 @@ def run_guarded(entry: Callable[[], None]) -> None:
             # Double Ctrl+C: a voluntary abort, not a crash — no traceback.
             print("\nDownload cancelled by user.")
             sys.exit(130)
+        if _is_expected_failure(exc):
+            # The reason is already on screen (and in the log): the stack adds nothing.
+            print(f"\nError: {exc}", file=sys.stderr)
+            pause_if_needed()
+            sys.exit(1)
+        
         traceback.print_exc()
         pause_if_needed()
         sys.exit(1)

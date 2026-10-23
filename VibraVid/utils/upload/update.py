@@ -45,6 +45,7 @@ _RELEASE_URL = f"https://api.github.com/repos/{__author__}/{__title__}/releases/
 _RELEASE_CACHE_TTL = 24 * 60 * 60
 _RELEASE_ERROR_TTL = 30 * 60
 _CHECK_TIMEOUT = 4
+_BINARY_CHECK_INTERVAL = 2 * 24 * 60 * 60
 
 _UPDATE_COMMANDS = {
     "installer": "VibraVid -UP",
@@ -207,6 +208,11 @@ def _latest_release(*, force: bool = False, timeout: float = _CHECK_TIMEOUT) -> 
     return release
 
 
+def auto_check_enabled() -> bool:
+    """`[DEFAULT] auto_check_update` (default on): automatic release check at start. Explicit checks (`--check-update`, buttons) ignore it."""
+    return config_manager.config.get_bool("DEFAULT", "auto_check_update", default=True)
+
+
 def check_for_updates(*, force: bool = False, timeout: float = _CHECK_TIMEOUT) -> dict:
     """Read-only update check. Never downloads a release asset or changes the running app."""
     mode = get_execution_mode()
@@ -366,10 +372,7 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
     local = binary_paths.get_local_tool_version(tool)
 
-    managed_dirs = {os.path.abspath(binary_paths.get_tools_directory())}
-    previous_dir = binary_paths.get_legacy_binary_directory()
-    if previous_dir:
-        managed_dirs.add(os.path.abspath(previous_dir))
+    managed_dir = os.path.abspath(binary_paths.get_tools_directory())
     ext = ".exe" if binary_paths.system == "windows" else ""
 
     if local is not None and local == remote:
@@ -415,19 +418,37 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
 
         if path:
             # Only manage the binary we downloaded ourselves; never touch a system-PATH install.
-            if os.path.dirname(os.path.abspath(path)) not in managed_dirs:
+            if os.path.dirname(os.path.abspath(path)) != managed_dir:
                 logger.info(f"{binary_name} resolved outside the managed binary directory; skipping")
                 continue
 
+            # Keep the old binary aside until the new one is in place: an interrupted download must not leave the tool uninstalled.
+            backup = path + ".old"
             try:
-                os.remove(path)
+                os.replace(path, backup)
             except OSError as e:
-                logger.warning(f"Failed to remove stale {binary_name}: {e}")
+                logger.warning(f"Failed to set aside stale {binary_name}: {e}")
                 continue
 
             binary_paths.invalidate_binary(binary_name)
+        else:
+            backup = None
 
-        if binary_paths.download_binary(tool, binary_name):
+        downloaded = None
+        try:
+            downloaded = binary_paths.download_binary(tool, binary_name)
+        finally:
+            if backup:
+                try:
+                    if downloaded:
+                        os.remove(backup)
+                    else:
+                        os.replace(backup, path)
+                        binary_paths.invalidate_binary(binary_name)
+                except OSError as e:
+                    logger.warning(f"Could not finalize {binary_name} update ({backup}): {e}")
+
+        if downloaded:
             updated_any = True
 
     # Only record the remote version once it has actually been installed/verified;
@@ -457,19 +478,64 @@ def check_binary_update(tool: str, exec_names: list[str]) -> dict:
     }
 
 
-def check_all_binaries_update() -> dict:
-    """Refresh every managed third-party binary published in AstraeLabs/Binary"""
+def _installed_in_managed_dir(exec_names: list[str], tool: str) -> bool:
+    ext = ".exe" if binary_paths.system == "windows" else ""
+    managed = os.path.abspath(binary_paths.get_tools_directory())
+    for name in exec_names:
+        path = binary_paths.get_binary_path(tool, f"{name}{ext}")
+        if path and os.path.dirname(os.path.abspath(path)) == managed:
+            return True
+    return False
+
+
+def check_all_binaries_update(*, only_installed: bool = False) -> dict:
+    """Refresh every managed third-party binary published in AstraeLabs/Binary (`only_installed`: never install a missing one)"""
     from VibraVid.setup.checker import _should_download
 
     results = {}
     for tool, exec_names in _GENERIC_UPDATABLE_TOOLS.items():
         if not _should_download(tool):
             continue
+        if only_installed and not _installed_in_managed_dir(exec_names, tool):
+            continue
         try:
             results[tool] = check_binary_update(tool, exec_names)
         except Exception as e:
             logger.debug(f"{tool} update check failed: {e}")
             results[tool] = {"success": False, "message": str(e)}
+    return results
+
+
+def maybe_auto_update_binaries() -> dict | None:
+    """Refresh the managed binaries at most every `_BINARY_CHECK_INTERVAL`; the stamp is only written once a check reached AstraeLabs/Binary and every newer version it found was installed."""
+    if not config_manager.config.get_bool("DEFAULT", "auto_update_binaries", default=True):
+        return None
+
+    stamp_path = Path(config_manager.base_path) / ".cache" / "vibravid_binary_check.json"
+    try:
+        if time.time() - json.loads(stamp_path.read_text(encoding="utf-8")).get("checked_at", 0) < _BINARY_CHECK_INTERVAL:
+            return None
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+
+    try:
+        results = check_all_binaries_update(only_installed=True)
+    except Exception as exc:
+        logger.debug("Automatic binary update failed: %s", exc)
+        return None
+
+    for tool, result in results.items():
+        if result.get("updated"):
+            console.print(f"[#06A77D]{tool}: {result.get('message')}")
+
+    reached = [result for result in results.values() if result.get("latest")]
+    failed_update = any(not result.get("updated") and result.get("local") != result.get("latest") for result in reached)
+    if reached and not failed_update:
+        try:
+            stamp_path.parent.mkdir(parents=True, exist_ok=True)
+            stamp_path.write_text(json.dumps({"checked_at": time.time()}), encoding="utf-8")
+        except OSError as exc:
+            logger.debug("Binary check stamp could not be saved: %s", exc)
     return results
 
 

@@ -7,7 +7,7 @@ from typing import Any
 from rich.console import Console
 from rich.prompt import Prompt
 
-from VibraVid.core.downloader.base import DownloadCancelled, DownloadResult
+from VibraVid.core.downloader.base import DownloadCancelled, DownloadFailed, DownloadResult
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.services._base import tmdb_artwork
 from VibraVid.services._base.tv_display_manager import (
@@ -355,7 +355,7 @@ def process_episode_download(
         if not downloaded_any:
             # Nothing downloaded for this season: propagate so the CLI exits
             # non-zero and the GUI marks the download Failed instead of Done.
-            raise RuntimeError(summary)
+            raise DownloadFailed(summary)
         
         console.print(f"[yellow]{summary}")
         logger.warning(summary)

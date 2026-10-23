@@ -29,24 +29,12 @@ def _touch(path: Path, data: bytes = b"x") -> Path:
     return path
 
 
-def test_the_previous_flat_directory_is_the_parent(layout):
-    paths, old_dir, _ = layout
-    assert paths.get_legacy_binary_directory() == str(old_dir)
-
-
-def test_no_fallback_directory_when_the_binary_dir_is_overridden(layout):
-    paths, _, _ = layout
-    paths.binary_dir_override = "/somewhere/else"
-    assert paths.get_legacy_binary_directory() is None
-
-
-def test_binary_is_found_in_tools_first_then_in_the_old_flat_directory(layout):
+def test_binary_is_only_looked_up_in_the_tools_directory(layout):
     paths, old_dir, new_dir = layout
-    old = _touch(old_dir / "velora.exe")
+    _touch(old_dir / "velora.exe")
+    _touch(new_dir / "velora.exe")
+    assert paths.get_binary_path("velora", "velora.exe") is None
 
-    assert paths.get_binary_path("velora", "velora.exe") == str(old)
-
-    paths.invalidate_binary("velora.exe")
     new = _touch(new_dir / "tools" / "velora.exe")
     assert paths.get_binary_path("velora", "velora.exe") == str(new)
 
@@ -90,3 +78,45 @@ def test_the_dedicated_directory_beats_the_old_one(searcher):
     new = _touch(new_dir / "wvd" / "device.wvd")
 
     assert os.path.samefile(finder.search(".wvd"), new)
+
+
+def test_tool_version_is_read_from_the_tools_directory_only(layout):
+    paths, old_dir, new_dir = layout
+    (old_dir / ".versions.json").write_text('{"ffmpeg": "n9.0"}', encoding="utf-8")
+    _touch(new_dir / "tools" / ".deno.version", b"2.0")
+    assert paths.get_local_tool_version("ffmpeg") is None
+    assert paths.get_local_tool_version("deno") is None
+
+    paths.set_local_tool_version("ffmpeg", "n9.1")
+    assert paths.get_local_tool_version("ffmpeg") == "n9.1"
+    assert (new_dir / "tools" / ".versions.json").is_file()
+
+
+def test_ffmpeg_below_one_megabyte_is_not_used_and_not_kept_as_installed(layout, monkeypatch):
+    paths, _, new_dir = layout
+    _touch(new_dir / "tools" / "ffmpeg.exe", b"version https://git-lfs.github.com/spec/v1")
+
+    assert paths.get_binary_path("ffmpeg", "ffmpeg.exe") is None
+
+    monkeypatch.setattr(paths, "_load_paths_json", lambda: {})
+    assert paths.download_binary("ffmpeg", "ffmpeg.exe") is None
+
+
+def test_small_binary_of_another_tool_is_still_accepted(layout):
+    paths, _, new_dir = layout
+    small = _touch(new_dir / "tools" / "mp4decrypt.exe", b"x" * 366_080)
+    assert paths.get_binary_path("mp4decrypt", "mp4decrypt.exe") == str(small)
+
+
+def test_auto_update_only_covers_the_tools_directory(layout, monkeypatch):
+    from VibraVid.utils.upload import update as updater
+
+    paths, old_dir, new_dir = layout
+    monkeypatch.setattr(updater, "binary_paths", paths)
+    monkeypatch.setattr(paths, "system", "windows")
+    _touch(old_dir / "flux.exe")
+    _touch(new_dir / "tools" / "velora.exe")
+
+    assert updater._installed_in_managed_dir(["velora"], "velora")
+    assert not updater._installed_in_managed_dir(["flux"], "flux")
+    assert not updater._installed_in_managed_dir(["deno"], "deno")

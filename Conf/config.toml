@@ -8,13 +8,18 @@ close_console = true
 show_message = true
 # Download the updated list of site domains online
 fetch_domain_online = true
+# Check for a new VibraVid release at start
+auto_check_update = true
+# CLI only: every 2 days check the downloaded binaries (ffmpeg, flux, velora, ...)
+auto_update_binaries = true
 disable_scraper_cache = false
-# Service folders to load. Windows paths go in single quotes: ["default", 'C:\more_service']
+# Service folders to load. Windows paths go in single quotes: ["default", 'C:\\more_service']
 imp_service = ["default"]
-# Services to switch off completely (CLI, TUI and GUI), by folder name: ["aurora", "tubitv"]
-hidden_services = []
 # Empty = automatic
 installation = ""
+# Folders of the Widevine (.wvd) / PlayReady (.prd) devices. Empty = default: wvd and prd inside the binary folder (Windows C:\binary\VibraVid\wvd). Windows paths go in single quotes: 'D:\Devices'
+wvd_dir = ""
+prd_dir = ""
 # In order of preference: tmdb, imdb, tvdb (comma separated)
 metadata_provider = "tmdb,imdb"
 tui_images = "auto"
@@ -197,7 +202,6 @@ full_resync_interval = 21600
 # Simultaneous downloads started by ARR
 max_concurrent_downloads = 2
 webhook_priority_enabled = true
-# Seconds
 native_webhook_priority_window_seconds = 120
 seerr_fallback_delay_seconds = 20
 

@@ -74,10 +74,14 @@ log_level = "INFO"
 close_console = true
 show_message = true
 fetch_domain_online = true
+auto_check_update = true
+auto_update_binaries = true
 disable_scraper_cache = false
 imp_service = ["default"]
 hidden_services = []
 installation = ""
+wvd_dir = ""
+prd_dir = ""
 metadata_provider = "tmdb,imdb"
 tui_images = "auto"
 ```
@@ -91,7 +95,11 @@ tui_images = "auto"
 | `disable_scraper_cache` | `false` | GUI only: disable the 15-minute per-title scraper cache |
 | `imp_service` | `["default"]` | Where to load site modules from: `"default"` (built-ins), local directories (each module needs `__init__.py` defining `indice` and `_useFor`), or a GitHub/Gitea repo URL. Custom modules override built-ins of the same name |
 | `hidden_services` | `[]` | Services to switch off completely, by folder name (e.g. `["aurora", "tubitv"]`): they are not loaded, so they disappear from the CLI menu and `-i`, the TUI and the GUI, and ARR / the watchlist skip them. The remaining services are renumbered without gaps, but the `indice` in the service files is never touched. The `VIBRAVID_HIDDEN_SITES` env var (comma-separated, see `docker-compose.yml`) adds to this list. Saved from the GUI Settings page it applies without a restart |
+| `auto_check_update` | `true` | Check for a new VibraVid release at start (24 h cache): the CLI notice, the TUI System screen and the GUI banner. `false` makes no automatic request; `--check-update` and the Check for Updates buttons still check |
+| `auto_update_binaries` | `true` | CLI only: every 2 days the managed binaries (the ones in the `installation` level) are checked against AstraeLabs/Binary and updated at start. `--binary-update` and the TUI/GUI buttons always check |
 | `installation` | `""` | Binaries downloaded at setup. `""`: FFmpeg, Velora, flux. `"yt"`: + yt-dlp, deno. `"full"`: + dovi_tool, mkvtoolnix, yt-dlp, deno |
+| `wvd_dir` | `""` | Folder searched first for Widevine `.wvd` devices (sub-folders included). Empty: `wvd` inside the binary directory (e.g. `C:\binary\VibraVid\wvd`, see [Local CDM devices](#local-cdm-devices)) |
+| `prd_dir` | `""` | Same for PlayReady `.prd` devices. Empty: `prd` inside the binary directory (e.g. `C:\binary\VibraVid\prd`) |
 | `metadata_provider` | `tmdb,imdb` | Sidecar providers, tried in order (`tmdb`, `imdb`, `tvdb`). CLI: `--metadata-provider` |
 | `tui_images` | `auto` | TUI cover art: `auto`, `sixel`, `kitty` (real images, see [TUI](tui.md#cover-art)), `blocks` (drawn with characters, works anywhere) or `off` |
 
@@ -99,9 +107,8 @@ tui_images = "auto"
 imp_service = ["default", "/home/user/my_custom_sites"]                         # local folder
 imp_service = ["default", "https://github.com/owner/my-vibravid-sites"]         # repository
 imp_service = ["default", "http://user:password@192.168.1.149:3000/owner/repo"] # private repo
+imp_service = ["default", "https://github.com/owner/my-vibravid-sites#dev"]      # branch, tag or commit
 ```
-
-Repository archives are cached in `.cache/imported_service/<host>__<owner>__<repo>__<ref>/`; the cache is trusted for 15 minutes, then a cheap latest-commit check decides whether to re-download. Pin a branch/tag with `#ref` (`https://host/owner/repo#dev`). Credentials go in the URL (`user:password@`; GitHub: a personal access token as password) and end up in plain text in `config.toml`: prefer a scoped token and never push a config containing them.
 
 ## OUTPUT
 
@@ -501,4 +508,4 @@ Put device files in the binary directory (override with `VIBRAVID_BINARY_DIR`, e
 - `wvd/`: **Widevine** `.wvd` files (pywidevine)
 - `prd/`: **PlayReady** `.prd` files (pyplayready)
 
-Files in the old flat location (`C:\binary`, `~/.local/bin/binary`, `~/Applications/binary`) are still found. With `cdm = "search"` the first `.wvd`/`.prd` is used; to keep several, name one, e.g. `cdm = "mine.wvd"`.
+Downloaded binaries are only used from `tools/`; `.wvd`/`.prd` files left in the old flat location (`C:\binary`, `~/.local/bin/binary`, `~/Applications/binary`) are still found. With `cdm = "search"` the first `.wvd`/`.prd` is used; to keep several, name one, e.g. `cdm = "mine.wvd"`.

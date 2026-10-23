@@ -67,6 +67,7 @@ urlpatterns = [
     path("api/version/check/", views.check_updates, name="check_updates"),
     path("api/version/update/", views.trigger_update, name="trigger_update"),
     path("api/binaries/update/", views.trigger_binaries_update, name="trigger_binaries_update"),
+    path("api/imp-service/refresh/", views.refresh_external_import, name="refresh_external_import"),
 
     # Telegram bot bridge (docker/telegram_bot/, trigger-download only — see api_bot.py)
     path("api/bot/search/", api_bot.bot_search, name="bot_search"),

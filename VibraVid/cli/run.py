@@ -33,7 +33,12 @@ from VibraVid.setup.system import (
 from VibraVid.utils import _startup_prefetch, config_manager, disk_cache, get_log_file_path, setup_logger, start_message
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
-from VibraVid.utils.upload.update import check_for_updates, update_command
+from VibraVid.utils.upload.update import (
+    auto_check_enabled,
+    check_for_updates,
+    maybe_auto_update_binaries,
+    update_command,
+)
 from VibraVid.utils.upload.version import __title__, __version__
 
 console = Console()
@@ -621,7 +626,7 @@ def main():
                 _show_update_notice(info)
             return
 
-        if not args.skip_update_check and sys.stdin.isatty() and sys.stdout.isatty() and not getattr(args, "tui", False):
+        if not args.skip_update_check and auto_check_enabled() and sys.stdin.isatty() and sys.stdout.isatty() and not getattr(args, "tui", False):
             _startup_prefetch.start_update_check()
 
         if getattr(args, "tui", False):
@@ -659,6 +664,9 @@ def main():
             console.print(f"[red]Missing required dependency: {', '.join(missing_tools)}.[/red]")
             logger.error(f"Missing required dependency: {missing_tools}")
             raise SystemExit(1)
+
+        if not (args.binary_update or args.update):
+            maybe_auto_update_binaries()
 
         # Execute pre-run hooks with context from post-download if available, otherwise with empty context
         execute_hooks("pre_run")
