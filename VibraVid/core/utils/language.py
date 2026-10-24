@@ -12,14 +12,14 @@ _SUBTITLE_FLAG_WORDS = (
 LANGUAGES: dict[str, dict] = {
     "ita": {"iso1": "it", "bcp47": "it-IT", "display": "Italian", "aliases": ["italiano"]},
     "eng": {"iso1": "en", "bcp47": "en-US", "display": "English", "aliases": ["inglese"]},
-    "jpn": {"iso1": "ja", "bcp47": "ja-JP", "display": "Japanese", "aliases": ["giapponese"]},
+    "jpn": {"iso1": "ja", "bcp47": "ja-JP", "display": "Japanese", "aliases": ["jap", "jp", "japanese", "giapponese"]},
     "deu": {"iso1": "de", "bcp47": "de-DE", "display": "German", "aliases": ["ger", "german", "tedesco", "deutsch"]},
     "fra": {"iso1": "fr", "bcp47": "fr-FR", "display": "French", "aliases": ["fre", "french", "francese", "francais"]},
-    "spa": {"iso1": "es", "bcp47": "es-419", "display": "Spanish", "aliases": ["spanish", "spagnolo", "espanol"]},
-    "por": {"iso1": "pt", "bcp47": "pt-BR", "display": "Portuguese", "aliases": ["portuguese", "portoghese"]},
+    "spa": {"iso1": "es", "bcp47": "es-419", "display": "Spanish", "aliases": ["esp", "sp", "spanish", "spagnolo", "espanol"]},
+    "por": {"iso1": "pt", "bcp47": "pt-BR", "display": "Portuguese", "aliases": ["ptb", "portuguese", "portoghese"]},
     "rus": {"iso1": "ru", "bcp47": "ru-RU", "display": "Russian", "aliases": ["russian", "russo"]},
     "ara": {"iso1": "ar", "bcp47": "ar-SA", "display": "Arabic", "aliases": ["arabic", "arabo"]},
-    "zho": {"iso1": "zh", "bcp47": "zh-CN", "display": "Chinese", "aliases": ["chi", "chinese", "cinese", "mandarin"]},
+    "zho": {"iso1": "zh", "bcp47": "zh-CN", "display": "Chinese", "aliases": ["chi", "cn", "chn", "chinese", "cinese", "mandarin"]},
     "kor": {"iso1": "ko", "bcp47": "ko-KR", "display": "Korean", "aliases": ["korean", "coreano"]},
     "hin": {"iso1": "hi", "bcp47": "hi-IN", "display": "Hindi", "aliases": ["hindi"]},
     "tur": {"iso1": "tr", "bcp47": "tr-TR", "display": "Turkish", "aliases": ["turkish", "turco"]},
@@ -28,12 +28,12 @@ LANGUAGES: dict[str, dict] = {
     "swe": {"iso1": "sv", "bcp47": "sv-SE", "display": "Swedish", "aliases": ["swedish", "svedese"]},
     "fin": {"iso1": "fi", "bcp47": "fi-FI", "display": "Finnish", "aliases": ["finnish", "finlandese"]},
     "nor": {"iso1": "nb", "bcp47": "nb-NO", "display": "Norwegian", "aliases": ["no", "nob", "norwegian", "norvegese"]},
-    "dan": {"iso1": "da", "bcp47": "da-DK", "display": "Danish", "aliases": ["danish", "danese"]},
+    "dan": {"iso1": "da", "bcp47": "da-DK", "display": "Danish", "aliases": ["dk", "danish", "danese"]},
     "cat": {"iso1": "ca", "bcp47": "ca-ES", "display": "Catalan", "aliases": ["catalan", "catala"]},
     "ron": {"iso1": "ro", "bcp47": "ro-RO", "display": "Romanian", "aliases": ["rum", "romanian", "rumeno"]},
-    "ces": {"iso1": "cs", "bcp47": "cs-CZ", "display": "Czech", "aliases": ["cze", "czech", "ceco"]},
+    "ces": {"iso1": "cs", "bcp47": "cs-CZ", "display": "Czech", "aliases": ["cze", "cz", "czech", "ceco"]},
     "hun": {"iso1": "hu", "bcp47": "hu-HU", "display": "Hungarian", "aliases": ["hungarian", "ungherese"]},
-    "ell": {"iso1": "el", "bcp47": "el-GR", "display": "Greek", "aliases": ["gre", "greek", "greco"]},
+    "ell": {"iso1": "el", "bcp47": "el-GR", "display": "Greek", "aliases": ["gre", "gr", "greek", "greco"]},
     "heb": {"iso1": "he", "bcp47": "he-IL", "display": "Hebrew", "aliases": ["hebrew", "ebraico"]},
     "tha": {"iso1": "th", "bcp47": "th-TH", "display": "Thai", "aliases": ["thai", "tailandese"]},
     "tam": {"iso1": "ta", "bcp47": "ta-IN", "display": "Tamil", "aliases": ["tamil"]},
@@ -47,7 +47,7 @@ LANGUAGES: dict[str, dict] = {
     "vie": {"iso1": "vi", "bcp47": "vi-VN", "display": "Vietnamese", "aliases": ["vietnamese", "vietnamita"]},
     "ind": {"iso1": "id", "bcp47": "id-ID", "display": "Indonesian", "aliases": ["indonesian", "indonesiano"]},
     "msa": {"iso1": "ms", "bcp47": "ms-MY", "display": "Malay", "aliases": ["may", "malay", "malese"]},
-    "ukr": {"iso1": "uk", "bcp47": "uk-UA", "display": "Ukrainian", "aliases": ["ukrainian", "ucraino"]},
+    "ukr": {"iso1": "uk", "bcp47": "uk-UA", "display": "Ukrainian", "aliases": ["ua", "ukrainian", "ucraino"]},
     "slk": {"iso1": "sk", "bcp47": "sk-SK", "display": "Slovak", "aliases": ["slo", "slovak", "slovacco"]},
     "hrv": {"iso1": "hr", "bcp47": "hr-HR", "display": "Croatian", "aliases": ["scr", "croatian"]},
     "srp": {"iso1": "sr", "bcp47": "sr-RS", "display": "Serbian", "aliases": ["serbian", "serbo"]},
@@ -361,6 +361,12 @@ def resolve_iso639_2(lang: str) -> str:
 
     token = "".join(ch for ch in token if ch.isalpha())
     return _ALIAS_TO_ISO3.get(token, "und")
+
+
+def canonical_iso639_2(lang: str) -> str:
+    """Like resolve_iso639_2 but also folds 3-letter aliases (fre, ger, jap) onto the canonical code, for matching only."""
+    raw = (lang or "").strip().lower()
+    return _ALIAS_TO_ISO3.get(raw) or resolve_iso639_2(raw)
 
 
 def resolve_iso639_1(lang: str) -> str:

@@ -8,6 +8,12 @@
 #   cookies = '''{"cookie_name":"cookie_value"}'''
 # args: default options for every download of the service, written like on the command line, e.g. args = "--quality 1080" (see the docs).
 # cdm: name of your WVD/PRD file, "search" or an id from [DRM.remote_cdm]. Empty = default (see the docs).
+# process: per-service pipeline switches, both off when the line is missing. live_mux = true: write the .mkv while downloading (streaming mux); live_decrypt = true: decrypt each segment as it arrives instead of after the download.
+
+[aurora]
+process = { live_mux = true, live_decrypt = true }
+[raiplay]
+process = { live_mux = true, live_decrypt = true }
 
 [amazon_music]
 cookies = '''[paste here]'''
@@ -18,6 +24,7 @@ args = ""
 cookies = '''[paste here]'''
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [chili]
 email = ""
@@ -25,33 +32,39 @@ password = ""
 country = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [crunchyroll]
 cookies = '''[paste here]'''
 device_id = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [discoveryplus]
 st = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [disney]
 token = ""
 refresh_token = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [hbomax]
 st = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [mediasetinfinity]
 rtilogin_acd = '''[paste here]'''
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [netflix]
 device_type = "chrome"
@@ -59,21 +72,25 @@ securenetflixid = ""
 netflixid = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [nowtvit]
 skyCEsidmesso01 = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [paramountplus]
 st = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [primevideo]
 cookies = '''[paste here]'''
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [rakutentv]
 email = ""
@@ -81,12 +98,18 @@ password = ""
 country = ""
 cdm = ""
 args = ""
+process = { live_mux = true, live_decrypt = true }
 
 [timvision]
 cookies = '''[paste here]'''
 cdm = ""
+process = { live_mux = true, live_decrypt = true }
 
 [tubi]
 email = ""
 password = ""
 cdm = ""
+process = { live_mux = true, live_decrypt = true }
+
+[tester]
+process = { live_mux = true, live_decrypt = true }

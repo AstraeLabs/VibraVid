@@ -328,6 +328,8 @@ def _run_download_in_thread(
             context_tracker.media_type = media_type
             context_tracker.fallback_poster_url = poster
             context_tracker.series_tmdb_id = _known_series_tmdb_id(item_payload.get("tmdb_id"))
+            context_tracker.metadata_provider = None
+            context_tracker.metadata_id = None
             context_tracker.is_gui = True
             context_tracker.is_cancelled_callback = _is_scheduled_cancelled
             context_tracker.season = int(season) if str(season or "").isdigit() else 0
@@ -339,6 +341,7 @@ def _run_download_in_thread(
             # Create Entries from payload
             entries_fields = {k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__}
             media_item = Entries(**entries_fields)
+            context_tracker.metadata_title = media_item
 
             # audio_format override for providers that support it (e.g. Spotify)
             if audio_format:

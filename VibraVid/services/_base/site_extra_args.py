@@ -1,6 +1,7 @@
 # 15.09.26
 
 import argparse
+import json
 import logging
 import shlex
 from contextlib import contextmanager
@@ -10,7 +11,8 @@ from VibraVid.utils import config_manager
 from .site_loader import load_search_functions
 
 logger = logging.getLogger(__name__)
-_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale"}
+_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale", "process"}
+_PROCESS_SWITCHES = ("live_mux", "live_decrypt")
 
 
 def parse_site_extra_args(site: str, raw: str) -> dict:
@@ -148,6 +150,46 @@ def resolve_persisted_site_options(site: str) -> dict:
     except ValueError:
         logger.warning("Invalid 'args' in login.toml for site '%s': %r", site, raw)
         return {}
+
+
+def _as_switch(site: str, name: str, value) -> bool | None:
+    """A `process` switch as bool (true/false, "true"/"false", 1/0); anything else is ignored with a warning."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, str)) and str(value).strip().lower() in ("true", "1", "false", "0"):
+        return str(value).strip().lower() in ("true", "1")
+    logger.warning("Invalid 'process.%s' in login.toml for site '%s': %r (expected true or false)", name, site, value)
+    return None
+
+
+def resolve_site_process(site: str) -> dict[str, bool | None]:
+    """Resolve the `process` switches of this site in login.toml, returning a dict of {switch_name: bool | None}."""
+    result: dict[str, bool | None] = dict.fromkeys(_PROCESS_SWITCHES)
+    if not site:
+        return result
+
+    try:
+        section = config_manager.login.get_section(site) or config_manager.login.get_section(site.lower())
+        raw = (section or {}).get("process")
+        if isinstance(raw, str):
+            raw = json.loads(raw) if raw.strip() else None
+    except Exception:
+        logger.warning("Invalid 'process' in login.toml for site '%s'", site, exc_info=True)
+        return result
+
+    if raw is None:
+        return result
+    
+    if not isinstance(raw, dict):
+        logger.warning("Invalid 'process' in login.toml for site '%s': %r (expected a table)", site, raw)
+        return result
+
+    for name, value in raw.items():
+        if name not in _PROCESS_SWITCHES:
+            logger.warning("Unknown 'process.%s' in login.toml for site '%s' (known: %s)", name, site, ", ".join(_PROCESS_SWITCHES))
+            continue
+        result[name] = _as_switch(site, name, value)
+    return result
 
 
 @contextmanager

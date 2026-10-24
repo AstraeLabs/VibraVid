@@ -74,12 +74,19 @@ def remove_service(name) -> str:
     if name in BUILTIN_SERVICES:
         raise ServiceRemovalError(403, f"'{name}' è un servizio incluso nel progetto e non può essere rimosso.")
 
+    # The name only selects among the folders that exist on disk: it is never joined into a path itself.
     base = os.path.realpath(services_dir())
-    target = os.path.join(services_dir(), name)
+    folder = next((entry for entry in os.listdir(base) if entry == name), None) if os.path.isdir(base) else None
+    if folder is None:
+        raise ServiceRemovalError(404, f"Servizio '{name}' non trovato tra quelli caricati.")
+    
+    target = os.path.join(base, folder)
     if os.path.islink(target):
         raise ServiceRemovalError(403, f"'{name}' è un collegamento simbolico: non viene rimosso.")
+    
     if name not in removable_services():
         raise ServiceRemovalError(404, f"Servizio '{name}' non trovato tra quelli caricati.")
+    
     if os.path.dirname(os.path.realpath(target)) != base:
         raise ServiceRemovalError(403, f"'{name}' non si trova nella cartella dei servizi.")
 

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES, get_codec_token
-from VibraVid.core.utils.language import resolve_iso639_1, resolve_iso639_2, resolve_locale
+from VibraVid.core.utils.language import canonical_iso639_2, resolve_iso639_1, resolve_locale
 from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
@@ -642,8 +642,8 @@ def _matches_lang(s, langs: str) -> bool:
     rl = _resolved_language(s)
     sl_base = _strip_lang_flag_affixes(sl)
     rl_base = _strip_lang_flag_affixes(rl)
-    sl_iso = resolve_iso639_2(sl_base) if sl_base else "und"
-    rl_iso = resolve_iso639_2(rl_base) if rl_base else "und"
+    sl_iso = canonical_iso639_2(sl_base) if sl_base else "und"
+    rl_iso = canonical_iso639_2(rl_base) if rl_base else "und"
 
     for t in tokens:
         if t == sl or t == rl:
@@ -660,7 +660,7 @@ def _matches_lang(s, langs: str) -> bool:
                 return True
             continue  # no base-language fallback for region-qualified tokens
 
-        t_iso = resolve_iso639_2(t)
+        t_iso = canonical_iso639_2(t)
         if t_iso != "und" and (t_iso == sl_iso or t_iso == rl_iso):
             return True
     return False

@@ -18,7 +18,7 @@ from VibraVid.core.ui.tracker import context_tracker
 
 setup_logger()
 conf_extension = config_manager.config.get("PROCESS", "extension")
-context_tracker.force_livemux = True
+context_tracker.site_name = "tester"
 
 
 ism_url = ""

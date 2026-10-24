@@ -31,3 +31,13 @@ def test_a_site_option_whose_dest_matches_its_flag_is_unchanged():
 
 def test_a_dest_missing_from_the_parser_falls_back_to_the_dashed_dest():
     assert "--some-option 1" in _build({"some_option": "1"})
+
+
+def test_a_dest_the_context_tracker_already_prints_is_not_repeated_from_the_site_options():
+    parser = argparse.ArgumentParser()
+    context = SimpleNamespace(cli_site="netflix", cli_season_selection="1", cli_episode_selection="2", site_options={"season": "1", "episode": "2", "vcodec": "AVC"})
+    builder = EquivalentCommandBuilder(excluded_dests={"season", "episode"})
+
+    cmd = builder.build(parser.parse_args([]), parser, context, site_option_dests=["season", "episode", "vcodec"])
+
+    assert cmd.count("--season") == 1 and cmd.count("--episode") == 1 and "--vcodec AVC" in cmd

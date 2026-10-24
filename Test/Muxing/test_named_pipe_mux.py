@@ -146,6 +146,7 @@ def test_eligible_no_livemux_flag(monkeypatch):
 def test_eligible_without_force_livemux_when_possible(monkeypatch):
     gd = _make_generic_downloader("out.mkv", [["video"], ["audio"]])
     _patch_tracker(monkeypatch, force_livemux=False)
+    monkeypatch.setattr("VibraVid.core.downloader.util.live_switches._switch", lambda *args: True)  # PROCESS.use_live_mux = true
     _patch_ffmpeg_found(monkeypatch)
     _patch_engine(monkeypatch)
     assert gd._manifest_streaming_mux_eligible() is True
@@ -261,6 +262,7 @@ def test_pipe_mux_custom_100_segments(tmp_path, monkeypatch):
     monkeypatch.setattr(context_tracker, "bypass_vault_cache", False)
 
     context_tracker.force_livemux = True
+    monkeypatch.setattr("VibraVid.core.downloader.util.live_switches._switch", lambda *args: True)  # these streams are SAMPLE-AES: live decrypt on
     out = str(tmp_path / "custom_test.mkv")
     sources = [
         {"url": _CUSTOM_VIDEO_URL, "type": "video"},

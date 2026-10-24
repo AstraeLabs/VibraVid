@@ -14,6 +14,7 @@ from rich.console import Console
 
 from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, media_token_values, strip_media_tokens
 from VibraVid.core.downloader.drm_keys import build_key_fallback
+from VibraVid.core.downloader.util.live_switches import any_selected_encrypted, live_mux_allowed
 from VibraVid.core.muxing import (
     build_hybrid_output,
     embed_poster,
@@ -29,7 +30,6 @@ from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.utils.media_players import MediaPlayers
 from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.services._base.sidecars import Sidecars
-from VibraVid.services._base.site_loader import load_search_functions
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
@@ -412,16 +412,12 @@ class BaseDownloader:
 
     def _maybe_enable_streaming_mux(self) -> None:
         """Called by HLS/DASH/ISM downloaders, after streams are selected but before start_download()"""
-        lazy = load_search_functions().get(f"{self.site_name}_search")
-        service_module = lazy.get_module() if lazy else None
-        if not getattr(service_module, "_live_mux", False) and not context_tracker.force_livemux:
-            logger.info(f"streaming_mux: not enabled (service {self.site_name!r} does not opt in via _live_mux = True)")
+        media_downloader = getattr(self, "media_downloader", None)
+        allowed, why = live_mux_allowed(self.site_name, encrypted_tracks=any_selected_encrypted(getattr(media_downloader, "streams", None)))
+        if not allowed:
+            logger.info(f"streaming_mux: not enabled ({why})")
             return
 
-        if context_tracker.no_livemux:
-            logger.info("streaming_mux: not enabled (--no-livemux)")
-            return
-        
         if MUX_ENGINE.lower() != "ffmpeg":
             logger.info(f"streaming_mux: not enabled (PROCESS.engine={MUX_ENGINE!r} != ffmpeg)")
             return
@@ -430,7 +426,6 @@ class BaseDownloader:
             logger.info(f"streaming_mux: not enabled (output_path={self.output_path!r} is not .mkv)")
             return
 
-        media_downloader = getattr(self, "media_downloader", None)
         if media_downloader is None:
             logger.info("streaming_mux: not enabled (media_downloader not created yet)")
             return
@@ -673,7 +668,9 @@ class BaseDownloader:
         self.last_merge_result = result_json
         if (result_json or {}).get("video_missing"):
             self.error = "The muxed file lost the video track (the video file was not readable); temporary files were kept"
-        
+        elif (result_json or {}).get("video_truncated"):
+            self.error = "The video track is much shorter than the audio (its merge was cut short); no file was muxed and the temporary files were kept"
+
         if not self._merge_output_ok(merged_file):
             return None
         # Chapters are already baked into merged_file by join_media() above — no separate _inject_chapters() pass needed.

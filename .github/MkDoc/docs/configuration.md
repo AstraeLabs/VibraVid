@@ -66,6 +66,22 @@ args = "--quality 1080 --range HDR10"
 args = "--country es"
 ```
 
+## Pipeline switches for a service (`process`)
+
+A service section of `Conf/login.toml` switches two parts of the download pipeline on or off for that service only, without touching the service itself. **Without a `process` line both are off** (the old `_live_mux` flag of the services is no longer read):
+
+```toml
+[disney]
+process = { live_mux = true, live_decrypt = true }
+```
+
+| Switch | `true` | `false` or unset |
+|--------|--------|------------------|
+| `live_mux` | Streaming-mux fast path: the final `.mkv` is written while downloading | Tracks are muxed after the download |
+| `live_decrypt` | In-flight (per-segment) decryption | Segments are decrypted after the download (slower). The streaming mux then only runs when no selected track is encrypted |
+
+A switch missing from `process` falls back to the global one in `config.toml` (`PROCESS.use_live_mux`, `DOWNLOAD.use_live_decrypt`, both `false` by default), so services without a `login.toml` section (e.g. `raiplay`) follow `config.toml`. For a single run: `--livemux` forces the streaming mux, `--no-livemux` and `--no-live-decrypt` switch it off. Order: command line, then `process` in `login.toml`, then `config.toml`. A JSON string (`process = '{"live_mux": false}'`) or a `[disney.process]` table work too.
+
 ## DEFAULT
 
 ```toml
@@ -207,6 +223,7 @@ cleanup_tmp_folder = true
 | `cleanup_tmp_folder` | `true` | Remove temporary files afterwards |
 | `embed_poster` | `false` | Embed a poster/still: matching TMDB artwork, else the site's own |
 | `write_sidecars` | `false` | Write `.nfo` + poster/thumb next to each download when the match is reliable (see [Metadata providers](#metadata-providers)). CLI: `--sidecars` / `--no-sidecars` |
+| `use_live_decrypt` | `false` | In-flight (per-segment) decryption while downloading, for every service without its own `process` line in `login.toml`. `false` = decrypt after the download (per run: `--no-live-decrypt`) |
 | `use_curl_cffi_segments` | `false` | Download segments via `curl_cffi` (TLS/JA3 impersonation) instead of Velora |
 | `segment_delay_seconds` | `0` | Fixed delay before each segment request (CDN rate limits) |
 | `segment_delay_jitter_seconds` | `0` | Random 0..N seconds added on top of the delay |
@@ -285,6 +302,7 @@ extension = "mkv"
 | Key | Default | Description |
 |-----|---------|-------------|
 | `engine` | `"ffmpeg"` | Muxer: `ffmpeg` or `mkvmerge` (needs a **full installation**) |
+| `use_live_mux` | `false` | Streaming-mux fast path (writes the `.mkv` while downloading), for every service without its own `process` line in `login.toml` (per run: `--livemux` / `--no-livemux`) |
 | `use_gpu` | `false` | Hardware acceleration, auto-detected: `cuda` (NVIDIA), `qsv` (Intel), `vaapi` (AMD) |
 | `param_video` | H.265 | FFmpeg video encoding parameters |
 | `param_audio` | Opus 128k | FFmpeg audio encoding parameters |

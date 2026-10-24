@@ -91,9 +91,11 @@ def _run_flux_dump(file_path: str) -> dict | None:
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.debug(f"flux -d -j failed to run for {file_path}: {exc}")
         return None
+    
     if result.returncode != 0:
-        logger.debug(f"flux -d -j exited {result.returncode} for {file_path}: {result.stderr.strip()}")
+        logger.warning(f"flux -d -j exited {result.returncode} for {file_path} ({flux_path}): {result.stderr.strip()}")
         return None
+    
     try:
         return json.loads(result.stdout)
     except (ValueError, json.JSONDecodeError) as exc:

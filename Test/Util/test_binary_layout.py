@@ -1,5 +1,6 @@
 # 17.10.26
 
+import importlib
 import os
 from pathlib import Path
 
@@ -17,6 +18,7 @@ def layout(tmp_path, monkeypatch):
     old_dir = tmp_path / "binary"
     new_dir = old_dir / "VibraVid"
     new_dir.mkdir(parents=True)
+    monkeypatch.setattr(importlib.import_module("VibraVid.setup.binary_paths"), "is_genuine_binary", lambda tool, path: True)
 
     paths = BinaryPaths()
     monkeypatch.setattr(paths, "get_binary_directory", lambda: str(new_dir))
@@ -92,7 +94,7 @@ def test_tool_version_is_read_from_the_tools_directory_only(layout):
     assert (new_dir / "tools" / ".versions.json").is_file()
 
 
-def test_ffmpeg_below_one_megabyte_is_not_used_and_not_kept_as_installed(layout, monkeypatch):
+def test_ffmpeg_below_the_minimum_size_is_not_used_and_not_kept_as_installed(layout, monkeypatch):
     paths, _, new_dir = layout
     _touch(new_dir / "tools" / "ffmpeg.exe", b"version https://git-lfs.github.com/spec/v1")
 

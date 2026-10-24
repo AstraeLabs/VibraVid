@@ -21,7 +21,7 @@ logging.getLogger("ttconv.imsc.elements").setLevel(logging.CRITICAL)
 
 console = Console()
 logger = logging.getLogger(__name__)
-_XML10_INVALID = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+_XML10_INVALID = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 _TS_RE = re.compile(r"(\d{1,}:[0-5]\d:[0-5]\d[,\.]\d{3})\s*-->\s*(\d{1,}:[0-5]\d:[0-5]\d[,\.]\d{3})")
 
 

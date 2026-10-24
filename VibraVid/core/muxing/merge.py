@@ -84,6 +84,10 @@ SUBTITLE_DISPOSITION_LANGUAGE = get_configured_disposition_language()
 _GPU_TYPE_CACHE = None
 MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower()
 
+# A video shorter than this share of every audio track (and by more than the gap) lost its tail
+_TRUNCATED_VIDEO_RATIO = 0.9
+_TRUNCATED_VIDEO_MIN_GAP = 60.0
+
 
 def _get_param_video() -> list:
     return config_manager.config.get_list("PROCESS", "param_video")
@@ -849,7 +853,11 @@ def join_media(
     if audio_tracks:
         console.print(f"[cyan]\nMerging [red]{len(audio_tracks)} [cyan]audio track(s)...")
         audio_tracks, use_shortest = _prepare_audio_tracks(video_path, audio_tracks, limit_duration_diff)
-    
+
+        truncated = _truncated_video_durations(video_path, audio_tracks)
+        if truncated:
+            return _reject_truncated_video(video_path, *truncated)
+
     if subtitle_tracks:
         console.print(f"[cyan]\nMerging [red]{len(subtitle_tracks)} [cyan]subtitle track(s)...")
         subtitle_tracks = _prepare_subtitle_tracks(video_path, subtitle_tracks, limit_duration_diff)
@@ -873,6 +881,33 @@ def join_media(
     out_path = _apply_compatible_extension(video_path, out_path)
     merged, result_json = _join_media_ffmpeg(video_path, audio_tracks, subtitle_tracks, out_path, use_shortest, chapters, force_ts_fix)
     return merged, _ensure_video_kept(video_path, merged, result_json)
+
+
+def _truncated_video_durations(video_path: str, audio_tracks: list[dict[str, str]]) -> tuple[float, float] | None:
+    """``(video, shortest audio)`` durations when every audio track runs well past the video (it lost its tail), None otherwise or when a duration is unknown."""
+    if not audio_tracks:
+        return None
+
+    video_duration = get_video_duration(video_path)
+    audio_durations = [get_video_duration(track.get("path")) for track in audio_tracks]
+    if not video_duration or not all(audio_durations):
+        return None
+
+    shortest_audio = min(audio_durations)
+    if shortest_audio - video_duration > _TRUNCATED_VIDEO_MIN_GAP and video_duration < shortest_audio * _TRUNCATED_VIDEO_RATIO:
+        return video_duration, shortest_audio
+    return None
+
+
+def _reject_truncated_video(video_path: str, video_duration: float, audio_duration: float) -> tuple[str, dict]:
+    """Refuse to mux a video that is much shorter than its audio: ``-t``/``-shortest`` would cut every track to the truncated length and report success."""
+    message = (
+        f"Video '{os.path.basename(video_path)}' lasts {video_duration:.0f}s but its audio lasts {audio_duration:.0f}s "
+        "-- the video merge was cut short, not muxing a truncated file; the temporary files are kept"
+    )
+    logger.error(message)
+    console.print(f"[red]{message}")
+    return "", {"exit_code": 1, "video_truncated": True}
 
 
 def _video_stream_state(path: str) -> bool | None:

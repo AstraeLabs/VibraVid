@@ -1,0 +1,4 @@
+name: VibraVid CodeQL config
+
+paths-ignore:
+  - Test

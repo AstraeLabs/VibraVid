@@ -13,7 +13,12 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.downloader._media_tokens import FILE_PROBE_KEYS, MEDIA_PLACEHOLDERS, media_token_values, strip_media_tokens
+from VibraVid.core.downloader._media_tokens import (
+    FILE_PROBE_KEYS,
+    MEDIA_PLACEHOLDERS,
+    media_token_values,
+    strip_media_tokens,
+)
 from VibraVid.core.muxing import embed_poster, inject_chapters, retag_file
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console

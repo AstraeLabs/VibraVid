@@ -30,6 +30,8 @@ def _skip_post_decrypt() -> bool:
     return context_tracker.skip_decrypt
 
 
-def _streaming_mux_enabled() -> bool:
-    """Fast path is on by default; --no-livemux CLI flag disables it for this run."""
-    return not context_tracker.no_livemux
+def _streaming_mux_enabled(site: str | None = None) -> bool:
+    """Fast path runs when process.live_mux (login.toml) or PROCESS.use_live_mux (config.toml) is true, or --livemux; --no-livemux always disables it."""
+    from VibraVid.core.downloader.util.live_switches import live_mux_allowed
+
+    return live_mux_allowed(site)[0]

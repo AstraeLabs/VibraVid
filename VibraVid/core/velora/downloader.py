@@ -255,8 +255,13 @@ class MediaDownloader(
         # post-download decrypt pass if the first init turns out not to be a valid
         # ftyp+moov, so there is no config knob to get wrong.
         if all_support_live and selected_media and flux_available and not context_tracker.skip_decrypt:
-            self._session_live_decrypt = True
-            logger.info("All selected streams support live decryption — using in-flight decryption.")
+            from VibraVid.core.downloader.util.live_switches import live_decrypt_allowed
+
+            if live_decrypt_allowed(self.site_name):
+                self._session_live_decrypt = True
+                logger.info("All selected streams support live decryption — using in-flight decryption.")
+            else:
+                logger.info("In-flight decryption is not switched on (process.live_decrypt, DOWNLOAD.use_live_decrypt, or --no-live-decrypt) — decrypting after the download.")
 
         ext_result: dict[str, Any] = {"ext_subs": [], "ext_auds": []}
         spawned_threads: list[threading.Thread] = []
@@ -310,6 +315,8 @@ class MediaDownloader(
                 _parent_skip_decrypt = context_tracker.skip_decrypt
                 _parent_no_livemux = context_tracker.no_livemux
                 _parent_force_livemux = context_tracker.force_livemux
+                _parent_no_live_decrypt = context_tracker.no_live_decrypt
+                _parent_site_name = context_tracker.site_name
                 _parent_no_concurrent = context_tracker.no_concurrent
                 _parent_log_engine_output = context_tracker.log_engine_output
 
@@ -317,6 +324,8 @@ class MediaDownloader(
                     context_tracker.skip_decrypt = _parent_skip_decrypt
                     context_tracker.no_livemux = _parent_no_livemux
                     context_tracker.force_livemux = _parent_force_livemux
+                    context_tracker.no_live_decrypt = _parent_no_live_decrypt
+                    context_tracker.site_name = _parent_site_name
                     context_tracker.no_concurrent = _parent_no_concurrent
                     context_tracker.log_engine_output = _parent_log_engine_output
                     context_tracker.http_version = _parent_http_version
@@ -324,6 +333,7 @@ class MediaDownloader(
                         self._download_stream(s, bar_manager)
                     except Exception as exc:
                         logger.error(f"Stream download error ({s.type}/{s.language}): {exc}", exc_info=True)
+                        self._record_track_done(self._stream_task_key(s), None)
 
                 # Live recordings can legitimately run far longer than join_interruptible's default 2h hard_timeout
                 is_live_session = any(getattr(s, "is_live", False) for s in selected_media)

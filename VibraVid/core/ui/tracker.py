@@ -704,6 +704,14 @@ class ContextTracker:
         self.local.force_livemux = value
 
     @property
+    def no_live_decrypt(self) -> bool:
+        return bool(getattr(self.local, "no_live_decrypt", False))
+
+    @no_live_decrypt.setter
+    def no_live_decrypt(self, value):
+        self.local.no_live_decrypt = value
+
+    @property
     def no_concurrent(self) -> bool:
         return bool(getattr(self.local, "no_concurrent", False))
 
@@ -816,6 +824,30 @@ class ContextTracker:
     @series_tmdb_id.setter
     def series_tmdb_id(self, value):
         self.local.series_tmdb_id = value
+
+    @property
+    def metadata_title(self):
+        return getattr(self.local, "metadata_title", None)
+
+    @metadata_title.setter
+    def metadata_title(self, value):
+        self.local.metadata_title = value
+
+    @property
+    def metadata_provider(self):
+        return getattr(self.local, "metadata_provider", None)
+
+    @metadata_provider.setter
+    def metadata_provider(self, value):
+        self.local.metadata_provider = value
+
+    @property
+    def metadata_id(self):
+        return getattr(self.local, "metadata_id", None)
+
+    @metadata_id.setter
+    def metadata_id(self, value):
+        self.local.metadata_id = value
 
     @property
     def sidecar_provider(self):

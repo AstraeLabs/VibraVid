@@ -14,6 +14,7 @@ from rich.console import Console
 
 from VibraVid.core.decryptor.keys_manager import KeysManager
 from VibraVid.core.downloader.util._drm_probe import PROBE_BYTES_FAST, DRMProbe
+from VibraVid.core.downloader.util.live_switches import any_selected_encrypted, live_decrypt_allowed, live_mux_allowed
 from VibraVid.core.drm.manager import DRMManager
 from VibraVid.core.drm.system import DRMType, normalize_kid
 from VibraVid.core.muxing import probe_media_file
@@ -532,7 +533,7 @@ class Generic_Downloader(BaseDownloader):
 
     def _streaming_mux_direct_eligible(self) -> dict[str, Any] | None:
         """Return the eligible video entry for the direct-mp4 streaming-mux fast path, or None."""
-        if context_tracker.no_livemux:
+        if not live_mux_allowed()[0]:
             return None
         
         if config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower() != "ffmpeg":
@@ -1328,7 +1329,7 @@ class Generic_Downloader(BaseDownloader):
 
     def _manifest_streaming_mux_eligible(self) -> bool:
         """True if conditions are met to attempt multi-manifest named-pipe live mux."""
-        if context_tracker.no_livemux:
+        if not live_mux_allowed(encrypted_tracks=any_selected_encrypted(s for md, _ in self._active for s in md.streams))[0]:
             return False
         
         if config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower() != "ffmpeg":
@@ -1577,6 +1578,7 @@ class Generic_Downloader(BaseDownloader):
             md._session_live_decrypt = (
                 bool(sel)
                 and not context_tracker.skip_decrypt
+                and live_decrypt_allowed()
                 and MediaDownloader.all_support_live_decryption(sel)
             )
             md._prepare_labels()
@@ -1696,6 +1698,7 @@ class Generic_Downloader(BaseDownloader):
             md._session_live_decrypt = (
                 bool(sel)
                 and not context_tracker.skip_decrypt
+                and live_decrypt_allowed()
                 and MediaDownloader.all_support_live_decryption(sel)
             )
             md._prepare_labels()

@@ -94,6 +94,14 @@ class DRMInfo:
             self.drm_type = detected
             return
 
+        wrapped = _DRMSystems.wrap_bare_playready_header(pssh_base64)
+        if wrapped != pssh_base64:
+            logger.info("DRMInfo.set_pssh: detected bare PlayReady header, wrapping in PSSH box")
+            pssh_base64 = wrapped
+            drm_type_hint = DRMType.PLAYREADY
+            for kid in _DRMSystems.extract_kids_from_playready_pro(pssh_base64):
+                self.set_kid(kid)
+
         try:
             from uuid import UUID as _UUID
 

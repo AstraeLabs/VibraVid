@@ -109,8 +109,11 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
 
     # Redirect back to search results if we have the params
     if search_query and search_site:
+        from urllib.parse import urlencode
+
         from django.urls import reverse
-        return redirect(f"{reverse('search')}?site={search_site}&query={search_query}")
+        
+        return redirect(f"{reverse('search')}?{urlencode({'site': search_site, 'query': search_query})}")
 
     # Series details may have been opened by POST: redirecting to their bare
     # Referer loses the payload and produces a misleading "Missing parameters".

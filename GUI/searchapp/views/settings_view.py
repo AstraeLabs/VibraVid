@@ -87,7 +87,7 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
 
     try:
         # Save uploaded ZIP to temp
-        zip_path = os.path.join(tmp_dir, uploaded.name)
+        zip_path = os.path.join(tmp_dir, "upload.zip")
         with open(zip_path, "wb") as f:
             for chunk in uploaded.chunks():
                 f.write(chunk)

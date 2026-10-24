@@ -90,6 +90,21 @@ class _DRMSystems(dict):
         return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:32]}"
 
     @staticmethod
+    def wrap_bare_playready_header(data_b64: str) -> str:
+        """Wrap a bare UTF-16LE WRMHEADER (some packagers emit it with no PSSH box / PlayReady Object) into a PlayReady Object; anything else is returned unchanged."""
+        try:
+            raw = base64.b64decode(data_b64)
+        except Exception:
+            return data_b64
+
+        if not raw.startswith(b"<\x00") or "<WRMHEADER" not in raw[:64].decode("utf-16-le", errors="ignore") or len(raw) > 0xFFFF:
+            return data_b64
+
+        record = (1).to_bytes(2, "little") + len(raw).to_bytes(2, "little") + raw
+        pro = (6 + len(record)).to_bytes(4, "little") + (1).to_bytes(2, "little") + record
+        return base64.b64encode(pro).decode("ascii")
+
+    @staticmethod
     def extract_kid_from_playready_pro(pro_b64: str):
         """Extract KID from base64 PlayReady Object (PRO) or WRM Header."""
         try:

@@ -10,6 +10,7 @@ sys.path.insert(0, str(workspace_root))
 import pytest
 
 from VibraVid.setup import checker
+from VibraVid.setup.binary_paths import MIN_BINARY_SIZE
 
 TERMUX_FLUX = [
     "[red]No prebuilt flux binary available for this Termux device.[/red]",
@@ -89,6 +90,7 @@ def env(monkeypatch):
     monkeypatch.setattr(checker, "binary_paths", e.paths)
     monkeypatch.setattr(checker, "console", e.console)
     monkeypatch.setattr(checker.shutil, "which", lambda name, *a, **k: e.on_path.get(name))
+    monkeypatch.setattr(checker, "is_genuine_binary", lambda group, path: True)  # the fake binaries cannot answer `--version`
     monkeypatch.setattr(checker, "_should_download", lambda group: group in e.allowed)
     return e
 
@@ -327,8 +329,34 @@ def test_ffmpeg_pointer_file_in_path_is_ignored_and_downloaded_again(env, tmp_pa
 
 def test_small_files_are_only_suspicious_for_ffmpeg(env, tmp_path):
     small = tmp_path / "mp4decrypt"
-    small.write_bytes(b"x" * 366_080)
+    small.write_bytes(b"x" * (MIN_BINARY_SIZE["ffmpeg"] - 1))
     env.on_path["mp4decrypt"] = str(small)
 
     assert checker._which("mp4decrypt", "mp4decrypt") == str(small)
     assert checker._which("ffmpeg", "mp4decrypt") is None
+
+
+def test_ffmpeg_and_ffprobe_installed_on_the_system_are_used_without_any_download(env):
+    env.on_path["ffmpeg"] = "/usr/bin/ffmpeg"
+    env.on_path["ffprobe"] = "/usr/bin/ffprobe"
+
+    assert checker.check_ffmpeg() == ("/usr/bin/ffmpeg", "/usr/bin/ffprobe")
+    assert env.paths.local_lookups == [] and env.paths.download_calls == [] and env.console.lines == []
+
+
+@pytest.mark.parametrize("system", ["linux", "darwin"])
+def test_no_published_ffmpeg_build_points_to_the_package_manager(env, monkeypatch, system):
+    monkeypatch.setattr(checker, "is_docker", lambda: False)  # the suite may itself run inside a container
+    env.paths.system = system
+
+    assert checker.check_ffmpeg() == (None, None)
+    assert env.paths.download_calls == [("ffmpeg", "ffmpeg"), ("ffmpeg", "ffprobe")]
+    assert any("ffmpeg" in line.lower() and "install" in line.lower() for line, _ in env.console.lines)
+
+
+def test_inside_docker_no_install_hint_is_printed_because_the_image_ships_ffmpeg(env, monkeypatch):
+    monkeypatch.setattr(checker, "is_docker", lambda: True)
+    env.paths.system = "linux"
+
+    assert checker.check_ffmpeg() == (None, None)
+    assert not any("install" in line.lower() for line, _ in env.console.lines)

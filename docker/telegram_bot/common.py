@@ -180,7 +180,7 @@ def _cb_parts(event) -> list[str]:
 def _poster_url(item: dict) -> str | None:
     """Poster/thumbnail URL from a search result's payload (TMDB or site-provided), if any."""
     poster = (item.get("payload") or {}).get("poster")
-    if not poster or "via.placeholder.com" in poster:
+    if not poster or urllib.parse.urlparse(poster).hostname == "via.placeholder.com":
         return None
     return poster
 

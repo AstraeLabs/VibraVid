@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import threading
 
@@ -17,9 +18,14 @@ logger = logging.getLogger(__name__)
 
 VERSIONS_FILENAME = ".versions.json"
 LFS_TOOLS = {"ffmpeg"}
-MIN_BINARY_SIZE = {"ffmpeg": 1024 * 1024}
+MIN_BINARY_SIZE = {"ffmpeg": 64 * 1024}
 
 DOWNLOAD_CHUNK_SIZE = 256 * 1024
+_IDENTITY_PATTERNS = {
+    "flux": re.compile(r"^flux \d+\.\d+\.\d+\s*$"),
+    "velora": re.compile(r'"name"\s*:\s*"Velora"'),
+}
+_identity_cache: dict[tuple, bool] = {}
 
 
 def is_broken_binary(tool: str, path: str | None) -> bool:
@@ -29,6 +35,31 @@ def is_broken_binary(tool: str, path: str | None) -> bool:
         return bool(path) and minimum > 0 and os.path.isfile(path) and os.path.getsize(path) < minimum
     except OSError:
         return False
+
+
+def is_genuine_binary(tool: str, path: str | None) -> bool:
+    """False if *path* is a different program that merely shares *tool*'s name (e.g. Flux CD's `flux`). Tools without a fingerprint always pass."""
+    pattern = _IDENTITY_PATTERNS.get(tool)
+    if pattern is None or not path:
+        return True
+
+    try:
+        st = os.stat(path)
+        key = (path, st.st_size, st.st_mtime_ns)  # a re-downloaded file at the same path is re-checked
+    except OSError:
+        return False
+
+    if key in _identity_cache:
+        return _identity_cache[key]
+
+    try:
+        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+        genuine = bool(pattern.search((out.stdout or out.stderr).strip()))
+    except (OSError, subprocess.SubprocessError):
+        genuine = False
+
+    _identity_cache[key] = genuine
+    return genuine
 
 
 def _format_size(n: float) -> str:
@@ -280,12 +311,18 @@ class BinaryPaths:
 
     @staticmethod
     def _is_usable_file(tool: str, path: str) -> bool:
-        """A regular file that is not obviously broken: a broken one is skipped (and replaced on the next download)."""
+        """A regular file that is not obviously broken or not the right program: such a file is skipped (and replaced on the next download)."""
         if not os.path.isfile(path):
             return False
+        
         if is_broken_binary(tool, path):
             logger.warning(f"Ignoring {path}: only {os.path.getsize(path)} bytes, not a working {tool} binary (Git LFS pointer or interrupted download)")
             return False
+        
+        if not is_genuine_binary(tool, path):
+            logger.warning(f"Ignoring {path}: reports no valid {tool} version (wrong program or corrupted download), it will be downloaded again")
+            return False
+        
         return True
 
     def invalidate_binary(self, binary_name: str) -> None:

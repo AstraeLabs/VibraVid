@@ -35,7 +35,8 @@ ARR_BANNER_TEXT = (
 )
 LOGIN = "LOGIN"
 SERVICE_PREFIX = "svc:"
-OPTION_KEYS = {"cdm", "args", "device_type", "country"}
+OPTION_KEYS = {"cdm", "args", "device_type", "country", "process"}
+HIDDEN_LOGIN_KEYS = {"process"}
 PLACEHOLDER = "[paste here]"
 SECRET_KEYS = ("password", "token", "adminbetoken", "etp_rt", "st")
 FIELD_NOTES = {"cdm": "note_cdm", "args": "note_args", "cookies": "note_cookies", "tmdb": "note_tmdb", "tvdb": "note_tvdb"}
@@ -203,6 +204,9 @@ class SettingsScreen(Screen):
         """The inputs of one [service] table (or of one top-level value), each with the note saying what it is for."""
         if isinstance(fields, dict):
             for key, val in fields.items():
+                if key in HIDDEN_LOGIN_KEYS:
+                    continue
+                
                 field_id = f"login-{service}-{key}".replace(".", "_").replace(" ", "_")
                 orig_type = type(val)
                 self._field_map[field_id] = (LOGIN, (service, key), orig_type)

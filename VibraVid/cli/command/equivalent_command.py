@@ -167,8 +167,9 @@ class EquivalentCommandBuilder:
         flags = {action.dest: action.option_strings[-1] for action in parser._actions if action.option_strings}
         parts = []
         for dest, value in (getattr(context_tracker, "site_options", None) or {}).items():
-            if dest == "drm" or value in (None, False):
+            if dest == "drm" or dest in self._excluded_dests or value in (None, False):
                 continue
+            
             flag = flags.get(dest) or "--" + dest.replace("_", "-")
             parts += self._flag_and_value(flag, value)
         return parts

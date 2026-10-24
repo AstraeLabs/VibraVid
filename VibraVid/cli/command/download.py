@@ -1,6 +1,7 @@
 # 10.12.25
 
 import logging
+import re
 from pathlib import Path
 
 from rich.console import Console
@@ -266,7 +267,7 @@ def handle_direct_download(args) -> bool:
                     headers=headers or None,
                     proxy=proxy_url,
                     format_spec=getattr(args, "format", None),
-                    subtitle_langs=getattr(args, "sub_langs", "").split(",") if getattr(args, "sub_langs", None) else [],
+                    subtitle_langs=[t for t in re.split(r"[,|\s]+", getattr(args, "subtitle", None) or "") if t],
                     write_subs=bool(getattr(args, "write_subs", False)),
                     write_auto_subs=bool(getattr(args, "write_auto_subs", False)),
                     list_formats=list_formats,
@@ -291,7 +292,7 @@ def handle_direct_download(args) -> bool:
                 headers=headers or None,
                 proxy=proxy_url,
                 format_spec=getattr(args, "format", None),
-                subtitle_langs=getattr(args, "sub_langs", "").split(",") if getattr(args, "sub_langs", None) else [],
+                subtitle_langs=[t for t in re.split(r"[,|\s]+", getattr(args, "subtitle", None) or "") if t],
                 write_subs=bool(getattr(args, "write_subs", False)),
                 write_auto_subs=bool(getattr(args, "write_auto_subs", False)),
                 list_formats=False,

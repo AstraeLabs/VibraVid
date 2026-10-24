@@ -11,9 +11,11 @@ sys.path.append(src_path)
 
 from VibraVid.utils import setup_logger
 from VibraVid.core.downloader import MP4_Downloader
+from VibraVid.core.ui.tracker import context_tracker
 
 t0 = time.monotonic()
 setup_logger()
+context_tracker.site_name = "tester"
 path, kill_handler, error = MP4_Downloader(
     url="", 
     path=r".\Video\MP.mp4", 

@@ -41,6 +41,9 @@ def _set_sidecar_target(media_type: str, select_title) -> None:
     context_tracker.sidecar_id = None
     context_tracker.sidecar_media_type = media_type
     context_tracker.sidecar_verify = False
+    context_tracker.metadata_title = select_title
+    context_tracker.metadata_provider = None
+    context_tracker.metadata_id = None
     if not tmdb_artwork.sidecars_enabled():
         return
 

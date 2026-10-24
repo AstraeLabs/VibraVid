@@ -159,8 +159,8 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Track selection
     track_group = parser.add_argument_group("Track selection")
     track_group.add_argument("-sv", "--video", type=str, metavar="SPEC", help='Video track filter (e.g. "best", "1080p", "r=1080:c=hvc1:f=best")')
-    track_group.add_argument("-sa", "--audio", type=str, metavar="SPEC", help='Audio track filter (e.g. "ita|it", "l=ita:c=aac:f=best")')
-    track_group.add_argument("-ss", "--subtitle", type=str, metavar="SPEC", help='Subtitle track filter (e.g. "ita|eng")')
+    track_group.add_argument("-sa", "--audio", "--audio-langs", dest="audio", type=str, metavar="SPEC", help='Audio track filter (e.g. "ita|it", "l=ita:c=aac:f=best")')
+    track_group.add_argument("-ss", "--subtitle", "--sub-langs", dest="subtitle", type=str, metavar="SPEC", help='Subtitle track filter (e.g. "ita|eng"); also the subtitle languages for --yt-dlp')
     track_group.add_argument("--skip-no-match", dest="skip_no_match", action="store_true", help="Skip the whole download if -sv/-sa/-ss matches no track, instead of falling back to the best available one")
 
     # ── Download options
@@ -176,7 +176,8 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--max-speed", dest="max_speed_mbps", type=float, metavar="MB/s", default=None, help="Cap the segment download rate in MB/s (0 = unlimited). Applies to each stream (video/audio) separately. Useful for CDNs that throttle clients exceeding a speed threshold")
     dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
     dl_opts.add_argument("--no-livemux", dest="no_livemux", action="store_true", help="Disable the streaming-mux fast path for this run and always fall back to the normal post-download join_media() pass. Fast path is on by default")
-    dl_opts.add_argument("--livemux", dest="force_livemux", action="store_true", help="Force-enable the streaming-mux fast path for this run even if the current service does not opt in via _live_mux = True. Off by default")
+    dl_opts.add_argument("--livemux", dest="force_livemux", action="store_true", help="Force-enable the streaming-mux fast path for this run even if process.live_mux (login.toml) / PROCESS.use_live_mux (config.toml) are not true. Encrypted tracks still need live decryption")
+    dl_opts.add_argument("--no-live-decrypt", dest="no_live_decrypt", action="store_true", help="Disable in-flight (per-segment) decryption for this run: segments are decrypted after the download instead. In-flight decryption is on only with process = { live_decrypt = true } in login.toml (per service) or DOWNLOAD.use_live_decrypt = true")
     dl_opts.add_argument("--no-concurrent", dest="no_concurrent", action="store_true", help="Download video, audio and subtitles sequentially instead of simultaneously for this run. Concurrent download is on by default")
     dl_opts.add_argument("--log-decryptor-output", dest="log_decryptor_output", action="store_const", const=True, default=None, help="Write flux's own stdout+stderr lines to the log file as they run, tagged with the engine name (e.g. [FLUX]) instead of [INFO]")
     dl_opts.add_argument("--sidecars", dest="write_sidecars", action="store_const", const=True, default=None, help="Write a Kodi/Jellyfin/Emby <name>.nfo plus a poster (films) or thumb (episodes) next to each downloaded file, only for a reliable metadata match (overrides DOWNLOAD.write_sidecars)")
@@ -226,7 +227,6 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--audio-format", dest="audio_format", metavar="FORMAT", help="Audio format for yt-dlp extraction (e.g. mp3, m4a, wav, opus)")
     dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY", help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k)")
     dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N", help="Only process the first N entries of a playlist")
-    dl_group.add_argument("--sub-langs", dest="sub_langs", metavar="LANGS", help="Comma-separated subtitle languages (e.g. it,en)")
     dl_group.add_argument("--write-subs", dest="write_subs", action="store_true", help="Write subtitles")
     dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true", help="Write auto-generated subtitles")
 
@@ -279,6 +279,11 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     return parser, site_option_dests
 
 
+def normalize_lang_list(spec: str) -> str:
+    """Accept comma-separated plain language lists ("it,en") as the "it|en" the track filters expect."""
+    return spec if any(c in spec for c in "=:") else "|".join(t for t in re.split(r"[,|\s]+", spec) if t)
+
+
 def apply_config_updates(args):
     """Apply command line arguments to configuration."""
     arg_mappings = {
@@ -305,6 +310,9 @@ def apply_config_updates(args):
 
         if arg_name == "close_console" and isinstance(val, str):
             val = val.lower() == "true"
+
+        if arg_name in ("audio", "subtitle"):
+            val = normalize_lang_list(val)
 
         if arg_name in PERSISTENT_ARGS:
             persistent_updates[config_key] = val
@@ -714,6 +722,7 @@ def main():
         context_tracker.skip_decrypt = bool(getattr(args, "skip_decrypt", False))
         context_tracker.no_livemux = bool(getattr(args, "no_livemux", False))
         context_tracker.force_livemux = bool(getattr(args, "force_livemux", False))
+        context_tracker.no_live_decrypt = bool(getattr(args, "no_live_decrypt", False))
         context_tracker.no_concurrent = bool(getattr(args, "no_concurrent", False))
         context_tracker.skip_no_match = bool(getattr(args, "skip_no_match", False))
         context_tracker.log_engine_output = getattr(args, "log_decryptor_output", None)

@@ -9,7 +9,7 @@ from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.drm.cdm.remote.remote_cdm_api import RemoteCdmApi, build_remote_cdm
-from VibraVid.core.drm.system import accumulate_content_key, cdm_load_line, normalize_kid
+from VibraVid.core.drm.system import _DRMSystems, accumulate_content_key, cdm_load_line, normalize_kid
 from VibraVid.setup import binary_paths, read_device_prd
 from VibraVid.utils.http_client import create_client
 
@@ -124,7 +124,7 @@ def _get_playready_keys_local_cdm(
 
     try:
         for item in pssh_list:
-            pssh = item["pssh"]
+            pssh = _DRMSystems.wrap_bare_playready_header(item["pssh"])
             kid_info = normalize_kid(item.get("kid", "N/A"))
             type_info = item.get("type", "unknown")
 
@@ -136,7 +136,13 @@ def _get_playready_keys_local_cdm(
             console.print(f"[red]{type_info} [cyan](PSSH: [yellow]{pssh[:30]}...[cyan] KID: [red]{kid_info})")
 
             # Parse PSSH
-            pssh_obj = PSSH(pssh)
+            try:
+                pssh_obj = PSSH(pssh)
+            except Exception as e:  # one unparseable entry must not discard the valid ones
+                logger.error(f"Skipping unparseable PlayReady PSSH for {kid_info}: {e!r}")
+                console.print(f"[red]Skipping unparseable PlayReady PSSH: {e}")
+                continue
+            
             if not pssh_obj.wrm_headers:
                 logger.error(f"No WRM headers found in PSSH for {kid_info}")
                 console.print("[red]No WRM headers found in PSSH")

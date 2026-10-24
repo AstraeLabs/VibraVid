@@ -6,7 +6,6 @@
 log_level = "INFO"
 close_console = true
 show_message = true
-# Download the updated list of site domains online
 fetch_domain_online = true
 # Check for a new VibraVid release at start
 auto_check_update = true
@@ -140,6 +139,7 @@ https = "http://localhost:8888"
 
 [DRM]
 use_cdm = true
+
 # Default CDM: "search" (first .wvd/.prd in the binary folder), a file name, a remote id or a list (see docs)
 cdm = "search"
 

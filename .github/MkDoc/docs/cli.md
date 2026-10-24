@@ -33,8 +33,8 @@ python manual.py -i streamingcommunity --search "batman" --year "1990-2015" # ra
 
 ```bash
 python manual.py ... -sv 1080                  # video
-python manual.py ... -sa "eng"                 # audio language
-python manual.py ... -ss "eng"                 # subtitles
+python manual.py ... -sa "eng"                 # audio language (long form: --audio-langs)
+python manual.py ... -ss "eng"                 # subtitles (long form: --sub-langs)
 python manual.py ... -ss "ita_forced"          # only the forced subtitle track
 python manual.py ... -sa "deu" --skip-no-match # skip the whole download if the filter matches no track
 python manual.py ... --extension mp4           # container (overrides PROCESS.extension for this run)
@@ -167,7 +167,7 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--audio-format <FORMAT>` | `mp3`, `m4a`, `wav`, `opus`, ... |
 | `--audio-quality <QUALITY>` | `0`, `5`, `8k`, ... |
 | `--playlist-end <N>` | Only the first N playlist entries |
-| `--sub-langs <LANGS>` | Comma-separated subtitle languages (`it,en`) |
+| `--sub-langs <LANGS>` | Subtitle languages (`it,en`); same flag as `-ss` |
 | `--write-subs` / `--write-auto-subs` | Write subtitles / auto-generated subtitles |
 
 ## Advanced options
@@ -182,7 +182,8 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--no-vault-cache` | Bypass the vault cache; fresh CDM license request every run |
 | `--cdm <CDM>` | CDM for this run, above `login.toml` and `config.toml`: a `.wvd`/`.prd` name, `search`, or a remote CDM id. Repeatable, one per DRM system (`--cdm mine.wvd --cdm my_playready`). A JSON list/table is accepted for [quality rules](configuration.md#choosing-the-cdm-cdm). Unknown file/id stops the run before downloading |
 | `--no-decrypt` | Debug: no decryption at all (in-flight or post-download) |
-| `--no-livemux` / `--livemux` | Disable / force the streaming-mux fast path (default on, unless the service doesn't opt in via `_live_mux = True`) |
+| `--no-livemux` / `--livemux` | Disable / force the streaming-mux fast path (off by default: turn it on with `process` in `login.toml` or `PROCESS.use_live_mux`) |
+| `--no-live-decrypt` | Disable in-flight (per-segment) decryption for this run: segments are decrypted after the download. It is on only with `process.live_decrypt` / `DOWNLOAD.use_live_decrypt` ([`process`](configuration.md#pipeline-switches-for-a-service-process) in `login.toml`, `DOWNLOAD.use_live_decrypt`) |
 | `--no-concurrent` | Download video, audio and subtitles sequentially (concurrent by default) |
 | `--skip-no-match` | Skip the download if `-sv`/`-sa`/`-ss` match no track, instead of falling back to the best |
 | `--log-decryptor-output` | Write flux's stdout/stderr to the log, tagged with the engine name (e.g. `[FLUX]`) |

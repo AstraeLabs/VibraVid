@@ -9,7 +9,7 @@ from rich.console import Console
 
 from VibraVid.utils import config_manager
 
-from .binary_paths import binary_paths, is_broken_binary
+from .binary_paths import binary_paths, is_broken_binary, is_genuine_binary
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -22,6 +22,11 @@ INSTALLATION_LEVELS = {
 _TERMUX_PREBUILT = "prebuilt"
 _TERMUX_RETRY = "retry"
 _TERMUX_MANUAL = "manual"
+
+
+def is_docker() -> bool:
+    """Check if the application is running inside a Docker container."""
+    return os.path.exists("/.dockerenv")
 
 
 def is_termux() -> bool:
@@ -44,6 +49,11 @@ def _which(group: str, name: str) -> str | None:
     if found and is_broken_binary(group, found):
         logger.warning(f"Ignoring {found} found in PATH: too small to be a working {group} binary")
         return None
+    
+    if found and not is_genuine_binary(group, found):
+        logger.warning(f"Ignoring {found} found in PATH: not the {group} this app needs (another program with the same name)")
+        return None
+    
     return found
 
 
@@ -171,6 +181,11 @@ def check_ffmpeg(download: bool = True) -> tuple[str | None, str | None]:
 
     logger.error("Failed to download FFmpeg")
     console.print("Failed to download FFmpeg", style="red")
+    if system_platform == "darwin":
+        console.print("[cyan]No prebuilt FFmpeg is published for macOS. Install it using: [yellow]brew install ffmpeg[/cyan]")
+    elif system_platform == "linux" and not is_docker():  # the image already ships ffmpeg
+        console.print("[cyan]No prebuilt FFmpeg is available for this system. Install it using your package manager, e.g.: [yellow]sudo apt install ffmpeg[/cyan]")
+    
     return None, None
 
 

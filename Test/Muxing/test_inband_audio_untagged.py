@@ -86,7 +86,7 @@ class _CapturingFeeder:
 
 
 def _velora_cmd(monkeypatch, tmp_path, streams, results):
-    monkeypatch.setattr(velora_mux, "_streaming_mux_enabled", lambda: True)
+    monkeypatch.setattr(velora_mux, "_streaming_mux_enabled", lambda *a: True)
     monkeypatch.setattr(velora_mux, "get_ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(velora_mux, "StreamingMuxFeeder", _CapturingFeeder)
     monkeypatch.setattr(velora_mux.config_manager.config, "get", lambda *a, **k: k.get("default", "ffmpeg"))

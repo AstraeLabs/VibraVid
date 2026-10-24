@@ -141,8 +141,8 @@ class StreamingMuxMixin:
     def _try_start_streaming_mux_inner(
         self, video_ext: str, video_stream: Any, video_duration_cap: float | None = None
     ) -> "StreamingMuxFeeder | None":
-        if not _streaming_mux_enabled():
-            logger.info("streaming_mux: disabled for this run (--no-livemux) -- falling back to the normal mux")
+        if not _streaming_mux_enabled(getattr(self, "site_name", None)):
+            logger.info("streaming_mux: switched off for this run (--no-livemux, process.live_mux or PROCESS.use_live_mux) -- falling back to the normal mux")
             return None
 
         output_path = getattr(self, "_streaming_mux_output_path", None)
