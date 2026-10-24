@@ -168,3 +168,47 @@ def test_delete_detached_falls_back_when_breakaway_is_refused(tmp_path, monkeypa
 
     assert len(flags_seen) == 2
     assert _wait_until_gone(d)
+
+
+def test_wait_pending_deletes_waits_for_the_background_process(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(os_manager, "_pending_deletes", [])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"])
+    os_manager._pending_deletes.append(proc)
+
+    os_manager.wait_pending_deletes(timeout=30)
+
+    assert proc.poll() == 0 and os_manager._pending_deletes == []
+
+
+def test_wait_pending_deletes_gives_up_after_the_timeout(monkeypatch, caplog):
+    import subprocess
+
+    monkeypatch.setattr(os_manager, "_pending_deletes", [])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(20)"])
+    os_manager._pending_deletes.append(proc)
+    try:
+        started = time.monotonic()
+        os_manager.wait_pending_deletes(timeout=0.3)
+
+        assert time.monotonic() - started < 5
+        assert "still running" in caplog.text
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_posix_fast_rmtree_tracks_its_detached_delete(tmp_path, monkeypatch):
+    import subprocess
+
+    started = []
+    monkeypatch.setattr(os_manager, "system", "linux")
+    monkeypatch.setattr(os_manager, "_pending_deletes", [])
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd) or "proc")
+    d = _make_dir_with_files(str(tmp_path), "dash_temp", count=3)
+
+    os_manager.fast_rmtree(d)
+
+    assert started and started[0][:2] == ["rm", "-rf"]
+    assert os_manager._pending_deletes == ["proc"]

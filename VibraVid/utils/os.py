@@ -33,6 +33,7 @@ class OsManager:
 
         self.system = binary_paths._detect_system()
         self.max_length = self._get_max_length()
+        self._pending_deletes: list[subprocess.Popen] = []
 
     def _get_max_length(self) -> int:
         """Get max filename length based on OS."""
@@ -157,6 +158,17 @@ class OsManager:
 
         self._delete_detached(dst)
 
+    def wait_pending_deletes(self, timeout: float = 300.0) -> None:
+        """Wait for the background deletes started by fast_rmtree before exiting (POSIX only): a container stops every process when its main one ends, which left the whole trash folder behind. Windows keeps its deletes detached."""
+        pending, self._pending_deletes = self._pending_deletes, []
+        deadline = time.monotonic() + timeout
+        for proc in pending:
+            try:
+                proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                logger.warning(f"fast_rmtree: the background delete is still running after {timeout:.0f}s, leaving it to the next run's sweep")
+                return
+
     def _extended_path(self, path: str) -> str:
         """Windows extended-length form (``\\\\?\\``) of an absolute *path* that is too long for the regular API; unchanged elsewhere and for short paths."""
         if self.system != "windows" or len(path) < _WIN_LONG_PATH or path.startswith("\\\\?\\"):
@@ -274,7 +286,7 @@ class OsManager:
                 except OSError:
                     subprocess.Popen(cmd, creationflags=flags, **kwargs)  # the job forbids breakaway
             else:
-                subprocess.Popen(["rm", "-rf", path], start_new_session=True, close_fds=True)
+                self._pending_deletes.append(subprocess.Popen(["rm", "-rf", path], start_new_session=True, close_fds=True))
         except OSError as exc:
             logger.warning(f"fast_rmtree: could not spawn a detached delete for {path!r} ({exc}) -- deleting on a background thread instead")
             threading.Thread(target=shutil.rmtree, args=(path,), kwargs={"ignore_errors": True}, daemon=True).start()

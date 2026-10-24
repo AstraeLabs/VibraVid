@@ -79,6 +79,8 @@ embed_poster = false
 # Write .nfo and poster next to the video (Jellyfin/Emby/Kodi)
 write_sidecars = false
 cleanup_tmp_folder = true
+# Folder for the temporary download files. Empty = next to the output. Use a fast local disk when the output is a NAS (about 2x the title)
+temp_root = ""
 
 
 [CODEC]

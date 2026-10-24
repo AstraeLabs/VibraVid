@@ -60,14 +60,14 @@ def test_stats_bitrate_prefers_the_stream_then_mkvmerge_tags():
     assert md._stats_bitrate({}) == 0
 
 
-def _run(monkeypatch, tmp_path, ffprobe_json, packets="", mkvmerge_json=None, name="media.mkv"):
+def _run(monkeypatch, tmp_path, ffprobe_json, packets="", mkvmerge_json=None, name="media.mkv", **kwargs):
     """get_media_metadata() with ffprobe / mkvmerge answers faked per command."""
     media = tmp_path / name
     media.write_bytes(b"x" * 1000)
     calls = []
 
     def fake_run(cmd, *_args, **_kwargs):
-        calls.append(cmd[0])
+        calls.append("packets" if "-show_entries" in cmd else cmd[0])
         if cmd[0] == "mkvmerge":
             return SimpleNamespace(returncode=0, stdout=json.dumps(mkvmerge_json or {}), stderr="")
         if "-show_entries" in cmd:
@@ -77,7 +77,7 @@ def _run(monkeypatch, tmp_path, ffprobe_json, packets="", mkvmerge_json=None, na
     monkeypatch.setattr(md, "get_ffprobe_path", lambda: "ffprobe")
     monkeypatch.setattr(md, "get_mkvmerge_path", lambda: "mkvmerge")
     monkeypatch.setattr(md.subprocess, "run", fake_run)
-    return md.get_media_metadata.__wrapped__(str(media)), calls
+    return md.get_media_metadata.__wrapped__(str(media), **kwargs), calls
 
 
 VIDEO = {"codec_type": "video", "codec_name": "hevc", "width": 3840, "height": 2160, "avg_frame_rate": "24000/1001", "pix_fmt": "yuv420p10le",
@@ -103,6 +103,41 @@ def test_mkv_without_stats_sums_the_packets(monkeypatch, tmp_path):
                        packets="5000000\n5000000\n", mkvmerge_json={"tracks": []})
     assert (data["video_bitrate"], data["video_bitrate_source"]) == (8_000_000, "packets")
     assert "mkvmerge" in calls
+
+
+def test_packet_scan_is_skipped_when_the_bitrate_is_not_wanted(monkeypatch, tmp_path):
+    # the scan reads the whole file (several GB over a NAS) just to fill a name token the template may not use
+    data, calls = _run(monkeypatch, tmp_path, {"streams": [VIDEO], "format": {"duration": "10.0", "bit_rate": "9999999", "format_name": "matroska,webm"}},
+                       packets="5000000\n5000000\n", mkvmerge_json={"tracks": []}, with_bitrate=False)
+    assert "packets" not in calls
+    assert data["video_bitrate_source"] == "container"  # the cheap fallbacks still apply
+    assert data["quality"] == "2160p"
+
+
+def test_packet_scan_runs_by_default(monkeypatch, tmp_path):
+    _, calls = _run(monkeypatch, tmp_path, {"streams": [VIDEO], "format": {"duration": "10.0", "format_name": "matroska,webm"}}, packets="1000\n", mkvmerge_json={"tracks": []})
+    assert "packets" in calls
+
+
+@pytest.mark.parametrize("template, wanted", [("Movie [%(quality)].mkv", False), ("Movie [%(quality)] [%(video_bitrate)].mkv", True)])
+def test_finalize_only_asks_for_the_bitrate_when_the_name_uses_it(tmp_path, monkeypatch, template, wanted):
+    from VibraVid.core.downloader import base
+
+    out = tmp_path / f"Movie.{base.EXTENSION_OUTPUT}"
+    out.write_bytes(b"x")
+    dl = base.BaseDownloader(str(out), "_hls_temp", sanitize_path=False)
+    dl._final_name_template = str(tmp_path / template.replace(".mkv", f".{base.EXTENSION_OUTPUT}"))
+    asked = []
+    monkeypatch.setattr(base, "get_media_metadata", lambda path, with_bitrate=True: asked.append(with_bitrate) or {"quality": "1080p", "video_bitrate": 5_000_000})
+    monkeypatch.setattr(dl, "_move_to_final_location", lambda f: None)
+    monkeypatch.setattr(dl, "_verify_output", lambda: False)
+    monkeypatch.setattr(base, "execute_hooks", lambda *a, **k: None)
+    monkeypatch.setattr(base.download_tracker, "complete_download", lambda *a, **k: None)
+    monkeypatch.setattr("VibraVid.utils.vault.default.default_vault.track_download_async", lambda **k: None)
+
+    dl._finalize(final_file=str(out))
+
+    assert asked == [wanted]
 
 
 def test_mkvmerge_fills_fps_and_statistics_tags(monkeypatch, tmp_path):

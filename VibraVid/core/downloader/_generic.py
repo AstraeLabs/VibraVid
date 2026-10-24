@@ -1893,7 +1893,7 @@ class Generic_Downloader(BaseDownloader):
             console.print("[yellow]File already exists.")
             return DownloadResult(self.output_path, False, None)
 
-        os_manager.create_path(self.output_dir)
+        self._create_work_dirs()
 
         if self.chapters:
             logger.info(f"Adding {len(self.chapters)} external chapter(s).")

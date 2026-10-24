@@ -162,8 +162,8 @@ def _packet_bitrate(file_path: str, duration: float) -> int:
 
 
 @ffprobe_cached
-def get_media_metadata(file_path: str) -> dict:
-    """Extract quality (resolution), languages, codecs and flags from a media file using ffprobe."""
+def get_media_metadata(file_path: str, with_bitrate: bool = True) -> dict:
+    """Extract quality (resolution), languages, codecs and flags from a media file using ffprobe. ``with_bitrate=False`` skips the packet scan that reads the whole file just to measure the video bit rate."""
     cmd = [get_ffprobe_path(), "-v", "error", "-show_streams", "-show_format", "-print_format", "json", file_path]
     logger.info(f"Running get_media_metadata for {os.path.basename(file_path)} with cmd: {' '.join(cmd)}")
 
@@ -200,7 +200,7 @@ def get_media_metadata(file_path: str) -> dict:
                     if not vbitrate and mkv.get("bitrate"):
                         vbitrate, source = mkv["bitrate"], "mkvmerge"
                 
-                if not vbitrate:
+                if not vbitrate and with_bitrate:
                     vbitrate = _packet_bitrate(file_path, duration)
                     source = "packets" if vbitrate else ""
                 

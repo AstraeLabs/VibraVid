@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r GUI/requirements.txt
 COPY . .
 
 # Create required directories and set permissions
-RUN mkdir -p /app/Video /app/logs /app/data /home/appuser/.config && \
+RUN mkdir -p /app/Video /app/tmp /app/logs /app/data /home/appuser/.config && \
     chown -R appuser:appuser /app /home/appuser
 
 # Switch to non-root user
@@ -38,7 +38,7 @@ ENV PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1
 
 # Declare volumes for persistent data
-VOLUME ["/app/GUI", "/app/Video", "/app/logs", "/app/Conf", "/app/data"]
+VOLUME ["/app/GUI", "/app/Video", "/app/tmp", "/app/logs", "/app/Conf", "/app/data"]
 
 EXPOSE 8000
 

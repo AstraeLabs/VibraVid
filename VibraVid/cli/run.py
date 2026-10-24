@@ -30,7 +30,15 @@ from VibraVid.setup.system import (
     get_ffmpeg_path,
     get_ffprobe_path,
 )
-from VibraVid.utils import _startup_prefetch, config_manager, disk_cache, get_log_file_path, setup_logger, start_message
+from VibraVid.utils import (
+    _startup_prefetch,
+    config_manager,
+    disk_cache,
+    get_log_file_path,
+    os_manager,
+    setup_logger,
+    start_message,
+)
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
 from VibraVid.utils.upload.update import (
@@ -71,6 +79,7 @@ def run_function(func: Callable[..., None], search_terms: str | None = None, sel
 
 def force_exit():
     """Force script termination in any context."""
+    os_manager.wait_pending_deletes()
     logger.info("Forcing script termination.")
     sys.exit(0)
 

@@ -209,6 +209,7 @@ token_refresh_stall_rounds = 3
 embed_poster = false
 write_sidecars = false
 cleanup_tmp_folder = true
+temp_root = ""
 ```
 
 | Key | Default | Description |
@@ -221,6 +222,7 @@ cleanup_tmp_folder = true
 | `subtitle_resolve_workers` | `4` | HLS subtitle renditions resolved concurrently; `1` = sequential |
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`) into a subtitle track. Opt-in: needs decoding the whole video (extra time/CPU) |
 | `cleanup_tmp_folder` | `true` | Remove temporary files afterwards |
+| `temp_root` | `""` | Folder for the temporary files (segments, merge and decrypt leftovers). Empty = next to the output file. With the output on a NAS share, point it to a fast local disk: every step otherwise reads and writes the whole title over the network (about 8x the file size). Needs about 2x the size of one title. The `VIBRAVID_TEMP_DIR` environment variable overrides it (the Docker image sets it to `/app/tmp`) |
 | `embed_poster` | `false` | Embed a poster/still: matching TMDB artwork, else the site's own |
 | `write_sidecars` | `false` | Write `.nfo` + poster/thumb next to each download when the match is reliable (see [Metadata providers](#metadata-providers)). CLI: `--sidecars` / `--no-sidecars` |
 | `use_live_decrypt` | `false` | In-flight (per-segment) decryption while downloading, for every service without its own `process` line in `login.toml`. `false` = decrypt after the download (per run: `--no-live-decrypt`) |

@@ -24,6 +24,10 @@ services:
       # Downloads. Override with a host path via VIBRAVID_VIDEO_DIR to store files on bulk storage
       # (e.g. /volume2/Movies on a NAS). Named volume used when variable is not set.
       - ${VIBRAVID_VIDEO_DIR:-vibravid_videos}:/app/Video
+      # Scratch space (segments, merge/decrypt leftovers). Keep it on a fast LOCAL disk: with only a NAS share as
+      # storage every step reads and writes the whole title over the network (about 8x the file size).
+      # Override with a host path via VIBRAVID_TMP_DIR in .env (e.g. an SSD folder). Needs about 2x the size of one title.
+      - ${VIBRAVID_TMP_DIR:-vibravid_tmp}:/app/tmp
       # Logs persistence
       - ${VIBRAVID_LOGS_DIR:-vibravid_logs}:/app/.cache/logs
       # Configuration persistence
@@ -49,6 +53,9 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-}"
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: "/app"
+
+      # Where the downloader keeps its temporary files (the volume above); the finished file still goes to /app/Video
+      VIBRAVID_TEMP_DIR: "/app/tmp"
 
       # User / group ID for file ownership on host-mounted volumes.
       # Set these to match the uid/gid that owns your NAS share so that
@@ -148,6 +155,8 @@ volumes:
   vibravid_db:
     driver: local
   vibravid_videos:
+    driver: local
+  vibravid_tmp:
     driver: local
   vibravid_logs:
     driver: local

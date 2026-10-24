@@ -59,7 +59,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # Create required directories and set permissions
 # NOTE: the entrypoint runs as root first to handle PUID/PGID remapping,
 # so we do not switch to USER appuser here.
-RUN mkdir -p /app/Video /app/logs /app/data /app/.cache \
+RUN mkdir -p /app/Video /app/tmp /app/logs /app/data /app/.cache \
              /home/appuser/.config && \
     chown -R appuser:appuser /app /home/appuser && \
     chmod -R 755 /app /home/appuser

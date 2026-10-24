@@ -3,6 +3,7 @@
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,9 +28,11 @@ from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
 
 from .constants import (
+    STREAMING_MUX_MAX_TOTAL_WAIT_SECONDS,
     STREAMING_MUX_MAX_WAIT_SECONDS,
     STREAMING_MUX_MIN_THROUGHPUT_BPS,
     STREAMING_MUX_MIN_WAIT_SECONDS,
+    STREAMING_MUX_POLL_SECONDS,
     STREAMING_MUX_SECONDS_PER_SEGMENT,
     logger,
 )
@@ -102,6 +105,39 @@ def _subtitle_title_and_iso_lang(entry: Any) -> tuple[str, str]:
 
 
 class StreamingMuxMixin:
+    def _scratch_bytes(self) -> int:
+        """Bytes under the scratch folder: grows while any track downloads, merges or normalizes, so it tells a slow disk from a stuck track."""
+        total = 0
+        for root, _dirs, files in os.walk(getattr(self, "output_dir", None) or "."):
+            for name in files:
+                try:
+                    total += os.stat(os.path.join(root, name)).st_size
+                except OSError:
+                    pass
+        return total
+
+    def _wait_for_track(self, key: str, idle_timeout: float) -> bool:
+        """True once *key* is done. *idle_timeout* counts seconds WITHOUT progress in the scratch folder (a slow disk merging a big track is not a stuck one), up to STREAMING_MUX_MAX_TOTAL_WAIT_SECONDS."""
+        event = self._track_done_event(key)
+        abort = getattr(self, "_abort_event", None)
+        started = last_progress = time.monotonic()
+        seen = -1
+        while not event.wait(timeout=STREAMING_MUX_POLL_SECONDS):
+            if abort is not None and abort.is_set():
+                return False
+
+            now = time.monotonic()
+            size = self._scratch_bytes()
+            if size != seen:
+                seen, last_progress = size, now
+            if now - last_progress >= idle_timeout:
+                logger.info(f"streaming_mux: {key!r} made no progress for {idle_timeout:.0f}s")
+                return False
+            if now - started >= STREAMING_MUX_MAX_TOTAL_WAIT_SECONDS:
+                logger.info(f"streaming_mux: gave up waiting for {key!r} after {now - started:.0f}s")
+                return False
+        return True
+
     def _try_start_streaming_mux(
         self, video_ext: str, video_stream: Any, video_duration_cap: float | None = None
     ) -> "StreamingMuxFeeder | None":
@@ -186,8 +222,8 @@ class StreamingMuxMixin:
         for other in other_streams:
             key = self._stream_task_key(other)
             timeout = _estimate_livemux_wait_seconds(other)
-            if not self._track_done_event(key).wait(timeout=timeout):
-                logger.info(f"streaming_mux: timed out waiting for {key!r} after {timeout:.0f}s -- falling back to the normal mux")
+            if not self._wait_for_track(key, timeout):
+                logger.info(f"streaming_mux: timed out waiting for {key!r} -- falling back to the normal mux")
                 return None
 
             resolved = self._get_track_result(key)
@@ -199,8 +235,8 @@ class StreamingMuxMixin:
         for ext_track in external_subs + external_auds:
             key = ext_track["_task_key"]
             timeout = STREAMING_MUX_MIN_WAIT_SECONDS  # external tracks (e.g. HLS text subs) are light -- fixed floor is enough
-            if not self._track_done_event(key).wait(timeout=timeout):
-                logger.info(f"streaming_mux: timed out waiting for external track {key!r} after {timeout:.0f}s -- falling back to the normal mux")
+            if not self._wait_for_track(key, timeout):
+                logger.info(f"streaming_mux: timed out waiting for external track {key!r} -- falling back to the normal mux")
                 return None
 
             resolved = self._get_track_result(key)

@@ -1,6 +1,7 @@
 # 2.03.26
 
 import glob
+import hashlib
 import logging
 import os
 import re
@@ -119,10 +120,32 @@ class BaseDownloader:
         self.copied_audios = []
         self.audio_only = False
 
+    @staticmethod
+    def _local_temp_dir(directory: str, name: str) -> str | None:
+        """``<temp_root>/<hash of the output folder>/<name>`` when VIBRAVID_TEMP_DIR or DOWNLOAD.temp_root names a writable folder, else None (the temp folder stays next to the output). The hash keeps the path stable for resuming and apart for two titles with the same name."""
+        root = str(os.environ.get("VIBRAVID_TEMP_DIR") or config_manager.config.get("DOWNLOAD", "temp_root", default="") or "").strip()
+        if not root:
+            return None
+
+        parent = os.path.join(root, hashlib.sha1(os.path.abspath(directory).encode("utf-8")).hexdigest()[:8])
+        try:
+            os.makedirs(parent, exist_ok=True)
+            if not os.access(parent, os.W_OK):
+                raise OSError("not writable")
+        except OSError as exc:
+            logger.warning(f"DOWNLOAD.temp_root {root!r} is not usable ({exc}): the temporary files stay next to the output")
+            return None
+        return os.path.join(parent, name)
+
     def _resolve_temp_dir(self, temp_suffix: str) -> str:
         """Path of the scratch directory for segments, muxing leftovers and subtitles."""
         directory = os.path.dirname(self.output_path)
-        temp_dir = os.path.join(directory, "." + self.filename_base + temp_suffix)
+        name = "." + self.filename_base + temp_suffix
+        local_dir = self._local_temp_dir(directory, name)
+        if local_dir:
+            return local_dir
+
+        temp_dir = os.path.join(directory, name)
 
         # Adopt a temp dir left by a pre-dot-prefix version so its segments stay resumable.
         legacy_dir = os.path.join(directory, self.filename_base + temp_suffix)
@@ -265,8 +288,13 @@ class BaseDownloader:
             enqueue_down_from_context(manifest_url, self.output_path)
             return DownloadResult(self.output_path, False, None)
 
-        os_manager.create_path(self.output_dir)
+        self._create_work_dirs()
         return None
+
+    def _create_work_dirs(self) -> None:
+        """Create the temp folder and the output folder: the temp folder used to create the second as a side effect, which stops being true when it lives elsewhere (DOWNLOAD.temp_root)."""
+        os_manager.create_path(self.output_dir)
+        os_manager.create_path(os.path.dirname(self.output_path) or ".")
 
     def _fail(self, error: str) -> "DownloadResult":
         """Record a failed terminal state on the tracker and return it."""
@@ -458,7 +486,7 @@ class BaseDownloader:
             try:
                 if os.path.exists(self.output_path):
                     os.remove(self.output_path)
-                os.rename(final_file, self.output_path)
+                shutil.move(final_file, self.output_path)  # a plain rename fails across filesystems (temp_root on another disk)
             except Exception as e:
                 console.print(f"[yellow]Warning: Could not move file: {e}")
                 self.output_path = final_file
@@ -860,7 +888,8 @@ class BaseDownloader:
         template = getattr(self, "_final_name_template", self.output_path)
         if any(p in template for p in self._MEDIA_PLACEHOLDERS):
             try:
-                metadata = get_media_metadata(self.output_path)
+                # The bit rate costs a full read of the file: only worth it when the name uses it
+                metadata = get_media_metadata(self.output_path, with_bitrate="%(video_bitrate)" in template)
                 logger.info(f"Metadata for dynamic rename: {metadata}")
 
                 replacements = media_token_values(metadata)
