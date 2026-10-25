@@ -4,10 +4,10 @@ import logging
 import os
 import re
 import time
-import unicodedata
 from difflib import SequenceMatcher
 
 from rich.console import Console
+from unidecode import unidecode
 
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
@@ -93,6 +93,10 @@ class TMDBClient:
                 return data
 
             except Exception as e:
+                if getattr(getattr(e, "response", None), "status_code", None) == 404:
+                    logger.debug(f"TMDB has no {endpoint}")  # e.g. an episode the show does not list yet: not an error
+                    return {}
+
                 if attempt < retries:
                     if hasattr(e, "response") and e.response:
                         status_code = e.response.status_code
@@ -114,7 +118,7 @@ class TMDBClient:
         if not text:
             return ""
 
-        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+        text = unidecode(str(text))
         text = re.sub(r"[^\w\s-]", "", text).strip().lower()
         text = re.sub(r"[-\s]+", "-", text)
         return text
