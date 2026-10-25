@@ -20,7 +20,7 @@ installation = ""
 wvd_dir = ""
 prd_dir = ""
 # In order of preference: tmdb, imdb, tvdb (comma separated)
-metadata_provider = "tmdb,imdb"
+metadata_provider = "tvdb,tmdb,imdb"
 tui_images = "auto"
 
 
@@ -180,6 +180,7 @@ post_run = []
 enabled = false
 download_italian_anime_default = true
 anime_id_crosswalk_enabled = true
+
 # List of fallback providers in priority order
 provider_fallback = [
     "streamingcommunity",

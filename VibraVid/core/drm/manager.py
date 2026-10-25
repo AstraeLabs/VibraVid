@@ -626,6 +626,7 @@ class DRMManager:
                 license_certificate=license_certificate,
                 license_request_fn=license_request_fn,
                 cdm_origin=self.widevine_cdm_origin,
+                fresh_license=self._bypass_cache(),
             )
         if drm_type == "playready":
             return get_playready_keys, dict(

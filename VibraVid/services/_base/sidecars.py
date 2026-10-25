@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.services._base.metadata import EpisodeInfo, MovieInfo, Person, SeriesInfo, get_provider
+from VibraVid.services._base.metadata import EpisodeInfo, MovieInfo, Person, SeriesInfo, get_provider, provider_names
 from VibraVid.utils.http_client import create_client
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,13 @@ class Sidecars:
         season: int = 0
         episode: int = 0
         episode_name: str | None = None
-        verify: bool = False  # title-only candidate: write only if the provider's episode title matches episode_name
+        verify: bool = False
+        title: str | None = None
+
+    # (provider, id) of a title-only candidate -> the other provider's (provider, id) that last confirmed an episode of that series
+    _confirmed_by: dict[tuple[str, str], tuple[str, str]] = {}
+    # (provider, series title) -> that provider's title-only candidate (None = none found)
+    _alternatives: dict[tuple[str, str], str | None] = {}
 
     def __init__(
         self,
@@ -42,6 +48,7 @@ class Sidecars:
         episode: int = 0,
         episode_name: str | None = None,
         verify: bool = False,
+        title: str | None = None,
     ):
         self.video_path = video_path
         self.provider = provider
@@ -51,6 +58,7 @@ class Sidecars:
         self.episode = int(episode or 0)
         self.episode_name = episode_name
         self.verify = verify
+        self.title = title
         self.base = os.path.splitext(video_path)[0]
         self.written: list[str] = []
 
@@ -68,6 +76,7 @@ class Sidecars:
             context_tracker.episode or 0,
             context_tracker.episode_name or None,
             context_tracker.sidecar_verify,
+            getattr(context_tracker.metadata_title, "name", None),
         )
 
     @classmethod
@@ -90,8 +99,8 @@ class Sidecars:
                     self._write_movie(info)
 
             elif self.media_type == "tv" and self.season > 0 and self.episode > 0:
-                info = source.episode(self.item_id, self.season, self.episode)
-                if info and self._episode_confirmed(source, info):
+                if found := self._find_episode(source):
+                    source, info = found
                     self._write_episode(info)
                     self._write_series(source, info)
 
@@ -102,16 +111,74 @@ class Sidecars:
             logger.info(f"sidecars written ({self.provider}): {', '.join(os.path.basename(p) for p in self.written)}")
         return self.written
 
+    def _find_episode(self, source) -> tuple | None:
+        """The ``(provider, episode)`` to write from, or None. A title-only candidate that does not confirm the episode gives way to the other providers' candidates for the same title; the provider that last confirmed this series goes first, so a series stays on one provider."""
+        primary = (self.provider, self.item_id)
+        if not self.verify:
+            info = source.episode(self.item_id, self.season, self.episode)
+            return (source, info) if info else None
+
+        if not self.episode_name:
+            self._log_unconfirmed([])
+            return None
+
+        seen, tried = set(), []
+        for name, item in self._candidates(primary):
+            if (name, item) in seen:
+                continue
+            seen.add((name, item))
+            candidate = source if (name, item) == primary else get_provider(name)
+            info = candidate.episode(item, self.season, self.episode) if candidate else None
+            if info and self._episode_confirmed(candidate, info):
+                if (name, item) == primary:
+                    self._confirmed_by.pop(primary, None)
+                else:
+                    self._confirmed_by[primary] = (name, item)
+                    logger.info(f"sidecars: {self.provider} does not confirm S{self.season:02d}E{self.episode:02d} of '{self.title}', using {name}")
+                self.provider, self.item_id = name, item
+                return candidate, info
+
+            tried.append(f"{name} '{info.title if info else None}'")
+
+        self._log_unconfirmed(tried)
+        return None
+
+    def _candidates(self, primary: tuple[str, str]):
+        """``(provider, id)`` pairs to try for an episode: the last one that confirmed this series, the series' own candidate, then the title-only candidate of every other available provider (looked up on first need)."""
+        if sticky := self._confirmed_by.get(primary):
+            yield sticky
+        yield primary
+
+        if not self.title:
+            return
+        for name in provider_names():
+            alternative = get_provider(name)
+            if name == self.provider or alternative is None or not alternative.available():
+                continue
+
+            key = (name, self.title)
+            if key not in self._alternatives:
+                try:
+                    found = alternative.find_by_title("tv", self.title)
+                except Exception as exc:
+                    logger.debug(f"sidecars: {name} title lookup failed for '{self.title}': {exc}")
+                    found = None
+                self._alternatives[key] = str(found) if found else None
+            if self._alternatives[key]:
+                yield name, self._alternatives[key]
+
+    def _log_unconfirmed(self, tried: list[str]) -> None:
+        logger.info(f"sidecars skipped for {os.path.basename(self.video_path)}: S{self.season:02d}E{self.episode:02d} is {', '.join(tried) or 'unchecked'}, the site says '{self.episode_name}'")
+
     def _episode_confirmed(self, source, info: EpisodeInfo) -> bool:
         """For a title-only series candidate the episode title is the proof that both the series and the season/episode numbering are right."""
         if not self.verify:
             return True
-        
-        if self.episode_name and source.titles_match([info.title], self.episode_name):
-            return True
-        
-        logger.info(f"sidecars skipped for {os.path.basename(self.video_path)}: {self.provider} S{self.season:02d}E{self.episode:02d} is '{info.title}', the site says '{self.episode_name}'")
-        return False
+
+        return bool(self.episode_name) and (
+            source.titles_match([info.title], self.episode_name)
+            or source.generic_episodes_match(info.title, self.episode_name, self.season, self.episode)
+        )
 
     # ── film ──────────────────────────────────────────────────────────────
     def _write_movie(self, info: MovieInfo) -> None:
