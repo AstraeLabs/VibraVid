@@ -7,11 +7,11 @@ import shlex
 from contextlib import contextmanager
 
 from VibraVid.utils import config_manager
+from VibraVid.utils.config import LOGIN_OPTION_KEYS
 
 from .site_loader import load_search_functions
 
 logger = logging.getLogger(__name__)
-_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale", "profile", "process"}
 _PROCESS_SWITCHES = ("live_mux", "live_decrypt")
 
 
@@ -97,7 +97,7 @@ def get_site_login_status(site: str) -> dict | None:
         return None
     values = config_manager.login.get_section(site)
 
-    credentials = {k: v for k, v in values.items() if str(k).strip().lower() not in _LOGIN_NON_CREDENTIAL_KEYS}
+    credentials = {k: v for k, v in values.items() if str(k).strip().lower() not in LOGIN_OPTION_KEYS}
     if values and not credentials:
         return None  # only options (args, cdm, ...): the service has no login
     keys = [{"key": str(k).strip(), "present": _filled(v), "optional": False} for k, v in credentials.items()]
