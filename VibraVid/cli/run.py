@@ -150,6 +150,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=f"Sites by name:  {available_names}\nSites by index: {available_indices}",
     )
+    parser.add_argument("--migrate-config", nargs="?", metavar="DIR", help="Migrate config.json/login.json locally (default: Conf); use --migrate-config --help for migration options")
 
     # ── Search & selection
     search_group = parser.add_argument_group("Search & selection")

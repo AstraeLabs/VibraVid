@@ -40,6 +40,14 @@ gui = ["GUI/requirements.txt"]
 [project.scripts]
 vibravid = "VibraVid.cli.bootstrap:main"
 
+[tool.hatch.build.targets.wheel.force-include]
+"Conf/config.toml" = "VibraVid/config_defaults/config.toml"
+"Conf/login.toml" = "VibraVid/config_defaults/login.toml"
+
+[tool.hatch.build.targets.sdist.force-include]
+"Conf/config.toml" = "Conf/config.toml"
+"Conf/login.toml" = "Conf/login.toml"
+
 [tool.ruff]
 force-exclude = true
 line-length = 120

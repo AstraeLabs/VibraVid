@@ -10,7 +10,10 @@ python manual.py -i 0 --search "interstellar"                             # site
 python manual.py -i streamingcommunity --search "interstellar" --skip-ts  # skip TS/CAM (StreamingCommunity only)
 python manual.py -i streamingcommunity --search "interstellar" --no-log   # no log file for this run
 python manual.py --dep                                                    # show dependency paths
+python manual.py --migrate-config --dry-run                               # preview local JSON-to-TOML migration
 ```
+
+For JSON configuration upgrades, see [Migrating from JSON](configuration.md#migrating-from-json), including backups and `--overwrite` when TOML files already exist. `python manual.py --migrate-config --help` lists migration options without starting the application.
 
 Site index numbers follow the services that are switched on: services listed in [`hidden_services`](configuration.md#default) are not loaded and the others are renumbered without gaps, so check `-h` for the current numbers (names never change).
 
