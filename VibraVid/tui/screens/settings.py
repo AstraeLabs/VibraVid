@@ -35,7 +35,7 @@ ARR_BANNER_TEXT = (
 )
 LOGIN = "LOGIN"
 SERVICE_PREFIX = "svc:"
-OPTION_KEYS = {"cdm", "args", "device_type", "country", "process"}
+OPTION_KEYS = {"cdm", "args", "device_type", "country", "profile", "process"}
 HIDDEN_LOGIN_KEYS = {"process"}
 PLACEHOLDER = "[paste here]"
 SECRET_KEYS = ("password", "token", "adminbetoken", "etp_rt", "st")
@@ -271,6 +271,8 @@ class SettingsScreen(Screen):
                             except Exception:
                                 logger.warning(f"Field {field_id}: invalid JSON, keeping previous value")
                                 continue
+                        elif orig_type is bool:
+                            val = raw_val.lower() in ("true", "1", "yes", "on")
                         else:
                             val = _cdm_json(target, raw_val)
                         if isinstance(target, tuple):

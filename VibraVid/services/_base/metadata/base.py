@@ -1,6 +1,7 @@
 # 01.10.26
 
 import logging
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -9,6 +10,7 @@ from VibraVid.provider.tmdb import tmdb_client
 from VibraVid.services._base import tmdb_artwork
 
 logger = logging.getLogger(__name__)
+_GENERIC_EPISODE = re.compile(r"^\s*(?:episode|episodio|ep)\.?\s*#?\s*(\d+)(?:\s*[.\-x/]\s*(\d+))?\s*$", re.IGNORECASE)
 
 
 @dataclass
@@ -127,6 +129,32 @@ class BaseMetadataProvider:
         """Best similarity between *name* and *candidates* (to choose among several matching results)."""
         wanted = cls._slug(name)
         return max((SequenceMatcher(None, cls._slug(c), wanted).ratio() for c in candidates if c), default=0.0)
+
+    @classmethod
+    def generic_episode_numbering(cls, title: str | None) -> tuple[int | None, int] | None:
+        """(season, episode) encoded in a placeholder title like ``Episode #1.2`` / ``Episodio 5`` (season is None when absent)."""
+        match = _GENERIC_EPISODE.match(title or "")
+        if not match:
+            return None
+        
+        first, second = int(match.group(1)), match.group(2)
+        return (first, int(second)) if second else (None, first)
+
+    @classmethod
+    def generic_episodes_match(cls, provider_title: str | None, site_title: str | None, season, episode) -> bool:
+        """Whether two placeholder titles name the same season/episode (e.g. IMDb's ``Episode #1.1`` vs the site's ``Episodio 1``)."""
+        provider = cls.generic_episode_numbering(provider_title)
+        site = cls.generic_episode_numbering(site_title)
+        if not provider or not site:
+            return False
+        
+        season, episode = int(season), int(episode)
+        return (
+            provider[1] == episode
+            and site[1] == episode
+            and provider[0] in (None, season)
+            and site[0] in (None, season)
+        )
 
     @staticmethod
     def year_close(found, wanted) -> bool:

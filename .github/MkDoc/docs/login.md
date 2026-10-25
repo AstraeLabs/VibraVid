@@ -5,13 +5,25 @@ Most services below need data from your logged-in browser session. Open the serv
 | Button | Reads | Used for |
 |--------|-------|----------|
 | **GET COOKIES** | Cookies of the current site | Crunchyroll, Discovery+, HBO Max, Prime Video, Apple TV |
-| **GET STORAGE** | Everything in `localStorage` | Mediaset Infinity, or anything to look up by hand |
+| **GET STORAGE** | Everything in `localStorage` | Mediaset Infinity (`rtilogin_acd`), or anything to look up by hand |
 | **GET TOKEN** | Only `access_token` / `refresh_token` from `localStorage` | Disney+ |
 
 - The **filter** box keeps only keys (or values) containing your text (e.g. `st`); **COPY JSON** copies exactly what is shown, on a single line.
 - In `login.toml` wrap copied JSON in triple **single** quotes (`cookies = '''{"key":"value"}'''`): the text stays exactly as copied (backslashes and `\n` are not interpreted), while plain TOML strings can't hold raw quotes.
 
 Every service section also has `args = ""`: options added to each download of that service (e.g. `args = "--quality 1080"`). See [Default options for a service](configuration.md#default-options-for-a-service-args).
+
+### Account profile (`profile`)
+
+For services with several profiles per account, `profile` picks the one to download with, instead of the profile your cookies were exported from:
+
+```toml
+[netflix]
+profile = "2"        # its number in the profile list ...
+# profile = "Kids"   # ... or its name (case does not matter)
+```
+
+Empty (or missing) keeps the profile of your cookies. The run prints `Profile: <name>`; a number or name that does not exist stops the run and lists the profiles with their numbers (`1 Adults, 2 Kids`). For a single run use `--user-profile 2` (or the name), which wins over `login.toml`. Netflix's own `--profile` option is something else: it selects the codec profile group (HPL, MPL, P1...).
 
 ---
 
@@ -46,6 +58,7 @@ cookies = '''<paste_copied_json_here>'''
 
 ```toml
 [mediasetinfinity]
+tv_login = false
 rtilogin_acd = '''<paste_copied_value_here>'''
 ```
 

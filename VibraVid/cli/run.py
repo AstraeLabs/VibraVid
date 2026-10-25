@@ -181,6 +181,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_opts.add_argument("--close-console", dest="close_console", type=str, choices=["true", "false"],metavar="true|false", help="Exit after last download (overrides config)")
     dl_opts.add_argument("--no-vault-cache", dest="bypass_vault_cache", action="store_const", const=True, default=None, help="Bypass DRM key vault cache; force a fresh CDM license request every run (for dynamic/time-sensitive tokens)")
     dl_opts.add_argument("--cdm", dest="cdm", action="append", metavar="CDM", default=None, help="CDM for this run, overriding login.toml and config.toml: a .wvd/.prd file name, 'search', or a remote CDM id. Repeatable (one per DRM system); JSON accepted for quality rules")
+    dl_opts.add_argument("--user-profile", dest="user_profile", metavar="N|NAME", default=None, help="Account profile for this run, overriding 'profile' in login.toml: its number in the service's profile list (1, 2, ...) or its name. Only for services that support profile selection")
     dl_opts.add_argument("--http-version", dest="http_version", choices=["1.1", "2", "3"], default=None, help="HTTP version Velora uses for segment downloads (default: 1.1 — safest for ~99%% of CDNs). Use 2 for CDNs with aggressive anti-bot fingerprinting that block HTTP/1.1-only ALPN (e.g. phncdn/Pornhub)")
     dl_opts.add_argument("--max-speed", dest="max_speed_mbps", type=float, metavar="MB/s", default=None, help="Cap the segment download rate in MB/s (0 = unlimited). Applies to each stream (video/audio) separately. Useful for CDNs that throttle clients exceeding a speed threshold")
     dl_opts.add_argument("--no-decrypt", dest="skip_decrypt", action="store_true", help="Debug switch: don't decrypt at all (neither in-flight per-segment nor the post-download pass)")
@@ -350,7 +351,7 @@ def _apply_interactive_site_options(selected_module_name, site_module_name):
 def build_site_options(args, parser, site_option_dests, site_module_name):
     """Merge this run's site-specific CLI values with the site's `args` from login.toml"""
     persisted = resolve_persisted_site_options(site_module_name) if site_module_name else {}
-    site_options = {"drm": getattr(args, "drm", None)}
+    site_options = {"drm": getattr(args, "drm", None), "user_profile": getattr(args, "user_profile", None)}
     for dest in site_option_dests:
         cli_val = getattr(args, dest, None)
         if cli_val != parser.get_default(dest):

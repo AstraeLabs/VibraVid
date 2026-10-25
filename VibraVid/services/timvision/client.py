@@ -31,7 +31,7 @@ _CONFIG_TTL = 24 * 3600
 def _load_login() -> dict:
     """Load credentials from login"""
     try:
-        return config_manager.login.get_section("timvision", {})
+        return config_manager.login.get_cookies("timvision")
     except Exception:
         return {}
 
@@ -61,8 +61,7 @@ class TimvisionClient:
             Login.show(Login.ACCOUNT)
 
     def _load_credentials(self):
-        creds = _load_login()
-        self.cookies = creds
+        self.cookies = _load_login()
         cookie_token = self.cookies.get("tokenCMS", "")
         self.token = cookie_token if re.fullmatch(r"[0-9a-fA-F]{32}", cookie_token) else ""
 

@@ -111,7 +111,7 @@ class ChiliClient:
     def _load_credentials(self):
         """Load cookies from login chili section."""
         try:
-            self.cookies = config_manager.login.get_section("chili", {})
+            self.cookies = config_manager.login.get_cookies("chili")
             email = self.cookies.get("email")
             self._email = email.strip() if isinstance(email, str) and email.strip() else None
             access_token = self.cookies.get("access_token")
@@ -120,7 +120,7 @@ class ChiliClient:
             )
 
             # Remove config keys that aren't cookies
-            for key in ("email", "password", "country", "access_token", "refresh_token", "cdm"):
+            for key in ("email", "password", "access_token", "refresh_token"):
                 self.cookies.pop(key, None)
         except Exception:
             self.cookies = {}
