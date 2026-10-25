@@ -163,10 +163,13 @@ def _is_ad_period(
     has_drm = period_element.find(".//mpd:ContentProtection", _NS) is not None
 
     xlink_actuate = ""
+    dai_ad_period = False
     for attr_name, attr_value in period_element.attrib.items():
-        if attr_name.lower().endswith("actuate"):
+        attr_name = attr_name.lower()
+        if attr_name.endswith("actuate"):
             xlink_actuate = (attr_value or "").strip().lower()
-            break
+        elif attr_name.endswith("adperiod"):
+            dai_ad_period = (attr_value or "").strip().lower() == "true"
 
     asset_identifier = period_element.find(".//mpd:AssetIdentifier", _NS)
     asset_text = (asset_identifier.text or "").strip().lower() if asset_identifier is not None else ""
@@ -176,11 +179,11 @@ def _is_ad_period(
 
     logger.debug(
         f"_is_ad_period | url={period_url} | url_ad={url_is_ad} | host_ad={host_is_ad} | xlink_onload={xlink_is_ad} "
-        f"| asset_ad={asset_is_ad} | has_drm={has_drm} | thumbnail_convention={thumbnail_convention_active} "
+        f"| asset_ad={asset_is_ad} | dai_ad={dai_ad_period} | has_drm={has_drm} | thumbnail_convention={thumbnail_convention_active} "
         f"| has_thumbnail={has_thumbnail} | duration={period_duration:.1f}s | thumbnail_ad={thumbnail_is_ad}"
     )
 
-    if (url_is_ad or host_is_ad or xlink_is_ad or asset_is_ad) and not has_drm:
+    if (url_is_ad or host_is_ad or xlink_is_ad or asset_is_ad or dai_ad_period) and not has_drm:
         return True
     return thumbnail_is_ad
 
@@ -920,6 +923,9 @@ class DashParser:
         base_el = element.find("mpd:BaseURL", _NS)
         if base_el is not None and base_el.text and base_el.text.strip():
             resolved = urljoin(parent_base, base_el.text.strip())
+            if urlparse(resolved).path.lower().endswith(".mpd"):
+                return urljoin(resolved, ".")
+        
             if resolved.endswith("/") or not _is_file_url(resolved):
                 return resolved if resolved.endswith("/") else resolved + "/"
 
@@ -1049,6 +1055,11 @@ class DashParser:
                 # requests segments past what that Period actually has on the CDN.
                 effective_duration = period_duration or stream.duration
                 total_segments = math.ceil(effective_duration * timescale / seg_duration)
+                
+                # endNumber is the last segment the CDN has: the period duration can round up past it (TIMvision subtitles)
+                end_num = tmpl.get("endNumber") or (tmpl_adapt.get("endNumber") if tmpl_adapt is not None else None)
+                if end_num and str(end_num).isdigit():
+                    total_segments = min(total_segments, int(end_num) - start_num + 1)
                 number_iter = range(start_num, start_num + total_segments)
 
             seg_dur_s = seg_duration / timescale if timescale > 0 else 0.0

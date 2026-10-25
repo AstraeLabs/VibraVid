@@ -65,26 +65,36 @@
 	{% endif %}
 
 	{% if seasons %}
-	<div class="cn-ssel" role="tablist" aria-label="{% if series.is_album %}Discs{% else %}Seasons{% endif %}">
-		{% for season in seasons %}
-			<button type="button" class="cn-stab{% if forloop.first %} is-active{% endif %}"
-			        data-season="{{ season.number }}" data-image="{{ season.image|default:'' }}" role="tab"
-			        aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
-				<span class="cn-stab-pick">
-					<input type="checkbox" class="cn-season-pick" value="{{ season.number }}"
-					       aria-label="Select {% if series.is_album %}disc{% else %}season{% endif %} {{ season.number }} for a batch download">
-				</span>
-				<span class="cn-stab-txt">
-					<span class="cn-stab-t">
-						{% if series.is_album %}{{ season.name|default:season.number }}{% else %}Season {{ season.number }}{% endif %}
+	<div class="cn-ssel-nav" id="cn-seasons-nav">
+		<button type="button" class="cn-ssel-arrow" id="cn-seasons-prev" hidden disabled
+		        aria-label="Scroll {% if series.is_album %}discs{% else %}seasons{% endif %} left" aria-controls="cn-seasons-list">
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>
+		</button>
+		<div class="cn-ssel" id="cn-seasons-list" role="tablist" aria-label="{% if series.is_album %}Discs{% else %}Seasons{% endif %}">
+			{% for season in seasons %}
+				<button type="button" class="cn-stab{% if forloop.first %} is-active{% endif %}"
+				        data-season="{{ season.number }}" data-image="{{ season.image|default:'' }}" role="tab"
+				        aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
+					<span class="cn-stab-pick">
+						<input type="checkbox" class="cn-season-pick" value="{{ season.number }}"
+						       aria-label="Select {% if series.is_album %}disc{% else %}season{% endif %} {{ season.number }} for a batch download">
 					</span>
-					<span class="cn-stab-s">
-						{{ season.episode_count }} {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}ep{{ season.episode_count|pluralize }}{% endif %}
-						{% if season.owned_count %} · {{ season.owned_count }}/{{ season.episode_count }}{% endif %}
+					<span class="cn-stab-txt">
+						<span class="cn-stab-t">
+							{% if series.is_album %}{{ season.name|default:season.number }}{% else %}Season {{ season.number }}{% endif %}
+						</span>
+						<span class="cn-stab-s">
+							{{ season.episode_count }} {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}ep{{ season.episode_count|pluralize }}{% endif %}
+							{% if season.owned_count %} · {{ season.owned_count }}/{{ season.episode_count }}{% endif %}
+						</span>
 					</span>
-				</span>
-			</button>
-		{% endfor %}
+				</button>
+			{% endfor %}
+		</div>
+		<button type="button" class="cn-ssel-arrow" id="cn-seasons-next" hidden disabled
+		        aria-label="Scroll {% if series.is_album %}discs{% else %}seasons{% endif %} right" aria-controls="cn-seasons-list">
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+		</button>
 	</div>
 
 	<form method="post" id="cn-seasons-form">
@@ -252,6 +262,34 @@
 
 	var tabs   = document.querySelectorAll(".cn-stab");
 	var panels = document.querySelectorAll(".cn-spanel");
+
+	var seasonNav  = el("cn-seasons-nav");
+	var seasonList = el("cn-seasons-list");
+	var seasonPrev = el("cn-seasons-prev");
+	var seasonNext = el("cn-seasons-next");
+
+	if (seasonList) {
+		function updateSeasonArrows() {
+			// Measure against the full row so the arrows can disappear after a resize.
+			var overflowing = seasonList.scrollWidth > seasonNav.clientWidth + 1;
+			seasonPrev.hidden = seasonNext.hidden = !overflowing;
+			seasonPrev.disabled = seasonList.scrollLeft <= 1;
+			seasonNext.disabled = seasonList.scrollLeft + seasonList.clientWidth >= seasonList.scrollWidth - 1;
+		}
+
+		function scrollSeasons(direction) {
+			seasonList.scrollBy({
+				left: direction * seasonList.clientWidth,
+				behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+			});
+		}
+
+		seasonPrev.addEventListener("click", function () { scrollSeasons(-1); });
+		seasonNext.addEventListener("click", function () { scrollSeasons(1); });
+		seasonList.addEventListener("scroll", updateSeasonArrows, { passive: true });
+		window.addEventListener("resize", updateSeasonArrows);
+		updateSeasonArrows();
+	}
 
 	var heroPhoto = el("cn-hero-photo");
 	var seriesBackdrop = "{{ series.backdrop|default:''|escapejs }}";
