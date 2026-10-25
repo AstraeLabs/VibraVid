@@ -540,9 +540,18 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
 @keyframes cn-flash { 0%, 100% { opacity: 1; } 40% { opacity: .45; } }
 
 /* ═══ TAB DELLE STAGIONI═══════════ */
+.cn-ssel-nav { display: flex; align-items: center; gap: 8px; padding-bottom: 18px; }
+.cn-ssel-arrow {
+  flex: 0 0 40px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 1px solid var(--cn-edge); border-radius: var(--cn-radius-sm);
+  background: var(--cn-surf); color: var(--cn-white); cursor: pointer;
+}
+.cn-ssel-arrow:hover:not(:disabled) { background: var(--cn-surf-2); }
+.cn-ssel-arrow:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 2px; }
+.cn-ssel-arrow:disabled { opacity: .3; cursor: default; }
 .cn-ssel {
-  display: flex; gap: 10px; overflow-x: auto;
-  padding: 4px 4px 22px; scroll-snap-type: x proximity; scrollbar-width: none;
+  display: flex; flex: 1; min-width: 0; gap: 10px; overflow-x: auto;
+  padding: 4px; scroll-snap-type: x proximity; scrollbar-width: none;
   mask-image: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
 }
