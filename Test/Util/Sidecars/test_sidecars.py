@@ -107,6 +107,7 @@ def images(monkeypatch):
 def clean_context():
     context_tracker.sidecar_provider = context_tracker.sidecar_id = context_tracker.sidecar_media_type = None
     context_tracker.sidecar_verify = False
+    context_tracker.metadata_title = None
     context_tracker.episode_name = None
     context_tracker.season = context_tracker.episode = 0
     yield
@@ -292,6 +293,16 @@ def test_candidate_episode_title_comparison_is_tolerant(tmp_path, tmdb, images):
 def test_candidate_episode_is_skipped_when_the_title_differs(tmp_path, tmdb, images):
     assert _verified(tmp_path, tmdb, images, "Un altro episodio") == []
     assert not list(tmp_path.glob("*.nfo")) and not list(tmp_path.glob("*.jpg"))
+
+
+def test_candidate_episode_accepts_generic_titles_with_the_same_numbering(tmp_path, tmdb, images):
+    tmdb.responses["tv/1396/season/1/episode/1"] = {**EPISODE, "name": "Episode #1.1"}
+    assert len(_verified(tmp_path, tmdb, images, "Episodio 1")) == 2
+
+
+def test_candidate_episode_rejects_generic_titles_with_another_numbering(tmp_path, tmdb, images):
+    tmdb.responses["tv/1396/season/1/episode/1"] = {**EPISODE, "name": "Episode #1.2"}
+    assert _verified(tmp_path, tmdb, images, "Episodio 1") == []
 
 
 @pytest.mark.parametrize("name", [None, ""])

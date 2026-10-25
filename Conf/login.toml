@@ -8,6 +8,7 @@
 #   cookies = '''{"cookie_name":"cookie_value"}'''
 # args: default options for every download of the service, written like on the command line, e.g. args = "--quality 1080" (see the docs).
 # cdm: name of your WVD/PRD file, "search" or an id from [DRM.remote_cdm]. Empty = default (see the docs).
+# profile: account profile to use, only for the services that have it (netflix): its number in the profile list (profile = "2") or its name (profile = "Kids"). Empty = the profile of your cookies. The run prints the numbered list.
 # process: per-service pipeline switches, both off when the line is missing. live_mux = true: write the .mkv while downloading (streaming mux); live_decrypt = true: decrypt each segment as it arrives instead of after the download.
 
 [aurora]
@@ -62,16 +63,18 @@ process = { live_mux = true, live_decrypt = true }
 
 [mediasetinfinity]
 rtilogin_acd = '''[paste here]'''
+tv_login = false
 cdm = ""
 args = ""
 process = { live_mux = true, live_decrypt = true }
 
 [netflix]
-device_type = "chrome"
 securenetflixid = ""
 netflixid = ""
+device_type = "chrome"
 cdm = ""
 args = ""
+profile = ""
 process = { live_mux = true, live_decrypt = true }
 
 [nowtvit]

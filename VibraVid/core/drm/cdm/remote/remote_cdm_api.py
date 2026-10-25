@@ -164,7 +164,7 @@ class RemoteCdmApi:
         return payload
 
     def get_license_challenge(
-        self, session_id: bytes, pssh_or_wrm: Any, license_type: str = "STREAMING", privacy_mode: bool = True
+        self, session_id: bytes, pssh_or_wrm: Any, license_type: str = "STREAMING", privacy_mode: bool = True, ask_cache: bool | None = None
     ) -> bytes:
         """Return the license challenge, or b"" when the API already returned every required key."""
         session = self._session(session_id)
@@ -173,7 +173,8 @@ class RemoteCdmApi:
         required = session.get("required_kids") or self._required_kids
 
         # L1/L2 always ask for cached keys first (the API optimises for them); others only once per session.
-        ask_cache = self.device_name in ("L1", "L2") or not session["tried_cache"]
+        if ask_cache is None:
+            ask_cache = self.device_name in ("L1", "L2") or not session["tried_cache"]
         data = self._post("/get-request", self._request_payload(session, init_data, ask_cache))
 
         if data.get("message_type") == "cached-keys" or "cached_keys" in data:

@@ -29,6 +29,7 @@ def get_widevine_keys(
     license_certificate: str = None,
     license_request_fn: Callable[[bytes, dict], bytes] | None = None,
     cdm_origin: str | None = None,
+    fresh_license: bool = False,
 ):
     """
     Extract Widevine CONTENT keys (KID/KEY) from a license.
@@ -81,6 +82,7 @@ def get_widevine_keys(
         license_certificate,
         license_request_fn,
         cdm_origin,
+        fresh_license,
     )
 
 
@@ -94,8 +96,9 @@ def _get_widevine_keys(
     license_certificate: str = None,
     license_request_fn: Callable[[bytes, dict], bytes] | None = None,
     cdm_origin: str | None = None,
+    fresh_license: bool = False,
 ):
-    """Extract Widevine keys using local or remote CDM device."""
+    """Extract Widevine keys using local or remote CDM device. *fresh_license*: a remote CDM API must not answer from its own key cache."""
     if license_url is None and license_request_fn is None:
         logger.error("Widevine: no license_url and no license_request_fn — cannot request a license, skipping CDM")
         console.print("[red]No license URL and no custom license request function — skipping CDM extraction.")
@@ -167,8 +170,7 @@ def _get_widevine_keys(
             # Create license challenge
             if isinstance(cdm, RemoteCdmApi) and kid_info and kid_info != "n/a":
                 cdm.set_required_kids([kid_info], session_id)
-            challenge = cdm.get_license_challenge(session_id, PSSH(pssh))
-
+            challenge = cdm.get_license_challenge(session_id, PSSH(pssh), **({"ask_cache": False} if fresh_license and isinstance(cdm, RemoteCdmApi) else {}))
             if not challenge and isinstance(cdm, RemoteCdmApi):
                 for key_obj in cdm.get_keys(session_id):
                     if key_obj.type == "CONTENT":

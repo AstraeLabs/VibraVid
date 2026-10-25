@@ -11,7 +11,7 @@ from VibraVid.utils import config_manager
 from .site_loader import load_search_functions
 
 logger = logging.getLogger(__name__)
-_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale", "process"}
+_LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale", "profile", "process"}
 _PROCESS_SWITCHES = ("live_mux", "live_decrypt")
 
 

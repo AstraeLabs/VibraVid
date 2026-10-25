@@ -480,3 +480,25 @@ def test_tvdb_find_by_title_uses_aliases_and_rejects_namesakes(monkeypatch):
 
 def test_base_provider_has_no_title_lookup_by_default():
     assert BaseMetadataProvider().find_by_title("tv", "x") is None
+
+
+def test_generic_episode_titles_are_compared_by_numbering():
+    assert BaseMetadataProvider.generic_episode_numbering("Episode #1.1") == (1, 1)
+    assert BaseMetadataProvider.generic_episode_numbering("Episodio 5") == (None, 5)
+    assert BaseMetadataProvider.generic_episode_numbering("Pilot") is None
+    assert BaseMetadataProvider.generic_episodes_match("Episode #1.1", "Episodio 1", 1, 1)
+    assert BaseMetadataProvider.generic_episodes_match("Episode #1.10", "Episodio 10", 1, 10)
+    assert not BaseMetadataProvider.generic_episodes_match("Episode #1.2", "Episodio 1", 1, 1)
+    assert not BaseMetadataProvider.generic_episodes_match("Episode #2.1", "Episodio 1", 1, 1)
+    assert not BaseMetadataProvider.generic_episodes_match("Pilot", "Episodio 1", 1, 1)
+    assert not BaseMetadataProvider.generic_episodes_match("Episode #1.1", "Un altro episodio", 1, 1)
+
+
+def test_slugify_transliterates_letters_nfkd_drops():
+    assert tmdb_client._slugify("Memoriæ") == "memoriae"
+    assert tmdb_client._slugify("Œuvre") == "oeuvre"
+    assert tmdb_client._slugify("Straße") == "strasse"
+    assert tmdb_client._slugify("Øresund") == "oresund"
+    assert tmdb_client._slugify("Đorđe") == "dorde"
+    assert tmdb_client._slugify("Łódź") == "lodz"
+    assert tmdb_client._slugify("Þór") == "thor"

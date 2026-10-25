@@ -208,7 +208,7 @@ class ConfigAccessor:
         # Check if the section and key exist
         if section not in self._config_dict:
             if default is not _MISSING:
-                logger.info(f"Section '{section}' not found in {self._cache_prefix} configuration, returning default.")
+                logger.debug(f"Section '{section}' not found in {self._cache_prefix} configuration, returning default.")
                 return default
 
             # Attempt repair only once per session to avoid repeated network calls

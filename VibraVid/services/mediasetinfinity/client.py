@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import re
+import sys
 import threading
 import time
 import uuid
@@ -62,7 +63,7 @@ class MediasetAPI:
             login_token = config_manager.login.get(conf["login_key"], "adminBeToken", default=None)
 
         if not (login_token and _is_token_valid(login_token)):
-            login_token = self.refresh_betoken() or login_token
+            login_token = self.refresh_betoken() or self.login_with_tv_code() or login_token
 
         if login_token:
             if _is_token_valid(login_token):
@@ -151,21 +152,17 @@ class MediasetAPI:
             self.sid = data.get("sid", self.client_id)
             return data["beToken"]
 
-    def refresh_betoken(self):
-        """Exchange the stored caToken + persona id for a fresh 24h beToken and cache it on disk."""
-        login_key = self.conf["login_key"]
-        section = config_manager.login.get_section(login_key)
-        acd = section.get("rtilogin_acd") or {}
-        ca_token = acd.get("caToken")
-        persona_id = (acd.get("persona") or {}).get("id")
-        url = self.conf.get("persona_login_url")
-        if not (ca_token and persona_id and url):
-            return None
+    def _store_betoken(self, token: str) -> None:
+        """Cache a beToken on disk until it expires."""
+        expiry = _decode_jwt_payload(token).get("exp", 0)
+        disk_cache.save("mediasetinfinity", self.conf["login_key"], {"adminBeToken": token, "expiry": expiry})
+        Login.refresh_ok(expiry)
 
-        Login.refresh_try()
+    def _exchange_persona(self, ca_token: str, persona_id: str):
+        """Exchange caToken + persona id for a 24h beToken and cache it on disk. None if the exchange fails."""
         try:
             with create_client(headers=self.headers) as client:
-                response = client.post(url, params={"sid": self.client_id}, json={"id": persona_id, "caToken": ca_token})
+                response = client.post(self.conf["persona_login_url"], params={"sid": self.client_id}, json={"id": persona_id, "caToken": ca_token})
             data = response.json()
             new_token = (data.get("response") or data).get("beToken")
         except Exception as e:
@@ -177,11 +174,72 @@ class MediasetAPI:
             Login.refresh_failed("caToken invalid/expired?")
             return None
 
-        expiry = _decode_jwt_payload(new_token).get("exp", 0)
-        disk_cache.save("mediasetinfinity", login_key, {"adminBeToken": new_token, "expiry": expiry})
-        logger.debug("beToken refreshed from caToken")
-        Login.refresh_ok(expiry)
+        self._store_betoken(new_token)
+        logger.debug("beToken obtained from caToken")
         return new_token
+
+    def login_with_tv_code(self):
+        """Login via the TV code flow, which requires a console to show the PIN. Returns a beToken or None."""
+        if not self.is_tv_login_enabled():
+            return None
+        
+        login_key = self.conf["login_key"]
+        base = self.conf["tv_login_url"]
+        if not sys.stdin.isatty():
+            logger.warning("tv_login needs a console to show the code: continuing without the account")
+            return None
+
+        Login.refresh_try()
+        try:
+            with create_client(headers=self.headers) as client:
+                action = client.post(f"{base}/create", json={
+                    "action_name": "LOGIN",
+                    "action_url": f"{self.conf['tv_login_page']}?pin={{action_pin}}",
+                    "action_data": {"client_id": self.client_id, "appName": self.app_name},
+                    "action_info": {"msg": "Accedi", "stepCurrent": "1", "stepTotal": "1", "appName": self.app_name},
+                }).json()["response"]
+                valid_until = time.strftime("%H:%M", time.localtime(action["action_ttl"]))
+                console.print(f"[cyan][+][/cyan] [white]Enter the code[/white] [bold green]{action['action_pin']}[/bold green] [white]on[/white] [cyan]{self.conf['tv_login_page']}[/cyan] [white](valid until {valid_until})[/white]")
+
+                while time.time() < action["action_ttl"]:
+                    progress = client.post(f"{base}/pair", json={"action_id": action["action_id"]}).json().get("response") or {}
+                    if progress.get("action_complete"):
+                        break
+                    time.sleep(3)
+                else:
+                    raise TimeoutError("code expired")
+        except Exception as e:
+            logger.debug(f"tv code login failed: {e}")
+            Login.refresh_failed(str(e)[:120] or e.__class__.__name__)
+            return None
+
+        login = (progress.get("action_result") or {}).get("login") or {}
+        account = login.get("account") or {}
+        personas = account.get("personas") or []
+        default = ((account.get("accountSettings") or {}).get("default") or "").rsplit("/", 1)[-1]  # same persona under another host
+        persona = next((p for p in personas if p["id"].rsplit("/", 1)[-1] == default), personas[0] if personas else None)
+        if not (login.get("caToken") and persona):
+            Login.refresh_failed("the site returned no session")
+            return None
+
+        disk_cache.save("mediasetinfinity", f"{login_key}_session", {"caToken": login["caToken"], "persona": {"id": persona["id"]}})
+        return self._exchange_persona(login["caToken"], persona["id"])
+
+    def is_tv_login_enabled(self) -> bool:
+        return bool(self.conf.get("tv_login_url") and config_manager.login.get(self.conf["login_key"], "tv_login", data_type=bool, default=False))
+
+    def refresh_betoken(self):
+        login_key = self.conf["login_key"]
+        section = config_manager.login.get_section(login_key)
+        tv_session = disk_cache.load("mediasetinfinity", f"{login_key}_session") if self.is_tv_login_enabled() else None
+        acd = tv_session or section.get("rtilogin_acd") or {}
+        ca_token = acd.get("caToken")
+        persona_id = (acd.get("persona") or {}).get("id")
+        if not (ca_token and persona_id and self.conf.get("persona_login_url")):
+            return None
+
+        Login.refresh_try()
+        return self._exchange_persona(ca_token, persona_id)
 
     def fetch_html(self, head_only: bool = False):
         headers = dict(self.headers)
