@@ -192,6 +192,7 @@ jobs:
                   --hidden-import=editorconfig \
                   --hidden-import=six \
                   --hidden-import=pathvalidate \
+                  --hidden-import=sqlite3 \
                   --hidden-import=xml.etree.ElementTree \
                   --hidden-import=mutagen \
                   --hidden-import=yaml \
