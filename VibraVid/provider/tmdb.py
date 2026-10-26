@@ -6,6 +6,7 @@ import re
 import time
 from difflib import SequenceMatcher
 
+from curl_cffi.const import CurlECode
 from rich.console import Console
 from unidecode import unidecode
 
@@ -16,6 +17,7 @@ console = Console()
 logger = logging.getLogger(__name__)
 _warned_legacy_login_key = False
 _SECRET_PARAMS = ("api_key",)
+_RETRYABLE_DNS_ERRORS = {CurlECode.COULDNT_RESOLVE_HOST, CurlECode.COULDNT_RESOLVE_PROXY}
 
 
 def _redact_params(params: dict) -> dict:
@@ -93,20 +95,20 @@ class TMDBClient:
                 return data
 
             except Exception as e:
-                if getattr(getattr(e, "response", None), "status_code", None) == 404:
+                status_code = getattr(getattr(e, "response", None), "status_code", None)
+                if status_code == 404:
                     logger.debug(f"TMDB has no {endpoint}")  # e.g. an episode the show does not list yet: not an error
                     return {}
 
-                if attempt < retries:
-                    if hasattr(e, "response") and e.response:
-                        status_code = e.response.status_code
-                        if status_code in [429, 500, 502, 503, 504]:
-                            wait_time = 2**attempt
-                            console.log(
-                                f"[yellow]TMDB API error {status_code}, retrying in {wait_time}s... ({attempt + 1}/{retries})[/yellow]"
-                            )
-                            time.sleep(wait_time)
-                            continue
+                dns_error = getattr(e, "code", None) in _RETRYABLE_DNS_ERRORS
+                if attempt < retries and (dns_error or status_code in {429, 500, 502, 503, 504}):
+                    wait_time = 2**attempt
+                    reason = "DNS lookup failed" if dns_error else f"API error {status_code}"
+                    console.log(
+                        f"[yellow]TMDB {reason}, retrying in {wait_time}s... ({attempt + 1}/{retries})[/yellow]"
+                    )
+                    time.sleep(wait_time)
+                    continue
 
                 console.log(f"[red]Error making request to {endpoint}: {str(e).replace(self.api_key, '***')}[/red]")
                 return {}
