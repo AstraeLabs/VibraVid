@@ -102,6 +102,18 @@ def test_refresh_cached_prints_path_once_per_file(out):
     ]
 
 
+def test_token_saved_by_refresh_is_not_announced_as_cached(out):
+    Login.refresh_try()
+    Login.refresh_ok(1807000000, r"C:\cache\a.json")
+    Login.refresh_cached(r"C:\cache\a.json")  # a later call of the same run reuses the file just written
+    Login.refresh_cached(r"C:\cache\b.json")
+
+    lines = out.export_text().splitlines()
+    assert lines[:2] == ["", "[+] Try refresh token..."]
+    assert lines[2].startswith("[+] Success (valid until ")
+    assert lines[3:] == ["[+] Try refresh token...", r"[/] Use cached token (C:\cache\b.json)"]
+
+
 def test_startup_block_is_wrapped_in_blank_lines(out):
     Login.refresh_try()
     Login.refresh_ok()

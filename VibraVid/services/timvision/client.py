@@ -31,7 +31,7 @@ _CONFIG_TTL = 24 * 3600
 def _load_login() -> dict:
     """Load credentials from login"""
     try:
-        return config_manager.login.get_section("timvision", {})
+        return config_manager.login.get_cookies("timvision")
     except Exception:
         return {}
 
@@ -61,8 +61,7 @@ class TimvisionClient:
             Login.show(Login.ACCOUNT)
 
     def _load_credentials(self):
-        creds = _load_login()
-        self.cookies = creds
+        self.cookies = _load_login()
         cookie_token = self.cookies.get("tokenCMS", "")
         self.token = cookie_token if re.fullmatch(r"[0-9a-fA-F]{32}", cookie_token) else ""
 
@@ -190,7 +189,7 @@ class TimvisionClient:
                     token = response["passToken"]
                     ttl = pass_cfg.get("passTimeout", 28800000) / 1000
                     disk_cache.save("timvision", "pass_token", {"token": token}, ttl=ttl)
-                    Login.refresh_ok(time.time() + ttl)
+                    Login.refresh_ok(time.time() + ttl, disk_cache.cache_path("timvision", "pass_token"))
                     return token
                 logger.warning(f"TIMvision createToken error: {response.get('errorMessage')}")
                 Login.refresh_failed(str(response.get("errorMessage") or "createToken error"))

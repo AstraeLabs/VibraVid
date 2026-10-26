@@ -35,6 +35,7 @@ DOMAIN_REFRESH_INTERVAL_SECONDS = 1800
 
 _MISSING = object()
 _PASTE_PLACEHOLDER = "[paste here]"
+LOGIN_OPTION_KEYS = frozenset({"cdm", "args", "country", "region", "locale", "profile", "process"})
 
 class LoginConfigError(ValueError):
     """A login.toml value the user has to fix: reported as a plain message, without a traceback."""
@@ -329,6 +330,14 @@ class ConfigAccessor:
         if scoped is not None:
             return dict(self._normalize_login_section(scoped))
         return dict(self._normalize_login_section(self._config_dict.get(section) or (default or {})))
+
+    def get_cookies(self, section: str) -> dict[str, str]:
+        """Return the section's cookies as name -> str: service options (process, cdm, args, ...) and empty values are dropped, since a dict value breaks the Cookie header."""
+        return {
+            str(name): value
+            for name, value in self.get_section(section).items()
+            if isinstance(value, str) and value and str(name).strip().lower() not in LOGIN_OPTION_KEYS
+        }
 
     def has_section(self, section: str) -> bool:
         """True if the section exists, even when empty (get_section cannot tell an empty section from a missing one)."""

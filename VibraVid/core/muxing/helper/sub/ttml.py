@@ -275,6 +275,7 @@ def convert_ttml_to_format(
         cumulative_offset = 0.0
         failed_blocks = 0
         _RESTART_TOLERANCE_SECONDS = 5.0
+        exact_blocks: list[tuple[str, float]] = []
 
         for index, block in enumerate(ttml_blocks, start=1):
             try:
@@ -297,19 +298,19 @@ def convert_ttml_to_format(
                     content = content.strip()
                     if content:
                         if has_exact_offsets:
-                            offset = chunk_offsets[index - 1]
-                        else:
-                            block_start = _first_cue_start_seconds(content)
-                            is_restart = block_start is not None and block_start < cumulative_offset - _RESTART_TOLERANCE_SECONDS
-                            offset = cumulative_offset if is_restart else 0.0
+                            exact_blocks.append((content, chunk_offsets[index - 1]))
+                            continue
+
+                        block_start = _first_cue_start_seconds(content)
+                        is_restart = block_start is not None and block_start < cumulative_offset - _RESTART_TOLERANCE_SECONDS
+                        offset = cumulative_offset if is_restart else 0.0
 
                         if offset > 0:
                             content = _shift_subtitle_timestamps(content, offset, target_format)
 
-                        if not has_exact_offsets:
-                            block_end = _last_cue_end_seconds(content)
-                            if block_end is not None:
-                                cumulative_offset = max(cumulative_offset, block_end)
+                        block_end = _last_cue_end_seconds(content)
+                        if block_end is not None:
+                            cumulative_offset = max(cumulative_offset, block_end)
 
                         all_captions.append(content)
 
@@ -317,6 +318,17 @@ def convert_ttml_to_format(
                 failed_blocks += 1
                 console.print(f"[yellow]Warning: Failed to process TTML block {index}/{len(ttml_blocks)}: {e}")
                 continue
+
+        if exact_blocks:
+            # The last block decides for the whole track: a per-chunk (ISM) cue starts near zero while its
+            # chunk offset is large, an absolute (DASH stpp) cue starts right at the chunk offset.
+            last_content, last_offset = exact_blocks[-1]
+            last_start = _first_cue_start_seconds(last_content)
+            already_absolute = last_offset > 0 and last_start is not None and last_start >= last_offset - _RESTART_TOLERANCE_SECONDS
+            for content, offset in exact_blocks:
+                if offset > 0 and not already_absolute:
+                    content = _shift_subtitle_timestamps(content, offset, target_format)
+                all_captions.append(content)
 
         if not all_captions:
             if failed_blocks:

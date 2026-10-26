@@ -50,7 +50,7 @@ class Login:
             elif kind == "refresh_cached":
                 Login.refresh_cached(Login._local_cache_path(args[0]))
             elif kind == "refresh_ok":
-                Login.refresh_ok(args[0])
+                Login.refresh_ok(args[0], Login._local_cache_path(args[1]) if len(args) > 1 else None)
             elif kind == "refresh_failed":
                 Login.refresh_failed(args[0])
 
@@ -113,10 +113,14 @@ class Login:
         Login._result_done()
 
     @staticmethod
-    def refresh_ok(valid_until: float | None = None) -> None:
-        """The refresh worked. `valid_until` (epoch seconds) is the new token's expiry, only when the service tells it."""
-        if Login._recorded("refresh_ok", valid_until):
+    def refresh_ok(valid_until: float | None = None, cache_path: str | None = None) -> None:
+        """The refresh worked; `valid_until` is the timestamp when the token expires, or None if unknown. `cache_path` is the path to the cache file, if any."""
+        if Login._recorded("refresh_ok", valid_until, *([str(cache_path)] if cache_path else [])):
             return
+        
+        if cache_path:
+            Login._cached_seen.add(str(cache_path))
+
         when = f" [green](valid until {time.strftime('%d/%m/%Y', time.localtime(valid_until))})[/green]" if valid_until else ""
         Login._emit(f"[green][+][/green] [white]Success[/white]{when}")
         Login._result_done()
