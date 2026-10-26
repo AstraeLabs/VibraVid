@@ -105,12 +105,16 @@ class VideoSource:
         if self.tmdb_id is None:
             return
 
+        language = urlparse(self.url).path.rstrip("/").rsplit("/", 1)[-1]
+        if language not in {"it", "en"}:
+            language = "it"
+
         if self.is_series:
             if self.season_number is None or self.episode_number is None:
                 return
-            api_url = f"https://vixsrc.to/api/tv/{self.tmdb_id}/{self.season_number}/{self.episode_number}?lang=it"
+            api_url = f"https://vixsrc.to/api/tv/{self.tmdb_id}/{self.season_number}/{self.episode_number}?lang={language}"
         else:
-            api_url = f"https://vixsrc.to/api/movie/{self.tmdb_id}?lang=it"
+            api_url = f"https://vixsrc.to/api/movie/{self.tmdb_id}?lang={language}"
 
         client = create_client(headers=self.headers)
         try:

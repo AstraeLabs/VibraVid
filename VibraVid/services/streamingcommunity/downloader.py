@@ -106,6 +106,9 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     episode_path = series_folder(*path_components)
     episode_name = f"{filename}.{extension_output}"
 
+    language = getattr(obj_episode, "provider_language", None) or scrape_serie.provider_language or "it"
+    video_source.url = f"{scrape_serie.base_url.rstrip('/')}/{language}"
+
     resolved_via_tmdb = False
     if tmdb_client.api_key is not None:
         try:

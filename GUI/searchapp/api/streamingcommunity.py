@@ -161,6 +161,8 @@ class StreamingCommunityAPI(BaseStreamingAPI):
             if selected is None:
                 return []
             video_id = selected.id
+            language = getattr(selected, "provider_language", None) or language
+            base = f"{self.base_url.rstrip('/')}/{language}"
         source = VideoSource(base, not media_item.is_movie, media_item.id)
         source.get_iframe(video_id)
         source.get_content()

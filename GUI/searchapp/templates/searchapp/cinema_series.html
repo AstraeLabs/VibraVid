@@ -190,6 +190,7 @@
 							<span class="cn-ep-txt">
 								<span class="cn-ep-n">
 									{% if series.is_album %}{{ episode.number }}.{% else %}Episode {{ episode.number }}{% endif %}
+									{% if episode.language_list %}<span title="Available provider catalogs"> · Catalog: {% for lang in episode.language_list %}{{ lang|upper }}{% if not forloop.last %}/{% endif %}{% endfor %}</span>{% endif %}
 								</span>
 								{% if episode.name %}<span class="cn-ep-name">{{ episode.name }}</span>{% endif %}
 								<span class="cn-ep-desc" hidden></span>
