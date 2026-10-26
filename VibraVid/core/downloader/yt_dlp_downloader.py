@@ -18,8 +18,22 @@ from VibraVid.setup import get_yt_dlp_path
 logger = logging.getLogger(__name__)
 console = Console()
 
-
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+_COOKIES_FROM_BROWSER_ENV = "VIBRAVID_YTDLP_COOKIES_FROM_BROWSER"
+_COOKIES_FILE_ENV = "VIBRAVID_YTDLP_COOKIEFILE"
+
+
+def _cookie_args(cookies_from_browser: str | None = None, cookies_file: str | None = None) -> list[str]:
+    """Build yt-dlp's cookie flags, falling back to the VIBRAVID_YTDLP_* environment variables."""
+    browser = cookies_from_browser or os.environ.get(_COOKIES_FROM_BROWSER_ENV)
+    cookie_file = cookies_file or os.environ.get(_COOKIES_FILE_ENV)
+
+    args: list[str] = []
+    if browser:
+        args.extend(["--cookies-from-browser", browser])
+    if cookie_file:
+        args.extend(["--cookies", cookie_file])
+    return args
 
 
 class YTDLPDownloader:
@@ -32,6 +46,8 @@ class YTDLPDownloader:
         filename: str | None = None,
         headers: dict | None = None,
         cookies: dict | None = None,
+        cookies_from_browser: str | None = None,
+        cookies_file: str | None = None,
         proxy: str | None = None,
         format_spec: str | None = None,
         subtitle_langs: list[str] | None = None,
@@ -43,6 +59,7 @@ class YTDLPDownloader:
         audio_format: str | None = None,
         audio_quality: str | None = None,
         playlist_end: int | None = None,
+        extractor_args: list[str] | None = None,
         download_id: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -52,6 +69,8 @@ class YTDLPDownloader:
         self.filename = strip_media_tokens(f"{filename}.tmp")[: -len(".tmp")] if filename else filename
         self.headers = headers or {}
         self.cookies = cookies
+        self.cookies_from_browser = cookies_from_browser or os.environ.get(_COOKIES_FROM_BROWSER_ENV)
+        self.cookies_file = cookies_file or os.environ.get(_COOKIES_FILE_ENV)
         self.proxy = proxy
         self.format_spec = format_spec or "bestvideo+bestaudio/best"
         self.subtitle_langs = subtitle_langs or []
@@ -63,13 +82,21 @@ class YTDLPDownloader:
         self.audio_format = audio_format
         self.audio_quality = audio_quality
         self.playlist_end = playlist_end
+        self.extractor_args = extractor_args or []
         self.download_id = download_id
         self.extra_args = kwargs
         self._yt_dlp_last_pct: dict[str, float] = {}
         self._yt_dlp_speed_hist: list[float] = []
 
     @classmethod
-    def extract_info(cls, target: str, timeout: int = 60) -> dict | None:
+    def extract_info(
+        cls,
+        target: str,
+        timeout: int = 60,
+        cookies_from_browser: str | None = None,
+        cookies_file: str | None = None,
+        extractor_args: list[str] | None = None,
+    ) -> dict | None:
         """Metadata of a URL or ``ytsearchN:query`` as yt-dlp's single JSON object, or None on failure.
 
         Flat: playlist/search entries are listed (id, title, uploader, duration, ...) without resolving each video.
@@ -80,7 +107,11 @@ class YTDLPDownloader:
             console.print("[red]yt-dlp binary not found. Run with --binary-update or --dep to check.")
             return None
 
-        cmd = [yt_dlp, "--flat-playlist", "--dump-single-json", "--no-warnings", target]
+        cmd = [yt_dlp, "--flat-playlist", "--dump-single-json", "--no-warnings"]
+        cmd.extend(_cookie_args(cookies_from_browser, cookies_file))
+        for extractor_arg in extractor_args or []:
+            cmd.extend(["--extractor-args", extractor_arg])
+        cmd.append(target)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -157,6 +188,11 @@ class YTDLPDownloader:
         if self.cookies:
             cookie_str = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
             cmd.extend(["--add-header", f"Cookie:{cookie_str}"])
+
+        cmd.extend(_cookie_args(self.cookies_from_browser, self.cookies_file))
+
+        for extractor_arg in self.extractor_args:
+            cmd.extend(["--extractor-args", extractor_arg])
 
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])

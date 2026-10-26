@@ -36,8 +36,11 @@ args = ""
 process = { live_mux = true, live_decrypt = true }
 
 [crunchyroll]
+tv_login = false
 cookies = '''[paste here]'''
 device_id = ""
+tv_client_id = ""
+tv_client_secret = ""
 cdm = ""
 args = ""
 process = { live_mux = true, live_decrypt = true }

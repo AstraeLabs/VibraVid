@@ -15,6 +15,7 @@ from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.drm import manager as drm_manager_mod
 from VibraVid.core.drm.key_fallback import KeyFallback
 from VibraVid.core.drm.manager import DRMManager
+from VibraVid.utils.vault import default as default_module
 from VibraVid.utils.vault.base import BaseVault
 from VibraVid.utils.vault.default import Vault_di_default
 
@@ -45,6 +46,12 @@ class FakeSession:
     def post(self, url, json=None):
         self.posts.append((url, json))
         return FakeResponse(self.reply)
+
+
+@pytest.fixture(autouse=True)
+def server_writes(monkeypatch):
+    """These tests exercise the server vault's write path, which SAVE_KEYS switches off by default."""
+    monkeypatch.setattr(default_module, "SAVE_KEYS", True)
 
 
 def make_default_vault(reply):

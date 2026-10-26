@@ -2,7 +2,6 @@
 
 import os
 import time
-from urllib.parse import parse_qs, urlparse
 
 from rich.console import Console
 
@@ -20,10 +19,8 @@ from .scrapper import GetSerieInfo
 
 console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
-CR_LICENSE_URL = "https://www.crunchyroll.com/license/v1/license/widevine"
 
-
-def _make_dash_audio_track(mpd_url: str, locale: str, headers: dict, license_headers: dict) -> dict:
+def _make_dash_audio_track(mpd_url: str, locale: str, headers: dict, license_headers: dict, license_url: str) -> dict:
     """Build an ``other_tracks`` audio entry for DASH_Downloader."""
     return {
         "type": "audio",
@@ -31,7 +28,7 @@ def _make_dash_audio_track(mpd_url: str, locale: str, headers: dict, license_hea
         "url": mpd_url,
         "language": locale,
         "headers": headers,
-        "license_url": CR_LICENSE_URL,
+        "license_url": license_url,
         "license_headers": license_headers,
     }
 
@@ -125,15 +122,14 @@ def parse_select_audio_filter(select_audio: str) -> list:
 def _make_license_request_fn(client: CrunchyrollClient, content_id: str):
     """``license_request_fn`` that gets the license through a playback session opened just for it."""
     def license_request_fn(challenge: bytes, item: dict) -> bytes:
-        return client.request_license(content_id, challenge, CR_LICENSE_URL)
+        return client.request_license(content_id, challenge, client.license_url)
 
     return license_request_fn
 
 
-def _build_license_headers(base_headers: dict, content_id: str, mpd_url: str, fallback_token: str) -> dict:
+def _build_license_headers(client: CrunchyrollClient, base_headers: dict, content_id: str, mpd_url: str, fallback_token: str) -> dict:
     """Build Widevine license request headers."""
-    query_params = parse_qs(urlparse(mpd_url).query)
-    playback_guid = (query_params.get("playbackGuid") or [fallback_token])[0]
+    playback_guid = client.license_video_token(mpd_url, fallback_token)
 
     headers = base_headers.copy()
     headers.update(
@@ -203,23 +199,26 @@ def download_film(select_title: Entries) -> str:
                 console.print(f"[yellow]Locale {locale} not available for this film")
                 continue
             
-            ex_license_hdrs = _build_license_headers(ex_hdrs, guid, ex_mpd_url, ex_token)
-            extra_audio_tracks.append(_make_dash_audio_track(ex_mpd_url, locale, ex_hdrs, ex_license_hdrs))
+            ex_license_hdrs = _build_license_headers(client, ex_hdrs, guid, ex_mpd_url, ex_token)
+            extra_audio_tracks.append(_make_dash_audio_track(ex_mpd_url, locale, ex_hdrs, ex_license_hdrs, client.license_url))
         except Exception as e:
             console.print(f"[yellow]Error fetching audio {locale}: {e}")
 
     if extra_audio_tracks:
         console.print(f"[dim]Extra audio: {[v['language'] for v in extra_audio_tracks]}")
 
-    license_headers = _build_license_headers(mpd_headers, main_id, mpd_url, token)
+    license_headers = _build_license_headers(client, mpd_headers, main_id, mpd_url, token)
     other_tracks = _subtitles_to_other_tracks(mpd_list_sub)
     other_tracks.extend(extra_audio_tracks)
+    license_url = client.license_url
+    mpd_content = client.cached_manifest(mpd_url)
     client.close()
 
     return DASH_Downloader(
         mpd_url=mpd_url,
+        mpd_content=mpd_content,
         mpd_headers=mpd_headers,
-        license_url=CR_LICENSE_URL,
+        license_url=license_url,
         license_headers=license_headers,
         other_tracks=other_tracks or None,
         output_path=os.path.join(movie_path, movie_name),
@@ -278,7 +277,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, main_guid)
     audio_locale = main_locale or audio_locale
     all_subtitles = _merge_subtitles(mpd_list_sub, [])
-    license_headers = _build_license_headers(mpd_headers, main_id, mpd_url, token)
+    license_headers = _build_license_headers(client, mpd_headers, main_id, mpd_url, token)
 
     # Fetch extra audio tracks for the remaining preferred locales
     extra_locales = []
@@ -299,7 +298,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
                 console.print(f"[yellow]Locale {locale} not available for this episode")
                 continue
             
-            ex_license_hdrs = _build_license_headers(ex_hdrs, guid, ex_mpd_url, ex_token)
+            ex_license_hdrs = _build_license_headers(client, ex_hdrs, guid, ex_mpd_url, ex_token)
             extra_locales.append(
                 {
                     "locale": locale,
@@ -324,9 +323,10 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         main_license_headers=license_headers,
         extra_locales=extra_locales,
         subtitles=all_subtitles,
-        license_url=CR_LICENSE_URL,
+        license_url=client.license_url,
         main_content_id=main_id,
         license_request_factory=lambda content_id: _make_license_request_fn(client, content_id),
+        manifest_text_fn=client.cached_manifest,
     )
 
     if not manifest_json:
@@ -340,7 +340,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         mpd_content=manifest_json,
         mpd_headers=mpd_headers,
         key=merged_keys,
-        license_url=CR_LICENSE_URL,
+        license_url=client.license_url,
         chapters=chapters or None,
         output_path=os.path.join(title_path, title_name),
     ).start()

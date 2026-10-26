@@ -1,3 +1,6 @@
+# 26.10.26
+# Deprecated
+
 """Migration runs without importing the application, accessing the network, or executing hooks."""
 
 import json

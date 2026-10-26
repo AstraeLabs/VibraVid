@@ -1,3 +1,6 @@
+# 26.10.26
+# Deprecated
+
 """Offline, explicit migration of legacy JSON configuration. No application imports."""
 
 import argparse

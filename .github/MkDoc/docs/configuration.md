@@ -398,6 +398,15 @@ token = ""
 | `log_engine_output` | `false` | Log the decrypt engine's stdout/stderr (verbose). CLI: `--log-decryptor-output` |
 | `vault` | - | External key store(s), queried before CDM extraction |
 
+### Local vault
+
+```toml
+[DRM.vault.local]
+enabled = true
+```
+
+Every key is also saved in a SQLite file per service, `.cache/services/<service>/vault.db` (table `keys`: `kid`, `key`, `license_url`, `pssh`, `created_at`, `synced_at`), and looked up there first. A `kid` + license + `pssh` already stored is never overwritten. Nothing is written while a remote request is served.
+
 ### Multiple / self-hosted DRM vaults
 
 One `[DRM.vault.<name>]` table per vault, queried in declaration order until every KID is resolved.

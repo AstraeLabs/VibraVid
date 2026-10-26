@@ -155,6 +155,9 @@ log_engine_output = false
 url = "https://drm-db.server66.workers.dev"
 token = ""
 
+[DRM.vault.local]
+enabled = false
+
 # Extra vault (remove the # to enable):
 # [DRM.vault.myvault]
 # url = "https://drm.example.com"
