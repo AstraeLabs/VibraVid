@@ -195,6 +195,7 @@
     }
 
     function collect(form) {
+        window.CinemaAudio?.prepareForm(form);
         const data = new FormData(form);
         data.delete("csrfmiddlewaretoken");
         // Same picker the download buttons read (see quality.js).

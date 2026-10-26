@@ -3,13 +3,27 @@
 import logging
 import re
 from collections.abc import Iterable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from VibraVid.core.muxing.hybrid import probe_media_file
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.velora.downloader import MediaDownloader as ManualMediaDownloader
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _auxiliary_track_context():
+    previous = (context_tracker.audio_filter, context_tracker.video_quality, context_tracker.manual_tracks)
+    context_tracker.audio_filter = None
+    context_tracker.video_quality = None
+    context_tracker.manual_tracks = False
+    try:
+        yield
+    finally:
+        context_tracker.audio_filter, context_tracker.video_quality, context_tracker.manual_tracks = previous
 
 
 def _safe_token(value: str, default: str = "track") -> str:
@@ -157,7 +171,7 @@ def download_other_tracks(
             url=url,
             output_dir=str(track_dir),
             filename=track_filename,
-            headers=headers or {},
+            headers=track.get("headers") or headers or {},
             key=normalized_keys,
             cookies=cookies or {},
             download_id=None,
@@ -169,7 +183,8 @@ def download_other_tracks(
         downloader.custom_filters = {**_kind_to_filters(kind, tag, quality), "dv_auto": False}
 
         try:
-            downloader.parse_stream(show_table=False)
+            with _auxiliary_track_context():
+                downloader.parse_stream(show_table=False)
             if kind == "video" and tag:
                 # Set resolution to the tag label so _prepare_labels shows "Vid DV"
                 tag_up = _safe_token(tag, tag).upper()
@@ -188,7 +203,8 @@ def download_other_tracks(
                         if lang and lang != "und":
                             s.language = lang
 
-            result = downloader.start_download(show_progress=show_progress)
+            with _auxiliary_track_context():
+                result = downloader.start_download(show_progress=show_progress)
         except Exception as exc:
             logger.error(f"Other track download failed ({label}): {exc}", exc_info=True)
             continue
@@ -211,6 +227,12 @@ def download_other_tracks(
         if not out_path.exists():
             logger.error(f"Output path missing for other track: {out_path}")
             continue
+
+        if track.get("single_audio"):
+            from VibraVid.core.muxing.helper.video import get_media_metadata
+            if len(get_media_metadata(str(out_path)).get("audio_tracks") or []) != 1:
+                logger.error("The requested catalog audio is missing or ambiguous: %s", label)
+                continue
 
         size = out_path.stat().st_size
         probe = probe_media_file(str(out_path)) if kind == "video" else {}

@@ -10,6 +10,8 @@ from django.views.decorators.http import require_http_methods
 from searchapp.api import get_api
 from searchapp.api.base import Entries
 
+from VibraVid.core.utils.audio_selection import audio_language_context, normalize_audio_language
+
 from ..forms import DownloadForm
 from ._shared import _run_download_in_thread
 
@@ -90,6 +92,7 @@ def start_download(request: HttpRequest) -> HttpResponse:
     episode = form.cleaned_data.get("episode") or None
     audio_format = form.cleaned_data.get("audio_format") or None
     manual_tracks = form.cleaned_data["manual_tracks"]
+    audio_language = form.cleaned_data["audio_language"]
 
     # Normalize
     if season:
@@ -124,6 +127,8 @@ def start_download(request: HttpRequest) -> HttpResponse:
 
     # Run download
     options = {"manual_tracks": True} if manual_tracks else {}
+    if audio_language:
+        options["audio_language"] = audio_language
     _run_download_in_thread(source_alias, item_payload, season, episode, media_type,
                             audio_format=audio_format, quality=quality, **options)
     return redirect("download_dashboard")
@@ -145,38 +150,58 @@ def available_qualities(request: HttpRequest) -> JsonResponse:
 
         item = Entries(**{k: v for k, v in payload.items() if k in Entries.__dataclass_fields__})
         api = get_api(data.get("source_alias") or "")
-        season = episode = None
-        description = item.name
-        if not item.is_movie:
-            import re
+        try:
+            choice = normalize_audio_language(data.get("audio_language") or payload.get("_audio_language"))
+        except ValueError as exc:
+            return JsonResponse({"qualities": [], "message": str(exc)}, status=400)
+        with audio_language_context(choice):
+            return _inspect_media(api, item, data)
+    except NotImplementedError as exc:
+        return JsonResponse({"qualities": [], "supported": False, "audio_supported": False, "message": str(exc)})
+    except Exception:
+        logger.exception("Unable to discover provider tracks")
+        return JsonResponse({"qualities": [], "message": "Unable to check tracks right now. Retry before downloading."}, status=502)
+
+
+def _inspect_media(api, item, data):
+    """Resolve one sample inside the request's isolated audio selection context."""
+    season = episode = None
+    description = item.name
+    if not item.is_movie:
+        import re
+        season_match = re.match(r"\d+", str(data.get("season") or ""))
+        episode_match = re.match(r"\d+", str(data.get("episode") or ""))
+        if season_match and episode_match:
+            season, episode = int(season_match.group()), int(episode_match.group())
+        else:
             seasons = api.get_series_metadata(item) or []
-            season_match = re.match(r"\d+", str(data.get("season") or ""))
             season = int(season_match.group()) if season_match else (seasons[0].number if seasons else None)
             selected = next((s for s in seasons if int(s.number) == season), None)
-            episode_match = re.match(r"\d+", str(data.get("episode") or ""))
             episode = int(episode_match.group()) if episode_match else (
                 selected.episodes[0].number if selected and selected.episodes else None
             )
-            if season is None or episode is None:
-                return JsonResponse({"qualities": [], "message": "No episode is available yet."})
-            description += f" S{season} E{episode}"
-        from VibraVid.core.utils.quality import normalize_quality
-        qualities = set()
-        for candidate in api.get_available_qualities(item, season, episode):
-            try:
-                quality = normalize_quality(candidate)
-            except ValueError:
-                continue
-            if quality and quality != "360p":
-                qualities.add(quality)
-        return JsonResponse({"qualities": sorted(qualities, key=lambda q: int(q[:-1]), reverse=True),
-                             "sample": description,
-                             "message": "For batches, availability is checked again for each episode." if season is not None else ""})
-    except NotImplementedError as exc:
-        return JsonResponse({"qualities": [], "supported": False, "message": str(exc)})
-    except Exception:
-        logger.exception("Unable to discover provider qualities")
-        return JsonResponse({"qualities": [], "message": "Unable to check qualities right now. You can use config or retry."}, status=502)
+        if season is None or episode is None:
+            return JsonResponse({"qualities": [], "audio_supported": True, "audio_languages": [],
+                                 "message": "No episode is available in the selected language."})
+        description += f" S{season} E{episode}"
+    from VibraVid.core.utils.quality import normalize_quality
+    qualities = set()
+    for candidate in api.get_available_qualities(item, season, episode):
+        try:
+            quality = normalize_quality(candidate)
+        except ValueError:
+            continue
+        if quality and quality != "360p":
+            qualities.add(quality)
+    try:
+        audio_languages = api.get_available_audio_languages(item, season, episode)
+        audio_supported = True
+    except (NotImplementedError, AttributeError):
+        audio_languages, audio_supported = [], False
+    return JsonResponse({"qualities": sorted(qualities, key=lambda q: int(q[:-1]), reverse=True),
+                         "audio_languages": audio_languages, "audio_supported": audio_supported,
+                         "sample": description,
+                         "message": "For batches, availability is checked again for each episode." if season is not None else ""})
 
 
 __all__ = ['series_metadata', 'start_download', 'available_qualities']

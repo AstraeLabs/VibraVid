@@ -2,6 +2,8 @@
 
 from django import forms
 
+from VibraVid.core.utils.audio_selection import normalize_audio_language
+
 from .api import get_available_sites, get_site_categories
 
 GLOBAL_ALL_TOKEN = "__all__"
@@ -34,6 +36,7 @@ def get_site_choices():
 
 
 class SearchForm(forms.Form):
+    audio_language = forms.CharField(max_length=35, required=False)
     site = forms.ChoiceField(
         label="Sito",
         widget=forms.Select(
@@ -59,6 +62,12 @@ class SearchForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields["site"].choices = get_site_choices()
 
+    def clean_audio_language(self):
+        try:
+            return normalize_audio_language(self.cleaned_data.get("audio_language"))
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
 
 class DownloadForm(forms.Form):
     source_alias = forms.CharField(widget=forms.HiddenInput)
@@ -68,6 +77,13 @@ class DownloadForm(forms.Form):
     quality = forms.RegexField(regex=r"^(?:[1-9][0-9]{1,3}p)?$", max_length=5, required=False)
     audio_format = forms.CharField(max_length=16, required=False, label="Formato audio")
     manual_tracks = forms.BooleanField(required=False)
+    audio_language = forms.CharField(max_length=35, required=False)
+
+    def clean_audio_language(self):
+        try:
+            return normalize_audio_language(self.cleaned_data.get("audio_language"))
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
 
     def clean_quality(self):
         from VibraVid.core.utils.quality import normalize_quality

@@ -25,6 +25,7 @@ class Entries:
     poster: str | None = None
     year: int | None = None
     provider_language: str | None = None
+    catalog_languages: list[str] | None = None
     tmdb_id: str | None = None
     raw_data: dict[str, Any] | None = None
     audio_format: str | None = None
@@ -183,6 +184,10 @@ class BaseStreamingAPI(ABC):
     def get_available_qualities(self, media_item: Entries, season: int | None = None, episode: int | None = None) -> list[str]:
         """Return only provider-confirmed resolutions for this exact video."""
         raise NotImplementedError("This provider does not expose video quality discovery yet")
+
+    def get_available_audio_languages(self, media_item: Entries, season=None, episode=None) -> list[dict]:
+        """Inspect actual audio tracks, without downloading video or returning media URLs."""
+        raise NotImplementedError("Audio languages will be checked when the manifest is loaded for download")
 
     @property
     def supports_quality_discovery(self) -> bool:

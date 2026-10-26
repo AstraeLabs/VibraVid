@@ -12,6 +12,7 @@ from VibraVid.core.manifest.stream import track_label
 from VibraVid.core.muxing.helper.sub import extract_embedded_cc
 from VibraVid.core.muxing.helper.video.hybrid import split_other_tracks
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.core.utils.language import resolve_iso639_2
 from VibraVid.core.velora.util.formatting import (
     parse_max_segments as _parse_max_segments,
 )
@@ -61,6 +62,8 @@ class HLS_Downloader(BaseDownloader):
         custom_filters: dict | None = None,
         display_selected_only: bool = False,
         ad_decision_fn: Callable[[str, str | None, dict | None], dict] | None = None,
+        embedded_audio_language: str | None = None,
+        required_audio_languages: list[str] | None = None,
     ):
         """
         Parameters:
@@ -109,6 +112,8 @@ class HLS_Downloader(BaseDownloader):
         self.max_time = _parse_max_time(max_time if max_time is not None else context_tracker.max_time)
         self.other_tracks = other_tracks or []
         self.custom_filters = custom_filters or None
+        self.embedded_audio_language = embedded_audio_language
+        self.required_audio_languages = required_audio_languages or []
         self.display_selected_only = display_selected_only
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
@@ -127,6 +132,15 @@ class HLS_Downloader(BaseDownloader):
         logger.info(f"Initialized HLS_Downloader with URL: {self.m3u8_url}, License URL: {self.license_url}, DRM Pref: {self.drm_preference}, Max Segments: {self.max_segments}, Max Time: {self.max_time}")
 
         self.drm_manager = DRMManager.for_site(context_tracker.site_name)
+        if context_tracker.audio_filter and self.required_audio_languages and output_path:
+            output_path = str(output_path)
+            audio_tag = "+".join(dict.fromkeys(resolve_iso639_2(language).upper()
+                                             for language in self.required_audio_languages))
+            if "%(language)" in output_path:
+                output_path = output_path.replace("%(language)", audio_tag)
+            elif f"[{audio_tag}]" not in os.path.basename(output_path):
+                stem, ext = os.path.splitext(output_path)
+                output_path = f"{stem} [{audio_tag}]{ext}"
         super().__init__(output_path, "_hls_temp", sanitize_path=sanitize_path)
 
     def _collect_drm_from_streams(self, streams: list) -> dict[str, list[dict]]:
@@ -369,7 +383,9 @@ class HLS_Downloader(BaseDownloader):
             ad_decision_fn=self.ad_decision_fn,
         )
         self.media_downloader.other_tracks = self.other_tracks
-        self.media_downloader.custom_filters = self.custom_filters
+        self.media_downloader.custom_filters = {
+            **(self.custom_filters or {}), "embedded_audio_language": self.embedded_audio_language,
+        }
         self.media_downloader.display_selected_only = self.display_selected_only
         self.media_downloader.hls_enc_override = self.hls_enc_override
         other_videos, other_audios, other_subtitles = split_other_tracks(self.other_tracks)
@@ -392,7 +408,7 @@ class HLS_Downloader(BaseDownloader):
             return no_match
 
         self._embedded_cc_streams = self._collect_embedded_cc(streams)
-        if not self._embedded_cc_streams:
+        if not self._embedded_cc_streams and not self.embedded_audio_language:
             # The streaming-mux fast path builds a plain ffmpeg command with no
             # per-input filtering -- embedded CEA-608/708 captions need the
             # extraction step _join_media_ffmpeg() does, so skip the fast path
@@ -438,3 +454,15 @@ class HLS_Downloader(BaseDownloader):
 
         # ── Guards → merge → finalize (shared tail)
         return self._finish_from_status(status)
+
+    def _merge_files(self, status: dict) -> str | None:
+        merged = super()._merge_files(status)
+        required = getattr(self, "required_audio_languages", None) or []
+        if merged and required:
+            from VibraVid.core.muxing.helper.video import get_media_metadata
+            from VibraVid.core.utils.audio_selection import matches_audio_language
+            actual = [track.get("language") for track in get_media_metadata(merged).get("audio_tracks") or []]
+            if not actual or any(not matches_audio_language(actual, language) for language in required):
+                self.error = "The final file does not contain every requested available audio track"
+                return None
+        return merged

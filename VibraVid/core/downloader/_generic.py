@@ -1090,7 +1090,7 @@ class Generic_Downloader(BaseDownloader):
     def _select(self, parsed: list[tuple[MediaDownloader, dict[str, Any]]]) -> list:
         f = self.custom_filters
         v = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        a = context_tracker.audio_filter or f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
         sub = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         # Sources with an explicit role bypass attribute-based dedup/selection,
@@ -1146,6 +1146,9 @@ class Generic_Downloader(BaseDownloader):
             )
             self._no_match = False
             download_tracker.update_status(selection_id, "Preparing selected tracks")
+
+        from VibraVid.core.utils.audio_selection import enforce_audio_selection
+        enforce_audio_selection(role_streams + pool)
 
         # If a DV companion was selected (select_video="hybrid" or CODEC.dv_auto),
         # keep a reference to it for special handling in the download/muxing phases.

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager, contextmanager
 
 import ua_generator
 from curl_cffi import requests
-from curl_cffi.const import CurlHttpVersion
+from curl_cffi.const import CurlECode, CurlHttpVersion, CurlOpt
 from curl_cffi.requests.impersonate import REAL_TARGET_MAP
 
 from VibraVid.utils import config_manager
@@ -216,6 +216,12 @@ def get_with_retry(session: requests.Session, url: str, retries: int | None = No
 
         if attempt >= retries:
             raise exc
+        code = getattr(exc, "code", None)
+        if code in {CurlECode.COULDNT_RESOLVE_HOST, CurlECode.COULDNT_RESOLVE_PROXY} or (
+            code == CurlECode.OPERATION_TIMEDOUT and "resolv" in str(exc).lower()
+        ):
+            # libcurl 8.16–8.21 caches transient DNS failures; retry the resolver itself.
+            session.curl.setopt(CurlOpt.DNS_CACHE_TIMEOUT, 0)
         logger.debug(f"GET {url} failed ({exc}), retry {attempt + 1}/{retries}")
         time.sleep(min(0.5 * (attempt + 1), 2.0))
 

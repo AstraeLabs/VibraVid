@@ -1,6 +1,7 @@
 # 06.06.25
 
 
+from VibraVid.core.utils.audio_selection import matches_audio_language, requested_audio_languages
 from VibraVid.services.streamingcommunity import _effective_languages
 from VibraVid.services.streamingcommunity.scrapper import GetSerieInfo
 from VibraVid.utils import config_manager
@@ -26,6 +27,7 @@ class StreamingCommunityAPI(BaseStreamingAPI):
         """Search for content on StreamingCommunity."""
         search_fn = self._get_search_fn()
         database = search_fn(query, get_onlyDatabase=True)
+        self.search_warnings = list(getattr(database, "search_warnings", []))
 
         results = []
         if database and hasattr(database, "media_list"):
@@ -44,6 +46,7 @@ class StreamingCommunityAPI(BaseStreamingAPI):
                     year=item_dict.get("year"),
                     tmdb_id=item_dict.get("tmdb_id"),
                     provider_language=item_dict.get("provider_language"),
+                    catalog_languages=item_dict.get("catalog_languages"),
                     raw_data=item_dict,
                 )
                 results.append(media_item)
@@ -141,11 +144,18 @@ class StreamingCommunityAPI(BaseStreamingAPI):
 
         return seasons if seasons else None
 
-    def get_available_qualities(self, media_item: Entries, season=None, episode=None) -> list[str]:
-        from VibraVid.core.utils.quality import manifest_qualities
+    def _inspection_streams(self, media_item: Entries, season=None, episode=None) -> list:
         from VibraVid.player.vixcloud import VideoSource
+        from VibraVid.services.streamingcommunity.audio import inspect_manifest
 
+        key = (media_item.id, season, episode, tuple(requested_audio_languages()))
+        if getattr(self, "_inspection_key", None) == key:
+            return self._inspection_tracks
         language = media_item.provider_language or "it"
+        requested = requested_audio_languages()
+        available_catalogs = media_item.catalog_languages or [language]
+        language = next((lang for wanted in requested for lang in available_catalogs
+                         if matches_audio_language([lang], wanted)), language)
         base = f"{self.base_url.rstrip('/')}/{language}"
         video_id = media_item.id
         if not media_item.is_movie:
@@ -162,12 +172,45 @@ class StreamingCommunityAPI(BaseStreamingAPI):
                 return []
             video_id = selected.id
             language = getattr(selected, "provider_language", None) or language
+            variants = getattr(selected, "catalog_episodes", {})
+            available_catalogs = list(variants) or [language]
+            language = next((lang for wanted in requested for lang in variants
+                             if matches_audio_language([lang], wanted)), language)
+            video_id = variants.get(language, video_id)
             base = f"{self.base_url.rstrip('/')}/{language}"
         source = VideoSource(base, not media_item.is_movie, media_item.id)
         source.get_iframe(video_id)
         source.get_content()
         playlist = source.get_playlist()
-        return manifest_qualities(playlist) if playlist else []
+        if not playlist:
+            raise ValueError("The provider did not return a video manifest")
+        self._inspection_info = inspect_manifest(playlist, source.headers, language)
+        self._inspection_tracks = self._inspection_info["streams"]
+        self._inspection_catalogs = available_catalogs
+        self._inspection_key = key
+        return self._inspection_tracks
+
+    def get_available_qualities(self, media_item: Entries, season=None, episode=None) -> list[str]:
+        from VibraVid.core.utils.quality import stream_quality
+        return sorted({q for s in self._inspection_streams(media_item, season, episode)
+                       if s.type == "video" and (q := stream_quality(s))}, key=lambda q: int(q[:-1]), reverse=True)
+
+    def get_available_audio_languages(self, media_item: Entries, season=None, episode=None) -> list[dict]:
+        from VibraVid.core.utils.audio_selection import language_code
+        from VibraVid.core.utils.language import resolve_language_display_name
+        languages = {}
+        streams = self._inspection_streams(media_item, season, episode)
+        for stream in streams:
+            if stream.type != "audio":
+                continue
+            code = language_code(stream.resolved_language or stream.language)
+            if code:
+                languages[code] = {"code": code, "name": resolve_language_display_name(code), "source": "manifest"}
+        if getattr(self, "_inspection_info", {}).get("embedded"):
+            for catalog in self._inspection_catalogs:
+                code = language_code(catalog)
+                languages[code] = {"code": code, "name": resolve_language_display_name(code), "source": "catalog"}
+        return list(languages.values())
 
     def start_download(self, media_item: Entries, season: str | None = None, episodes: str | None = None) -> bool:
         """Start downloading from StreamingCommunity."""

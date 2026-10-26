@@ -157,6 +157,8 @@
 			})();
 		</script>
 
+        {{ audio_language_config|json_script:"cn-audio-config" }}
+        <script src="{% static 'searchapp/audio_languages.js' %}"></script>
         <script src="{% static 'searchapp/quality.js' %}"
                 data-quality-url="{% url 'available_qualities' %}"
                 data-download-url="{% url 'start_download' %}"

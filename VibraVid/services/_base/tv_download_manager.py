@@ -101,6 +101,10 @@ def process_season_selection(
     else:
         # Pre-selected mode (from GUI/CLI) - accept a 1-based index (position in the displayed list) first, then fall back to matching an actual season number.
         def _resolve_season_num(num: int) -> None:
+            if context_tracker.audio_filter:
+                if num in available_numbers:
+                    list_season_select.append(num)
+                return
             if 1 <= num <= len(seasons_list):
                 list_season_select.append(seasons_list[num - 1].number)
             elif num in available_numbers:
@@ -271,6 +275,12 @@ def process_episode_download(
             # Map selection to indices
             list_episode_select = []
             for val in list_selection:
+                if context_tracker.audio_filter:
+                    exact = next((idx for idx, ep in enumerate(episodes, 1)
+                                  if _episode_number(ep, idx) == val), None)
+                    if exact is not None:
+                        list_episode_select.append(exact)
+                    continue
                 # 1. Check if it's a valid index (1-based)
                 if 1 <= val <= len(episodes):
                     list_episode_select.append(val)

@@ -63,6 +63,11 @@ def add_to_watchlist(request: HttpRequest) -> HttpResponse:
 
     try:
         item_payload = json.loads(item_payload_raw)
+        from VibraVid.core.utils.audio_selection import normalize_audio_language
+        audio_language = normalize_audio_language(request.POST.get("audio_language") or item_payload.get("_audio_language"))
+        if audio_language:
+            item_payload["_audio_language"] = audio_language
+            item_payload_raw = json.dumps(item_payload)
         name = item_payload.get("name")
         poster = item_payload.get("poster")
         tmdb_id = item_payload.get("tmdb_id")

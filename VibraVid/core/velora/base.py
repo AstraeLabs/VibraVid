@@ -487,7 +487,7 @@ class BaseMediaDownloader:
         f = self.custom_filters or {}
         requested_quality = context_tracker.video_quality
         v_cfg = "best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        a_cfg = context_tracker.audio_filter or f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
         s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         def _pref(key: str, default: bool = False, section: str = "DOWNLOAD") -> bool:
@@ -520,6 +520,9 @@ class BaseMediaDownloader:
             if not any(s.type == "video" for s in selectable):
                 raise ValueError(f"Requested quality {requested_quality} is not available for this video")
         self._sv, self._sa, self._ss = selector.apply(selectable)
+        from VibraVid.core.utils.audio_selection import enforce_audio_selection
+        if not context_tracker.defer_manual_tracks:
+            enforce_audio_selection(selectable, f.get("embedded_audio_language"))
         if requested_quality and not any(s.type == "video" and s.selected for s in selectable):
             raise ValueError(f"No video track matches requested quality {requested_quality}")
         self.no_match_skip = selector.no_match
@@ -528,6 +531,8 @@ class BaseMediaDownloader:
         """Return the active selection filter for *track_type*, preferring custom_filters over config."""
         cf_key = "subtitle" if track_type == "subtitle" else "audio"
         cfg_key = "select_subtitle" if track_type == "subtitle" else "select_audio"
+        if track_type == "audio" and context_tracker.audio_filter:
+            return context_tracker.audio_filter
         return (self.custom_filters or {}).get(cf_key) or config_manager.config.get("DOWNLOAD", cfg_key) or ""
 
     @staticmethod

@@ -209,6 +209,10 @@ class MP4FileDownloader:
             console.print("[yellow]Download skipped due to configuration.")
             return False
 
+        if (context_tracker.audio_filter and context_tracker.audio_filter != "all" and not self._expected_language
+                and self.close_tracking and not context_tracker.manual_tracks):
+            raise ValueError("This source provides a combined file without selectable audio tracks. Choose a source with audio selection.")
+
         if os.path.exists(self.path):
             console.print("[yellow]File already exists.")
             return False

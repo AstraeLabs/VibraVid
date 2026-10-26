@@ -632,6 +632,14 @@ class ContextTracker:
         self.local.cli_episode_selection = value
 
     @property
+    def audio_filter(self):
+        return getattr(self.local, "audio_filter", None)
+
+    @audio_filter.setter
+    def audio_filter(self, value):
+        self.local.audio_filter = value
+
+    @property
     def output_path(self):
         return getattr(self.local, "output_path", None)
 

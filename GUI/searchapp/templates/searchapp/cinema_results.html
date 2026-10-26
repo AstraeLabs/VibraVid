@@ -32,6 +32,7 @@
 		<input type="text" name="query" value="{{ query }}" required
 		       placeholder="Search again…" autocomplete="off" aria-label="Search again">
 		<input type="hidden" name="site" value="{{ selected_site }}">
+		<input type="hidden" name="audio_language" value="{{ audio_language_config.selection }}">
 		<button class="cn-cta" type="submit">Search</button>
 		<a class="cn-cta is-ghost" href="{% url 'search_page' %}"
 		   style="display:flex;align-items:center">Change scope</a>
@@ -44,6 +45,7 @@
 	{% endif %}
 
 	{% if results %}
+		{% include "searchapp/language_filter.html" %}
 		{% comment %}
 			Le schede compaiono solo per i tipi effettivamente presenti: una
 			ricerca di libri non deve mostrare un filtro "Serie" che non può mai
@@ -68,6 +70,7 @@
 			{% for result in results %}
 				<article class="cn-tile"
 				         data-kind="{{ result.filter_group }}"
+				         data-media-kind="{{ result.media_kind }}"
 				         data-key="{{ result.display_title }}"
 				         data-index="{{ forloop.counter }}"
 				         data-name="{{ result.display_title }}"
@@ -76,6 +79,7 @@
 				         data-site="{{ result.source_alias }}"
 				         data-slug="{{ result.slug|default:'' }}"
 				         data-tmdb-id="{{ result.tmdb_id|default:'' }}"
+				         data-languages="{{ result.catalog_languages }}"
 				         {% if not result.is_movie %}
 				         data-fire="cn-detail-{{ forloop.counter }}"
 				         {% else %}
@@ -129,7 +133,7 @@
 									<button class="cn-mini" type="submit">Download</button>
 								</form>
 							{% elif result.is_movie %}
-								<form id="cn-dl-{{ forloop.counter }}" action="{% url 'start_download' %}" method="post">
+								<form id="cn-dl-{{ forloop.counter }}" action="{% url 'start_download' %}" method="post"{% if result.media_kind == "movie" %} data-audio-prompt{% endif %}>
 									{% csrf_token %}
 									<input type="hidden" name="source_alias" value="{{ result.source_alias }}">
 									<input type="hidden" name="item_payload" value="{{ result.payload_json }}">
@@ -174,6 +178,15 @@
 		<p class="cn-empty" id="cn-nokind" hidden style="padding-left:0">
 			No results of this type.
 		</p>
+		<dialog id="cn-movie-audio-dialog" class="cn-audio-dialog" aria-labelledby="cn-audio-dialog-title" aria-describedby="cn-audio-dialog-movie">
+			<h2 id="cn-audio-dialog-title">Choose download audio</h2>
+			<p id="cn-audio-dialog-movie" class="cn-cap"></p>
+			{% include "searchapp/audio_picker.html" %}
+			<div class="cn-audio-dialog-actions">
+				<button type="button" class="cn-mini" data-audio-cancel>Cancel</button>
+				<button type="button" class="cn-mini is-mark" data-audio-download>Download</button>
+			</div>
+		</dialog>
 	{% else %}
 		<p class="cn-empty" style="padding-left:0">
 			No results for <b>{{ query }}</b>. Try fewer words, or another provider.

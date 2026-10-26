@@ -32,7 +32,7 @@ def search(request: HttpRequest) -> HttpResponse:
         query = request.GET.get('query')
         site = request.GET.get('site')
         if query and site:
-            form = SearchForm({'query': query, 'site': site})
+            form = SearchForm({'query': query, 'site': site, 'audio_language': request.GET.get('audio_language')})
         else:
             return redirect("search_home")
 
@@ -48,7 +48,7 @@ def search(request: HttpRequest) -> HttpResponse:
     if global_sites is not None:
         results, failed = _run_global_search(query, global_sites)
         if failed:
-            messages.warning(request, f"Some sources didn't respond: {', '.join(failed)}")
+            messages.warning(request, f"Some sources didn't respond fully: {', '.join(failed)}")
         return render(
             request,
             "searchapp/cinema_results.html",
@@ -67,6 +67,8 @@ def search(request: HttpRequest) -> HttpResponse:
     try:
         api = get_api(site)
         media_items = api.search(query)
+        for warning in getattr(api, "search_warnings", []):
+            messages.warning(request, warning)
         results = [_media_item_to_display_dict(item, site) for item in media_items]
     except Exception as e:
         messages.error(request, f"Search error: {e}")

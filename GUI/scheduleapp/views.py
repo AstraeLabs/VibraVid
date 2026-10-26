@@ -18,7 +18,7 @@ Status = ScheduledDownload.Status
 
 # Only what the download forms send; anything else in the request is dropped.
 _FORM_FIELDS = (
-    "source_alias", "item_payload", "quality", "audio_format", "season", "episode",
+    "source_alias", "item_payload", "quality", "audio_format", "audio_language", "season", "episode",
     "download_type", "season_number", "selected_episodes", "selected_seasons",
 )
 _MAX_AHEAD = timedelta(days=366)

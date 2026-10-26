@@ -77,6 +77,26 @@ class StreamingCommunityLanguageTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "VPN/DNS connection"):
                 streamingcommunity.title_search("grey")
 
+    def test_partial_catalog_warning_is_cleared_after_recovery(self):
+        base = "https://example.test"
+        italian = Mock(side_effect=[OSError("Connection failed"), OSError("Connection failed"), {"version": "v1"}])
+        title = {"id": 127, "name": "Grey's Anatomy", "type": "tv", "release_date": "2005-03-27"}
+        pages = {f"{base}/it": italian, f"{base}/en": {"version": "v1"},
+                 f"{base}/it/search?q=grey": {"props": {"titles": [title]}},
+                 f"{base}/en/search?q=grey": {"props": {"titles": [title]}}}
+        with (
+            patch.object(streamingcommunity, "site_constants", SimpleNamespace(FULL_URL=base, SITE_NAME="streamingcommunity")),
+            patch.object(streamingcommunity, "_effective_languages", return_value=["it", "en"]),
+            patch.object(streamingcommunity, "create_client", side_effect=lambda headers: _Client(pages, headers)),
+            patch("time.sleep"),
+        ):
+            self.assertEqual(streamingcommunity.title_search("grey"), 1)
+            self.assertIn("IT", streamingcommunity.entries_manager.search_warnings[0])
+            self.assertEqual(streamingcommunity.entries_manager.media_list[0].catalog_languages, ["en"])
+            self.assertEqual(streamingcommunity.title_search("grey"), 1)
+            self.assertEqual(streamingcommunity.entries_manager.search_warnings, [])
+            self.assertEqual(streamingcommunity.entries_manager.media_list[0].catalog_languages, ["it", "en"])
+
     def test_english_only_new_season_is_visible_with_italian_title(self):
         base = "https://example.test"
         title = "/titles/42-greys-anatomy"

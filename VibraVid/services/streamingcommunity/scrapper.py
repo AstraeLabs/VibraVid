@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
 
+from VibraVid.core.utils.audio_selection import matches_audio_language, requested_audio_languages
 from VibraVid.services._base.object import Episode, Season, SeasonManager
 from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
 
@@ -268,6 +269,7 @@ class GetSerieInfo:
                         if num in merged:
                             # already exists from other language -> mark both
                             existing = merged[num]
+                            existing.catalog_episodes[lang] = ep.get("id")
                             if attach_language:
                                 prev_lang = getattr(existing, "language", None)
                                 if prev_lang:
@@ -287,6 +289,7 @@ class GetSerieInfo:
                                 duration=ep.get("duration"),
                                 image=self._episode_image_url(self.base_url, ep),
                                 provider_language=lang,
+                                catalog_episodes={lang: ep.get("id")},
                                 **kwargs,
                             )
 
@@ -323,4 +326,7 @@ class GetSerieInfo:
             if not season.episodes.episodes:
                 self.collect_info_season(season_number)
 
+        wanted = requested_audio_languages()
+        if wanted:
+            return [ep for ep in season.episodes.episodes if any(matches_audio_language(ep.language, code) for code in wanted)]
         return season.episodes.episodes

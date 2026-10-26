@@ -651,6 +651,22 @@ class BaseDownloader:
         if not video_probe and video_path and os.path.exists(video_path):
             video_probe = probe_media_file(video_path)
 
+        embedded_language = getattr(self, "embedded_audio_language", None)
+        if embedded_language:
+            if "audio_tracks" not in (video_probe or {}):
+                video_probe = get_media_metadata(video_path)
+            if len((video_probe or {}).get("audio_tracks") or []) != 1:
+                self.error = "The source does not contain exactly one identifiable embedded audio track"
+                return None
+            audio_tracks.insert(0, {"path": video_path, "language": embedded_language, "name": embedded_language})
+        required_languages = getattr(self, "required_audio_languages", None) or []
+        if required_languages:
+            from VibraVid.core.utils.audio_selection import matches_audio_language
+            actual = [track.get("language") or track.get("name") for track in audio_tracks]
+            if not actual or any(not matches_audio_language(actual, language) for language in required_languages):
+                self.error = "A requested audio track failed to download; the incomplete audio selection was not saved"
+                return None
+
         if other_track_results or (video_probe or {}).get("dolby_vision"):
             hybrid_file = build_hybrid_output(
                 video_track=video_track if isinstance(video_track, dict) else {"path": video_path},

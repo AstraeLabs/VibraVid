@@ -67,12 +67,13 @@ def title_search(query: str) -> int:
         int: The number of unique titles found.
     """
     entries_manager.clear()
+    entries_manager.search_warnings = []
     table_show_manager.clear()
 
     # Dictionary to track unique IDs
-    seen_ids = set()
+    seen_ids = {}
     languages = _effective_languages()
-    loaded_catalogs = 0
+    loaded_catalogs = set()
     last_error = None
 
     for lang in languages:
@@ -111,18 +112,19 @@ def title_search(query: str) -> int:
             console.log(f"[red]Error parsing JSON response ({lang}): {e}")
             continue
 
-        loaded_catalogs += 1
+        loaded_catalogs.add(lang)
         for _i, dict_title in enumerate(data):
             try:
                 title_id = dict_title.get("id")
 
                 # Skip if we've already seen this ID
                 if title_id in seen_ids:
+                    existing = seen_ids[title_id]
+                    if lang not in existing.catalog_languages:
+                        existing.catalog_languages.append(lang)
                     continue
 
                 # Add ID to seen set
-                seen_ids.add(title_id)
-
                 images = dict_title.get("images") or []
                 filename = None
                 preferred_types = ["poster", "cover", "cover_mobile", "background"]
@@ -161,8 +163,7 @@ def title_search(query: str) -> int:
                 if not year:
                     year = dict_title.get("last_air_date") or dict_title.get("release_date")
 
-                entries_manager.add(
-                    Entries(
+                entry = Entries(
                         id=title_id,
                         slug=dict_title.get("slug"),
                         name=dict_title.get("name"),
@@ -170,9 +171,11 @@ def title_search(query: str) -> int:
                         image=image_url,
                         year=year.split("-")[0] if year and "-" in year else "9999",
                         provider_language=lang,
+                        catalog_languages=[lang],
                         tmdb_id=dict_title.get("tmdb_id"),
                     )
-                )
+                entries_manager.add(entry)
+                seen_ids[title_id] = entry
 
             except Exception as e:
                 console.print(f"[red]Error parsing a film entry ({lang}): {e}")
@@ -181,6 +184,11 @@ def title_search(query: str) -> int:
         raise RuntimeError(
             "Unable to load StreamingCommunity catalogs. Check the site or VPN/DNS connection and retry."
         ) from last_error
+    missing = [lang.upper() for lang in languages if lang not in loaded_catalogs]
+    if missing:
+        warning = f"Partial StreamingCommunity results: catalog(s) {', '.join(missing)} unavailable. Retry the search to include those languages."
+        entries_manager.search_warnings.append(warning)
+        console.print(f"[yellow]{warning}")
     return len(entries_manager)
 
 

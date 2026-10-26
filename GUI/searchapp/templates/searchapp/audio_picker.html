@@ -1,0 +1,11 @@
+<div class="cn-audio-picker">
+    <label>Audio
+        <select class="cn-audio-select" aria-label="Audio languages to download">
+            <option value="all">{{ audio_language_config.allLabel|default:"All configured languages" }}</option>
+            {% for language in audio_language_config.languages %}
+            <option value="{{ language.code }}">{{ language.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <span class="cn-audio-result" role="status">Available tracks are checked before downloading.</span>
+</div>

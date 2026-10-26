@@ -6,6 +6,10 @@
 {% block content %}
 <div class="cn-pad cn-seekpage">
 
+	{% for message in messages %}
+		<p class="cn-msg{% if message.tags == 'error' %} is-bad{% elif message.tags == 'warning' %} is-warn{% endif %}">{{ message }}</p>
+	{% endfor %}
+
 	{% comment %}
 		Il form va alla view `search` storica, che resta la sola a parlare coi
 		provider. Metodo GET perché quella view accetta query+site anche da
@@ -20,6 +24,7 @@
 			<button class="cn-cta" type="submit">Search</button>
 		</div>
 		<input type="hidden" name="site" id="cn-site" value="{{ all_token }}">
+		<input type="hidden" name="audio_language" value="{{ audio_language_config.selection }}">
 
 		{% comment %}
 			L'interruttore dei provider sta nella STESSA riga degli ambiti, non
@@ -48,6 +53,7 @@
 		</div>
 
 		<p class="cn-seek-hint" id="cn-scope-hint"></p>
+		{% include "searchapp/language_filter.html" %}
 		<p class="cn-seek-hint cn-extra-line" id="cn-extra-line" hidden></p>
 		<p class="cn-seek-hint cn-extra-line" id="cn-login-line" hidden></p>
 
