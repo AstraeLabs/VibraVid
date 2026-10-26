@@ -7,7 +7,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlparse
 
 from rich.console import Console
 
@@ -204,6 +204,9 @@ def _is_file_url(url: str) -> bool:
 
 
 class DashParser:
+    _AUTH_QUERY_HINTS = ("token", "hmac", "signature", "policy", "key-pair-id", "x-amz-", "auth")
+    _AUTH_QUERY_KEYS = frozenset({"sig", "hdnts", "hdntl", "wmsauthsign", "md5", "expires", "hash-algorithm"})
+
     def __init__(
         self,
         mpd_url: str,
@@ -260,14 +263,17 @@ class DashParser:
             return source_query
         return urlencode(filtered)
 
-    @staticmethod
-    def _inherit_query(segment_url: str, query_suffix: str) -> str:
-        """Append the precomputed *query_suffix* (see ``_compute_query_suffix``)"""
+    @classmethod
+    def _inherit_query(cls, segment_url: str, query_suffix: str) -> str:
+        """Append the precomputed *query_suffix* (see ``_compute_query_suffix``). A segment with its own query keeps it and only gains the manifest's missing auth params (DAZN: template has ``?vod_type=..``, ``dazn-token`` is only on the MPD URL)"""
         if not query_suffix:
             return segment_url
-        if "?" in segment_url:
-            return segment_url
-        return f"{segment_url}?{query_suffix}"
+        if "?" not in segment_url:
+            return f"{segment_url}?{query_suffix}"
+
+        present = {k.lower() for k, _ in parse_qsl(urlparse(segment_url).query, keep_blank_values=True)}
+        extra = [pair for pair in query_suffix.split("&") if (key := unquote(pair.partition("=")[0]).lower()) not in present and (key in cls._AUTH_QUERY_KEYS or any(hint in key for hint in cls._AUTH_QUERY_HINTS))]
+        return f"{segment_url}&{'&'.join(extra)}" if extra else segment_url
 
     def fetch_manifest(self) -> bool:
         start_parsing_time = time.time()

@@ -25,6 +25,9 @@ RUN pip install --no-cache-dir -r GUI/requirements.txt
 # Copy application code
 COPY . .
 
+# Keep migration templates outside the persistent Conf volume.
+RUN cp -r /app/Conf /app/Conf.defaults
+
 # Create required directories and set permissions
 RUN mkdir -p /app/Video /app/tmp /app/logs /app/data /home/appuser/.config && \
     chown -R appuser:appuser /app /home/appuser

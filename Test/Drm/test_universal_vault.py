@@ -12,6 +12,7 @@ from VibraVid.core.drm import manager as drm_manager
 from VibraVid.core.drm.manager import DRMManager
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.utils import config_manager, disk_cache
+from VibraVid.utils.vault import default as default_module
 from VibraVid.utils.vault import default_vault, universal
 from VibraVid.utils.vault.universal import UniversalVault, build_universal_vault
 
@@ -236,6 +237,7 @@ def vault_config(monkeypatch):
 
 @pytest.mark.parametrize("default_keys", [("default",), ("vault_1",), ("default", "vault_1")])
 def test_build_vaults_kinds_and_order(vault_config, monkeypatch, default_keys):
+    monkeypatch.setattr(default_module, "SAVE_KEYS", True)
     monkeypatch.setattr(default_vault, "base_url", "https://drm-db.example")
     vault_config(
         {

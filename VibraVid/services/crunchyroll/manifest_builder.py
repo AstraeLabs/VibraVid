@@ -18,9 +18,9 @@ class _KeyResolver:
     def __init__(self, license_url: str):
         self._dl = DASH_Downloader(license_url=license_url)
 
-    def resolve(self, mpd_url: str, headers: dict, license_headers: dict, license_request_fn=None) -> tuple[list[Stream], list[str]]:
-        """Parse *mpd_url* and return (streams, ["kid:key", ...]). Empty keys if unprotected/unresolved."""
-        parser = DashParser(mpd_url, headers=headers)
+    def resolve(self, mpd_url: str, headers: dict, license_headers: dict, license_request_fn=None, content: str | None = None) -> tuple[list[Stream], list[str]]:
+        """Parse *mpd_url* (or the already downloaded *content*) and return (streams, ["kid:key", ...]). Empty keys if unprotected/unresolved."""
+        parser = DashParser(mpd_url, headers=headers, content=content)
         if not parser.fetch_manifest():
             return [], []
 
@@ -146,10 +146,14 @@ def build_unified_manifest(
     base_url: str = "",
     main_content_id: str | None = None,
     license_request_factory=None,
+    manifest_text_fn=None,
 ) -> tuple[str, list[str]] | tuple[None, None]:
     """Build a single JSON manifest containing all video/audio/subtitle tracks, and a list of KID:key strings for the license request."""
     def _license_fn(content_id):
         return license_request_factory(content_id) if license_request_factory and content_id else None
+
+    def _content(url):
+        return manifest_text_fn(url) if manifest_text_fn else None
 
     resolver = _KeyResolver(license_url)
     merged_keys: dict[str, str] = {}
@@ -160,7 +164,7 @@ def build_unified_manifest(
             kid = entry.split(":", 1)[0].strip().lower()
             merged_keys.setdefault(kid, entry)
 
-    main_streams, main_keys = resolver.resolve(main_mpd_url, main_mpd_headers, main_license_headers, _license_fn(main_content_id))
+    main_streams, main_keys = resolver.resolve(main_mpd_url, main_mpd_headers, main_license_headers, _license_fn(main_content_id), _content(main_mpd_url))
     if not main_streams:
         console.print(f"[red]Could not resolve main locale {main_locale}, aborting manifest build.")
         return None, None
@@ -179,7 +183,7 @@ def build_unified_manifest(
         locale = spec.get("locale")
         console.print(f"[dim]Resolving audio ({locale}) ...")
         try:
-            streams, keys = resolver.resolve(spec.get("mpd_url"), spec.get("headers"), spec.get("license_headers"), _license_fn(spec.get("content_id")))
+            streams, keys = resolver.resolve(spec.get("mpd_url"), spec.get("headers"), spec.get("license_headers"), _license_fn(spec.get("content_id")), _content(spec.get("mpd_url")))
         except Exception as e:
             console.print(f"[yellow]Could not resolve audio {locale}: {e}")
             continue

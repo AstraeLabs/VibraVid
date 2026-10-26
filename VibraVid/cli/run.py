@@ -150,6 +150,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=f"Sites by name:  {available_names}\nSites by index: {available_indices}",
     )
+    parser.add_argument("--migrate-config", nargs="?", metavar="DIR", help="Migrate config.json/login.json locally (default: Conf); use --migrate-config --help for migration options")
 
     # ── Search & selection
     search_group = parser.add_argument_group("Search & selection")
@@ -239,6 +240,9 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N", help="Only process the first N entries of a playlist")
     dl_group.add_argument("--write-subs", dest="write_subs", action="store_true", help="Write subtitles")
     dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true", help="Write auto-generated subtitles")
+    dl_group.add_argument("--cookies-from-browser", dest="cookies_from_browser", metavar="BROWSER", help="Load cookies from a browser for yt-dlp (e.g. chrome, firefox, edge, 'chrome:Profile 1'). Fixes YouTube's 'Sign in to confirm you're not a bot' page.")
+    dl_group.add_argument("--cookies", dest="cookies_file", metavar="FILE", help="Netscape cookies.txt file passed to yt-dlp as --cookies. Alternative to --cookies-from-browser.")
+    dl_group.add_argument("--extractor-args", dest="extractor_args", action="append", metavar="IE:ARGS", help="Extra yt-dlp extractor arguments, repeatable (e.g. 'youtube:player_client=web_safari').")
 
     # ── Utility
     util_group = parser.add_argument_group("Utility")
@@ -250,6 +254,9 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     util_group.add_argument("--check-update", action="store_true", help="Check GitHub Releases for a newer version and exit (no download)")
     util_group.add_argument("--binary-update", dest="binary_update", action="store_true", help="Check all managed binaries, including yt-dlp and Deno, against AstraeLabs/Binary")
     util_group.add_argument("--dep", action="store_true", help="Show dependency paths (config, services, binaries)")
+    util_group.add_argument("--vault-import", dest="vault_import", metavar="PATH", help="Send the keys of a local vault .db (or every vault.db in a folder, e.g. .cache/services) to the server of [DRM.vault.default], then exit. The server skips keys it already has. The service is the folder name under .cache/services/, else --meta-site, else 'generic'")
+    util_group.add_argument("--vault-import-all", dest="vault_import_all", action="store_true", help="With --vault-import: send the keys already imported again too")
+    util_group.add_argument("--vault-import-dry-run", dest="vault_import_dry_run", action="store_true", help="With --vault-import: only count the keys to send")
     util_group.add_argument("--clear", dest="clear", action="store_true", help="Delete the cached login/session tokens of the service selected with -i before running (use after changing account/cookies). Requires -i; never touches other services.")
     util_group.add_argument("--version", action="version", version=f"{__title__} {__version__}")
 
@@ -658,6 +665,11 @@ def main():
         if hasattr(args, "dep") and args.dep:
             show_dependencies(search_functions)
             return
+
+        if getattr(args, "vault_import", None):
+            from VibraVid.utils.vault.importer import run_cli
+
+            sys.exit(run_cli(args.vault_import, getattr(args, "meta_site", None), args.vault_import_all, args.vault_import_dry_run))
 
         clear_error = clear_args_error(args)
         if clear_error:

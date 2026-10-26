@@ -10,6 +10,18 @@ docker-compose down         # Stop (data persists)
 
 For NAS users (Synology, TrueNAS, Unraid, etc.), see the [NAS deployment guide](nas.md) for a step-by-step setup guide including bind mounts and permission configuration.
 
+## Migrating existing JSON configuration
+
+After upgrading from JSON configuration, migrate the files in the mounted `/app/Conf` directory locally. If the upgrade already created TOML defaults, use `--overwrite` to back them up and replace them with your migrated JSON settings:
+
+```bash
+docker compose exec --user appuser vibravid python manual.py --migrate-config /app/Conf --dry-run --overwrite
+docker compose exec --user appuser vibravid python manual.py --migrate-config /app/Conf --overwrite
+docker compose restart vibravid
+```
+
+Run the commands while downloads are idle. Review the dry-run report and any edits made only in TOML before proceeding. The command uses `/app/Conf.defaults` from the image, keeps the JSON originals, and backs up sources and replaced files in a private `migration-*` directory on the same persistent volume. No credentials leave the container. See [Migrating from JSON](configuration.md#migrating-from-json) for mappings and recovery details.
+
 ## Custom paths and ports
 
 Copy the provided template and edit the values you need:

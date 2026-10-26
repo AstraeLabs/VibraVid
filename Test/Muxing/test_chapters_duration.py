@@ -123,5 +123,6 @@ def test_crunchyroll_audio_locale_is_read_from_the_playback_response(playback, e
     client = SimpleNamespace(
         get_streams=lambda _id: {"url": "https://example.test/a.mpd", "token": None, **playback},
         _get_headers=lambda: {},
+        use_tv=False,
     )
     assert cr_client.get_playback_session(client, "GR3VWXP96")[4] == expected

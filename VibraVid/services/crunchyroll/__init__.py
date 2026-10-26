@@ -1,6 +1,7 @@
 # 16.03.25
 
 import re
+import sys
 
 from rich.console import Console
 
@@ -66,10 +67,13 @@ def title_search(query: str) -> int:
 
     device_id = config_manager.login.get("crunchyroll", "device_id", default="")
     etp_rt = config_manager.login.get("crunchyroll", "etp_rt", default="")
-    cached = disk_cache.load("crunchyroll", "token")
-    has_cache = bool(isinstance(cached, dict) and (cached.get("access_token") or cached.get("refresh_token")))
-    if not (device_id or etp_rt or has_cache):
-        console.print("[yellow]\nWarning: Crunchyroll device_id/etp_rt are not set, search will return no results for this site.\n")
+    has_tv_login = bool(config_manager.login.get("crunchyroll", "email", default="") and config_manager.login.get("crunchyroll", "password", default=""))
+    has_cache = any(
+        isinstance(cached, dict) and (cached.get("access_token") or cached.get("refresh_token"))
+        for cached in (disk_cache.load("crunchyroll", "token"), disk_cache.load("crunchyroll", "token_tv"))
+    )
+    if not (device_id or etp_rt or has_cache or has_tv_login or sys.stdin.isatty()):
+        console.print("[yellow]\nWarning: Crunchyroll has no login (TV pair code, email/password or device_id/etp_rt), search will return no results for this site.\n")
         return 0
 
     client = CrunchyrollClient()

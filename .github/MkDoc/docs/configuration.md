@@ -2,6 +2,25 @@
 
 Settings live in `Conf/config.toml` (one section per block below). ARR settings: [ARR Integration](arr.md).
 
+## Migrating from JSON
+
+Upgrading from a version that used `config.json` and `login.json` does not load those files automatically. Run the local migration command in the new version:
+
+```bash
+python manual.py --migrate-config --dry-run
+python manual.py --migrate-config
+```
+
+The installed `vibravid` command and `python -m VibraVid` accept the same options. To migrate another directory, use `--migrate-config /path/to/Conf`; otherwise the normal configuration directory is used, including `VIBRAVID_BASE_PATH`.
+
+If the upgrade already created TOML files, add `--overwrite` to both commands. This explicitly rebuilds each migrated TOML file from local defaults and your JSON settings; review any edits made only in TOML first. Only files with a matching JSON source are migrated. Missing options retain the template defaults.
+
+Migration preserves hooks, maps `extra_args` to `args`, renames `cs_chrome` to `netflix`, fixes the old NOW TV cookie key, and converts cookie/token objects to their TOML representation. Inline remote CDMs move to the named registry; the report flags their changed fallback behavior for review. Unknown settings are retained with a review message; removed options, incompatible types, null values, and conflicting renamed keys are reported without printing credential values.
+
+The command keeps the JSON sources and creates a private `migration-<timestamp>-<unique suffix>` directory inside `Conf` with copies of every source and replaced TOML file. To undo a migration, stop VibraVid and restore the saved TOML files from that directory (or remove newly created TOML files). Keep backups private: they contain your credentials.
+
+Migration runs before application startup, never executes hooks, and makes no network requests. It uses the local default templates shipped with the checkout, installed package, or Docker image. `--defaults-dir /path/to/templates` selects a separate local directory containing `config.toml` and `login.toml`, useful if your checkout's `Conf` files were edited or damaged. Restart the GUI/container after migration so it reloads the files. See [Docker migration](docker.md#migrating-existing-json-configuration) for container commands.
+
 ## TMDB API Key
 
 Optional. A free [TMDB key](https://www.themoviedb.org/settings/api) unlocks the `%(tmdb_*)`, `%(original_title)`, `%(original_language)` and `%(imdb_id)` filename tokens, poster/backdrop artwork (`embed_poster`) and strict TMDB/TVDB matching in [ARR](arr.md). Without it the tokens are dropped from filenames and artwork/matching falls back to the site's own data. One key serves CLI, TUI, GUI and ARR.
@@ -378,6 +397,15 @@ token = ""
 | `bypass_vault_cache` | `false` | Skip the vault lookup and request a fresh license every run |
 | `log_engine_output` | `false` | Log the decrypt engine's stdout/stderr (verbose). CLI: `--log-decryptor-output` |
 | `vault` | - | External key store(s), queried before CDM extraction |
+
+### Local vault
+
+```toml
+[DRM.vault.local]
+enabled = true
+```
+
+Every key is also saved in a SQLite file per service, `.cache/services/<service>/vault.db` (table `keys`: `kid`, `key`, `license_url`, `pssh`, `created_at`, `synced_at`), and looked up there first. A `kid` + license + `pssh` already stored is never overwritten. Nothing is written while a remote request is served.
 
 ### Multiple / self-hosted DRM vaults
 

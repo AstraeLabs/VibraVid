@@ -16,6 +16,7 @@ db_config = config_manager.config.get_dict("DRM", "vault")
 _default_cfg = db_config.get("default") or db_config.get("vault_1") or {}
 VAULT_URL = _default_cfg.get("url", "")
 TOKEN = _default_cfg.get("token", "")
+SAVE_KEYS = True
 
 
 class Vault_di_default(BaseVault):
@@ -48,7 +49,7 @@ class Vault_di_default(BaseVault):
 
     @property
     def is_writable(self) -> bool:
-        return True
+        return SAVE_KEYS
 
     def _post(self, endpoint: str, payload: dict) -> dict | None:
         url = f"{self.base_url}/{endpoint}"
@@ -222,6 +223,9 @@ class Vault_di_default(BaseVault):
         return (self._clean_license_url(license_url) if license_url else None), pssh
 
     def report_wrong_key(self, kid: str, key: str, license_url: str, pssh: str | None = None) -> bool:
+        if not SAVE_KEYS:
+            return False
+
         base_license_url, pssh = self._row_for(kid, key, license_url, pssh)
         if not base_license_url:
             return False
@@ -239,6 +243,9 @@ class Vault_di_default(BaseVault):
 
     def replace_key(self, kid: str, new_key: str, old_key: str, license_url: str, pssh: str | None = None) -> bool:
         """Swap *old_key* (already reported wrong) for *new_key* on its row; a vault with no entry for the KID just stores it."""
+        if not SAVE_KEYS:
+            return False
+
         base_license_url, pssh = self._row_for(kid, old_key, license_url, pssh)
         if not base_license_url:
             return False

@@ -33,24 +33,28 @@ from VibraVid.tui.widgets.topbar import TopBar
 logger = logging.getLogger(__name__)
 
 
-def compact_ranges(numbers: set[int], total: int) -> str:
-    """Compact a set of ints into the CLI DSL: [1,2,3,5] -> '1-3,5'; all -> '*'."""
-    if not numbers:
+def compact_ranges(numbers: set[int | str], total: int) -> str:
+    """Compact a set of numbers into a range expression (e.g. 1,2,3,5,6 -> 1-3,5-6)."""
+    texts = {str(n) for n in numbers}
+    if not texts:
         return ""
-    ordered = sorted(set(numbers))
-    if len(ordered) >= total > 0:
+    if len(texts) >= total > 0:
         return "*"
 
+    ordered = sorted(int(t) for t in texts if t.isdigit())
+    others = sorted(t for t in texts if not t.isdigit())
+    
     parts = []
-    start = prev = ordered[0]
-    for n in ordered[1:]:
-        if n == prev + 1:
-            prev = n
-            continue
+    if ordered:
+        start = prev = ordered[0]
+        for n in ordered[1:]:
+            if n == prev + 1:
+                prev = n
+                continue
+            parts.append(str(start) if start == prev else f"{start}-{prev}")
+            start = prev = n
         parts.append(str(start) if start == prev else f"{start}-{prev}")
-        start = prev = n
-    parts.append(str(start) if start == prev else f"{start}-{prev}")
-    return ",".join(parts)
+    return ",".join(parts + others)
 
 
 class TitleDetailScreen(Screen):

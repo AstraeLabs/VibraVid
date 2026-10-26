@@ -9,7 +9,14 @@ from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.setup import resolve_cdm
 from VibraVid.utils import config_manager
-from VibraVid.utils.vault import DEFAULT_VAULT_KEYS, build_named_vault, build_universal_vault, default_vault
+from VibraVid.utils.vault import (
+    DEFAULT_VAULT_KEYS,
+    LOCAL_VAULT_KEY,
+    build_named_vault,
+    build_universal_vault,
+    default_vault,
+    local_vault,
+)
 from VibraVid.utils.vault._url_utils import clean_license_url
 from VibraVid.utils.vault.universal import CUSTOM_PROTOCOL, resolve_vault_protocol
 
@@ -36,10 +43,15 @@ class DRMManager:
         - "default" (or its old name "vault_1"): the built-in default vault singleton.
         - protocol "custom": your own vault speaking the default vault's REST contract (read + write).
         - protocol "api" / "json" / "query": a third-party vault (read-only unless "save_keys": true).
+        - "local" with enabled = true: the SQLite vault of the service (.cache/services/<service>/vault.db), always first.
         An entry without "protocol" gets it auto-detected once and cached (see utils.vault.universal).
         """
         vaults: list[object] = []
         entries = {name: cfg for name, cfg in config_manager.config.get_dict("DRM", "vault", default={}).items() if isinstance(cfg, dict)}
+        local_cfg = entries.pop(LOCAL_VAULT_KEY, None)
+        if local_cfg and local_cfg.get("enabled", False):
+            vaults.append(local_vault)
+        
         protocols = {name: CUSTOM_PROTOCOL if name in DEFAULT_VAULT_KEYS else resolve_vault_protocol(name, cfg) for name, cfg in entries.items()}
         rest_urls = {str(cfg.get("url") or "") for name, cfg in entries.items() if protocols[name] == CUSTOM_PROTOCOL}
 
@@ -349,11 +361,7 @@ class DRMManager:
 
             logger.info(f"Storing {len(to_store)} {drm_type} key(s) to {name} database")
             try:
-                # local vault does not accept kid_to_label — call with base signature
-                if name == "local":
-                    vdb.set_keys(to_store, base_license_url, pssh_val)
-                else:
-                    vdb.set_keys(to_store, base_license_url, pssh_val, kid_to_label)
+                vdb.set_keys(to_store, base_license_url, pssh_val, kid_to_label)
             except Exception as e:
                 logger.error(f"Failed to sync to {name} (will continue): {e}")
                 console.print(f"[yellow]Warning: Could not sync to {name}: {e}")

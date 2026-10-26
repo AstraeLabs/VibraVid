@@ -10,7 +10,10 @@ python manual.py -i 0 --search "interstellar"                             # site
 python manual.py -i streamingcommunity --search "interstellar" --skip-ts  # skip TS/CAM (StreamingCommunity only)
 python manual.py -i streamingcommunity --search "interstellar" --no-log   # no log file for this run
 python manual.py --dep                                                    # show dependency paths
+python manual.py --migrate-config --dry-run                               # preview local JSON-to-TOML migration
 ```
+
+For JSON configuration upgrades, see [Migrating from JSON](configuration.md#migrating-from-json), including backups and `--overwrite` when TOML files already exist. `python manual.py --migrate-config --help` lists migration options without starting the application.
 
 Site index numbers follow the services that are switched on: services listed in [`hidden_services`](configuration.md#default) are not loaded and the others are renumbered without gaps, so check `-h` for the current numbers (names never change).
 
@@ -169,6 +172,10 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--playlist-end <N>` | Only the first N playlist entries |
 | `--sub-langs <LANGS>` | Subtitle languages (`it,en`); same flag as `-ss` |
 | `--write-subs` / `--write-auto-subs` | Write subtitles / auto-generated subtitles |
+| `--cookies-from-browser <BROWSER>` | Load cookies from a browser (`chrome`, `firefox`, `edge`, `chrome:Profile 1`). Needed for YouTube's "Sign in to confirm you're not a bot" |
+| `--cookies <FILE>` | Netscape `cookies.txt` file (same as yt-dlp's `--cookies`) |
+| `--extractor-args <IE:ARGS>` | Extra yt-dlp extractor arguments, repeatable (e.g. `youtube:player_client=web_safari`) |
+| `VIBRAVID_YTDLP_COOKIES_FROM_BROWSER` / `VIBRAVID_YTDLP_COOKIEFILE` | Environment-variable equivalents, applied to every yt-dlp call (including YouTube search) |
 
 ## Advanced options
 
@@ -180,6 +187,7 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--clear` | Delete the cached login/session tokens of the service given with `-i` (requires `-i`; never touches other services or `login.toml`) |
 | `--key <KID:KEY>` | Hex decryption key, repeatable. With `--down` or a service run (`-i 0 --key <KID>:<KEY>`): used instead of the vault/CDM for the KIDs it covers, other KIDs resolve normally |
 | `--no-vault-cache` | Bypass the vault cache; fresh CDM license request every run |
+| `--vault-import <PATH>` | Send the keys of a [local vault](configuration.md#local-vault) `.db` (or every `vault.db` in a folder, e.g. `.cache/services`) to the server of `[DRM.vault.default]`, then exit. The server skips keys it already has. The service is the folder name under `.cache/services/`, else `--meta-site`, else `generic`. Add `--vault-import-all` to send the already imported keys again, `--vault-import-dry-run` to only count |
 | `--cdm <CDM>` | CDM for this run, above `login.toml` and `config.toml`: a `.wvd`/`.prd` name, `search`, or a remote CDM id. Repeatable, one per DRM system (`--cdm mine.wvd --cdm my_playready`). A JSON list/table is accepted for [quality rules](configuration.md#choosing-the-cdm-cdm). Unknown file/id stops the run before downloading |
 | `--no-decrypt` | Debug: no decryption at all (in-flight or post-download) |
 | `--no-livemux` / `--livemux` | Disable / force the streaming-mux fast path (off by default: turn it on with `process` in `login.toml` or `PROCESS.use_live_mux`) |
