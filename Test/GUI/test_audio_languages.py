@@ -110,3 +110,52 @@ def test_exact_episode_inspection_does_not_reload_every_season(monkeypatch):
     assert response.status_code == 200
     api.get_series_metadata.assert_not_called()
     assert api.get_available_audio_languages.call_args.args[1:] == (23, 1)
+
+
+def test_audio_inspection_does_not_expose_validation_exception(monkeypatch):
+    monkeypatch.setattr(download_module, "get_api", lambda site: Mock())
+    monkeypatch.setattr(download_module, "normalize_audio_language",
+                        Mock(side_effect=ValueError("private configuration path: /secret/audio.toml")))
+    request = RequestFactory().post("/api/available-qualities/", json.dumps({
+        "source_alias": "streamingcommunity", "item_payload": {"name": "Movie", "type": "movie"},
+        "audio_language": "invalid",
+    }), content_type="application/json")
+
+    response = download_module.available_qualities(request)
+
+    assert response.status_code == 400
+    assert json.loads(response.content) == {
+        "qualities": [], "message": "Choose an audio language from the configured languages."
+    }
+
+
+def test_audio_inspection_does_not_expose_provider_exception(monkeypatch):
+    api = SimpleNamespace(get_available_qualities=Mock(
+        side_effect=NotImplementedError("private provider token: secret-value")))
+    monkeypatch.setattr(download_module, "get_api", lambda site: api)
+    request = RequestFactory().post("/api/available-qualities/", json.dumps({
+        "source_alias": "streamingcommunity", "item_payload": {"name": "Movie", "type": "movie"},
+    }), content_type="application/json")
+
+    response = download_module.available_qualities(request)
+
+    assert response.status_code == 200
+    assert json.loads(response.content) == {
+        "qualities": [], "supported": False, "audio_supported": False,
+        "message": "This provider does not support quality inspection."
+    }
+
+
+def test_series_metadata_does_not_expose_provider_exception(monkeypatch):
+    monkeypatch.setattr(download_module, "get_api", Mock(
+        side_effect=RuntimeError("private provider token: secret-value")))
+    request = RequestFactory().post("/series-metadata/", json.dumps({
+        "source_alias": "streamingcommunity", "item_payload": {"name": "Movie", "type": "movie"},
+    }), content_type="application/json")
+
+    response = download_module.series_metadata(request)
+
+    assert response.status_code == 500
+    assert json.loads(response.content) == {
+        "Error get metadata": "Unable to get series metadata right now."
+    }

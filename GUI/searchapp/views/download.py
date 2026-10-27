@@ -72,8 +72,9 @@ def series_metadata(request: HttpRequest) -> JsonResponse:
             "episodesPerSeason": episodes_per_season
         })
 
-    except Exception as e:
-        return JsonResponse({"Error get metadata": str(e)}, status=500)
+    except Exception:
+        logger.exception("Unable to get series metadata")
+        return JsonResponse({"Error get metadata": "Unable to get series metadata right now."}, status=500)
 
 
 @require_http_methods(["POST"])
@@ -152,12 +153,13 @@ def available_qualities(request: HttpRequest) -> JsonResponse:
         api = get_api(data.get("source_alias") or "")
         try:
             choice = normalize_audio_language(data.get("audio_language") or payload.get("_audio_language"))
-        except ValueError as exc:
-            return JsonResponse({"qualities": [], "message": str(exc)}, status=400)
+        except ValueError:
+            return JsonResponse({"qualities": [], "message": "Choose an audio language from the configured languages."}, status=400)
         with audio_language_context(choice):
             return _inspect_media(api, item, data)
-    except NotImplementedError as exc:
-        return JsonResponse({"qualities": [], "supported": False, "audio_supported": False, "message": str(exc)})
+    except NotImplementedError:
+        return JsonResponse({"qualities": [], "supported": False, "audio_supported": False,
+                             "message": "This provider does not support quality inspection."})
     except Exception:
         logger.exception("Unable to discover provider tracks")
         return JsonResponse({"qualities": [], "message": "Unable to check tracks right now. Retry before downloading."}, status=502)
