@@ -79,6 +79,8 @@ embed_poster = false
 # Write .nfo and poster next to the video (Jellyfin/Emby/Kodi)
 write_sidecars = false
 cleanup_tmp_folder = true
+# When true, keep temporary files (.dec, partial chunks, etc.) on error for debugging
+keep_tmp_on_error = false
 # Folder for the temporary download files. Empty = next to the output. Use a fast local disk when the output is a NAS (about 2x the title)
 temp_root = ""
 
@@ -112,9 +114,6 @@ param_final = [
     "-c",
     "copy",
 ]
-# Track order, empty = automatic
-audio_order = []
-subtitle_order = []
 subtitle_disposition_language = "it-it_forced"
 merge_audio = true
 merge_subtitle = true
@@ -147,7 +146,7 @@ cdm = "search"
 
 # Skip the vault and ask the CDM for a fresh key
 bypass_vault_cache = false
-log_engine_output = false
+log_engine_output = true
 
 # Vaults (key databases) are queried in the order they are declared: add as many as you want.
 # protocol: "custom" (default), "api", "json" or "query". Auto-detected if omitted.

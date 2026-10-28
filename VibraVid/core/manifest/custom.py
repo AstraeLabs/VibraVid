@@ -188,6 +188,7 @@ class CustomParser:
             s.forced = bool(track.get("forced"))
             s.is_cc = bool(track.get("is_cc"))
             s.is_sdh = bool(track.get("is_sdh"))
+            s.time_origin = float(track.get("time_origin") or 0.0)
 
         drm = track.get("drm")
         if isinstance(drm, dict) and drm.get("kid"):

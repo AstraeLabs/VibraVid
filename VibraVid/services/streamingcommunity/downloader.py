@@ -7,6 +7,7 @@ from rich.console import Console
 
 from VibraVid.core.downloader import HLS_Downloader
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.core.utils.audio_selection import matches_audio_language, requested_audio_languages
 from VibraVid.player.vixcloud import ENABLE_VIXCLOUD_API_V2, VideoSource
 from VibraVid.provider.tmdb import tmdb_client
 from VibraVid.services._base import (
@@ -21,6 +22,7 @@ from VibraVid.services._base.tv_display_manager import map_episode_path, map_mov
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, start_message
 
+from .audio import download_audio_options
 from .scrapper import GetSerieInfo
 
 console = Console()
@@ -28,11 +30,25 @@ logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 
 
+def _catalog_playlist(language, title_id, episode_id=None):
+    source = VideoSource(f"{site_constants.FULL_URL.rstrip('/')}/{language}", episode_id is not None, title_id)
+    source.get_iframe(episode_id if episode_id is not None else title_id)
+    source.get_content()
+    playlist = source.get_playlist()
+    if not playlist:
+        raise ValueError("The selected audio source did not return a video")
+    return playlist, source.headers
+
+
 def download_film(select_title: Entries) -> str:
     """
     Downloads a film using the provided Entries information.
     """
     start_message()
+    requested = requested_audio_languages()
+    catalogs = select_title.catalog_languages or [select_title.provider_language]
+    language = next((lang for wanted in requested for lang in catalogs
+                     if matches_audio_language([lang], wanted)), select_title.provider_language)
     skip_ts = bool((context_tracker.site_options or {}).get("skip_ts"))
 
     scraper = None
@@ -65,7 +81,7 @@ def download_film(select_title: Entries) -> str:
 
     # Init class
     video_source = VideoSource(
-        f"{site_constants.FULL_URL}/{select_title.provider_language}", False, select_title.id, tmdb_data=tmdb_data
+        f"{site_constants.FULL_URL}/{language}", False, select_title.id, tmdb_data=tmdb_data
     )
 
     # Retrieve iframe unless the TMDB API V2 resolution path is enabled and available
@@ -84,7 +100,12 @@ def download_film(select_title: Entries) -> str:
     movie_path = movie_folder(*path_components)
     movie_name = f"{filename}.{extension_output}"
 
-    return HLS_Downloader(m3u8_url=master_playlist, output_path=os.path.join(movie_path, movie_name)).start()
+    audio_options = {}
+    if context_tracker.audio_filter and not context_tracker.manual_tracks:
+        audio_options = download_audio_options(master_playlist, video_source.headers, language, catalogs,
+                                               lambda lang: _catalog_playlist(lang, select_title.id))
+    return HLS_Downloader(m3u8_url=master_playlist, headers=video_source.headers,
+                          output_path=os.path.join(movie_path, movie_name), **audio_options).start()
 
 
 def download_episode(obj_episode, index_season_selected, index_episode_selected, scrape_serie, video_source):
@@ -105,6 +126,16 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     )
     episode_path = series_folder(*path_components)
     episode_name = f"{filename}.{extension_output}"
+
+    language = getattr(obj_episode, "provider_language", None) or scrape_serie.provider_language or "it"
+    variants = getattr(obj_episode, "catalog_episodes", {})
+    language = next((lang for wanted in requested_audio_languages() for lang in variants
+                     if matches_audio_language([lang], wanted)), language)
+    episode_id = variants.get(language, obj_episode.id)
+    video_source.episode_id = episode_id
+    video_source.url = f"{scrape_serie.base_url.rstrip('/')}/{language}"
+    video_source.iframe_src = None
+    video_source.window_parameter = None
 
     resolved_via_tmdb = False
     if tmdb_client.api_key is not None:
@@ -135,7 +166,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
 
     # Retrieve iframe unless the TMDB API V2 resolution path is enabled and available
     if not resolved_via_tmdb or not ENABLE_VIXCLOUD_API_V2:
-        video_source.get_iframe(obj_episode.id)
+        video_source.get_iframe(episode_id)
 
     video_source.get_content()
     master_playlist = video_source.get_playlist()
@@ -145,7 +176,13 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         return None
 
     # Download the episode
-    return HLS_Downloader(m3u8_url=master_playlist, output_path=os.path.join(episode_path, episode_name)).start()
+    audio_options = {}
+    if context_tracker.audio_filter and not context_tracker.manual_tracks:
+        catalogs = list(variants) or [language]
+        audio_options = download_audio_options(master_playlist, video_source.headers, language, catalogs,
+                         lambda lang: _catalog_playlist(lang, video_source.media_id, variants.get(lang, episode_id)))
+    return HLS_Downloader(m3u8_url=master_playlist, headers=video_source.headers,
+                          output_path=os.path.join(episode_path, episode_name), **audio_options).start()
 
 
 def download_series(

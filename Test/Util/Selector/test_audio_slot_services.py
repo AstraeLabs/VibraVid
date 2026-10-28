@@ -57,6 +57,11 @@ def test_effective_languages_slot_fallthrough(monkeypatch):
     assert _effective_languages() == ["en"]
 
 
+def test_effective_languages_includes_later_priority_slots(monkeypatch):
+    _set_select_audio(monkeypatch, "1ita|2eng")
+    assert _effective_languages() == ["it", "en"]
+
+
 def test_effective_languages_legacy_unchanged(monkeypatch):
     _set_select_audio(monkeypatch, "ita|eng")
     assert _effective_languages() == ["it", "en"]

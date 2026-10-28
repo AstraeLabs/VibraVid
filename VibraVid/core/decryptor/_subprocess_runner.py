@@ -16,6 +16,7 @@ from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
 _ENGINE_LOG_LEVELS = {"FLUX": 23}
+_ENGINE_WARNING = re.compile(r"^\s*(?:flux:\s*)?warning:\s*(.+)$", re.IGNORECASE)
 _TAIL_SEEK_NOISE = re.compile(
     r"co located POCs unavailable|"
     r"reference picture missing during reorder|"
@@ -110,10 +111,11 @@ def run_with_progress(
     status: str | None = None,
     engine_name: str | None = None,
     stream_type: str = "video",
+    input_size: int | None = None,
+    full_decode_check: bool | None = None,
 ) -> tuple:
     """
-    Launch *cmd* as a subprocess and monitor its progress by watching how
-    fast the *output_path* file grows relative to *encrypted_path*.
+    Launch *cmd* as a subprocess and monitor its progress
 
     Progress is reported either via *progress_cb* (dict with ``task_key``,
     ``pct``, etc.) or by printing an inline Rich bar to the console.
@@ -122,7 +124,11 @@ def run_with_progress(
         ``True`` on success (exit-code 0 and output file > 1 kB).
         ``(False, stderr_text)`` on failure.
     """
-    file_size = os.path.getsize(encrypted_path) if os.path.isfile(encrypted_path) else 0
+    if input_size is not None:
+        file_size = input_size
+    else:
+        file_size = os.path.getsize(encrypted_path) if os.path.isfile(encrypted_path) else 0
+    
     progress_percent = 0
     last_rendered_percent = -1
     stop_monitor = threading.Event()
@@ -178,10 +184,18 @@ def run_with_progress(
             time.sleep(0.05)
 
     engine_level = _ENGINE_LOG_LEVELS.get((engine_name or "").upper(), logging.INFO)
-    log_engine_output = (engine_name or "").upper() in _ENGINE_LOG_LEVELS and _log_engine_output_enabled()
+    is_engine = (engine_name or "").upper() in _ENGINE_LOG_LEVELS
+    log_engine_output = is_engine and _log_engine_output_enabled()
+
     def _log_engine_line(line: str) -> None:
         stripped = line.rstrip()
-        if stripped:
+        if not stripped:
+            return
+
+        warning = _ENGINE_WARNING.match(stripped)
+        if warning:
+            logger.warning(f"{label}: {warning.group(1)}")
+        elif log_engine_output:
             logger.log(engine_level, stripped)
 
     stderr_lines: list[str] = []
@@ -204,13 +218,13 @@ def run_with_progress(
         def _read_stderr() -> None:
             for line in process.stderr:
                 stderr_lines.append(line)
-                if log_engine_output:
+                if is_engine:
                     _log_engine_line(line)
 
         def _read_stdout() -> None:
             for line in process.stdout:
                 stdout_lines.append(line)
-                if log_engine_output:
+                if is_engine:
                     _log_engine_line(line)
 
         stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
@@ -257,7 +271,7 @@ def run_with_progress(
         _emit(final_percent, final_size)
 
     if process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        full_check = stream_type == "audio"
+        full_check = stream_type == "audio" if full_decode_check is None else full_decode_check
         decode_error = _tail_decode_check(output_path, full=full_check)
         if decode_error is None:
             return True

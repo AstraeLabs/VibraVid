@@ -6,15 +6,13 @@ import os
 import platform
 import subprocess
 
-from rich.console import Console
-
+from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.utils.codec import get_codec_extension
 from VibraVid.setup import get_ffprobe_path
 
 from ..font import FontManager
 from .sanitize import sanitize_vtt_file
 
-console = Console()
 logger = logging.getLogger(__name__)
 
 

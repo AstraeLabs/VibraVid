@@ -7,8 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
 
+from VibraVid.core.utils.audio_selection import matches_audio_language, requested_audio_languages
 from VibraVid.services._base.object import Episode, Season, SeasonManager
-from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
 
 logger = logging.getLogger(__name__)
 _EPISODE_IMAGE_TYPES = ("cover", "cover_mobile", "background", "poster")
@@ -43,6 +44,7 @@ class GetSerieInfo:
         self.seasons_manager = SeasonManager()
         self.provider_language = provider_language
         self.languages = languages if languages is not None else ["it", "en"]
+        self._loaded_catalogs = set()
         self._collect_lock = threading.Lock()
         if isinstance(self.url, str) and self.url.endswith(("/it", "/en")):
             self.base_url = self.url.rsplit("/", 1)[0]
@@ -75,42 +77,62 @@ class GetSerieInfo:
 
     def collect_info_title(self) -> None:
         """
-        Retrieve general information about the TV series from the streaming site.
+        Retrieve title information and merge seasons from the selected catalogs.
 
         Raises:
             Exception: If there's an error fetching series information
         """
-        try:
-            with create_client(headers=self.headers) as client:
-                response = client.get(f"{self.url}/titles/{self.media_id}-{self.series_name}")
-            response.raise_for_status()
+        languages = list(dict.fromkeys([self.provider_language, *self.languages]))
+        seasons_by_number = {season.number: season for season in self.seasons_manager.seasons}
+        last_error = None
+        loaded = bool(self._loaded_catalogs)
 
-            # Extract series info from JSON response
-            soup = BeautifulSoup(response.text, "html.parser")
-            json_response = json.loads(soup.find("div", {"id": "app"}).get("data-page"))
-            self.version = json_response["version"]
-
-            # Extract information about available seasons
-            title_data = json_response.get("props", {}).get("title", {})
-
-            # Save general series information
-            self.title_info = title_data
-
-            # Extract available seasons and add them to SeasonManager
-            seasons_data = title_data.get("seasons", [])
-            for season_data in seasons_data:
-                self.seasons_manager.add(
-                    Season(
-                        id=season_data.get("id"),
-                        number=season_data.get("number"),
-                        name=f"Season {season_data.get('number')}",
-                        slug=season_data.get("slug"),
+        for lang in languages:
+            if lang in self._loaded_catalogs:
+                continue
+            try:
+                with create_client(headers=self.headers) as client:
+                    response = get_with_retry(
+                        client, f"{self.base_url}/{lang}/titles/{self.media_id}-{self.series_name}", retries=1,
                     )
-                )
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                json_response = json.loads(soup.find("div", {"id": "app"}).get("data-page"))
+                title_data = json_response.get("props", {}).get("title", {})
+                if not getattr(self, "title_info", None):
+                    self.version = json_response["version"]
+                    self.title_info = title_data
 
-        except Exception as e:
-            logger.error(f"Error collecting series info: {e}")
-            raise
+                for season_data in title_data.get("seasons") or []:
+                    number = season_data.get("number")
+                    if number is None:
+                        continue
+                    number = int(number)
+                    season = seasons_by_number.get(number)
+                    if season is None:
+                        season = self.seasons_manager.add(
+                            Season(
+                                id=season_data.get("id"),
+                                number=number,
+                                name=f"Season {number}",
+                                slug=season_data.get("slug"),
+                                catalog_ids={},
+                            )
+                        )
+                        seasons_by_number[number] = season
+                    if lang not in season.catalog_ids:
+                        # A recovered catalog may have newer episodes than the cached list.
+                        season.episodes.clear()
+                    season.catalog_ids[lang] = season_data.get("id")
+                self._loaded_catalogs.add(lang)
+                loaded = True
+            except Exception as e:
+                last_error = e
+                logger.warning("Could not load title %s from %s catalog: %s", self.media_id, lang, e)
+
+        if not loaded:
+            logger.error("Error collecting series info: %s", last_error)
+            raise last_error or RuntimeError("No catalog returned title information")
 
     def get_quality(self) -> str:
         """Return the quality label (e.g. 'TS', 'CAM', 'HD') for this title.
@@ -179,7 +201,7 @@ class GetSerieInfo:
                 try:
                     logger.info(f"Fetching episodes for season {number_season} in language '{lang}'")
                     with create_client(headers=self.headers) as client:
-                        resp_ver = client.get(f"{self.base_url}/{lang}")
+                        resp_ver = get_with_retry(client, f"{self.base_url}/{lang}", retries=1)
                     resp_ver.raise_for_status()
                     ver = BeautifulSoup(resp_ver.text, "html.parser")
                     ver = json.loads(ver.find("div", {"id": "app"}).get("data-page"))["version"]
@@ -196,19 +218,38 @@ class GetSerieInfo:
                 )
                 client = create_client(headers=custom_headers)
                 try:
-                    response = client.get(
-                        f"{self.base_url}/{lang}/titles/{self.media_id}-{self.series_name}/season-{number_season}"
+                    response = get_with_retry(
+                        client, f"{self.base_url}/{lang}/titles/{self.media_id}-{self.series_name}/season-{number_season}",
+                        retries=1,
                     )
                     response.raise_for_status()
-                    return response.json().get("props", {}).get("loadedSeason", {}).get("episodes", [])
+                    loaded = response.json().get("props", {}).get("loadedSeason") or {}
+                    # Missing seasons can return HTTP 200 with season 1's episodes.
+                    if str(loaded.get("number")) != str(number_season):
+                        logger.warning(
+                            "Ignoring %s catalog season %s returned for requested season %s",
+                            lang, loaded.get("number"), number_season,
+                        )
+                        return []
+                    expected_id = catalog_ids.get(lang)
+                    if expected_id is not None and str(loaded.get("id")) != str(expected_id):
+                        logger.warning(
+                            "Ignoring %s catalog season with unexpected id %s (expected %s)",
+                            lang, loaded.get("id"), expected_id,
+                        )
+                        return []
+                    return loaded.get("episodes") or []
                 except Exception as e:
                     logger.debug(f"No season data for lang {lang}: {e}")
                     return []
                 finally:
                     client.close()
 
-            # Fetch episodes for each configured catalog (self.languages) in parallel
-            langs = self.languages
+            # Query only catalogs that actually list this season.
+            catalog_ids = getattr(season, "catalog_ids", {})
+            langs = [lang for lang in self.languages if lang in catalog_ids]
+            if not langs:
+                return
             with ThreadPoolExecutor(max_workers=len(langs)) as pool:
                 results = list(pool.map(_fetch_lang_episodes, langs))
             for lang, json_response in zip(langs, results, strict=False):
@@ -228,6 +269,7 @@ class GetSerieInfo:
                         if num in merged:
                             # already exists from other language -> mark both
                             existing = merged[num]
+                            existing.catalog_episodes[lang] = ep.get("id")
                             if attach_language:
                                 prev_lang = getattr(existing, "language", None)
                                 if prev_lang:
@@ -246,6 +288,8 @@ class GetSerieInfo:
                                 name=ep.get("name"),
                                 duration=ep.get("duration"),
                                 image=self._episode_image_url(self.base_url, ep),
+                                provider_language=lang,
+                                catalog_episodes={lang: ep.get("id")},
                                 **kwargs,
                             )
 
@@ -264,7 +308,8 @@ class GetSerieInfo:
     def getNumberSeason(self) -> int:
         """Get the total number of seasons available for the series."""
         with self._collect_lock:
-            if not self.seasons_manager.seasons:
+            catalogs = {self.provider_language, *self.languages}
+            if not self.seasons_manager.seasons or not catalogs.issubset(self._loaded_catalogs):
                 self.collect_info_title()
 
         return len(self.seasons_manager.seasons)
@@ -281,4 +326,7 @@ class GetSerieInfo:
             if not season.episodes.episodes:
                 self.collect_info_season(season_number)
 
+        wanted = requested_audio_languages()
+        if wanted:
+            return [ep for ep in season.episodes.episodes if any(matches_audio_language(ep.language, code) for code in wanted)]
         return season.episodes.episodes

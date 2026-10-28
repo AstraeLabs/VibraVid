@@ -401,6 +401,7 @@ class Stream:
     # Subtitle / Audio flags
     forced: bool = False
     is_cc: bool = False
+    instream_id: str = ""
     is_sdh: bool = False
 
     # All types
@@ -425,6 +426,7 @@ class Stream:
     supports_live_decryption: bool = True  # Default True, parsers will set False when needed
     is_live: bool = False
     is_wvtt_mp4: bool = False
+    time_origin: float = 0.0  # subtitle cues sit on an absolute timeline starting here (seconds), subtracted at merge
     no_range_split: bool = False
 
     # ── Size estimation ───────────────────────────────────────────────────────

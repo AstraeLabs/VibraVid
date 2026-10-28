@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from searchapp.api import get_api
 from searchapp.api.base import Entries
 
+from VibraVid.core.utils.audio_selection import normalize_audio_language
 from VibraVid.provider.tmdb import tmdb_client
 
 from ..library_index import owned_episodes
@@ -36,11 +37,17 @@ def series_detail(request: HttpRequest) -> HttpResponse:
         item_payload_raw = request.GET.get("item_payload")
 
     if not source_alias or not item_payload_raw:
-        messages.error(request, "Missing parameters.")
+        if request.method == "POST":
+            messages.error(request, "Unable to open this title. Select it again from the search results.")
         return redirect("search_home")
 
     try:
         item_payload = json.loads(item_payload_raw)
+        data = request.POST if request.method == "POST" else request.GET
+        audio_language = normalize_audio_language(data.get("audio_language") or item_payload.get("_audio_language"))
+        if audio_language:
+            item_payload["_audio_language"] = audio_language
+            item_payload_raw = json.dumps(item_payload)
         api = get_api(source_alias)
         entries_fields = {k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__}
         media_item = Entries(**entries_fields)

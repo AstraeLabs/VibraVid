@@ -329,12 +329,12 @@ def test_forced_cc_and_sdh_tracks_all_get_their_fonts_once(fonts_dir, tmp_path):
     assert mimes["TestFont.ttf"] == "application/x-truetype-font"
 
 
-def test_missing_fonts_are_reported_but_do_not_abort(fonts_dir, tmp_path, capsys):
+def test_missing_fonts_are_reported_but_do_not_abort(fonts_dir, tmp_path, printed):
     put_font(fonts_dir, "TestFont.ttf")
     sub = write_ass(tmp_path / "a.ass", fonts=(("TestFont", 0, 0), ("Totally Unknown", 0, 0)))
     attachments = collect_font_attachments([sub], str(tmp_path / "out.mkv"))
     assert [a.name for a in attachments] == ["TestFont.ttf"]
-    assert "Totally Unknown" in capsys.readouterr().out
+    assert "Totally Unknown" in printed()
 
 
 def test_empty_font_files_are_skipped(fonts_dir, tmp_path):

@@ -65,6 +65,8 @@
 	{% endif %}
 
 	{% if seasons %}
+	{% if not series.is_album %}{% include "searchapp/language_filter.html" %}{% endif %}
+	<p class="cn-empty cn-language-empty" hidden>No episodes are available in the selected language.</p>
 	<div class="cn-ssel-nav" id="cn-seasons-nav">
 		<button type="button" class="cn-ssel-arrow" id="cn-seasons-prev" hidden disabled
 		        aria-label="Scroll {% if series.is_album %}discs{% else %}seasons{% endif %} left" aria-controls="cn-seasons-list">
@@ -84,7 +86,7 @@
 							{% if series.is_album %}{{ season.name|default:season.number }}{% else %}Season {{ season.number }}{% endif %}
 						</span>
 						<span class="cn-stab-s">
-							{{ season.episode_count }} {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}ep{{ season.episode_count|pluralize }}{% endif %}
+							<span data-language-count="{{ season.number }}">{{ season.episode_count }}</span> {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}ep{{ season.episode_count|pluralize }}{% endif %}
 							{% if season.owned_count %} · {{ season.owned_count }}/{{ season.episode_count }}{% endif %}
 						</span>
 					</span>
@@ -119,7 +121,7 @@
 						{% if series.is_album %}{{ season.name|default:season.number }}{% else %}Season {{ season.number }}{% endif %}
 					</span>
 					<span class="cn-s">
-						{{ season.episode_count }} {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}episode{{ season.episode_count|pluralize }}{% endif %}
+						<span data-language-count="{{ season.number }}">{{ season.episode_count }}</span> {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}episode{{ season.episode_count|pluralize }}{% endif %}
 						{% if season.owned_count %}
 							· <b style="color:var(--cn-go)">{{ season.owned_count }} already in library</b>
 						{% endif %}
@@ -161,6 +163,7 @@
 						<label class="cn-ep{% if episode.owned %} is-owned{% endif %}"
 						       data-season="{{ season.number }}"
 						       data-episode="{{ episode.number }}"
+						       data-languages="{{ episode.language|default:'' }}"
 						       {% if episode.owned %}data-owned="1"{% endif %}
 						       {% if not episode.image %}data-noart="1"{% endif %}
 						       style="--cn-p1:{{ series.p1 }};--cn-p2:{{ series.p2 }}">
@@ -190,6 +193,7 @@
 							<span class="cn-ep-txt">
 								<span class="cn-ep-n">
 									{% if series.is_album %}{{ episode.number }}.{% else %}Episode {{ episode.number }}{% endif %}
+									{% if episode.language_list %}<span title="Available provider catalogs"> · Catalog: {% for lang in episode.language_list %}{{ lang|upper }}{% if not forloop.last %}/{% endif %}{% endfor %}</span>{% endif %}
 								</span>
 								{% if episode.name %}<span class="cn-ep-name">{{ episode.name }}</span>{% endif %}
 								<span class="cn-ep-desc" hidden></span>
@@ -353,7 +357,7 @@
 
 	function syncSeason(season) {
 		var chosen = [];
-		document.querySelectorAll('.cn-ep-pick[data-season="' + season + '"]:checked')
+		document.querySelectorAll('.cn-ep-pick[data-season="' + season + '"]:checked:not(:disabled)')
 			.forEach(function (c) { chosen.push(c.value); });
 
 		el("cn-eps-" + season).value = chosen.length ? compress(chosen) : "";
@@ -373,6 +377,7 @@
 
 			document.querySelectorAll('.cn-ep-pick[data-season="' + season + '"]')
 				.forEach(function (c) {
+						if (c.disabled) { c.checked = false; return; }
 					if (d.pickMissing !== undefined) {
 						c.checked = !c.closest(".cn-ep").hasAttribute("data-owned");
 					} else {
@@ -395,6 +400,15 @@
 
 	document.querySelectorAll(".cn-spanel").forEach(function (s) { syncSeason(s.dataset.season); });
 	refreshTray();
+	document.addEventListener("cn:audio-filter", function () {
+		var current = document.querySelector(".cn-stab.is-active:not([hidden])");
+		var first = current || document.querySelector(".cn-stab:not([hidden])");
+		if (first) activateSeason(first.dataset.season);
+		else panels.forEach(function (panel) { panel.hidden = true; });
+		panels.forEach(function (panel) { syncSeason(panel.dataset.season); });
+		refreshTray();
+		if (seasonList) seasonList.dispatchEvent(new Event("scroll"));
+	});
 
 	{% if tmdb_available %}
 	var SERIES = {

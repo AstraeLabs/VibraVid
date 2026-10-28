@@ -29,8 +29,14 @@ from VibraVid.core.utils.codec import (
 )
 from VibraVid.core.utils.language import LANGUAGE_MAP, language_variants, resolve_locale, subtitle_flags
 from VibraVid.core.utils.resolution import classify_resolution
-from VibraVid.core.utils.selector import FilterSpec, StreamSelector, StreamSelectorFormatter, configured_mux_dtsx
+from VibraVid.core.utils.selector import (
+    StreamSelector,
+    StreamSelectorFormatter,
+    configured_mux_dtsx,
+    tag_matches_filter,
+)
 from VibraVid.core.utils.stream_selector_ui import InteractiveStreamSelector
+from VibraVid.core.utils.track_order import effective_select_filter
 from VibraVid.core.velora.subtitle import build_ext_track_label, ext_from_url, is_valid_format, normalize_sub_filename
 from VibraVid.core.velora.util._subtitle_segments import get_subtitle_resolve_workers, resolve_subtitle_segments_sync
 from VibraVid.provider.tmdb import tmdb_client
@@ -487,7 +493,7 @@ class BaseMediaDownloader:
         f = self.custom_filters or {}
         requested_quality = context_tracker.video_quality
         v_cfg = "best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a_cfg = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        a_cfg = effective_select_filter("audio", f)
         s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         def _pref(key: str, default: bool = False, section: str = "DOWNLOAD") -> bool:
@@ -520,89 +526,31 @@ class BaseMediaDownloader:
             if not any(s.type == "video" for s in selectable):
                 raise ValueError(f"Requested quality {requested_quality} is not available for this video")
         self._sv, self._sa, self._ss = selector.apply(selectable)
+        from VibraVid.core.utils.audio_selection import enforce_audio_selection
+        if not context_tracker.defer_manual_tracks:
+            enforce_audio_selection(selectable, f.get("embedded_audio_language"))
         if requested_quality and not any(s.type == "video" and s.selected for s in selectable):
             raise ValueError(f"No video track matches requested quality {requested_quality}")
         self.no_match_skip = selector.no_match
 
     def _effective_filter(self, track_type: str) -> str:
         """Return the active selection filter for *track_type*, preferring custom_filters over config."""
-        cf_key = "subtitle" if track_type == "subtitle" else "audio"
-        cfg_key = "select_subtitle" if track_type == "subtitle" else "select_audio"
-        return (self.custom_filters or {}).get(cf_key) or config_manager.config.get("DOWNLOAD", cfg_key) or ""
-
-    @staticmethod
-    def _ext_filter_tokens(cfg: str, track_type: str) -> list[str]:
-        """Split a select_audio/select_subtitle filter string into lowercase language tokens."""
-        if "=" in cfg:
-            spec = FilterSpec.parse(cfg, track_type)
-            return [t.strip().lower() for t in (spec.langs or "").split("|") if t.strip()]
-        return [t.strip().lower() for t in re.split(r"[|,]", cfg) if t.strip()]
+        return effective_select_filter("subtitle" if track_type == "subtitle" else "audio", self.custom_filters)
 
     def _ext_lang_matches(self, lang: str, track_type: str) -> bool:
-        """Return True if the external track with *lang* tag should be downloaded."""
-        cfg = self._effective_filter(track_type)
-        if not cfg or cfg.lower() == "all":
-            return True
-        if cfg.lower() == "false":
-            return False
-
-        tokens = self._ext_filter_tokens(cfg, track_type)
-        lang_l = lang.strip().lower()
-
-        for token in tokens:
-            base_token = token.split("_")[0]
-            if base_token in lang_l or lang_l.startswith(base_token):
-                return True
-
-            # ISO-639-2 three-letter → two-letter prefix match ("ita" → "it")
-            if len(base_token) == 3 and base_token.isalpha() and lang_l.startswith(base_token[:2]):
-                return True
-        return False
+        """Return True if the external track (or closed caption) with *lang* tag should be downloaded."""
+        return tag_matches_filter(self._effective_filter(track_type), track_type, lang)
 
     def _ext_track_matches(self, track: dict, track_type: str) -> bool:
-        """
-        Return True if *track* (a full external track dict with flag fields)
-        matches the configured selection filter, including flag requirements.
-        """
-        cfg = self._effective_filter(track_type)
-        if not cfg or cfg.lower() == "all":
-            return True
-        if cfg.lower() == "false":
-            return False
-
-        lang = (track.get("language") or "").strip().lower()
-        tokens = self._ext_filter_tokens(cfg, track_type)
-
-        for token in tokens:
-            parts = token.split("_")
-            base_token = parts[0]
-            req_flags = {p for p in parts[1:] if p in {"forced", "cc", "sdh", "hi"}}
-            if "hi" in req_flags:
-                req_flags.discard("hi")
-                req_flags.add("cc")
-
-            lang_ok = (
-                base_token in lang
-                or lang.startswith(base_token)
-                or (len(base_token) == 3 and base_token.isalpha() and lang.startswith(base_token[:2]))
-            )
-            if not lang_ok:
-                continue
-
-            if req_flags:
-                track_flags: set = set()
-                if track.get("forced"):
-                    track_flags.add("forced")
-                if track.get("cc"):
-                    track_flags.add("cc")
-                if track.get("sdh"):
-                    track_flags.add("sdh")
-                if not req_flags.issubset(track_flags):
-                    continue
-
-            return True
-
-        return False
+        """Return True if *track* (a full external track dict with flag fields) matches the configured selection filter, including flag requirements."""
+        return tag_matches_filter(
+            self._effective_filter(track_type),
+            track_type,
+            track.get("language") or "",
+            forced=bool(track.get("forced")),
+            cc=bool(track.get("cc")),
+            sdh=bool(track.get("sdh")),
+        )
 
     def _prepare_labels(self) -> None:
         sel_video = [s for s in self.streams if s.type == "video" and s.selected and not s.is_external]

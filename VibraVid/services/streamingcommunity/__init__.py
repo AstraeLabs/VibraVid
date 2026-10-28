@@ -10,7 +10,7 @@ from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
 from VibraVid.utils import TVShowManager, config_manager
-from VibraVid.utils.http_client import create_client, get_userAgent
+from VibraVid.utils.http_client import create_client, get_userAgent, get_with_retry
 
 from .downloader import download_film, download_series
 
@@ -29,7 +29,7 @@ def register_cli_args(parser) -> list:
 
 
 def _effective_languages() -> list[str]:
-    """Derive which site catalog(s) to search/list from the global DOWNLOAD.select_audio filter"""
+    """Search every site catalog allowed by the global DOWNLOAD.select_audio filter."""
     select_audio = config_manager.config.get("DOWNLOAD", "select_audio", default="")
     if not select_audio:
         return ["it", "en"]
@@ -45,17 +45,15 @@ def _effective_languages() -> list[str]:
             return ["it", "en"]
         groups_raw = [spec.langs] if spec.langs else []
 
+    languages = []
     for langs in groups_raw:
         raw_codes = [c.strip() for c in langs.split("|") if c.strip()]
-        languages = []
         for code in raw_codes:
             iso = resolve_iso639_1(code)
             if iso in ("it", "en") and iso not in languages:
                 languages.append(iso)
-        if languages:
-            return languages
 
-    return ["it", "en"]
+    return languages or ["it", "en"]
 
 
 def title_search(query: str) -> int:
@@ -69,22 +67,26 @@ def title_search(query: str) -> int:
         int: The number of unique titles found.
     """
     entries_manager.clear()
+    entries_manager.search_warnings = []
     table_show_manager.clear()
 
     # Dictionary to track unique IDs
-    seen_ids = set()
+    seen_ids = {}
     languages = _effective_languages()
+    loaded_catalogs = set()
+    last_error = None
 
     for lang in languages:
         console.print(f"[cyan]Searching in language: [yellow]{lang}")
 
         try:
             with create_client(headers={"user-agent": get_userAgent()}) as client:
-                response = client.get(f"{site_constants.FULL_URL}/{lang}")
+                response = get_with_retry(client, f"{site_constants.FULL_URL}/{lang}", retries=1)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
             version = json.loads(soup.find("div", {"id": "app"}).get("data-page"))["version"]
         except Exception as e:
+            last_error = e
             console.print(f"[red]Site: {site_constants.SITE_NAME} version ({lang}), request error: {e}")
             continue
 
@@ -95,9 +97,10 @@ def title_search(query: str) -> int:
             with create_client(
                 headers={"user-agent": get_userAgent(), "x-inertia": "true", "x-inertia-version": version}
             ) as client:
-                response = client.get(search_url)
+                response = get_with_retry(client, search_url, retries=1)
             response.raise_for_status()
         except Exception as e:
+            last_error = e
             console.print(f"[red]Site: {site_constants.SITE_NAME} ({lang}), request search error: {e}")
             continue
 
@@ -105,20 +108,23 @@ def title_search(query: str) -> int:
         try:
             data = response.json().get("props").get("titles")
         except Exception as e:
+            last_error = e
             console.log(f"[red]Error parsing JSON response ({lang}): {e}")
             continue
 
+        loaded_catalogs.add(lang)
         for _i, dict_title in enumerate(data):
             try:
                 title_id = dict_title.get("id")
 
                 # Skip if we've already seen this ID
                 if title_id in seen_ids:
+                    existing = seen_ids[title_id]
+                    if lang not in existing.catalog_languages:
+                        existing.catalog_languages.append(lang)
                     continue
 
                 # Add ID to seen set
-                seen_ids.add(title_id)
-
                 images = dict_title.get("images") or []
                 filename = None
                 preferred_types = ["poster", "cover", "cover_mobile", "background"]
@@ -157,8 +163,7 @@ def title_search(query: str) -> int:
                 if not year:
                     year = dict_title.get("last_air_date") or dict_title.get("release_date")
 
-                entries_manager.add(
-                    Entries(
+                entry = Entries(
                         id=title_id,
                         slug=dict_title.get("slug"),
                         name=dict_title.get("name"),
@@ -166,13 +171,24 @@ def title_search(query: str) -> int:
                         image=image_url,
                         year=year.split("-")[0] if year and "-" in year else "9999",
                         provider_language=lang,
+                        catalog_languages=[lang],
                         tmdb_id=dict_title.get("tmdb_id"),
                     )
-                )
+                entries_manager.add(entry)
+                seen_ids[title_id] = entry
 
             except Exception as e:
                 console.print(f"[red]Error parsing a film entry ({lang}): {e}")
 
+    if not loaded_catalogs:
+        raise RuntimeError(
+            "Unable to load StreamingCommunity catalogs. Check the site or VPN/DNS connection and retry."
+        ) from last_error
+    missing = [lang.upper() for lang in languages if lang not in loaded_catalogs]
+    if missing:
+        warning = f"Partial StreamingCommunity results: catalog(s) {', '.join(missing)} unavailable. Retry the search to include those languages."
+        entries_manager.search_warnings.append(warning)
+        console.print(f"[yellow]{warning}")
     return len(entries_manager)
 
 

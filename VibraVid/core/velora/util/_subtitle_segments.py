@@ -192,8 +192,8 @@ def _read_vtt_segment_text(path) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def merge_vtt_files(paths, merge_logger=None) -> str:
-    """Merge multiple WebVTT files into a single WebVTT track, shifting cue timestamps by"""
+def merge_vtt_files(paths, merge_logger=None, time_origin: float = 0.0) -> str:
+    """Merge multiple WebVTT files into a single WebVTT track, shifting cue timestamps by. *time_origin* is the start in seconds of the absolute (live) timeline the cues are on, subtracted so they start at zero like the media fragments."""
     log = merge_logger or logger
     per_segment = []
     for p in paths:
@@ -203,11 +203,11 @@ def merge_vtt_files(paths, merge_logger=None) -> str:
         except Exception as exc:
             log.warning(f"[merge_vtt] skipping unreadable segment {getattr(p, 'name', p)}: {exc}")
 
-    return _merge_cue_segments(per_segment, log, segment_count=len(paths))
+    return _merge_cue_segments(per_segment, log, segment_count=len(paths), time_origin=time_origin)
 
 
 def _merge_cue_segments(
-    per_segment: list[list], log, segment_count: int | None = None, durations: list[float] | None = None
+    per_segment: list[list], log, segment_count: int | None = None, durations: list[float] | None = None, time_origin: float = 0.0
 ) -> str:
     """Shared merge core for both ``merge_vtt_files`` and ``merge_vtt_segments``."""
     out_lines = ["WEBVTT", ""]
@@ -243,7 +243,9 @@ def _merge_cue_segments(
                 log.debug(f"[merge_vtt] segment {idx}: detected relative restart (first_start={first_start:.2f}s, running_end={running_end:.2f}s) -> offset={seg_offset:.2f}s")
 
         for start, end, m, body in cues:
-            s, e = start + seg_offset, end + seg_offset
+            s, e = start + seg_offset - time_origin, end + seg_offset - time_origin
+            if time_origin and e <= 0:
+                continue  # cue ends before the origin: not part of this track
             text = "\n".join(body)
             key = (round(s, 3), round(e, 3), text)
             if key in seen:

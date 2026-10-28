@@ -32,7 +32,7 @@ from VibraVid.core.ui.manual_tracks import manual_track_broker
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES
-from VibraVid.core.utils.language import language_variants, resolve_iso639_2, resolve_language_display_name
+from VibraVid.core.utils.language import language_variants, track_title_and_iso_lang
 from VibraVid.core.utils.selector import (
     FilterSpec,
     StreamSelector,
@@ -48,6 +48,7 @@ from VibraVid.core.utils.selector import (
     _subtitle_variant_key,
     configured_mux_dtsx,
 )
+from VibraVid.core.utils.track_order import effective_select_filter, order_tracks
 from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.core.velora.util._stream_helpers import join_interruptible
 from VibraVid.core.velora.util.formatting import (
@@ -633,11 +634,8 @@ class Generic_Downloader(BaseDownloader):
         ffmpeg_path = get_ffmpeg_path()
         output_path = os_manager.get_sanitize_path(self.output_path)
 
-        audio_paths: list[str] = []
-        audio_langs: list[str] = []
-        subtitle_paths: list[str] = []
-        subtitle_infos: list[SubtitleDispositionInfo] = []
-        subtitle_langs: list[str] = []
+        audio_items: list[tuple[dict[str, Any], str]] = []
+        subtitle_items: list[tuple[dict[str, Any], str, SubtitleDispositionInfo]] = []
 
         force_subtitle = config_manager.config.get("PROCESS", "force_subtitle")
         for entry in sibling_entries:
@@ -649,17 +647,23 @@ class Generic_Downloader(BaseDownloader):
             lang = result.get("language") or "und"
 
             if kind in ("audio", "aud"):
-                audio_paths.append(path)
-                audio_langs.append(lang)
+                audio_items.append(({"language": lang}, path))
             elif kind in ("subtitle", "sub"):
                 converted = convert_subtitle(path, force_subtitle)
                 if not converted:
                     logger.warning(f"streaming_mux: subtitle conversion failed for '{entry['label']}' -- dropping this track from the fast-path mux")
                     continue
-                subtitle_paths.append(converted)
                 tag = (source.get("tag") or role.partition(":")[2]).strip().lower()
-                subtitle_infos.append(SubtitleDispositionInfo(language=lang, forced=tag == "forced"))
-                subtitle_langs.append(lang)
+                info = SubtitleDispositionInfo(language=lang, forced=tag == "forced")
+                subtitle_items.append(({"language": lang, "forced": info.is_forced}, converted, info))
+
+        audio_items = order_tracks(audio_items, "audio", effective_select_filter("audio", self.custom_filters), track_of=lambda item: item[0])
+        subtitle_items = order_tracks(subtitle_items, "subtitle", effective_select_filter("subtitle", self.custom_filters), track_of=lambda item: item[0])
+        audio_tracks = [track for track, _ in audio_items]
+        audio_paths = [path for _, path in audio_items]
+        subtitle_tracks = [track for track, _, _ in subtitle_items]
+        subtitle_paths = [path for _, path, _ in subtitle_items]
+        subtitle_infos = [info for _, _, info in subtitle_items]
 
         cmd = [ffmpeg_path, "-y", "-f", "mp4", "-i", "-"]
         for p in audio_paths:
@@ -683,17 +687,15 @@ class Generic_Downloader(BaseDownloader):
         for i in range(len(subtitle_paths)):
             cmd += ["-map", f"{sub_input_base + i}:s"]
 
-        for i, lang in enumerate(audio_langs):
-            iso_lang = resolve_iso639_2(lang)
-            title = resolve_language_display_name(lang)
+        for i, track in enumerate(audio_tracks):
+            title, iso_lang = track_title_and_iso_lang(track)
             cmd += [f"-metadata:s:a:{i}", f"title={title}"]
             cmd += [f"-metadata:s:a:{i}", f"language={iso_lang}"]
             cmd += [f"-metadata:s:a:{i}", f"handler_name={title}"]
             cmd += [f"-disposition:a:{i}", "default" if i == 0 else "0"]
 
-        for i, lang in enumerate(subtitle_langs):
-            iso_lang = resolve_iso639_2(lang)
-            title = resolve_language_display_name(lang)
+        for i, track in enumerate(subtitle_tracks):
+            title, iso_lang = track_title_and_iso_lang(track)
             cmd += [f"-metadata:s:s:{i}", f"title={title}"]
             cmd += [f"-metadata:s:s:{i}", f"language={iso_lang}"]
             cmd += [f"-metadata:s:s:{i}", f"handler_name={title}"]
@@ -1090,7 +1092,7 @@ class Generic_Downloader(BaseDownloader):
     def _select(self, parsed: list[tuple[MediaDownloader, dict[str, Any]]]) -> list:
         f = self.custom_filters
         v = f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
-        a = f.get("audio") or config_manager.config.get("DOWNLOAD", "select_audio")
+        a = effective_select_filter("audio", f)
         sub = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
 
         # Sources with an explicit role bypass attribute-based dedup/selection,
@@ -1146,6 +1148,9 @@ class Generic_Downloader(BaseDownloader):
             )
             self._no_match = False
             download_tracker.update_status(selection_id, "Preparing selected tracks")
+
+        from VibraVid.core.utils.audio_selection import enforce_audio_selection
+        enforce_audio_selection(role_streams + pool)
 
         # If a DV companion was selected (select_video="hybrid" or CODEC.dv_auto),
         # keep a reference to it for special handling in the download/muxing phases.
@@ -1429,8 +1434,6 @@ class Generic_Downloader(BaseDownloader):
         muxer.start_ffmpeg(muxer.build_cmd(audio_paths, sub_paths))  # type: ignore[attr-defined]
 
     def _launch_streaming_mux_manifest_inner(self) -> "NamedPipeMuxer | None":
-        from VibraVid.core.utils.language import resolve_iso639_2, resolve_language_display_name
-
         ffmpeg_path = get_ffmpeg_path()
         output_path = os_manager.get_sanitize_path(self.output_path)
 
@@ -1457,6 +1460,9 @@ class Generic_Downloader(BaseDownloader):
             logger.info("streaming_mux[pipes]: no clear video+audio split — skipping")
             return None
 
+        audio_entries = order_tracks(audio_entries, "audio", effective_select_filter("audio", self.custom_filters), track_of=lambda entry: entry[1])
+        sub_entries = order_tracks(sub_entries, "subtitle", effective_select_filter("subtitle", self.custom_filters), track_of=lambda entry: entry[1])
+
         muxer = NamedPipeMuxer(n_pipes=1)
         video_pipe = muxer.pipe_paths[0]
         video_md.enable_relay_mux(muxer.get_writer(0))  # type: ignore[arg-type]
@@ -1472,9 +1478,7 @@ class Generic_Downloader(BaseDownloader):
         video_codecs = (getattr(video_stream, "codecs", "") or "").lower()
 
         def _lang_meta(kind: str, idx: int, s_t) -> list[str]:
-            lang = getattr(s_t, "resolved_language", "") or getattr(s_t, "language", "") or "und"
-            title = resolve_language_display_name(lang)
-            iso = resolve_iso639_2(lang)
+            title, iso = track_title_and_iso_lang(s_t)
             return [
                 f"-metadata:s:{kind}:{idx}", f"title={title}",
                 f"-metadata:s:{kind}:{idx}", f"language={iso}",

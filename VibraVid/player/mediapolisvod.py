@@ -1,9 +1,27 @@
 # 11.04.25
 
 import json
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, urlunparse
 
 from VibraVid.utils.http_client import create_client, get_headers
+
+
+def _sanitize_url_port(url: str) -> str:
+    """Rimuove la porta dall'URL se non è un numero decimale valido tra 0 e 65535."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return url
+
+    netloc = parsed.netloc
+    if ":" in netloc:
+        host, _, port = netloc.rpartition(":")
+        if not port or not port.isdigit() or int(port) > 65535:
+            netloc = host
+            parsed = parsed._replace(netloc=netloc)
+            url = urlunparse(parsed)
+
+    return url
 
 
 class VideoSource:
@@ -65,7 +83,7 @@ class VideoSource:
                 except Exception as decode_error:
                     return f"Error: Failed to decode response - {str(decode_error)}", subtitle_url
 
-            return m3u8_url, subtitle_url
+            return _sanitize_url_port(m3u8_url), subtitle_url
 
         except Exception as e:
             return f"Error: {str(e)}", None

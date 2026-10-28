@@ -146,6 +146,12 @@ def parse_max_time(value: None | int | float | str | tuple[float, float | None])
     return (0.0, end) if end and end > 0 else (0.0, None)
 
 
+def limit_requested(value: None | int | float | tuple) -> bool:
+    """True when a parsed ``--max-time`` / ``--max-segments`` range (or a bare number) really cuts the download: the ``(0, None)`` of "no limit" is a non-empty tuple, so it is truthy, never test it directly."""
+    start, end = value if isinstance(value, tuple) else (0, value)
+    return bool(start) or bool(end)
+
+
 def parse_max_segments(value: None | int | str | tuple[int, int | None]) -> tuple[int, int | None]:
     """Parse a "--max-segments" value into a ``(start_index, end_index)`` range."""
     if isinstance(value, tuple):

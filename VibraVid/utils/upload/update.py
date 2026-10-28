@@ -1,5 +1,6 @@
 # 01.03.23
 
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -18,6 +19,7 @@ from rich.console import Console
 from VibraVid.setup import get_is_binary_installation
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.utils import config_manager
+from VibraVid.utils.console.message import SHOW, format_status
 from VibraVid.utils.http_client import create_client
 
 from .version import __author__, __title__
@@ -539,8 +541,9 @@ def maybe_auto_update_binaries() -> dict | None:
     return results
 
 
-def update():
-    """Print the one-line status banner: execution mode, version, platform, country and community links."""
+@functools.cache
+def status_info() -> tuple[tuple[str, str], ...]:
+    """Country, platform, version and execution type as ``(label, Rich-marked value)``, read once: the banner redraws them on every page and none of it changes during the run."""
     # Get the current version (installed version)
     try:
         current_version = importlib.metadata.version(__title__)
@@ -552,10 +555,22 @@ def update():
     try:
         CACHE_FILE = os.path.join(config_manager.base_path, ".cache", "ip.json")
         if os.path.exists(CACHE_FILE):
-            data_json = json.load(open(CACHE_FILE))
-            country_code = data_json.get("country_code")
+            with open(CACHE_FILE) as f:
+                country_code = json.load(f).get("country_code")
     except Exception:
         pass
 
-    logger.info(f"Execution mode: {get_execution_mode()}, System: {binary_paths._detect_system()}, Version: {current_version}, Country: {country_code}")
-    console.print(f"      [green]{get_execution_mode()} [dim]·[/] [red]{current_version} [dim]·[/] [cyan]{binary_paths.system} {binary_paths.arch} [dim]·[/] [purple]{country_code if country_code else 'None'} [dim]·[/] [link=https://discord.com/invite/8vV68UGRc7][#5865F2]Discord[/link] [dim]·[/] [link=https://www.paypal.com/donate/?hosted_button_id=UXTWMT8P6HE2C][#ea4aaa]Donate[/link]")
+    mode = get_execution_mode()
+    logger.info(f"Execution mode: {mode}, System: {binary_paths._detect_system()}, Version: {current_version}, Country: {country_code}")
+    return (
+        ("Geo", f"[purple]{country_code if country_code else 'None'}"),
+        ("Sys", f"[cyan]{binary_paths.system} {binary_paths.arch}"),
+        ("Ver", f"[red]{current_version}"),
+        ("Type", f"[green]{mode.replace('_', ' ').capitalize()}"),
+    )
+
+
+def update():
+    """Print the community links under the banner, which carries the status items (``status_info``) in a column; with the banner switched off (DEFAULT.show_message) they go in front of the links on one line."""
+    links = "[link=https://discord.com/invite/8vV68UGRc7][#5865F2]Discord[/link] [dim]·[/] [link=https://www.paypal.com/donate/?hosted_button_id=UXTWMT8P6HE2C][#ea4aaa]Donate[/link]"
+    console.print(f"           {links if SHOW else ' [dim]·[/] '.join((*format_status(status_info()), links))}")

@@ -71,11 +71,14 @@ class WorkerMixin:
                     # Sibling (or this) track proved the key wrong -- stop
                     # burning decrypt cycles here; the abort reason below
                     # ends this track after the queue drains.
-                    if ctx.decrypt_aborted_reason is None:
-                        ctx.decrypt_aborted_reason = (
-                            f"wrong key for KID {poisoned} "
-                            "(confirmed on another track) -- terminating track"
-                        )
+                    with ctx.decrypt_lock:
+                        first = ctx.decrypt_aborted_reason is None
+                        if first:
+                            ctx.decrypt_aborted_reason = (
+                                f"wrong key for KID {poisoned} "
+                                "(confirmed on another track) -- terminating track"
+                            )
+                    if first:
                         self._skip_stream_wrong_key(ctx.stream, poisoned, ctx.bar_manager, ctx.task_key)
                     continue
                 path_value = item.get("path")
@@ -277,12 +280,13 @@ class WorkerMixin:
                     self._decrypt_ism_segment(ctx, fp, seg, ctx.ism_decryptor, protected_init_path)
 
             except Exception as exc:
-                ctx.decrypt_errors.append(str(exc))
                 exc_str = str(exc)
-                is_permanent = "no content key for the track's default_kid" in exc_str.lower()
-                if is_permanent and ctx.decrypt_aborted_reason is None:
-                    ctx.decrypt_aborted_reason = exc_str
-                    logger.error(f"Segment decrypt error ({ctx.protocol_lower}/{ctx.task_key}): {exc}")
-                elif not is_permanent:
-                    logger.error(f"Segment decrypt error ({ctx.protocol_lower}/{ctx.task_key}): {exc}")
+                with ctx.decrypt_lock:
+                    ctx.decrypt_errors.append(exc_str)
+                    is_permanent = "no content key for the track's default_kid" in exc_str.lower()
+                    if is_permanent and ctx.decrypt_aborted_reason is None:
+                        ctx.decrypt_aborted_reason = exc_str
+                        logger.error(f"Segment decrypt error ({ctx.protocol_lower}/{ctx.task_key}): {exc}")
+                    elif not is_permanent:
+                        logger.error(f"Segment decrypt error ({ctx.protocol_lower}/{ctx.task_key}): {exc}")
                 ctx.decrypt_queue.task_done()

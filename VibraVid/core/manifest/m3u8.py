@@ -203,6 +203,7 @@ class HLSParser:
                     if s:
                         s.is_cc = True
                         instream_id = self._attr(line, "INSTREAM-ID", "")
+                        s.instream_id = instream_id
                         if instream_id and not s.id:
                             s.id = instream_id
                         if s.name and "[CC]" not in s.name:

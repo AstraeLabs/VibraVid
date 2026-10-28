@@ -99,6 +99,8 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
         from .views import _run_download_in_thread
         api = get_api(item.source_alias)
         payload = json.loads(item.item_payload)
+        from VibraVid.core.utils.audio_selection import audio_language_context, filter_series_audio
+        audio_language = payload.get("_audio_language")
         media = Entries(**{k: v for k, v in payload.items() if k in Entries.__dataclass_fields__})
         quality = item.preferred_quality
         seasons = []
@@ -132,7 +134,8 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
                 item.auto_completed = completed
             # Don't let the metadata cache hide a newly published season/episode.
             api._scraper_cache.pop(api._get_cache_key(media), None)
-            seasons = api.get_series_metadata(media) or []
+            with audio_language_context(audio_language):
+                seasons = filter_series_audio(api.get_series_metadata(media) or [], audio_language)
             videos = [(s.number, ep.number) for s in seasons if item.auto_all_seasons or s.number == item.auto_season for ep in s.episodes]
             fields = {"num_seasons": len(seasons), "last_season_episodes": seasons[-1].episode_count if seasons else 0}
             
@@ -165,7 +168,8 @@ def _process_item(item: WatchlistItem, force: bool = False) -> None:
             handed_off = False
             try:
                 try:
-                    available = api.get_available_qualities(media, season, episode) if quality else None
+                    with audio_language_context(audio_language):
+                        available = api.get_available_qualities(media, season, episode) if quality else None
                 except NotImplementedError:
                     if quality:
                         WatchlistItem.objects.filter(pk=item.pk).update(

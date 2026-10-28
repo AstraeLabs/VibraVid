@@ -5,13 +5,11 @@ import os
 import re
 from dataclasses import dataclass
 
-from rich.console import Console
-
+from VibraVid.core.ui.bar_manager import console
 from VibraVid.utils import config_manager
 
 from .font import FONT_FILE_EXTENSIONS, FontFace, FontManager, face_from_filename, parse_face_name
 
-console = Console()
 logger = logging.getLogger(__name__)
 FALLBACK_POOL_URL = "https://static.crunchyroll.com/vilos-v2/web/vilos/assets/libass-fonts/"
 FALLBACK_POOL = {

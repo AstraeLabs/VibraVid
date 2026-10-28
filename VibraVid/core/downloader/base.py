@@ -15,7 +15,12 @@ from rich.console import Console
 
 from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, media_token_values, strip_media_tokens
 from VibraVid.core.downloader.drm_keys import build_key_fallback
-from VibraVid.core.downloader.util.live_switches import any_selected_encrypted, live_mux_allowed
+from VibraVid.core.downloader.util.live_switches import (
+    any_selected_encrypted,
+    live_decrypt_allowed,
+    live_mux_allowed,
+    live_mux_opted_out,
+)
 from VibraVid.core.muxing import (
     build_hybrid_output,
     embed_poster,
@@ -29,6 +34,7 @@ from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.muxing.helper.video.hybrid import download_other_tracks
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.utils.media_players import MediaPlayers
+from VibraVid.core.utils.track_order import effective_select_filter, order_tracks
 from VibraVid.core.velora.downloader import MediaDownloader
 from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.setup import get_ffmpeg_path
@@ -82,6 +88,9 @@ class DownloadResult(NamedTuple):
 
 
 class BaseDownloader:
+    # True for protocols whose encrypted tracks the chunks pipe (flux --chunks | ffmpeg) can mux without live decrypt.
+    supports_chunks_pipe = False
+
     def __init__(self, output_path: str, temp_suffix: str, sanitize_path: bool = True, **kwargs):
         """Common initialisation shared by DASH / HLS / ISM sub-classes."""
         if not output_path:
@@ -257,6 +266,11 @@ class BaseDownloader:
     def _no_media_downloaded(self, status: dict) -> bool:
         """Return True when the download produced absolutely nothing."""
         logger.info(f"Download status: {status}")
+
+        # The chunks pipe / streaming mux consumes the video and writes the final file itself: with no other track on disk that is all there is.
+        if getattr(getattr(self, "media_downloader", None), "streaming_mux_result", None):
+            return False
+        
         return (
             status.get("video") is None
             and not status.get("audios")
@@ -441,7 +455,18 @@ class BaseDownloader:
     def _maybe_enable_streaming_mux(self) -> None:
         """Called by HLS/DASH/ISM downloaders, after streams are selected but before start_download()"""
         media_downloader = getattr(self, "media_downloader", None)
-        allowed, why = live_mux_allowed(self.site_name, encrypted_tracks=any_selected_encrypted(getattr(media_downloader, "streams", None)))
+        encrypted = any_selected_encrypted(getattr(media_downloader, "streams", None))
+
+        allowed, why = live_mux_allowed(self.site_name, encrypted_tracks=encrypted)
+        if not allowed and encrypted and self.supports_chunks_pipe and not live_decrypt_allowed(self.site_name):
+            # Only the live-decrypt veto is waived (the chunks pipe needs no live decrypt):
+            # --no-livemux and process.live_mux still apply.
+            allowed, why = live_mux_allowed(self.site_name)
+            if not allowed and not live_mux_opted_out(self.site_name):
+                # Nobody switched the mux off: the chunks pipe is the cheapest way to finish an encrypted DASH, so it is the default.
+                # It still falls back to the file mode on its own when its conditions do not hold (see chunks_pipe.py).
+                allowed, why = True, ""
+        
         if not allowed:
             logger.info(f"streaming_mux: not enabled ({why})")
             return
@@ -458,10 +483,15 @@ class BaseDownloader:
             logger.info("streaming_mux: not enabled (media_downloader not created yet)")
             return
 
-        # Check media_downloader.other_tracks (the hybrid-only list, already filtered of
-        # subtitle/extra-audio sidecar entries by the DASH/HLS/ISM downloader by this point)
-        if getattr(media_downloader, "other_tracks", None):
-            logger.info("streaming_mux: not enabled (other_tracks/hybrid output present)")
+        # Check media_downloader.other_tracks: only hybrid VIDEO tracks (e.g. Dolby Vision
+        # companion) veto the streaming-mux fast path because they require a separate hybrid
+        # merge pass. Subtitle / extra-audio other_tracks do NOT veto streaming-mux.
+        _hybrid_video = any(
+            (t.get("type") or "").strip().lower().startswith("video")
+            for t in (getattr(media_downloader, "other_tracks", None) or [])
+        )
+        if _hybrid_video:
+            logger.info("streaming_mux: not enabled (hybrid video tracks present)")
             return
 
         media_downloader.enable_streaming_mux(self.output_path, chapters=self.chapters)
@@ -610,6 +640,11 @@ class BaseDownloader:
             elif base_kind == "subtitle":
                 subtitle_tracks.append(track)
 
+        # The files come in the alphabetical order of their names: the tracks go out in the order of the select_audio / select_subtitle the download ran with.
+        custom_filters = getattr(getattr(self, "media_downloader", None), "custom_filters", None)
+        audio_tracks = order_tracks(audio_tracks, "audio", effective_select_filter("audio", custom_filters))
+        subtitle_tracks = order_tracks(subtitle_tracks, "subtitle", effective_select_filter("subtitle", custom_filters))
+
         if video_track is None:
             media_downloader = getattr(self, "media_downloader", None)
             video_was_selected = any(
@@ -651,6 +686,22 @@ class BaseDownloader:
         if not video_probe and video_path and os.path.exists(video_path):
             video_probe = probe_media_file(video_path)
 
+        embedded_language = getattr(self, "embedded_audio_language", None)
+        if embedded_language:
+            if "audio_tracks" not in (video_probe or {}):
+                video_probe = get_media_metadata(video_path)
+            if len((video_probe or {}).get("audio_tracks") or []) != 1:
+                self.error = "The source does not contain exactly one identifiable embedded audio track"
+                return None
+            audio_tracks.insert(0, {"path": video_path, "language": embedded_language, "name": embedded_language})
+        required_languages = getattr(self, "required_audio_languages", None) or []
+        if required_languages:
+            from VibraVid.core.utils.audio_selection import matches_audio_language
+            actual = [track.get("language") or track.get("name") for track in audio_tracks]
+            if not actual or any(not matches_audio_language(actual, language) for language in required_languages):
+                self.error = "A requested audio track failed to download; the incomplete audio selection was not saved"
+                return None
+
         if other_track_results or (video_probe or {}).get("dolby_vision"):
             hybrid_file = build_hybrid_output(
                 video_track=video_track if isinstance(video_track, dict) else {"path": video_path},
@@ -678,6 +729,7 @@ class BaseDownloader:
 
         # CC-embedded subtitles are extracted straight from the raw video stream
         subtitle_tracks = self._prepare_subtitle_tracks_for_merge(subtitle_tracks, video_path)
+        subtitle_tracks = order_tracks(subtitle_tracks, "subtitle", effective_select_filter("subtitle", custom_filters))  # the closed captions just extracted join the list here
         subtitle_tracks_to_merge: list = []
         if subtitle_tracks:
             if MERGE_SUBTITLES:

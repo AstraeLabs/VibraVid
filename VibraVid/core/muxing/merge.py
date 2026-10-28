@@ -10,13 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from mutagen.mp4 import MP4, MP4Cover
-from rich.console import Console
 
+from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import (
     resolve_ietf,
-    resolve_iso639_2,
-    resolve_language_display_name,
+    track_title_and_iso_lang,
 )
 from VibraVid.setup import binary_paths, get_ffmpeg_path, get_mkvmerge_path
 from VibraVid.utils import config_manager, internet_manager
@@ -24,7 +23,6 @@ from VibraVid.utils.image_cache import get_cached_tmdb_image
 
 from .capture import capture_ffmpeg_real_time
 from .helper.audio import (
-    check_duration_v_a,
     detect_audio_offset,
     get_video_duration,
     has_audio,
@@ -73,7 +71,6 @@ from .helper.video import (
 )
 from .retag import build_container_tags
 
-console = Console()
 logger = logging.getLogger(__name__)
 
 USE_GPU = config_manager.config.get_bool("PROCESS", "use_gpu")
@@ -99,81 +96,6 @@ def _get_param_audio() -> list:
 
 def _get_param_final() -> list:
     return config_manager.config.get_list("PROCESS", "param_final")
-
-
-def _get_audio_order() -> list:
-    return config_manager.config.get_list("PROCESS", "audio_order", default=[])
-
-
-def _get_subtitle_order() -> list:
-    return config_manager.config.get_list("PROCESS", "subtitle_order", default=[])
-
-
-def _normalize_lang_token(value: str) -> str:
-    raw = (value or "").strip().lower()
-    if not raw:
-        return ""
-
-    # Strip common subtitle flags to match entries such as "ita_forced" or "eng_cc".
-    for suffix in ("_forced", "_cc", "_sdh"):
-        if raw.endswith(suffix):
-            raw = raw[: -len(suffix)]
-            break
-
-    return raw.replace("_", "-")
-
-
-def _sort_tracks_by_order(
-    tracks: list[dict[str, Any]], order_config: list[str], lang_fields: list[str]
-) -> list[dict[str, Any]]:
-    if not tracks or not order_config:
-        return tracks
-
-    normalized_order: list[str] = []
-    for item in order_config:
-        token = _normalize_lang_token(str(item))
-        if token:
-            normalized_order.append(token)
-
-    if not normalized_order:
-        return tracks
-
-    for track in tracks:
-        logger.info(f"Track before sorting: {track}")
-
-    priority_map = {lang: idx for idx, lang in enumerate(normalized_order)}
-
-    def _rank(track: dict[str, Any]) -> int:
-        candidates: list[str] = []
-
-        for field in lang_fields:
-            field_val = track.get(field)
-            if field_val:
-                candidates.append(str(field_val))
-
-        for raw in candidates:
-            normalized = _normalize_lang_token(raw)
-            if normalized in priority_map:
-                return priority_map[normalized]
-
-            base = normalized.split("-", 1)[0]
-            if base in priority_map:
-                return priority_map[base]
-
-            iso_code = resolve_iso639_2(normalized)
-            if iso_code in priority_map:
-                return priority_map[iso_code]
-
-            if len(iso_code) == 3 and iso_code != "und":
-                iso_base = iso_code[:2]
-                if iso_base in priority_map:
-                    return priority_map[iso_base]
-
-        return len(priority_map) + 1
-
-    indexed = list(enumerate(tracks))
-    indexed.sort(key=lambda pair: (_rank(pair[1]), pair[0]))
-    return [track for _, track in indexed]
 
 
 def detect_gpu_device_type() -> str:
@@ -349,10 +271,6 @@ def _mkvmerge_lang_flag(track: dict[str, Any], default: str = "und") -> str:
     return resolve_ietf(str(raw))
 
 
-def _mkvmerge_track_name(track: dict[str, Any]) -> str:
-    return track.get("name") or track.get("language") or track.get("lang") or ""
-
-
 def _mkvmerge_add_track(
     kind: str,
     path: str,
@@ -402,7 +320,7 @@ def mkvmerge_subtitle_args(subtitle_tracks: list[dict[str, Any]]) -> list[str]:
             console.print(f"[yellow]    Setting disposition: [red]{lang_display}")
 
         args += _mkvmerge_add_track(
-            "subtitle", sub_path, lang_iso, lang_display,
+            "subtitle", sub_path, lang_iso, track_title_and_iso_lang(subtitle)[0],
             default=is_default, forced=info.is_forced, hearing_impaired=info.is_hearing_impaired,
         )
     return args
@@ -650,22 +568,78 @@ def embed_poster(file_path: str, image_url: str | None = None):
     return file_path, result_json
 
 
-def order_audio_tracks(audio_tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sort *audio_tracks* by PROCESS.audio_order (unchanged when not configured)."""
-    audio_order = _get_audio_order()
-    if not audio_order:
-        return audio_tracks
-    logger.info(f"Applying configured audio order: {audio_order}")
-    return _sort_tracks_by_order(audio_tracks, audio_order, ["language", "name", "lang"])
+def audio_sync(
+    video_duration: float | None, audio_paths: list[str], names: list[str], limit_duration_diff: float = 3
+) -> tuple[list[float], bool]:
+    """``(offset in seconds of each audio, cut_to_video)``: a track more than *limit_duration_diff* seconds off the video asks for the output to be cut to the video, and one that differs that much from the first audio is cross-correlated against it to find its offset. join_media and the streaming mux (whose video is not a file yet: its duration is the manifest's) both call this."""
+    offsets: list[float] = []
+    cut_to_video = False
+    reference_audio: str | None = None
+    reference_duration: float | None = None
+
+    for audio_path, audio_lang in zip(audio_paths, names, strict=True):
+        audio_duration = get_video_duration(audio_path)
+        if audio_duration is None:
+            offsets.append(0.0)
+            continue
+
+        diff = abs(video_duration - audio_duration) if video_duration else 0.0
+        diff_sec = round((video_duration or 0.0) - audio_duration)
+        diff_str = f"+{diff_sec}s" if diff_sec >= 0 else f"{diff_sec}s"
+        console.print(f"[yellow]    - [cyan]Audio lang [red]{audio_lang}, [cyan]Video: [red]{round(video_duration or 0.0)}s, [cyan]Diff: [red]{diff_str}")
+
+        if diff > limit_duration_diff:
+            logger.warning(f"Duration difference for '{audio_lang}' exceeds limit ({diff:.2f}s > {limit_duration_diff}s). This track will be included with -shortest, but consider fixing the source files.")
+            shortest_dur = round(min(video_duration or 0.0, audio_duration))
+            console.print(f"[yellow]      -> [cyan]shortest will be applied: output trimmed to ~{shortest_dur}s")
+            cut_to_video = True
+
+        if reference_audio is None:
+            reference_audio = audio_path
+            reference_duration = audio_duration
+            offsets.append(0.0)
+            logger.info(f"Audio offset reference track: {audio_lang}")
+            continue
+
+        dur_gap = abs(audio_duration - reference_duration) if reference_duration is not None else 0.0
+        if dur_gap <= limit_duration_diff:
+            logger.info(f"Skipping offset detection for '{audio_lang}': duration matches reference (gap {dur_gap:.2f}s <= {limit_duration_diff}s).")
+            offsets.append(0.0)
+            continue
+
+        offset = detect_audio_offset(reference_audio, audio_path)
+        if offset is None:
+            logger.warning(f"Offset detection failed for '{audio_lang}'.")
+            offsets.append(0.0)
+            continue
+
+        offsets.append(offset)
+        if abs(offset) >= 0.05:
+            direction = "Late" if offset > 0 else "Early"
+            console.print(f"[yellow]    OFFSET [cyan]{audio_lang}: [red]{offset:+.3f}s [cyan]({direction})")
+
+    return offsets, cut_to_video
 
 
-def order_subtitle_tracks(subtitle_tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sort *subtitle_tracks* by PROCESS.subtitle_order (unchanged when not configured)."""
-    subtitle_order = _get_subtitle_order()
-    if not subtitle_order:
-        return subtitle_tracks
-    logger.info(f"Applying configured subtitle order: {subtitle_order}")
-    return _sort_tracks_by_order(subtitle_tracks, subtitle_order, ["language", "lang", "name"])
+_OFFSET_THR = 0.05
+
+
+def audio_offset_args(offset_sec: float, name: str | None = None) -> list[str]:
+    """The ffmpeg input option that cancels an audio's detected offset (before its ``-i``). ``offset_sec`` is how late the track is against the reference (``detect_audio_offset``): a late one loses its head with ``-ss``, an early one is delayed with ``-itsoffset``."""
+    if offset_sec > _OFFSET_THR:
+        logger.info(f"Applying -ss {offset_sec:.3f} to '{name}'")
+        return ["-ss", f"{offset_sec:.3f}"]
+    if offset_sec < -_OFFSET_THR:
+        logger.info(f"Applying -itsoffset {abs(offset_sec):.3f} to '{name}'")
+        return ["-itsoffset", f"{abs(offset_sec):.3f}"]
+    return []
+
+
+def cut_to_video_args(video_duration: float | None) -> list[str]:
+    """The ffmpeg output options that cut every track to the video: ``-t`` its duration, or ``-shortest`` when that is unknown."""
+    if video_duration and video_duration > 0:
+        return ["-t", f"{video_duration:.3f}", "-strict", "experimental"]
+    return ["-shortest", "-strict", "experimental"]
 
 
 def _prepare_audio_tracks(
@@ -678,7 +652,6 @@ def _prepare_audio_tracks(
         tuple: (valid_audio_tracks, use_shortest)
     """
     use_shortest = False
-    audio_tracks = order_audio_tracks(audio_tracks)
 
     # Check and convert audio tracks if TS with issues
     temp_audio_paths = []
@@ -709,46 +682,9 @@ def _prepare_audio_tracks(
         logger.warning("_prepare_audio_tracks: no valid audio tracks remaining after duration check.")
         return [], False
 
-    # Check duration differences
-    reference_audio: str | None = None
-    reference_duration: float | None = None
-
-    for audio_track in audio_tracks:
-        audio_path = audio_track.get("path")
-        audio_lang = audio_track.get("name", "unknown")
-
-        _, diff, video_duration, audio_duration = check_duration_v_a(video_path, audio_path)
-        diff_sec = round(video_duration - audio_duration)
-        diff_str = f"+{diff_sec}s" if diff_sec >= 0 else f"{diff_sec}s"
-        console.print(f"[yellow]    - [cyan]Audio lang [red]{audio_lang}, [cyan]Video: [red]{round(video_duration)}s, [cyan]Diff: [red]{diff_str}")
-
-        if diff > limit_duration_diff:
-            logger.warning(f"Duration difference for '{audio_lang}' exceeds limit ({diff:.2f}s > {limit_duration_diff}s). This track will be included with -shortest, but consider fixing the source files.")
-            shortest_dur = round(min(video_duration, audio_duration))
-            console.print(f"[yellow]      -> [cyan]shortest will be applied: output trimmed to ~{shortest_dur}s")
-            use_shortest = True
-
-        if reference_audio is None:
-            reference_audio = audio_path
-            reference_duration = audio_duration
-            audio_track["_offset_sec"] = 0.0
-            logger.info(f"Audio offset reference track: {audio_lang}")
-        else:
-            dur_gap = abs(audio_duration - reference_duration) if reference_duration is not None else 0.0
-            if dur_gap <= limit_duration_diff:
-                logger.info(f"Skipping offset detection for '{audio_lang}': duration matches reference (gap {dur_gap:.2f}s <= {limit_duration_diff}s).")
-                audio_track["_offset_sec"] = 0.0
-                continue
-
-            offset = detect_audio_offset(reference_audio, audio_path)
-            if offset is None:
-                logger.warning(f"Offset detection failed for '{audio_lang}'.")
-                audio_track["_offset_sec"] = 0.0
-            else:
-                audio_track["_offset_sec"] = offset
-                if abs(offset) >= 0.05:
-                    direction = "Early" if offset > 0 else "Late"
-                    console.print(f"[yellow]    OFFSET [cyan]{audio_lang}: [red]{offset:+.3f}s [cyan]({direction})")
+    offsets, use_shortest = audio_sync(get_video_duration(video_path), [t.get("path") for t in audio_tracks], [t.get("name", "unknown") for t in audio_tracks], limit_duration_diff)
+    for audio_track, offset in zip(audio_tracks, offsets, strict=True):
+        audio_track["_offset_sec"] = offset
 
     return audio_tracks, use_shortest
 
@@ -763,7 +699,6 @@ def _prepare_subtitle_tracks(
         list: the processed subtitle tracks (empty list if none survive preprocessing).
     """
     video_duration = get_video_duration(video_path)
-    subtitles_list = order_subtitle_tracks(subtitles_list)
 
     # De-duplicate by resolved path (guards against any upstream double-add)
     seen_paths: set = set()
@@ -1019,22 +954,13 @@ def _join_media_ffmpeg(
         ffmpeg_cmd.extend(["-f", "mpegts"])
     ffmpeg_cmd.extend(["-i", video_path])
 
-    _OFFSET_THR = 0.05
     for audio_track in audio_tracks:
         audio_path = audio_track.get("path")
-        offset_sec = audio_track.get("_offset_sec", 0.0)
 
         if is_mpegts_file(audio_path):
             ffmpeg_cmd.extend(["-f", "mpegts"])
 
-        if offset_sec > _OFFSET_THR:
-            ffmpeg_cmd.extend(["-itsoffset", f"{offset_sec:.3f}"])
-            logger.info(f"Applying -itsoffset {offset_sec:.3f} to '{audio_track.get('name')}'")
-        elif offset_sec < -_OFFSET_THR:
-            ss_val = abs(offset_sec)
-            ffmpeg_cmd.extend(["-ss", f"{ss_val:.3f}"])
-            logger.info(f"Applying -ss {ss_val:.3f} to '{audio_track.get('name')}'")
-
+        ffmpeg_cmd.extend(audio_offset_args(audio_track.get("_offset_sec", 0.0), audio_track.get("name")))
         ffmpeg_cmd.extend(["-i", audio_path])
 
     for subtitle in subtitle_tracks:
@@ -1065,9 +991,7 @@ def _join_media_ffmpeg(
         ffmpeg_cmd.extend(["-map", f"0:s:{cc['sub_index']}"])
 
     for i, audio_track in enumerate(audio_tracks):
-        lang_source = audio_track.get("language") or audio_track.get("name", "unknown")
-        lang_code = resolve_iso639_2(lang_source)
-        track_title = audio_track.get("name") or resolve_language_display_name(lang_source)
+        track_title, lang_code = track_title_and_iso_lang(audio_track)
 
         ffmpeg_cmd.extend([f"-metadata:s:a:{i}", f"language={lang_code}"])
         ffmpeg_cmd.extend([f"-metadata:s:a:{i}", f"title={track_title}"])
@@ -1082,10 +1006,7 @@ def _join_media_ffmpeg(
         sub_path = subtitle["path"]
         sub_ext = os.path.splitext(sub_path)[1].lower().lstrip(".")
         lang_display = subtitle.get("lang", subtitle.get("language", "unknown"))
-
-        # ISO 639-2: resolve_iso639_2 already strips _forced/_cc/_sdh via split("_")
-        # e.g. "ita_forced" -> "ita",  "en-US" -> "eng",  "ita" -> "ita"
-        lang_iso = resolve_iso639_2(lang_display)
+        sub_title, lang_iso = track_title_and_iso_lang(subtitle)  # e.g. "Italian [Forced]", "ita"
 
         console.print(f"[yellow]    - [cyan]Subtitle lang [red]{lang_display}.{sub_ext}")
         if idx == default_sub_idx:
@@ -1103,9 +1024,9 @@ def _join_media_ffmpeg(
         else:
             subtitle_codec_args += [f"-c:s:{idx}", "copy"]
 
-        ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"title={lang_display}"]
+        ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"title={sub_title}"]
         ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"language={lang_iso}"]
-        ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"handler_name={lang_display}"]
+        ffmpeg_cmd += [f"-metadata:s:s:{idx}", f"handler_name={sub_title}"]
 
     if embedded_cc_streams:
 
@@ -1114,8 +1035,7 @@ def _join_media_ffmpeg(
         for n, cc in enumerate(embedded_cc_streams):
             cc_idx = len(subtitle_tracks) + n
             cc_base = cc["language"] if cc["language"] and cc["language"] != "und" else audio_base
-            cc_lang_iso = resolve_iso639_2(cc_base)
-            cc_title = f"{cc_base}_cc"
+            cc_title, cc_lang_iso = track_title_and_iso_lang({"language": f"{cc_base}_cc"})
             console.print(f"[yellow]    - [cyan]Subtitle lang [red]{cc_title} [cyan](embedded {cc['codec_name']})")
             subtitle_codec_args += [f"-c:s:{cc_idx}", "mov_text"]
             ffmpeg_cmd += [f"-metadata:s:s:{cc_idx}", f"title={cc_title}"]
@@ -1133,11 +1053,7 @@ def _join_media_ffmpeg(
     _maybe_tag_hevc_for_mkv(ffmpeg_cmd, video_path, out_path, _is_video_copied())
 
     if use_shortest:
-        video_duration = get_video_duration(video_path)
-        if video_duration and video_duration > 0:
-            ffmpeg_cmd.extend(["-t", f"{video_duration:.3f}", "-strict", "experimental"])
-        else:
-            ffmpeg_cmd.extend(["-shortest", "-strict", "experimental"])
+        ffmpeg_cmd.extend(cut_to_video_args(get_video_duration(video_path)))
 
     # Subtitle disposition: hearing_impaired for embedded CC streams (if any)
     for n in range(len(embedded_cc_streams)):
@@ -1212,9 +1128,8 @@ def _join_media_mkvmerge(
 
     for i, audio_track in enumerate(audio_tracks):
         lang_code = _mkvmerge_lang_flag(audio_track)
-        track_name = _mkvmerge_track_name(audio_track)
         clean_audio_path = _strip_drm_boxes(audio_track["path"])
-        cmd += _mkvmerge_add_track("audio", clean_audio_path, lang_code, track_name, default=(i == 0))
+        cmd += _mkvmerge_add_track("audio", clean_audio_path, lang_code, track_title_and_iso_lang(audio_track)[0], default=(i == 0))
 
     cmd += mkvmerge_subtitle_args(subtitle_tracks)
     cmd += mkvmerge_attach_args(collect_font_attachments([s["path"] for s in subtitle_tracks], out_path))

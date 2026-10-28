@@ -5,15 +5,13 @@ import os
 import subprocess
 from pathlib import Path
 
-from rich.console import Console
-
+from VibraVid.core.ui.bar_manager import console
 from VibraVid.setup import get_ffmpeg_path, get_flux_path
 
 from .detect import detect_subtitle_format, fix_subtitle_extension
 from .sanitize import sanitize_vtt_file
 from .ttml import convert_ttml_to_format
 
-console = Console()
 logger = logging.getLogger(__name__)
 
 

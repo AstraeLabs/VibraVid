@@ -4,6 +4,32 @@ from VibraVid.core.ui.tracker import DownloadTracker
 from VibraVid.utils.upload.version import __version__
 
 
+def audio_language_context(request):
+    import json
+
+    from VibraVid.core.utils.audio_selection import configured_audio_languages, normalize_audio_language
+
+    choices = configured_audio_languages()
+    data = request.POST if request.method == "POST" else request.GET
+    selection = data.get("audio_language")
+    if selection is None:
+        try:
+            selection = json.loads(data.get("item_payload") or "{}").get("_audio_language")
+        except (ValueError, TypeError, AttributeError):
+            pass
+    try:
+        selection = normalize_audio_language(selection)
+    except ValueError:
+        selection = None
+    return {"audio_language_config": {
+        "languages": choices,
+        "selection": selection or "all",
+        "explicit": selection is not None,
+        "allLabel": "Both configured languages" if len(choices) == 2 else
+                    "All configured languages" if choices else "All available audio",
+    }}
+
+
 def version_context(request):
     """Add version to template context."""
     return {

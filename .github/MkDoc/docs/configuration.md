@@ -228,6 +228,7 @@ token_refresh_stall_rounds = 3
 embed_poster = false
 write_sidecars = false
 cleanup_tmp_folder = true
+keep_tmp_on_error = false
 temp_root = ""
 ```
 
@@ -241,6 +242,7 @@ temp_root = ""
 | `subtitle_resolve_workers` | `4` | HLS subtitle renditions resolved concurrently; `1` = sequential |
 | `extract_embedded_cc` | `false` | HLS only: extract embedded CEA-608/708 captions (`EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS`) into a subtitle track. Opt-in: needs decoding the whole video (extra time/CPU) |
 | `cleanup_tmp_folder` | `true` | Remove temporary files afterwards |
+| `keep_tmp_on_error` | `false` | Keep the temporary files (.dec, partial chunks, ...) when a download fails, for debugging |
 | `temp_root` | `""` | Folder for the temporary files (segments, merge and decrypt leftovers). Empty = next to the output file. With the output on a NAS share, point it to a fast local disk: every step otherwise reads and writes the whole title over the network (about 8x the file size). Needs about 2x the size of one title. The `VIBRAVID_TEMP_DIR` environment variable overrides it (the Docker image sets it to `/app/tmp`) |
 | `embed_poster` | `false` | Embed a poster/still: matching TMDB artwork, else the site's own |
 | `write_sidecars` | `false` | Write `.nfo` + poster/thumb next to each download when the match is reliable (see [Metadata providers](#metadata-providers)). CLI: `--sidecars` / `--no-sidecars` |
@@ -255,7 +257,7 @@ temp_root = ""
 
 ### Stream selection filters
 
-`select_video`, `select_audio` and `select_subtitle` choose which tracks are downloaded.
+`select_video`, `select_audio` and `select_subtitle` choose which tracks are downloaded. Audio and subtitle tracks are also written in the order the filter names their languages (`"ita|eng"` puts Italian first; the slots `"1ita|2eng"` rank by number), and the tracks it does not name go last. The first audio track is the default one.
 
 **Video**
 
@@ -310,8 +312,6 @@ param_video = ["-c:v", "libx265", "-crf", "28", "-preset", "medium"]
 param_audio = ["-c:a", "libopus", "-b:a", "128k"]
 param_song = []
 param_final = ["-c", "copy"]
-audio_order = []
-subtitle_order = []
 subtitle_disposition_language = "it-it_forced"
 merge_audio = true
 merge_subtitle = true
@@ -329,7 +329,6 @@ extension = "mkv"
 | `param_audio` | Opus 128k | FFmpeg audio encoding parameters |
 | `param_song` | `[]` | FFmpeg re-encode parameters for music tracks |
 | `param_final` | `["-c", "copy"]` | Final FFmpeg parameters; when set, takes precedence over `param_video`/`param_audio` |
-| `audio_order`, `subtitle_order` | `[]` | Track order in the output, e.g. `["ita", "eng"]` |
 | `merge_audio`, `merge_subtitle` | `true` | Merge all audio / subtitle tracks into the output file |
 | `subtitle_disposition_language` | `"it-it_forced"` | Subtitle track to mark default/forced |
 | `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio instead of dropping it at selection (ffmpeg can't demux DTS:X: needs mkvmerge) |

@@ -21,6 +21,12 @@ from searchapp.api.base import Entries
 from VibraVid.cli.command.equivalent_command import equivalent_command_builder
 from VibraVid.core.ui.manual_tracks import manual_track_broker
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.utils.audio_selection import (
+    audio_filter_for_selection,
+    audio_language_context,
+    filter_series_audio,
+    normalize_audio_language,
+)
 from VibraVid.services._base.site_extra_args import (
     get_site_extra_args_schema as get_site_extra_args_schema,
 )
@@ -152,7 +158,8 @@ def _media_item_to_display_dict(item: Entries, source_alias: str) -> dict[str, A
         'slug': item.slug,
         'tmdb_id': item.tmdb_id,
         'availability': item.desc,
-        'catalog_language': item.provider_language,
+        'catalog_language': ", ".join(item.catalog_languages or ([item.provider_language] if item.provider_language else [])),
+        'catalog_languages': ",".join(item.catalog_languages or ([item.provider_language] if item.provider_language else [])),
     }
 
     # Ensure payload reflects the GUI behaviour (so start_download treats songs like single-item downloads)
@@ -196,7 +203,8 @@ def _run_global_search(query: str, sites: list[str]):
 
     def _one(site: str):
         api = get_api(site)
-        return [_media_item_to_display_dict(item, site) for item in api.search(query)]
+        items = [_media_item_to_display_dict(item, site) for item in api.search(query)]
+        return items, getattr(api, "search_warnings", [])
 
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(len(sites), 8))
     future_map = {executor.submit(_one, s): s for s in sites}
@@ -204,7 +212,10 @@ def _run_global_search(query: str, sites: list[str]):
         for fut in concurrent.futures.as_completed(future_map, timeout=_GLOBAL_SEARCH_TIMEOUT):
             site = future_map[fut]
             try:
-                results.extend(fut.result())
+                items, warnings = fut.result()
+                results.extend(items)
+                if warnings:
+                    failed.append(f"{site}: {'; '.join(warnings)}")
             except Exception as e:
                 logger.warning(f"[global_search] '{site}' failed: {e}")
                 failed.append(site)
@@ -234,11 +245,13 @@ def _run_download_in_thread(
     media_type: str = "Film", output_path: str = None, audio_format: str = None,
     poster: str = None, _submit: bool = True, _metadata: list | None = None,
     _batch_id: str | None = None, quality: str | None = None,
-    manual_tracks: bool = False,
+    manual_tracks: bool = False, audio_language: str | None = None,
 ) -> concurrent.futures.Future | Callable[[], bool]:
     """Register a job, then submit it or return its worker for a sequential batch."""
     from VibraVid.core.utils.quality import normalize_quality
     quality = normalize_quality(quality) or None
+    audio_language = normalize_audio_language(audio_language or item_payload.get("_audio_language"))
+    audio_filter = audio_filter_for_selection(audio_language)
     if quality and not get_api(site).supports_quality_discovery:
         logger.warning("%s cannot honor a chosen quality; ignoring %s", site, quality)
         quality = None
@@ -260,26 +273,29 @@ def _run_download_in_thread(
             if metadata is None:
                 api = get_api(site)
                 media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
-                metadata = api.get_series_metadata(media_item) or []
+                with audio_language_context(audio_language):
+                    metadata = api.get_series_metadata(media_item) or []
             
-            # Same reading as the downloader: a 1-based position in the list first, then a season number.
+            metadata = filter_series_audio(metadata, audio_language)
             position = int(season)
-            selected = metadata[position - 1] if 1 <= position <= len(metadata) else next(
-                (s for s in metadata if str(s.number) == str(season)), None
-            )
-            count = selected.episode_count if selected else 0
-            if count:
+            selected = next((s for s in metadata if str(s.number) == str(season)), None)
+            if selected is None and not audio_language and 1 <= position <= len(metadata):
+                selected = metadata[position - 1]
+            available = {int(ep.number) for ep in selected.episodes} if selected else set()
+            if available:
                 planned = set()
                 for part in str(episodes).split(","):
                     part = part.strip()
                     if part == "*":
-                        planned.update(range(1, count + 1))
+                        planned.update(available)
                     elif "-" in part:
                         first, last = part.split("-", 1)
-                        planned.update(range(int(first), int(last) + 1 if last.isdigit() else count + 1))
+                        planned.update(range(int(first), int(last) + 1 if last.isdigit() else max(available) + 1))
                     else:
                         planned.add(int(part))
-                planned_episodes = sorted(n for n in planned if 1 <= n <= count)
+                planned_episodes = sorted(planned & available)
+                if audio_language and planned_episodes:
+                    episodes = ",".join(map(str, planned_episodes))
         except Exception:
             logger.warning("Could not expand queued episodes for %s", title, exc_info=True)
     stop_scope = "download"
@@ -318,6 +334,7 @@ def _run_download_in_thread(
                 return False
 
             # Set context for downloaders in this thread
+            context_tracker.audio_filter = audio_filter
             context_tracker.video_quality = None if manual_tracks else quality
             context_tracker.manual_tracks = bool(manual_tracks)
             context_tracker.defer_manual_tracks = False
@@ -399,6 +416,7 @@ def _run_download_in_thread(
             _remove_scheduled_download(download_id)
             download_tracker.clear_stop_request(download_id)
             context_tracker.video_quality = None
+            context_tracker.audio_filter = None
             context_tracker.manual_tracks = False
             context_tracker.defer_manual_tracks = False
             context_tracker.manual_track_on_wait = None
@@ -432,8 +450,11 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
     from VibraVid.core.utils.quality import normalize_quality
     try:
         quality = normalize_quality(request.POST.get("quality")) or None
+        audio_language = normalize_audio_language(request.POST.get("audio_language"))
+        if audio_language:
+            track_options["audio_language"] = audio_language
     except ValueError:
-        messages.error(request, "Invalid quality selection.")
+        messages.error(request, "Invalid quality or audio language selection.")
         return redirect("search_home")
 
     if not all([source_alias, item_payload_raw]):
@@ -442,6 +463,9 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
 
     try:
         item_payload = json.loads(item_payload_raw)
+        audio_language = normalize_audio_language(request.POST.get("audio_language") or item_payload.get("_audio_language"))
+        if audio_language:
+            track_options["audio_language"] = audio_language
     except (ValueError, TypeError):
         messages.error(request, "Error parsing the data.")
         return redirect("search_home")
@@ -453,7 +477,8 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             try:
                 api = get_api(source_alias)
                 media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
-                metadata = api.get_series_metadata(media_item) or []
+                with audio_language_context(audio_language):
+                    metadata = filter_series_audio(api.get_series_metadata(media_item) or [], audio_language)
                 seasons = [str(s.number) for s in metadata]
             except Exception:
                 logger.exception("Could not plan full series download")
@@ -469,10 +494,17 @@ def _handle_series_download(request: HttpRequest) -> HttpResponse:
             try:
                 api = get_api(source_alias)
                 media_item = Entries(**{k: v for k, v in item_payload.items() if k in Entries.__dataclass_fields__})
-                metadata = api.get_series_metadata(media_item) or []
+                with audio_language_context(audio_language):
+                    metadata = filter_series_audio(api.get_series_metadata(media_item) or [], audio_language)
             except Exception:
                 logger.warning("Could not expand selected seasons", exc_info=True)
                 metadata = []
+        if audio_language:
+            eligible_seasons = {str(s.number) for s in metadata}
+            seasons = [s for s in seasons if s in eligible_seasons]
+            if not seasons:
+                messages.warning(request, "No episodes are available in the selected audio language.")
+                return redirect("search_home")
         # Register every season before submitting the sequential worker so jobs
         # waiting for executor capacity are already visible and cancellable.
         batch_id = uuid.uuid4().hex if len(seasons) > 1 else None

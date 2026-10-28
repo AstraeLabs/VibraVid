@@ -22,15 +22,13 @@ from VibraVid.core.muxing.helper.video import get_media_metadata, is_mpegts_file
 from VibraVid.core.muxing.merge import (
     _mkvmerge_add_track,
     _mkvmerge_lang_flag,
-    _mkvmerge_track_name,
     mkvmerge_chapters_args,
     mkvmerge_subtitle_args,
-    order_audio_tracks,
-    order_subtitle_tracks,
     prepare_chapters,
     video_track_name,
 )
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.core.utils.language import track_title_and_iso_lang
 from VibraVid.setup import get_dovi_tool_path, get_ffmpeg_path, get_ffprobe_path, get_mkvmerge_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.proc import run_logged
@@ -503,7 +501,7 @@ def build_hybrid_output(
         logger.info(f"Hybrid: restoring source video start-time offset ({video_start_time_ms} ms)")
     mux_cmd.append(str(hybrid_hevc))
 
-    for idx, track in enumerate(order_audio_tracks(audio_tracks)):
+    for idx, track in enumerate(audio_tracks):
         track_path_str = str(track.get("path") or "").strip()
         if not track_path_str:
             continue
@@ -522,10 +520,10 @@ def build_hybrid_output(
             logger.warning(f"Hybrid audio[{idx}] strip-enca failed — using original: {track_path.name}")
 
         mux_cmd.extend(
-            _mkvmerge_add_track("audio", str(track_path), _mkvmerge_lang_flag(track), _mkvmerge_track_name(track), default=(idx == 0))
+            _mkvmerge_add_track("audio", str(track_path), _mkvmerge_lang_flag(track), track_title_and_iso_lang(track)[0], default=(idx == 0))
         )
 
-    mux_cmd.extend(mkvmerge_subtitle_args(order_subtitle_tracks([t for t in subtitle_tracks if Path(str(t.get("path") or "")).is_file()])))
+    mux_cmd.extend(mkvmerge_subtitle_args([t for t in subtitle_tracks if Path(str(t.get("path") or "")).is_file()]))
 
     if chapters:
         chapters = prepare_chapters(chapters, get_video_duration(str(base_path)), str(output_file.parent))

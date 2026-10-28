@@ -20,19 +20,19 @@ def _convert(tmp_path, *blocks):
     return convert_ttml_to_format(str(src), str(out), "srt"), out
 
 
-def test_empty_blocks_are_skipped_without_an_error(tmp_path, capsys):
+def test_empty_blocks_are_skipped_without_an_error(tmp_path, printed):
     ok, out = _convert(tmp_path, *[EMPTY_TT] * 5)
 
-    shown = capsys.readouterr().out
+    shown = printed()
     assert ok is False and not out.exists()
     assert "no captions" in shown and "5 empty block(s)" in shown
     assert "No valid TTML blocks processed" not in shown
 
 
-def test_unparsable_blocks_still_report_the_error(tmp_path, capsys):
+def test_unparsable_blocks_still_report_the_error(tmp_path, printed):
     ok, _ = _convert(tmp_path, BROKEN_TT)
 
-    shown = capsys.readouterr().out
+    shown = printed()
     assert ok is False
     assert "No valid TTML blocks processed" in shown
 

@@ -1,18 +1,13 @@
 # 01.04.25
 
 import os
-import re
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from VibraVid.core.muxing.helper.chapters import (
-    clamp_chapters,
-    persist_chapters_file,
-    sort_chapters,
-    write_ffmetadata_chapters,
-)
+from VibraVid.core.muxing.helper.chapters import write_ffmetadata_chapters
 from VibraVid.core.muxing.helper.font_embed import collect_font_attachments, ffmpeg_attach_args, mkv_subtitle_codec_args
 from VibraVid.core.muxing.helper.sub.convert import convert_subtitle, extract_vtt_from_wvtt_mp4
 from VibraVid.core.muxing.helper.sub.disposition import (
@@ -23,7 +18,9 @@ from VibraVid.core.muxing.helper.sub.disposition import (
 from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
 from VibraVid.core.muxing.streaming_mux import StreamingMuxFeeder
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.core.utils.language import resolve_iso639_2, resolve_language_display_name
+from VibraVid.core.utils.language import track_title_and_iso_lang
+from VibraVid.core.utils.resolution import classify_resolution
+from VibraVid.core.utils.track_order import effective_select_filter, order_tracks
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
 
@@ -40,6 +37,14 @@ from .live_merge import _LiveMerger
 from .sniff import _streaming_mux_enabled
 
 
+@dataclass
+class StreamingMuxPlan:
+    """ffmpeg command of the cross-track mux (video read from stdin) plus what the caller must clean up / report."""
+    cmd: list[str]
+    output_path: str
+    chapters_injected: bool
+
+
 def _estimate_livemux_wait_seconds(stream: Any) -> float:
     """How long to wait for *stream* to finish downloading before giving up on the live-mux fast path, estimated from its segment count and/or estimated byte size instead of one fixed timeout """
     segs = len(getattr(stream, "segments", None) or [])
@@ -52,16 +57,6 @@ def _estimate_livemux_wait_seconds(stream: Any) -> float:
     from_size = (size / STREAMING_MUX_MIN_THROUGHPUT_BPS) if size else 0.0
 
     return min(STREAMING_MUX_MAX_WAIT_SECONDS, max(STREAMING_MUX_MIN_WAIT_SECONDS, from_segs, from_size))
-
-
-def _audio_title_and_iso_lang(entry: Any) -> tuple[str, str]:
-    if isinstance(entry, dict):
-        lang_source = entry.get("language") or entry.get("name") or "und"
-        title = entry.get("name") or resolve_language_display_name(lang_source)
-    else:
-        lang_source = entry.resolved_language or entry.language or "und"
-        title = getattr(entry, "name", "") or resolve_language_display_name(lang_source)
-    return title, resolve_iso639_2(lang_source)
 
 
 def _subtitle_disposition_info(entry: Any) -> "SubtitleDispositionInfo":
@@ -77,31 +72,6 @@ def _subtitle_disposition_info(entry: Any) -> "SubtitleDispositionInfo":
         sdh = bool(getattr(entry, "is_sdh", False))
         cc = bool(getattr(entry, "is_cc", False))
     return SubtitleDispositionInfo(language=lang_source, forced=forced, sdh=sdh, cc=cc)
-
-
-def _subtitle_title_and_iso_lang(entry: Any) -> tuple[str, str]:
-    """Subtitle title is a bit more complex: if the track is marked forced, SDH, or CC, we append that to the title. If the track has no name, we use the language display name as the base title (same fallback as audio)."""
-    if isinstance(entry, dict):
-        lang_source = entry.get("language") or entry.get("name") or "und"
-        raw_name = entry.get("name") or ""
-        forced, sdh, cc = bool(entry.get("forced")), bool(entry.get("sdh")), bool(entry.get("cc"))
-    else:
-        lang_source = entry.resolved_language or entry.language or "und"
-        raw_name = getattr(entry, "name", "") or ""
-        forced = bool(getattr(entry, "forced", False))
-        sdh = bool(getattr(entry, "is_sdh", False))
-        cc = bool(getattr(entry, "is_cc", False))
-
-    base = re.sub(r"\s*[(\[][^)\]]*[)\]]\s*", " ", raw_name).strip() or resolve_language_display_name(lang_source)
-    flags = []
-    if forced:
-        flags.append("[Forced]")
-    if sdh:
-        flags.append("[SDH]")
-    elif cc:
-        flags.append("[CC]")
-    title = f"{base} {' '.join(flags)}".strip() if flags else base
-    return title, resolve_iso639_2(lang_source)
 
 
 class StreamingMuxMixin:
@@ -177,7 +147,28 @@ class StreamingMuxMixin:
     def _try_start_streaming_mux_inner(
         self, video_ext: str, video_stream: Any, video_duration_cap: float | None = None
     ) -> "StreamingMuxFeeder | None":
-        if not _streaming_mux_enabled(getattr(self, "site_name", None)):
+        plan = self._prepare_streaming_mux(video_ext, video_stream, video_duration_cap)
+        if plan is None:
+            return None
+
+        feeder = StreamingMuxFeeder(plan.cmd)
+        try:
+            feeder.start()
+        except Exception as exc:
+            logger.warning(f"streaming_mux: failed to start ffmpeg: {exc}")
+            return None
+
+        # Not confirmed until _finish_streaming_mux_inner() sees the fast-path output actually succeed -- if it falls back to the normal mux instead
+        self._streaming_mux_chapter_pending = plan.chapters_injected
+
+        logger.info(f"streaming_mux: started early cross-track mux -> {plan.output_path}")
+        return feeder
+
+    def _prepare_streaming_mux(
+        self, video_ext: str, video_stream: Any, video_duration_cap: float | None = None, progress: bool = False, chunks_pipe: bool = False
+    ) -> "StreamingMuxPlan | None":
+        """Eligibility checks, the wait for every other track and the ffmpeg command of the cross-track mux whose video arrives on stdin; None when the fast path does not apply. *progress* adds ``-progress pipe:1`` for a caller that reads ffmpeg's stdout. *chunks_pipe*: the caller is the chunks pipe, which has its own opt-out rules (``--no-livemux`` ...) and is on by default, so the in-flight switch is not asked again."""
+        if not chunks_pipe and not _streaming_mux_enabled(getattr(self, "site_name", None)):
             logger.info("streaming_mux: switched off for this run (--no-livemux, process.live_mux or PROCESS.use_live_mux) -- falling back to the normal mux")
             return None
 
@@ -190,9 +181,16 @@ class StreamingMuxMixin:
             logger.info("streaming_mux: not eligible (PROCESS.engine != ffmpeg) -- falling back to the normal mux")
             return None
 
-        if getattr(self, "other_tracks", None):
-            logger.info("streaming_mux: not eligible (other_tracks/hybrid output present) -- falling back to the normal mux")
-            return None  # hybrid output (dolby vision, other video renditions, ...) has its own path
+        # Only hybrid VIDEO other_tracks (e.g. Dolby Vision companion) veto streaming-mux
+        # because they require a separate hybrid merge pass. Subtitle / extra-audio
+        # other_tracks do NOT veto streaming-mux.
+        _hybrid_video = any(
+            (t.get("type") or "").strip().lower().startswith("video")
+            for t in (getattr(self, "other_tracks", None) or [])
+        )
+        if _hybrid_video:
+            logger.info(f"streaming_mux: not eligible (hybrid video tracks present: {getattr(self, 'other_tracks', None)}) -- falling back to the normal mux")
+            return None
 
         # External tracks (e.g. HLS text subtitles promoted by
         # _promote_hls_subtitles_to_external(), called earlier in start_download()) are
@@ -201,7 +199,7 @@ class StreamingMuxMixin:
         external_subs = [t for t in (getattr(self, "external_subtitles", None) or []) if t.get("_selected", True)]
         external_auds = [t for t in (getattr(self, "external_audios", None) or []) if t.get("_selected", True)]
         if (external_subs or external_auds) and context_tracker.no_concurrent:
-            logger.info("streaming_mux: not eligible (external tracks present and --no-concurrent is set) -- falling back to the normal mux")
+            logger.info(f"streaming_mux: not eligible (external tracks present and --no-concurrent is set: subs={len(external_subs)}, auds={len(external_auds)}) -- falling back to the normal mux")
             return None
 
         try:
@@ -217,7 +215,6 @@ class StreamingMuxMixin:
             for s in getattr(self, "streams", []) or []
             if getattr(s, "selected", False) and not getattr(s, "is_external", False) and s.type in ("audio", "subtitle")
         ]
-
         ready_paths: dict[str, Path] = {}
         for other in other_streams:
             key = self._stream_task_key(other)
@@ -245,14 +242,24 @@ class StreamingMuxMixin:
                 return None
             ready_paths[key] = resolved
 
-        audio_streams = [s for s in other_streams if s.type == "audio"]
-        subtitle_streams = [s for s in other_streams if s.type == "subtitle"]
-        audio_paths = [ready_paths[self._stream_task_key(s)] for s in audio_streams] + [
-            ready_paths[t["_task_key"]] for t in external_auds
-        ]
-        _subtitle_candidates = [(s, ready_paths[self._stream_task_key(s)]) for s in subtitle_streams] + [
-            (t, ready_paths[t["_task_key"]]) for t in external_subs
-        ]
+        # Manifest order is not the order join_media muxes them in: same function, same select_audio / select_subtitle.
+        custom_filters = getattr(self, "custom_filters", None)
+        audio_candidates = order_tracks(
+            [(s, ready_paths[self._stream_task_key(s)]) for s in other_streams if s.type == "audio"]
+            + [(t, ready_paths[t["_task_key"]]) for t in external_auds],
+            "audio",
+            effective_select_filter("audio", custom_filters),
+            track_of=lambda candidate: candidate[0],
+        )
+        audio_tracks = [track for track, _ in audio_candidates]
+        audio_paths = [path for _, path in audio_candidates]
+        _subtitle_candidates = order_tracks(
+            [(s, ready_paths[self._stream_task_key(s)]) for s in other_streams if s.type == "subtitle"]
+            + [(t, ready_paths[t["_task_key"]]) for t in external_subs],
+            "subtitle",
+            effective_select_filter("subtitle", custom_filters),
+            track_of=lambda candidate: candidate[0],
+        )
 
         # ffmpeg builds in this session have no native TTML decoder, so a raw .ttml fed
         # into the fast-path pipe (unlike join_media(), which always pre-converts via the
@@ -287,16 +294,33 @@ class StreamingMuxMixin:
             subtitle_paths.append(Path(_converted))
             subtitle_entries.append(_entry)
 
+        # Not at module level: merge.py imports back into velora.
+        from VibraVid.core.muxing.merge import (
+            audio_offset_args,
+            audio_sync,
+            cut_to_video_args,
+            prepare_chapters,
+            video_track_name,
+        )
+
+        # The video is not a file yet: its duration is the manifest's. The tracks are named by the one function join_media names its own with.
+        video_duration = video_duration_cap or getattr(video_stream, "duration", None) or None
+        audio_infos = [track_title_and_iso_lang(t) for t in audio_tracks]
+        audio_offsets, cut_to_video = audio_sync(video_duration, [str(p) for p in audio_paths], [title for title, _ in audio_infos])
+
         video_fmt = "mp4" if video_ext in ("mp4", "m4s", "m4a") else "mpegts"
         cmd = [ffmpeg_path, "-y"]
+        if progress:
+            cmd += ["-progress", "pipe:1", "-nostats"]
         if video_fmt == "mpegts":
             cmd += ["-fflags", "+genpts+igndts+discardcorrupt", "-avoid_negative_ts", "make_zero"]
             cmd += ["-analyzeduration", "100M", "-probesize", "100M"]
 
         cmd += ["-f", video_fmt, "-i", "-"]
-        for p in audio_paths:
+        for p, offset, (title, _lang) in zip(audio_paths, audio_offsets, audio_infos, strict=True):
             if is_mpegts_file(str(p)):
                 cmd += ["-f", "mpegts"]
+            cmd += audio_offset_args(offset, title)
             cmd += ["-i", str(p)]
 
         for p in subtitle_paths:
@@ -307,17 +331,19 @@ class StreamingMuxMixin:
         chapter_input_idx: int | None = None
         raw_chapters = getattr(self, "_streaming_mux_chapters", None)
         if raw_chapters:
-            media_duration = video_duration_cap or getattr(video_stream, "duration", None) or None
-            chapters = sort_chapters(clamp_chapters(raw_chapters, media_duration))
-            if chapters[0]["seconds"] > 0:
-                chapters = [{"name": "Intro", "seconds": 0}] + chapters
-
-            persist_chapters_file(chapters, getattr(self, "temp_dir", None))
-            self._streaming_mux_chapter_file = write_ffmetadata_chapters(chapters, media_duration)
+            # join_media's own preparation (sort, dedupe, clamp, Intro, sidecar), not a copy of it
+            chapters = prepare_chapters(raw_chapters, video_duration, getattr(self, "temp_dir", None))
+            self._streaming_mux_chapter_file = write_ffmetadata_chapters(chapters, video_duration)
             chapter_input_idx = 1 + len(audio_paths) + len(subtitle_paths)
             cmd += ["-f", "ffmetadata", "-i", self._streaming_mux_chapter_file]
 
         cmd += ["-map", "0:v:0"]
+        
+        # Video title as join_media writes it (its resolution class); the stream knows it from the manifest, there is no file to probe yet.
+        quality = classify_resolution(getattr(video_stream, "width", 0), getattr(video_stream, "height", 0))
+        if quality:  # no quality would make video_track_name probe an empty path
+            cmd += ["-metadata:s:v:0", f"title={video_track_name('', quality=quality)}"]
+
         if not audio_paths:
             cmd += ["-map", "0:a?"]
         
@@ -332,10 +358,7 @@ class StreamingMuxMixin:
         for i in range(len(subtitle_paths)):
             cmd += ["-map", f"{sub_input_base + i}:s"]
 
-        audio_infos = [_audio_title_and_iso_lang(s) for s in audio_streams] + [
-            _audio_title_and_iso_lang(t) for t in external_auds
-        ]
-        subtitle_infos = [_subtitle_title_and_iso_lang(e) for e in subtitle_entries]
+        subtitle_infos = [track_title_and_iso_lang(e) for e in subtitle_entries]
 
         for i, (title, lang) in enumerate(audio_infos):
             cmd += [f"-metadata:s:a:{i}", f"title={title}"]
@@ -363,32 +386,26 @@ class StreamingMuxMixin:
             cmd += ffmpeg_attach_args(collect_font_attachments(subtitle_paths, output_path))
         if video_duration_cap:
             cmd += ["-t", f"{video_duration_cap:.3f}"]
+        elif cut_to_video:
+            cmd += cut_to_video_args(video_duration)
         cmd += [str(output_path)]
 
-        feeder = StreamingMuxFeeder(cmd)
-        try:
-            feeder.start()
-        except Exception as exc:
-            logger.warning(f"streaming_mux: failed to start ffmpeg: {exc}")
-            return None
+        return StreamingMuxPlan(cmd=cmd, output_path=str(output_path), chapters_injected=chapter_input_idx is not None)
 
-        # Not confirmed until _finish_streaming_mux_inner() sees the fast-path output actually succeed -- if it falls back to the normal mux instead
-        self._streaming_mux_chapter_pending = chapter_input_idx is not None
-
-        logger.info(f"streaming_mux: started early cross-track mux -> {output_path}")
-        return feeder
+    def _cleanup_streaming_mux_chapter_file(self) -> None:
+        chapter_file = getattr(self, "_streaming_mux_chapter_file", None)
+        if chapter_file:
+            try:
+                os.unlink(chapter_file)
+            except OSError:
+                pass
 
     def _finish_streaming_mux(self, feeder: "StreamingMuxFeeder", live_merge_ok: bool) -> None:
         """Finalize the streaming-mux fast path, if it was started. If *live_merge_ok* is False, abort the fast path and fall back to the normal mux."""
         try:
             self._finish_streaming_mux_inner(feeder, live_merge_ok)
         finally:
-            chapter_file = getattr(self, "_streaming_mux_chapter_file", None)
-            if chapter_file:
-                try:
-                    os.unlink(chapter_file)
-                except OSError:
-                    pass
+            self._cleanup_streaming_mux_chapter_file()
 
     def _finish_streaming_mux_inner(self, feeder: "StreamingMuxFeeder", live_merge_ok: bool) -> None:
         if not live_merge_ok:

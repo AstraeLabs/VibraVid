@@ -33,6 +33,20 @@ def live_decrypt_allowed(site: str | None = None) -> bool:
     return _switch(site, "live_decrypt", "DOWNLOAD", "use_live_decrypt")
 
 
+def live_mux_opted_out(site: str | None = None) -> bool:
+    """True when the streaming mux is switched off on purpose: ``--no-livemux``, ``process.live_mux = false`` of the site or ``PROCESS.use_live_mux = false``. A key that is simply missing is not an opt-out."""
+    if context_tracker.no_livemux:
+        return True
+    site = site or context_tracker.site_name
+    if site:
+        from VibraVid.services._base.site_extra_args import resolve_site_process
+
+        value = resolve_site_process(site).get("live_mux")
+        if value is not None:
+            return not value
+    return config_manager.config.get_bool("PROCESS", "use_live_mux", default=None) is False
+
+
 def live_mux_allowed(site: str | None = None, encrypted_tracks: bool = False) -> tuple[bool, str]:
     """Whether the streaming-mux fast path may run for *site*, with the reason when it may not."""
     site = site or context_tracker.site_name

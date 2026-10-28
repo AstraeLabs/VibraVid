@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
 from rich.console import Console
 
-from VibraVid.utils.http_client import create_client, get_userAgent
+from VibraVid.utils.http_client import create_client, get_userAgent, get_with_retry
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class VideoSource:
 
         try:
             with create_client(headers=self.headers) as client:
-                response = client.get(f"{self.url}/iframe/{self.media_id}", params=params)
+                response = get_with_retry(client, f"{self.url}/iframe/{self.media_id}", params=params, retries=1)
             response.raise_for_status()
 
             # Parse response with BeautifulSoup to get iframe source
@@ -105,12 +105,16 @@ class VideoSource:
         if self.tmdb_id is None:
             return
 
+        language = urlparse(self.url).path.rstrip("/").rsplit("/", 1)[-1]
+        if language not in {"it", "en"}:
+            language = "it"
+
         if self.is_series:
             if self.season_number is None or self.episode_number is None:
                 return
-            api_url = f"https://vixsrc.to/api/tv/{self.tmdb_id}/{self.season_number}/{self.episode_number}?lang=it"
+            api_url = f"https://vixsrc.to/api/tv/{self.tmdb_id}/{self.season_number}/{self.episode_number}?lang={language}"
         else:
-            api_url = f"https://vixsrc.to/api/movie/{self.tmdb_id}?lang=it"
+            api_url = f"https://vixsrc.to/api/movie/{self.tmdb_id}?lang={language}"
 
         client = create_client(headers=self.headers)
         try:
@@ -130,12 +134,19 @@ class VideoSource:
         """
         try:
             if ENABLE_VIXCLOUD_API_V2 and self.tmdb_id is not None:
-                self._resolve_tmdb_embed_url()
+                try:
+                    self._resolve_tmdb_embed_url()
+                except Exception:
+                    logger.warning("TMDB player lookup unavailable; using the selected provider source")
+                    if not self.iframe_src:
+                        if self.is_series and self.episode_id is None:
+                            raise
+                        self.get_iframe(self.episode_id if self.is_series else self.media_id)
 
             # Fetch content from iframe source
             if self.iframe_src is not None:
                 with create_client(headers=self.headers) as client:
-                    response = client.get(self.iframe_src)
+                    response = get_with_retry(client, self.iframe_src, retries=1)
                 response.raise_for_status()
                 self.parse_script(script_text=response.text)
 

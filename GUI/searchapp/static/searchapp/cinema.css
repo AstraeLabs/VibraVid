@@ -319,6 +319,23 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
 
 .cn-cap { font-size: 13.5px; font-weight: 650; line-height: 1.3; }
 .cn-sub { font-size: 12px; color: var(--cn-faint); font-weight: 600; }
+
+.cn-language-filter { margin: 18px 0 24px; }
+.cn-language-filter > .cn-tag { display: block; margin-bottom: 9px; }
+.cn-language-filter .cn-seek-hint { margin-top: 9px; font-size: 12px; }
+.cn-audio-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0; }
+.cn-audio-picker label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
+.cn-audio-select { max-width: 240px; color: var(--cn-white); background: #181820; border: 1px solid var(--cn-edge); border-radius: 8px; padding: 7px 9px; }
+.cn-audio-result { flex-basis: 100%; font-size: 11px; color: var(--cn-mute); line-height: 1.4; }
+.cn-audio-result.is-error { color: var(--cn-hot); }
+.cn-audio-dialog { width: min(440px, calc(100vw - 36px)); padding: 24px; border: 1px solid var(--cn-edge); border-radius: 12px; background: var(--cn-deep); color: var(--cn-white); }
+.cn-audio-dialog::backdrop { background: rgba(0,0,0,.7); }
+.cn-audio-dialog h2 { margin: 0 0 12px; font-size: 22px; }
+.cn-audio-dialog .cn-audio-picker { margin-top: 24px; }
+.cn-audio-dialog .cn-audio-picker label { width: 100%; }
+.cn-audio-dialog .cn-audio-select { flex: 1; min-width: 0; max-width: none; }
+.cn-audio-dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.cn-ep[hidden], .cn-stab[hidden] { display: none; }
 .cn-avail { display: block; font-size: 11px; color: var(--cn-amber); font-weight: 600; margin-top: 2px; }
 
 /* ═══ PAGINE SECONDARIE ═══════════════════════════════════════════════════ */
