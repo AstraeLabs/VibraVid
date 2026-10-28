@@ -255,7 +255,7 @@ temp_root = ""
 
 ### Stream selection filters
 
-`select_video`, `select_audio` and `select_subtitle` choose which tracks are downloaded.
+`select_video`, `select_audio` and `select_subtitle` choose which tracks are downloaded. Audio and subtitle tracks are also written in the order the filter names their languages (`"ita|eng"` puts Italian first; the slots `"1ita|2eng"` rank by number), and the tracks it does not name go last. The first audio track is the default one.
 
 **Video**
 
@@ -310,8 +310,6 @@ param_video = ["-c:v", "libx265", "-crf", "28", "-preset", "medium"]
 param_audio = ["-c:a", "libopus", "-b:a", "128k"]
 param_song = []
 param_final = ["-c", "copy"]
-audio_order = []
-subtitle_order = []
 subtitle_disposition_language = "it-it_forced"
 merge_audio = true
 merge_subtitle = true
@@ -329,7 +327,6 @@ extension = "mkv"
 | `param_audio` | Opus 128k | FFmpeg audio encoding parameters |
 | `param_song` | `[]` | FFmpeg re-encode parameters for music tracks |
 | `param_final` | `["-c", "copy"]` | Final FFmpeg parameters; when set, takes precedence over `param_video`/`param_audio` |
-| `audio_order`, `subtitle_order` | `[]` | Track order in the output, e.g. `["ita", "eng"]` |
 | `merge_audio`, `merge_subtitle` | `true` | Merge all audio / subtitle tracks into the output file |
 | `subtitle_disposition_language` | `"it-it_forced"` | Subtitle track to mark default/forced |
 | `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio instead of dropping it at selection (ffmpeg can't demux DTS:X: needs mkvmerge) |

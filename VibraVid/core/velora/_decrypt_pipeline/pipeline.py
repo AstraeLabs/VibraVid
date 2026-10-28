@@ -23,7 +23,9 @@ from ..util._stream_helpers import (
 )
 from ..util._subtitle_segments import merge_vtt_files
 from ..util.formatting import format_size as _fmt_size
-from ..util.formatting import normalize_path_key
+from ..util.formatting import limit_requested, normalize_path_key
+from .chunks_decrypt import ChunksDecryptMixin
+from .chunks_pipe import ChunksPipeMixin
 from .constants import (
     _DECRYPT_ERROR_RATIO_LIMIT,
     MAX_TOKEN_REFRESH_ROUNDS,
@@ -60,6 +62,8 @@ class DecryptPipelineMixin(
     WorkerMixin,
     ProgressMixin,
     DownloadEventMixin,
+    ChunksDecryptMixin,
+    ChunksPipeMixin,
 ):
     def _download_stream_generic(
         self,
@@ -102,8 +106,6 @@ class DecryptPipelineMixin(
         if self._stop_check() or not paths or self._abort_event.is_set():
             self._record_track_done(task_key, None)
             return
-
-        # Derive the merged-file extension from a *media* segment
         sample_url = next(
             (s["url"] for s in dl_segs if s.get("seg_type") != "init"),
             dl_segs[0]["url"] if dl_segs else "",
@@ -267,7 +269,7 @@ class DecryptPipelineMixin(
 
             if stream.type == "video":
                 _video_duration_cap = None
-                if self.max_segments or self.max_time:
+                if limit_requested(self.max_segments) or limit_requested(self.max_time):
                     _dl_video_dur = sum(s.get("duration", 0.0) for s in dl_segs if s.get("seg_type") != "init")
                     if _dl_video_dur > 0:
                         _video_duration_cap = _dl_video_dur
@@ -610,6 +612,14 @@ class DecryptPipelineMixin(
 
     def _merge_track(self, ctx: _SegmentDownloadContext, paths: list[Path], out_path: Path, live_merge_ok: bool) -> None:
         """Merge the downloaded segments into ``out_path``, decrypt the merged file when needed and finish the progress bar."""
+        if self._try_chunks_decrypt(ctx, paths, out_path, live_merge_ok):
+            if getattr(self, "streaming_mux_result", None):
+                # The chunks pipe already produced the final MKV; out_path is never written.
+                ctx.bar_manager.handle_progress_line({"task_key": ctx.task_key, "pct": 100})
+            else:
+                self._report_merge_result(ctx, paths, out_path, True, False, live_merge_ok)
+            return
+
         paths, is_plain_subtitle, stream_is_encrypted, already_decrypted_per_segment = self._merge_segments(ctx, paths, out_path, live_merge_ok)
         decrypted_ok, decrypt_already_reported = self._normalize_and_decrypt(
             ctx, out_path, is_plain_subtitle, stream_is_encrypted, already_decrypted_per_segment

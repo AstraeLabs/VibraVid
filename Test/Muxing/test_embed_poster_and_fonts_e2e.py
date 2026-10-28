@@ -237,10 +237,51 @@ def test_join_media_end_to_end_with_all_subtitle_kinds(world, monkeypatch, engin
     assert subs[4]["disposition"]["hearing_impaired"] == 1
     assert subs[0]["disposition"]["forced"] == 0 and subs[0]["disposition"]["hearing_impaired"] == 0
 
+    # the same titles and languages whichever engine muxed them
+    assert [s["tags"]["title"] for s in subs] == ["Italian", "Italian [Forced]", "English [CC]", "English [SDH]", "French [CC]"]
+    # Matroska keeps the bibliographic code for French (mkvmerge writes "fre", ffmpeg "fra")
+    assert ["fra" if s["tags"]["language"] == "fre" else s["tags"]["language"] for s in subs] == ["ita", "ita", "eng", "eng", "fra"]
+
     # TestFont (regular + the bold override), ForcedFont, CcFont, plus Arial that ffmpeg writes when it converts the VTT
     assert "TestFont.ttf" in attachments and "ForcedFont.ttf" in attachments and "CcFont.otf" in attachments and "Arial.ttf" in attachments
     assert len(attachments) == len(set(attachments))
     assert not cover
+
+
+SUBTITLES_ENG_FIRST = ["English [CC]", "English [SDH]", "Italian", "Italian [Forced]", "French [CC]"]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_join_media_writes_the_subtitles_in_the_order_select_subtitle_gave_them(world, monkeypatch, engine):
+    from VibraVid.core.utils.track_order import order_tracks
+
+    monkeypatch.setattr(merge, "MUX_ENGINE", engine)
+    out, result = merge.join_media(world.video, [], order_tracks(world.subs, "subtitle", "eng|ita"), str(world.tmp / "out.mkv"))
+
+    assert not result.get("exit_code")
+    subs, _attachments, _cover = _summary(out)
+    assert [s["tags"]["title"] for s in subs] == SUBTITLES_ENG_FIRST
+
+
+@needs_ffmpeg
+def test_streaming_direct_fast_path_orders_subtitles_by_select_subtitle(world, monkeypatch):
+    """Same order from the select_subtitle of the download: "eng|ita", or the slots "1eng|2ita"."""
+    from VibraVid.core.downloader import _generic
+
+    monkeypatch.setattr(_generic, "get_ffmpeg_path", lambda: FFMPEG)
+    fragmented = world.tmp / "frag.mp4"
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", world.video, "-c", "copy", "-movflags", "frag_keyframe+empty_moov", str(fragmented)], check=True)
+    entries = [{"label": f"s{i}", "source": {"role": "subtitle"}, "result": {"path": sub["path"], "language": sub["language"]}} for i, sub in enumerate(world.subs)]
+
+    for n, select_subtitle in enumerate(("eng|ita", "1eng|2ita")):
+        fake = SimpleNamespace(output_path=str(world.tmp / f"live{n}.mkv"), custom_filters={"subtitle": select_subtitle})
+        cmd, output_path = Generic_Downloader._build_streaming_mux_cmd_direct(fake, {"source": {"codecs": "avc1"}}, entries)
+        run = subprocess.run(cmd, input=fragmented.read_bytes(), capture_output=True)
+        assert run.returncode == 0, run.stderr.decode(errors="replace")[-600:]
+
+        subs, _attachments, _cover = _summary(output_path)
+        assert [s["tags"]["title"] for s in subs] == SUBTITLES_ENG_FIRST
+        assert [s["disposition"]["forced"] for s in subs] == [0, 0, 0, 1, 0]  # the dispositions follow their track
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -304,7 +345,7 @@ def test_streaming_direct_fast_path_keeps_ass_and_fonts(world, monkeypatch):
     monkeypatch.setattr(_generic, "get_ffmpeg_path", lambda: FFMPEG)
     monkeypatch.setattr(_generic.config_manager, "config", _generic.config_manager.config)  # real config, untouched
     out = str(world.tmp / "live.mkv")
-    fake = SimpleNamespace(output_path=out)
+    fake = SimpleNamespace(output_path=out, custom_filters={"audio": "best", "subtitle": "best"})  # no select_subtitle of the user's config reorders the tracks
     entries = [
         {"label": f"s{i}", "source": {"role": "subtitle"}, "result": {"path": sub["path"], "language": sub["language"]}}
         for i, sub in enumerate(world.subs[:4])

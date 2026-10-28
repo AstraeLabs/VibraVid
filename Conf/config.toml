@@ -112,9 +112,6 @@ param_final = [
     "-c",
     "copy",
 ]
-# Track order, empty = automatic
-audio_order = []
-subtitle_order = []
 subtitle_disposition_language = "it-it_forced"
 merge_audio = true
 merge_subtitle = true

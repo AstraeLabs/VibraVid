@@ -401,6 +401,7 @@ class Stream:
     # Subtitle / Audio flags
     forced: bool = False
     is_cc: bool = False
+    instream_id: str = ""
     is_sdh: bool = False
 
     # All types

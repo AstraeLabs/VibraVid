@@ -5,12 +5,14 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 workspace_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(workspace_root))
 
+from VibraVid.core.downloader import base as base_mod
 from VibraVid.core.downloader.util import live_switches
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import site_extra_args
@@ -128,6 +130,33 @@ def test_no_live_decrypt_flag_beats_login_and_config(env):
     assert live_switches.live_decrypt_allowed("a") is False
 
 
+def test_a_missing_live_mux_key_is_not_an_opt_out(env):
+    env.login(a={"cdm": ""})
+
+    assert live_switches.live_mux_opted_out("a") is False
+    assert live_switches.live_mux_opted_out("unknown_site") is False
+    assert live_switches.live_mux_opted_out(None) is False
+
+
+def test_live_mux_false_is_an_opt_out_in_login_and_in_config(env):
+    env.login(a={"process": {"live_mux": False}}, b={"process": {"live_mux": True}}, c={})
+
+    assert live_switches.live_mux_opted_out("a") is True
+    assert live_switches.live_mux_opted_out("b") is False
+    assert live_switches.live_mux_opted_out("c") is False
+
+    env.config(PROCESS__use_live_mux=False)
+    assert live_switches.live_mux_opted_out("c") is True  # no process line -> config.toml says no
+    assert live_switches.live_mux_opted_out("b") is False  # the site's own true wins over the global false
+
+
+def test_no_livemux_flag_is_always_an_opt_out(env):
+    env.login(a={"process": {"live_mux": True}})
+    context_tracker.no_livemux = True
+
+    assert live_switches.live_mux_opted_out("a") is True
+
+
 def test_live_decrypt_off_keeps_the_streaming_mux_for_clear_tracks_only(env):
     env.login(a={"process": {"live_mux": True, "live_decrypt": False}}, b={"process": {"live_mux": True, "live_decrypt": True}})
 
@@ -167,3 +196,67 @@ def test_site_defaults_to_the_one_in_the_tracker(env):
     context_tracker.site_name = "a"
 
     assert live_switches.live_decrypt_allowed() is False
+
+
+# --- the chunks pipe is the default for encrypted DASH when nobody opted out ----------------------------------------------------------
+
+def _downloader(site, *, encrypted=True, supports_pipe=True, output="out.mkv"):
+    """Just the attributes BaseDownloader._maybe_enable_streaming_mux reads; ``md.enabled`` is the output path once the mux is switched on."""
+    drm = SimpleNamespace(method="cenc", is_encrypted=lambda: True) if encrypted else None
+    md = SimpleNamespace(streams=[SimpleNamespace(selected=True, drm=drm)], other_tracks=[], enabled=None)
+    md.enable_streaming_mux = lambda path, chapters=None: setattr(md, "enabled", path)
+    dl = SimpleNamespace(site_name=site, media_downloader=md, output_path=output, chapters=[], supports_chunks_pipe=supports_pipe)
+    return dl, md
+
+
+def _enable(dl, monkeypatch):
+    monkeypatch.setattr(base_mod, "MUX_ENGINE", "ffmpeg")
+    base_mod.BaseDownloader._maybe_enable_streaming_mux(dl)
+
+
+def test_encrypted_dash_gets_the_pipe_without_any_switch(env, monkeypatch):
+    dl, md = _downloader(None)
+
+    _enable(dl, monkeypatch)
+
+    assert md.enabled == "out.mkv"
+
+
+def test_encrypted_dash_gets_the_pipe_for_a_site_without_a_process_line(env, monkeypatch):
+    env.login(a={"cdm": ""})
+    dl, md = _downloader("a")
+
+    _enable(dl, monkeypatch)
+
+    assert md.enabled == "out.mkv"
+
+
+@pytest.mark.parametrize("how", ["flag", "login", "config"])
+def test_every_opt_out_keeps_the_pipe_off(env, monkeypatch, how):
+    env.login(a={"process": {"live_mux": False}} if how == "login" else {})
+    if how == "config":
+        env.config(PROCESS__use_live_mux=False)
+    context_tracker.no_livemux = how == "flag"
+    dl, md = _downloader("a")
+
+    _enable(dl, monkeypatch)
+
+    assert md.enabled is None
+
+
+@pytest.mark.parametrize("case", ["clear tracks", "protocol without the pipe", "not an mkv"])
+def test_the_default_is_only_for_what_the_pipe_can_do(env, monkeypatch, case):
+    dl, md = _downloader(None, encrypted=case != "clear tracks", supports_pipe=case != "protocol without the pipe", output="out.mp4" if case == "not an mkv" else "out.mkv")
+
+    _enable(dl, monkeypatch)
+
+    assert md.enabled is None  # clear tracks keep today's rule (live_mux must be asked for), HLS/ISM never push ciphertext, only .mkv is muxed in flight
+
+
+def test_live_decrypt_on_leaves_the_decision_to_live_mux(env, monkeypatch):
+    env.login(a={"process": {"live_decrypt": True}})
+    dl, md = _downloader("a")
+
+    _enable(dl, monkeypatch)
+
+    assert md.enabled is None  # the in-flight decrypt path has its own rules; the chunks default does not touch it

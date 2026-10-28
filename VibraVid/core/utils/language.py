@@ -410,13 +410,15 @@ def extract_lang_and_flags(lang_raw: str, track_info: dict = None):
         if track_info.get("default"):
             flags.add("default")
 
-    for p in parts:
+    for n, p in enumerate(parts):
         token = p.strip("[]").lower()
-        if token in _SUBTITLE_FLAG_WORDS:
+        
+        # "hi" is also the code of Hindi: as the first token it is the language, not "hearing impaired".
+        if token in _SUBTITLE_FLAG_WORDS and not (n == 0 and token == "hi"):
             flags.add(token)
         else:
             clean.append(p)
-    
+
     return "-".join(clean), flags
 
 
@@ -440,3 +442,27 @@ def language_variants(lang_raw: str) -> dict[str, str]:
         "language_iso2": resolve_iso639_1(base),
         "language_iso3": resolve_iso639_2(base),
     }
+
+
+def track_language_and_flags(track) -> tuple[str, set[str]]:
+    """Language tag (``it-it``) and flags (``forced``, ``sdh``, ``cc``) of an audio or subtitle track: a dict (the ones ``_build_status`` lists, or an external track) or a manifest stream."""
+    get = track.get if isinstance(track, dict) else (lambda key, default=None: getattr(track, key, default))
+    raw = str(get("lang") or get("resolved_language") or get("language") or get("name") or "und")
+    return extract_lang_and_flags(raw, {"forced": get("forced"), "sdh": get("sdh") or get("is_sdh"), "cc": get("cc") or get("is_cc")})
+
+
+def track_title_and_iso_lang(track) -> tuple[str, str]:
+    """Title and ISO 639-2 code written for an audio or subtitle track: the language's display name plus ``[Forced]`` and ``[SDH]`` / ``[CC]``, e.g. ``Italian [Forced]``.
+
+    This is the only place that names a track: join_media (ffmpeg and mkvmerge), the streaming mux and the chunks pipe all call it, so they write the same title and language.
+    """
+    base, flags = track_language_and_flags(track)
+
+    labels = []
+    if "forced" in flags:
+        labels.append("[Forced]")
+    if "sdh" in flags:
+        labels.append("[SDH]")
+    elif "cc" in flags or "hi" in flags:
+        labels.append("[CC]")
+    return " ".join([resolve_language_display_name(base), *labels]).strip(), resolve_iso639_2(base)

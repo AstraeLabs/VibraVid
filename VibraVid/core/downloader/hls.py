@@ -12,7 +12,7 @@ from VibraVid.core.manifest.stream import track_label
 from VibraVid.core.muxing.helper.sub import extract_embedded_cc
 from VibraVid.core.muxing.helper.video.hybrid import split_other_tracks
 from VibraVid.core.ui.tracker import context_tracker
-from VibraVid.core.utils.language import resolve_iso639_2
+from VibraVid.core.utils.language import resolve_iso639_2, subtitle_flags
 from VibraVid.core.velora.util.formatting import (
     parse_max_segments as _parse_max_segments,
 )
@@ -349,15 +349,17 @@ class HLS_Downloader(BaseDownloader):
             lang = getattr(s, "resolved_language", "") or getattr(s, "language", "") or "und"
             console.print(f"\n[cyan]Found CC in manifest for [red]{lang}[cyan], trying extraction...")
             srt_path = os.path.join(self.output_dir, f"{self.filename_base}.{lang}_cc.srt")
-            result = extract_embedded_cc(video_path, srt_path)
+            result = extract_embedded_cc(video_path, srt_path, getattr(s, "instream_id", None))
             if result:
                 console.print(f"[yellow]    Extracted embedded CC subtitle: [green]{lang}")
+                tag = f"{lang}_cc"
                 subtitle_tracks.append(
                     {
                         "path": result,
-                        "name": f"{lang}_cc",
-                        "language": lang,
+                        "name": tag,
+                        "language": tag,
                         "size": os.path.getsize(result),
+                        **subtitle_flags(tag),
                     }
                 )
             else:

@@ -4,6 +4,7 @@ import json
 import locale
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,6 +34,50 @@ _TRANSIENT_OPEN_ERROR_MARKERS = (
 _OPEN_RETRY_ATTEMPTS = 6
 _OPEN_RETRY_BASE_DELAY = 0.4
 _OPEN_RETRY_MAX_DELAY = 3.0
+_FLUX_CHUNKS_MIN_VERSION = (0, 5, 3)
+_FLUX_TFDT_REBASE_MIN_VERSION = (0, 5, 4)
+_flux_versions: dict[str, tuple[int, ...] | None] = {}
+
+
+def _flux_version(flux_path: str) -> tuple[int, ...] | None:
+    """``flux --version`` as a tuple, cached per binary path + mtime (None when it cannot be read)."""
+    try:
+        cache_key = f"{flux_path}|{os.stat(flux_path).st_mtime_ns}"
+    except OSError:
+        return None
+    if cache_key not in _flux_versions:
+        version = None
+        try:
+            out = subprocess.run(
+                [flux_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+            ).stdout
+            match = re.search(r"flux\s+(\d+)\.(\d+)\.(\d+)", out or "")
+            if match:
+                version = tuple(int(g) for g in match.groups())
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        _flux_versions[cache_key] = version
+    return _flux_versions[cache_key]
+
+
+def flux_supports_chunks(flux_path: str | None) -> bool:
+    """Whether this flux binary understands ``--chunks`` (``VV_FLUX_CHUNKS=0`` turns it off)."""
+    if not flux_path or os.environ.get("VV_FLUX_CHUNKS", "1") == "0":
+        return False
+    version = _flux_version(flux_path)
+    return version is not None and version >= _FLUX_CHUNKS_MIN_VERSION
+
+
+def flux_supports_tfdt_rebase(flux_path: str | None) -> bool:
+    """Whether this flux binary can rebase the output's tfdt itself (``--tfdt-rebase``)."""
+    if not flux_path or not flux_supports_chunks(flux_path):
+        return False
+    version = _flux_version(flux_path)
+    return version is not None and version >= _FLUX_TFDT_REBASE_MIN_VERSION
 
 
 def _is_transient_open_error(stderr_text: str | None) -> bool:
@@ -616,6 +661,103 @@ class Decryptor:
         except Exception as exc:
             logger.error(f"Decryption error: {exc}")
             console.print(f"[red]Decryption error: {exc}")
+            return False
+
+    def decrypt_chunks(
+        self,
+        chunks_dir: str,
+        keys,
+        output_path: str,
+        stream_type: str = "video",
+        progress_cb: Callable[[dict[str, Any]], None] | None = None,
+        key_fallback=None,
+        tfdt_rebase: bool = False,
+    ) -> bool:
+        """Merge and decrypt the ``seg_<n>.mp4`` chunks of *chunks_dir* in one flux pass (``--chunks``), writing a clear fragmented MP4. *tfdt_rebase* also zeroes the first tfdt (needs flux >= 0.5.4, see ``flux_supports_tfdt_rebase``)."""
+        try:
+            if not flux_supports_chunks(self.flux_path):
+                logger.info(f"flux --chunks requires flux >= 0.5.3 at {self.flux_path}; using the regular merge + decrypt")
+                return False
+            if not _ansi_encodable(chunks_dir) or not _ansi_encodable(output_path):
+                logger.debug("chunks path not ANSI-safe for flux, using the regular merge + decrypt")
+                return False
+
+            first_chunk = os.path.join(chunks_dir, "seg_00000.mp4")
+            encrypted, kid, _pssh, scheme = self.detect_encryption(first_chunk)
+            norm_keys = KeysManager.normalize(keys)
+            if not encrypted or not norm_keys:
+                logger.info(
+                    f"seg_00000.mp4 did not surface CENC encryption on first GPAC probe "
+                    f"(encrypted={encrypted}, kid={(kid or '-')[:16]}..., scheme={scheme}); using the regular merge + decrypt"
+                )
+                return False
+
+            norm_keys = KeysManager.resolve_fixed_key(first_chunk, kid, norm_keys)
+            if not norm_keys:
+                logger.info(f"no usable key after resolve_fixed_key for KID {(kid or '-')[:16]}...; using the regular merge + decrypt")
+                return False
+
+            norm_keys = KeysManager.unique_by_kid(KeysManager.resolve_placeholder_kid(kid, norm_keys))
+            if key_fallback is not None:
+                norm_keys = KeysManager.normalize(key_fallback.apply([f"{k}:{v}" for k, v in norm_keys]))
+
+            if kid and not KeysManager.is_zero_kid(kid):
+                available_kids = {k.lower() for k, _ in norm_keys}
+                if kid.lower() not in available_kids:
+                    logger.error(f"No key matches required KID {kid} (have: {', '.join(k[:8] for k in available_kids)}); refusing to decrypt with mismatched keys")
+                    return False
+
+            chunk_files = [f for f in os.listdir(chunks_dir) if re.fullmatch(r"seg_\d+\.mp4", f)]
+            total_size = sum(os.path.getsize(os.path.join(chunks_dir, f)) for f in chunk_files)
+            method_display = (scheme or "unknown").upper().replace("_", "-")
+            dir_name = os.path.basename(os.path.normpath(chunks_dir))
+            label = f"[cyan]Dec[/cyan] [green]{dir_name}[/green] [[magenta]{method_display}[/magenta]] - [yellow]flux[/yellow]"
+
+            def _run(pairs: list[tuple[str, str]]) -> tuple[bool, str | None]:
+                cmd = [self.flux_path, "--chunks", chunks_dir, "-o", output_path]
+                ffmpeg_path = get_ffmpeg_path()
+                if ffmpeg_path and os.path.exists(ffmpeg_path):
+                    cmd.extend(["--ffmpeg-path", ffmpeg_path])
+                if tfdt_rebase:
+                    cmd.append("--tfdt-rebase")
+                for k, v in pairs:
+                    cmd.extend(["--key", f"{k.lower()}:{v.lower()}"])
+
+                logger.info(f"flux cmd: {self._redacted_cmd(cmd)}")
+                t0 = time.monotonic()
+                
+                # flux already test-decodes the first fragments with the key before writing (audio included),
+                # so the output only needs the cheap tail check, not a full audio decode.
+                result = run_with_progress(
+                    cmd, label, chunks_dir, output_path,
+                    progress_cb=progress_cb, status=method_display, engine_name="FLUX",
+                    stream_type=stream_type, input_size=total_size, full_decode_check=False,
+                )
+
+                if result is not True:
+                    err = result[1] if isinstance(result, tuple) else str(result)
+                    logger.debug(f"flux --chunks declined/failed after {time.monotonic() - t0:.1f}s: {err}")
+                    return False, err
+                
+                if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                    return False, "output missing or empty"
+                
+                logger.info(f"flux --chunks finished -> {os.path.basename(output_path)} in {time.monotonic() - t0:.1f}s ({os.path.getsize(output_path)} bytes)")
+                return True, None
+
+            ok, err = _run(norm_keys)
+            if not ok and key_fallback is not None and err and "key is wrong" in err:
+                ok = key_fallback.recover([kid] if kid else [], [f"{k}:{v}" for k, v in norm_keys], lambda ks: _run(KeysManager.normalize(ks)))
+            if not ok:
+                logger.warning(f"flux --chunks could not decrypt {dir_name}, falling back to merge + decrypt")
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            return bool(ok)
+
+        except Exception as exc:
+            logger.warning(f"flux --chunks failed, falling back to merge + decrypt: {exc}")
             return False
 
     def decrypt_segment_live(

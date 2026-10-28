@@ -9,8 +9,13 @@ from VibraVid.setup import get_ffmpeg_path
 logger = logging.getLogger(__name__)
 
 
-def extract_embedded_cc(video_path: str, output_srt_path: str) -> str | None:
-    """Extract embedded CEA-608/708 closed captions (A53 side-data) from a video's stream into a plain .srt file."""
+def cc_data_field(instream_id: str | None) -> str | None:
+    """The ffmpeg ``cc_dec`` data field carrying a CEA-608 channel: CC1/CC2 travel on the first field, CC3/CC4 on the second. None (pick the first field that appears) for any other id."""
+    return {"CC1": "first", "CC2": "first", "CC3": "second", "CC4": "second"}.get((instream_id or "").strip().upper())
+
+
+def extract_embedded_cc(video_path: str, output_srt_path: str, instream_id: str | None = None) -> str | None:
+    """Extract embedded CEA-608/708 closed captions (A53 side-data) from a video's stream into a plain .srt file. ``instream_id`` (the manifest's INSTREAM-ID) picks the channel: without it a CC3 track would get the CC1 text."""
     if not os.path.exists(video_path):
         logger.error(f"extract_embedded_cc: video not found: {video_path}")
         return None
@@ -28,6 +33,7 @@ def extract_embedded_cc(video_path: str, output_srt_path: str) -> str | None:
         "-y",
         "-v",
         "error",
+        *(["-data_field", field] if (field := cc_data_field(instream_id)) else []),
         "-f",
         "lavfi",
         "-i",

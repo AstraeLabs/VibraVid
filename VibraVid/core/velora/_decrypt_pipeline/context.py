@@ -52,6 +52,7 @@ class _SegmentDownloadContext:
     decrypt_errors: list[str] = field(default_factory=list)
     seg_errors: list[str] = field(default_factory=list)
     decrypt_aborted_reason: str | None = None
+    decrypt_lock: threading.Lock = field(default_factory=threading.Lock)
     decrypt_threads: list[threading.Thread] = field(default_factory=list)
     decrypt_stop: threading.Event = field(default_factory=threading.Event)
     key_sanity_checked: bool = False

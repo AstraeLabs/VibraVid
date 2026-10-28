@@ -149,3 +149,9 @@ class _LiveMerger:
                 self._fh.close()
             except Exception:
                 pass
+
+    def __enter__(self) -> "_LiveMerger":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()

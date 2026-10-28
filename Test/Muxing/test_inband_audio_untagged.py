@@ -15,6 +15,8 @@ import pytest
 
 from VibraVid.core.downloader._generic import Generic_Downloader
 from VibraVid.core.muxing.helper.video import metadata as metadata_mod
+from VibraVid.core.utils import track_order
+from VibraVid.core.utils.language import track_title_and_iso_lang
 from VibraVid.core.velora._decrypt_pipeline import DecryptPipelineMixin
 from VibraVid.core.velora._decrypt_pipeline import streaming_mux as velora_mux
 
@@ -85,7 +87,7 @@ class _CapturingFeeder:
         pass
 
 
-def _velora_cmd(monkeypatch, tmp_path, streams, results):
+def _velora_cmd(monkeypatch, tmp_path, streams, results, video=None, custom_filters=None):
     monkeypatch.setattr(velora_mux, "_streaming_mux_enabled", lambda *a: True)
     monkeypatch.setattr(velora_mux, "get_ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(velora_mux, "StreamingMuxFeeder", _CapturingFeeder)
@@ -97,6 +99,7 @@ def _velora_cmd(monkeypatch, tmp_path, streams, results):
     obj._streaming_mux_output_path = str(tmp_path / "out.mkv")
     obj._streaming_mux_chapters = None
     obj.other_tracks = []
+    obj.custom_filters = custom_filters or {"audio": "best", "subtitle": "best"}
     obj.external_subtitles = []
     obj.external_audios = []
     obj.streams = streams
@@ -104,7 +107,7 @@ def _velora_cmd(monkeypatch, tmp_path, streams, results):
     obj._track_done_event = lambda key: done
     obj._get_track_result = lambda key: results[key]
 
-    video = SimpleNamespace(type="video", codecs="avc1.4d401f")
+    video = video or SimpleNamespace(type="video", codecs="avc1.4d401f")
     assert obj._try_start_streaming_mux_inner("ts", video) is not None
     return _CapturingFeeder.last_cmd
 
@@ -127,6 +130,67 @@ def test_velora_fast_path_skips_inband_audio_with_separate_audio(monkeypatch, tm
     assert _has_map(cmd, "1:a")
 
 
+def _meta(cmd, spec):
+    return [cmd[i + 1] for i, a in enumerate(cmd) if a == spec]
+
+
+def test_velora_fast_path_names_tracks_like_join_media(monkeypatch, tmp_path):
+    """The audio is named by the one function join_media uses: its display name from the stream (``Italian``), the same as from the dict of ``out.it-it.m4a``; the video title comes from its resolution class."""
+    audio_file = tmp_path / "out.it-it.m4a"
+    audio_file.write_bytes(b"\x00" * 32)
+    audio = SimpleNamespace(
+        id="aud", type="audio", selected=True, is_external=False, segments=[],
+        compute_estimated_size=lambda: 0, resolved_language="it-IT", language="ita", name="Italiano",  # the provider's own name is not used
+    )
+    status_audio = {"path": str(audio_file), "name": "it-it", "language": "it-it"}  # what join_media is given
+    video = SimpleNamespace(type="video", codecs="hev1.2.4.L150.90", width=3840, height=1600)
+
+    cmd = _velora_cmd(monkeypatch, tmp_path, streams=[audio], results={"aud": Path(audio_file)}, video=video)
+
+    title, lang = track_title_and_iso_lang(status_audio)
+    assert (title, lang) == ("Italian", "ita")
+    assert f"title={title}" in _meta(cmd, "-metadata:s:a:0")
+    assert f"language={lang}" in _meta(cmd, "-metadata:s:a:0")
+    assert f"handler_name={title}" in _meta(cmd, "-metadata:s:a:0")
+    assert _meta(cmd, "-metadata:s:v:0") == ["title=2160p"]
+
+
+def _two_audios(tmp_path):
+    """English then Italian, the order a manifest lists them (and the alphabetical order of their files)."""
+    audios, results = [], {}
+    for key, tag, lang in (("a_en", "en-us", "en-US"), ("a_it", "it-it", "it-IT")):
+        path = tmp_path / f"out.{tag}.m4a"
+        path.write_bytes(b"\x00" * 32)
+        audios.append(SimpleNamespace(
+            id=key, type="audio", selected=True, is_external=False, segments=[],
+            compute_estimated_size=lambda: 0, resolved_language=lang, language=lang[:2], name=lang,
+        ))
+        results[key] = Path(path)
+    return audios, results
+
+
+def _inputs(cmd):
+    return [Path(b).name for a, b in zip(cmd, cmd[1:]) if a == "-i"][1:]  # the first one is the piped video
+
+
+@pytest.mark.parametrize("select_audio,first", [("ita|eng", "it-it"), ("1ita|2eng", "it-it"), ("eng|ita", "en-us"), ("best", "en-us")])
+def test_velora_fast_path_orders_audio_by_select_audio(monkeypatch, tmp_path, select_audio, first):
+    audios, results = _two_audios(tmp_path)
+
+    cmd = _velora_cmd(monkeypatch, tmp_path, streams=audios, results=results, custom_filters={"audio": select_audio, "subtitle": "best"})
+
+    assert _inputs(cmd)[0] == f"out.{first}.m4a"
+    first_title = "Italian" if first == "it-it" else "English"
+    assert _meta(cmd, "-metadata:s:a:0")[0] == f"title={first_title}"  # title, language and default follow the track
+    assert _meta(cmd, "-disposition:a:0") == ["default"] and _meta(cmd, "-disposition:a:1") == ["0"]
+
+
+def test_velora_fast_path_without_a_resolution_sets_no_video_title(monkeypatch, tmp_path):
+    cmd = _velora_cmd(monkeypatch, tmp_path, streams=[], results={})
+
+    assert _meta(cmd, "-metadata:s:v:0") == []
+
+
 # ── Generic_Downloader direct-mp4 fast path ──────────────────────────────────
 
 @pytest.fixture
@@ -134,6 +198,7 @@ def generic(monkeypatch, tmp_path):
     monkeypatch.setattr("VibraVid.core.downloader._generic.get_ffmpeg_path", lambda: "ffmpeg")
     d = object.__new__(Generic_Downloader)
     d.output_path = str(tmp_path / "out.mkv")
+    d.custom_filters = {"audio": "best", "subtitle": "best"}
     return d
 
 

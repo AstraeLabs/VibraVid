@@ -148,6 +148,8 @@ def _to_external_subtitle_track(track: dict) -> dict:
 
 
 class DASH_Downloader(BaseDownloader):
+    supports_chunks_pipe = True
+
     def __init__(
         self,
         mpd_url: str | None = None,

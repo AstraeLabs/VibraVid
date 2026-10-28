@@ -113,7 +113,7 @@ def detect_audio_offset(
         best_lag = lags[np.argmax(corr_masked)]
         offset_sec = float(best_lag) / sr
 
-        direction = "Early" if offset_sec > 0 else "Late"
+        direction = "Late" if offset_sec > 0 else "Early"
         logger.info(f"detect_audio_offset: best_lag={best_lag} samples -> offset={offset_sec:.3f} s ({Path(target_path).name} {direction} di {abs(offset_sec):.3f} s)")
         return offset_sec
 

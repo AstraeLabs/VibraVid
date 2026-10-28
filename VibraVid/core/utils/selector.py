@@ -4,6 +4,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES, get_codec_token
 from VibraVid.core.utils.language import canonical_iso639_2, resolve_iso639_1, resolve_locale
@@ -44,6 +45,17 @@ def split_audio_slots(raw: str) -> dict[int, str] | None:
         slots.setdefault(slot_num, []).append(lang)
 
     return {num: "|".join(langs) for num, langs in slots.items()}
+
+
+def filter_language_order(raw: str, stream_type: str) -> list[str]:
+    """Language tokens of a select_audio/select_subtitle value in the order they rank: as written ("ita|eng", "ita eng", "l=ita|eng"), slots by number ("2eng|1ita" -> ita, eng). Empty for filters that name no language ("best", "all", "false", a codec or an id)."""
+    r = (raw or "").strip()
+    if not r or r.lower() in _AUDIO_SLOT_RESERVED:
+        return []
+
+    slots = split_audio_slots(r)
+    langs = "|".join(slots[num] for num in sorted(slots)) if slots else (FilterSpec.parse(r, stream_type).langs or "")
+    return [t for t in re.split(r"[|\s]+", langs) if t and t.lower() not in ("best", "worst")]
 
 
 def _height(s) -> int:
@@ -781,6 +793,23 @@ def _subtitle_matches_request(s, base: str, req_flags: set) -> bool:
 
     sflags = _subtitle_flags(s)
     return req_flags.issubset(sflags)
+
+
+def tag_matches_filter(raw: str, stream_type: str, language: str, forced: bool = False, cc: bool = False, sdh: bool = False) -> bool:
+    """Whether a track known only by its language tag (an external one, or a closed caption inside the video) is asked for by a select_audio / select_subtitle value.
+
+    It matches like a manifest stream does (ISO 639-1/2, locales, names: "spa" is "es-419"): any language of the filter, whichever its slot ("1ita|2eng" asks for both: there is no pool to choose among), and the flags of a token ("ita_forced") must be carried by the track.
+    """
+    value = (raw or "").strip()
+    if not value or value.lower() == "all":
+        return True
+    
+    if value.lower() == "false":
+        return False
+
+    track = SimpleNamespace(language=language, resolved_language=language, forced=forced, is_cc=cc, is_sdh=sdh)
+    requests = _parse_subtitle_lang_requests("|".join(filter_language_order(value, stream_type)))
+    return any(_subtitle_matches_request(track, base, flags) for base, flags in requests)
 
 
 def _subtitle_variant_key(s) -> tuple[str, ...]:

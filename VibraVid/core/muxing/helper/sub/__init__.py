@@ -1,6 +1,6 @@
 # 17.01.25
 
-from .cc_extract import extract_embedded_cc
+from .cc_extract import cc_data_field, extract_embedded_cc
 from .convert import convert_subtitle, extract_vtt_from_wvtt_mp4
 from .detect import (
     detect_subtitle_format,
@@ -31,6 +31,7 @@ __all__ = [
     "extract_font_name_from_style",
     "convert_subtitle",
     "extract_vtt_from_wvtt_mp4",
+    "cc_data_field",
     "extract_embedded_cc",
     "SubtitleDispositionInfo",
     "build_subtitle_disposition_args",
