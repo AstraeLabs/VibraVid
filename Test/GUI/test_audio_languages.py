@@ -159,3 +159,16 @@ def test_series_metadata_does_not_expose_provider_exception(monkeypatch):
     assert json.loads(response.content) == {
         "Error get metadata": "Unable to get series metadata right now."
     }
+
+
+def test_language_filter_is_on_the_results_page_and_not_on_the_home_page():
+    """Home only starts a search (it still carries the choice in a hidden field); the filter lives where results are."""
+    from django.template.loader import render_to_string
+    from django.test import Client
+
+    with _config("ita|eng"):
+        home = Client().get("/", HTTP_HOST="127.0.0.1").content.decode("utf-8")
+        results = render_to_string("searchapp/cinema_results.html", {"results": [{"title": "Doctor Who"}], "query": "doctor who"}, request=RequestFactory().get("/search/", {"query": "doctor who"}))
+
+    assert "data-language-filter" not in home and 'name="audio_language"' in home
+    assert "data-language-filter" in results
