@@ -55,6 +55,30 @@ def test_sort_results_modes():
     assert [r[1].name for r in sorted_title] == ["Avatar", "Batman", "Cyberpunk"]
 
 
+def test_relevance_sort_ranks_by_the_query_not_by_which_site_answered_first():
+    """A global search merges sites in arrival order: the best title must still come first."""
+    women = MockItem("Women of Science", 2024)
+    poi = MockItem("Person of Interest", 2011)
+    persona = MockItem("Persona", 2019)
+    raw = [  # raiplay answered first
+        ("raiplay", women, [("raiplay", women)]),
+        ("streamingcommunity", persona, [("streamingcommunity", persona)]),
+        ("streamingcommunity", poi, [("streamingcommunity", poi), ("chili", poi)]),
+    ]
+
+    ranked = _sort_results(raw, "relevance", "persone of interest")
+
+    assert [r[1].name for r in ranked] == ["Person of Interest", "Women of Science", "Persona"]
+    assert [r[1].name for r in _sort_results(raw, "relevance", "")] == ["Women of Science", "Persona", "Person of Interest"]
+
+
+def test_relevance_ties_prefer_the_title_on_more_providers():
+    one, two = MockItem("Dune", 2021), MockItem("Dune", 1984)
+    raw = [("a", one, [("a", one)]), ("a", two, [("a", two), ("b", two)])]
+
+    assert [r[1].year for r in _sort_results(raw, "relevance", "dune")] == [1984, 2021]
+
+
 def test_library_status_detection():
     item = MockItem("Inception", 2010, is_movie=True)
 
@@ -114,6 +138,8 @@ async def test_search_screen_category_pills_initial_and_update():
         assert "(0)" in str(filter_film.label)
         assert "(0)" in str(filter_serie.label)
         assert "(0)" in str(filter_music.label)
+        for pill in (filter_film, filter_serie, filter_music):
+            assert str(pill.label).isascii(), "the category pills carry text only, no icons"
 
         # Update with mock results
         item_film = MockItem("Movie 1", 2022, is_movie=True)
@@ -128,6 +154,8 @@ async def test_search_screen_category_pills_initial_and_update():
         assert "(1)" in str(filter_film.label)
         assert "(1)" in str(filter_serie.label)
         assert "(1)" in str(filter_music.label)
+        for pill in (filter_film, filter_serie, filter_music):
+            assert str(pill.label).isascii()
 
 
 @pytest.mark.anyio

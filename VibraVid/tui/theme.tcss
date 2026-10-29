@@ -266,17 +266,6 @@ ListView > ListItem.-hovered {
     padding: 0;
 }
 
-#home-logo {
-    text-align: center;
-    margin-bottom: 1;
-}
-
-#home-tagline {
-    text-align: center;
-    color: $fg-muted;
-    margin-bottom: 1;
-}
-
 #home-search-bar {
     height: 1;
     margin-bottom: 1;
@@ -567,7 +556,7 @@ FuzzyList {
 }
 
 #detail-head {
-    height: auto;
+    height: 1fr;
 }
 
 #detail-cover {
@@ -576,7 +565,7 @@ FuzzyList {
 
 #detail-info {
     width: 1fr;
-    height: auto;
+    height: 1fr;
 }
 
 .detail-title {

@@ -176,6 +176,8 @@ jobs:
                   python -m pip install --upgrade certifi
                   python -m pip install -r requirements.txt
                   python -m pip install pyinstaller
+                  # textual-image's character fallback (covers in terminals without Kitty/Sixel) needs Pillow >= 12.1
+                  python -c "import PIL; v = tuple(int(p) for p in PIL.__version__.split('.')[:2]); assert v >= (12, 1), PIL.__version__"
 
             - name: Build executable with PyInstaller
               shell: bash

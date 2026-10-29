@@ -19,7 +19,6 @@ from textual.widgets import Button, Input, Static
 
 from VibraVid.tui.bridge import SiteInfo, sites_by_category
 from VibraVid.tui.i18n import t
-from VibraVid.tui.palette import ACCENT
 from VibraVid.tui.screens.search import SearchScreen
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.tui.widgets.topbar import TopBar
@@ -35,15 +34,6 @@ PILL_OVERHEAD = 4
 
 # below this width the five scope pills no longer leave room for their labels
 NARROW_WIDTH = 110
-
-ASCII_LOGO = f"""[bold {ACCENT}]
-██╗   ██╗██╗██████╗ ██████╗  █████╗ ██╗   ██╗██╗██████╗
-██║   ██║██║██╔══██╗██╔══██╗██╔══██╗██║   ██║██║██╔══██╗
-██║   ██║██║██████╔╝██████╔╝███████║██║   ██║██║██║  ██║
-╚██╗ ██╔╝██║██╔══██╗██╔══██╗██╔══██║╚██╗ ██╔╝██║██║  ██║
- ╚████╔╝ ██║██████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║██████╔╝
-[/bold {ACCENT}]"""
-
 
 class HomeScreen(Screen):
     """Search Engine style main screen with central search, category selectors & live-filtered provider pills."""
@@ -61,20 +51,17 @@ class HomeScreen(Screen):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="home-outer"):
             with Container(id="home-card"):
-                yield Static(ASCII_LOGO, id="home-logo")
-                yield Static(t("home_tagline"), id="home-tagline")
-
                 with Horizontal(id="home-search-bar"):
                     yield Input(placeholder=t("search_placeholder"), id="main-search-input")
                     yield Button(t("search_btn"), id="btn-submit-search", variant="primary")
 
                 yield Static(t("select_search_category"), classes="home-section-title")
                 with Grid(id="home-scope-pills"):
-                    yield Button(f"🌐 {t('scope_global')}", id="scope-global", variant="primary", classes="scope-pill")
-                    yield Button(f"🌸 {t('scope_anime')}", id="scope-anime", classes="scope-pill")
-                    yield Button(f"🎬 {t('scope_film')}", id="scope-film", classes="scope-pill")
-                    yield Button(f"📺 {t('scope_serie')}", id="scope-serie", classes="scope-pill")
-                    yield Button(f"🎵 {t('scope_music')}", id="scope-music", classes="scope-pill")
+                    yield Button(t('scope_global'), id="scope-global", variant="primary", classes="scope-pill")
+                    yield Button(t('scope_anime'), id="scope-anime", classes="scope-pill")
+                    yield Button(f"{t('scope_film')}", id="scope-film", classes="scope-pill")
+                    yield Button(f"{t('scope_serie')}", id="scope-serie", classes="scope-pill")
+                    yield Button(f"{t('scope_music')}", id="scope-music", classes="scope-pill")
 
                 yield Static(t("filter_provider_site"), classes="home-section-title")
                 with Horizontal(id="home-provider-filter-bar"):
@@ -83,8 +70,8 @@ class HomeScreen(Screen):
                 with Container(id="home-sites-box"):
                     yield VerticalScroll(id="home-sites-wrap")
 
-        yield TopBar("VibraVid", t("ctx_home"))
-        yield CustomFooter([("enter", t("hint_search")), ("tab", t("hint_field"))])
+        yield TopBar()
+        yield CustomFooter()
 
     async def on_mount(self) -> None:
         self._grouped = sites_by_category()
@@ -100,8 +87,7 @@ class HomeScreen(Screen):
         self.query_one("#main-search-input", Input).focus()
 
     async def on_resize(self, event: events.Resize) -> None:
-        """Adapt the card to the terminal: the logo is decoration, the controls are not."""
-        self.query_one("#home-logo", Static).display = event.size.height >= 30
+        """Adapt the card to the terminal width."""
         self.query_one("#home-scope-pills", Grid).set_class(event.size.width < NARROW_WIDTH, "-narrow")
         if self._shown_sites and self._pills_available_width() != self._pills_width:
             await self._render_provider_pills(self._shown_sites)
@@ -114,11 +100,7 @@ class HomeScreen(Screen):
         return max(20, min(104, int(self.size.width * 0.95)) - 12)
 
     def _rows_that_fit(self, buttons: list[Button], available: int) -> list[list[Button]]:
-        """Pack the pills into rows by measured width instead of a fixed count per row.
-
-        A fixed count overflows as soon as the terminal is narrow or the provider
-        names are long, and the pills past the edge become unclickable.
-        """
+        """Pack the pills into rows by measured width instead of a fixed count per row."""
         rows: list[list[Button]] = []
         row: list[Button] = []
         used = 0
@@ -143,7 +125,7 @@ class HomeScreen(Screen):
         is_all_active = (self._selected_site is None)
         all_variant = "primary" if is_all_active else "default"
 
-        all_buttons = [Button(f"🌐 {t('all_providers')}", id="site-all", variant=all_variant, classes="site-pill")]
+        all_buttons = [Button(t('all_providers'), id="site-all", variant=all_variant, classes="site-pill")]
         for site in sites:
             btn_id = f"site-btn-{site.name.replace('_', '-')}"
             label = site.name.capitalize()
@@ -217,10 +199,7 @@ class HomeScreen(Screen):
                 self.app.notify(t("enter_title_warning"), severity="warning")
                 return
 
-            screen = SearchScreen(site=self._selected_site, initial_query=query)
-            if self._selected_scope != "global":
-                screen._current_filter_category = self._selected_scope
-            self.app.push_screen(screen)
+            self.app.push_screen(SearchScreen(site=self._selected_site, initial_query=query, scope=self._selected_scope))
         finally:
             self.set_timer(0.6, self._unlock_search)
 

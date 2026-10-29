@@ -13,11 +13,11 @@ from VibraVid.utils.upload import update as updater
 STATUS = (
     ("Geo", "[purple]IT"),
     ("Sys", "[cyan]windows x64"),
-    ("Ver", "[red]1.4.8"),
+    ("Ver", "[red]1.4.9"),
     ("Type", "[green]Source code"),
 )
-COLUMN_ROWS = ("Geo:  IT", "Sys:  windows x64", "Ver:  1.4.8", "Type: Source code")  # the values lined up
-ONE_LINE = "Geo: IT · Sys: windows x64 · Ver: 1.4.8 · Type: Source code"
+COLUMN_ROWS = ("Geo:  IT", "Sys:  windows x64", "Ver:  1.4.9", "Type: Source code")  # the values lined up
+ONE_LINE = "Geo: IT · Sys: windows x64 · Ver: 1.4.9 · Type: Source code"
 
 
 def _rendered(status, width: int) -> list[str]:
@@ -77,8 +77,8 @@ def test_the_status_is_read_once_however_many_pages_redraw_the_banner(monkeypatc
         assert updater.status_info() is first
 
     assert len(calls) == 1
-    assert [label for label, _ in first] == ["Geo", "Sys", "Ver", "Type"]
-    assert first[-1] == ("Type", "[green]Source code")
+    assert [label for label, _ in first] == ["Geo", "Sys", "Ver", "Typ"]
+    assert first[-1] == ("Typ", "[green]Source code")
 
 
 def test_the_links_stay_on_their_own_line_under_the_banner(monkeypatch):

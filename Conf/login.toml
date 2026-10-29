@@ -51,6 +51,13 @@ cdm = ""
 args = ""
 process = { live_mux = true, live_decrypt = true }
 
+[dazn]
+token = ""
+device_id = ""
+cdm = ""
+args = ""
+process = { live_mux = true, live_decrypt = true }
+
 [disney]
 token = ""
 refresh_token = ""

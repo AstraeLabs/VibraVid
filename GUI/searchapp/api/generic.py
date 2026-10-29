@@ -142,5 +142,5 @@ class GenericStreamingAPI(BaseStreamingAPI):
         selections = self._make_selections(season, episodes)
         scrape_serie = self.get_cached_scraper(media_item)
         direct_item = media_item.raw_data if media_item.raw_data else media_item.__dict__.copy()
-        search_fn(direct_item=direct_item, selections=selections, scrape_serie=scrape_serie)
-        return True
+        result = search_fn(direct_item=direct_item, selections=selections, scrape_serie=scrape_serie)
+        return result is not False  # only an explicit failure (no stream, no rights...) is one: some entry points return None

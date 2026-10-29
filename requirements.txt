@@ -13,7 +13,7 @@ pycryptodomex
 mutagen
 textual
 textual-image
-Pillow
+Pillow>=12.1
 tomlkit
 tomli; python_version < "3.11"
 pyyaml

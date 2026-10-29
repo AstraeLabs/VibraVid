@@ -32,6 +32,7 @@ def _load_arr_config() -> dict:
         "full_resync_interval": 21600,
         "max_concurrent_downloads": 1,
         "download_timeout": 7200,
+        "max_retry_attempts": 5,
         "webhook_priority_enabled": True,
         "native_webhook_priority_window_seconds": 120,
         "seerr_fallback_delay_seconds": 20,
@@ -103,6 +104,8 @@ def _load_arr_config() -> dict:
         arr_cfg["enable_sonarr_webhook"] = _env_bool("ENABLE_SONARR_WEBHOOK")
     if _env("ENABLE_RADARR_WEBHOOK") is not None:
         arr_cfg["enable_radarr_webhook"] = _env_bool("ENABLE_RADARR_WEBHOOK")
+    if _env("ARR_MAX_RETRY_ATTEMPTS"):
+        arr_cfg["max_retry_attempts"] = _env_int("ARR_MAX_RETRY_ATTEMPTS", 5)
     if _env("ARR_MAX_CONCURRENT_DOWNLOADS"):
         arr_cfg["max_concurrent_downloads"] = _env_int("ARR_MAX_CONCURRENT_DOWNLOADS", 1)
     if _env("ARR_WEBHOOK_PRIORITY_ENABLED") is not None:
@@ -265,10 +268,18 @@ def _enqueue_if_new(
             .first()
         )
         if reusable:
+            max_attempts = int(_load_arr_config().get("max_retry_attempts") or 0)
+            if sync_source == "polling" and max_attempts and reusable.attempts >= max_attempts:
+                logger.debug(f"Skipping {key}: gave up after {reusable.attempts} failed attempts")
+                return False
+            
+            if sync_source != "polling":
+                reusable.attempts = 0
+            
             reusable.completed_at = None
             reusable.started_at = None
             reusable.success = None
-            reusable.save(update_fields=["completed_at", "started_at", "success"])
+            reusable.save(update_fields=["completed_at", "started_at", "success", "attempts"])
             reusable.media_request.status = ArrMediaRequest.Status.PENDING
             reusable.media_request.sync_source = sync_source
             reusable.media_request.last_synced_at = timezone.now()
@@ -558,9 +569,10 @@ def _targeted_sync_with_retry(
     return trigger_polling_sync(full_resync=True)
 
 
-def trigger_polling_sync(full_resync: bool = False) -> int:
+def trigger_polling_sync(full_resync: bool = False, manual: bool = False) -> int:
     """
     Run a polling sync against Sonarr/Radarr.
+    A manual sync gives the items that reached the retry cap another round of attempts.
     Returns the number of newly enqueued items.
     """
     close_old_connections()
@@ -578,11 +590,18 @@ def trigger_polling_sync(full_resync: bool = False) -> int:
 
     arr_views_mod.set_max_download_slots(cfg.get("max_concurrent_downloads", 1))
 
+    from searchapp.log_retention import purge_old_logs
+
     from .downloader_service import ArrDownloaderService
     from .processor_service import ArrProcessorService
 
+    purge_old_logs()
     _reconcile_orphaned_downloads(older_than_seconds=cfg.get("download_timeout", 7200))
     _reconcile_unmonitored_pending(sonarr=sonarr, radarr=radarr)
+    if manual:
+        from searchapp.models import ArrProcessingQueue
+
+        ArrProcessingQueue.objects.filter(success=False).update(attempts=0)
 
     processor = ArrProcessorService(
         sonarr=sonarr,
@@ -1359,7 +1378,8 @@ def _mark_completed(item: dict, season_num=None, ep_num=None):
         if queue_entry:
             queue_entry.completed_at = timezone.now()
             queue_entry.success = True
-            queue_entry.save(update_fields=["completed_at", "success"])
+            queue_entry.attempts = 0
+            queue_entry.save(update_fields=["completed_at", "success", "attempts"])
             queue_entry.media_request.status = ArrMediaRequest.Status.COMPLETED
             queue_entry.media_request.save(update_fields=["status"])
     except Exception as exc:
@@ -1376,11 +1396,17 @@ def _mark_failed(item: dict, error: str, season_num=None, ep_num=None):
         if queue_entry:
             queue_entry.completed_at = timezone.now()
             queue_entry.success = False
-            queue_entry.save(update_fields=["completed_at", "success"])
             status = ArrMediaRequest.Status.FAILED
             normalized_error = (error or "").lower()
             if "import_not_confirmed" in normalized_error or "import not confirmed" in normalized_error:
                 status = ArrMediaRequest.Status.IMPORT_PENDING
+            elif "unmonitored" not in normalized_error:
+                queue_entry.attempts += 1
+                max_attempts = int(_load_arr_config().get("max_retry_attempts") or 0)
+                if max_attempts and queue_entry.attempts == max_attempts:
+                    logger.warning(f"Giving up on {key} after {max_attempts} failed attempts: retried only by a manual sync or a webhook")
+            
+            queue_entry.save(update_fields=["completed_at", "success", "attempts"])
             queue_entry.media_request.status = status
             queue_entry.media_request.save(update_fields=["status"])
     except Exception as exc:

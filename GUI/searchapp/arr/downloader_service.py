@@ -14,6 +14,7 @@ from VibraVid.utils import anime_id_map, config_manager
 
 from .clients.radarr_client import RadarrClient
 from .clients.sonarr_client import SonarrClient
+from .item_log import item_log
 
 logger = logging.getLogger("ARR")
 _ARR_SEARCH_TIMEOUT = 45
@@ -65,6 +66,11 @@ class ArrDownloaderService:
 
     # ── serie ────────────────────────────────────────────
     def _process_serie(self, serie: dict) -> bool:
+        """Process one series item; its log lines go to the title's own file."""
+        with item_log(serie.get("title", "")):
+            return self._process_serie_item(serie)
+
+    def _process_serie_item(self, serie: dict) -> bool:
         from searchapp.views import _run_download_in_thread
 
         self.last_error = None
@@ -111,7 +117,7 @@ class ArrDownloaderService:
                     continue
 
                 display_title = f"{titles[0]} - S{season_num} E{ep_num}"
-                logger.info(f"⏳ Downloading '{display_title}' via {provider or 'configured fallback order'}")
+                logger.info(f"🔎 Searching '{display_title}' via {provider or 'configured fallback order'}")
 
                 item_payload, provider, matched_title = self._search_with_fallback_titles(
                     titles,
@@ -129,6 +135,7 @@ class ArrDownloaderService:
                     logger.error(f"✖️ Could not find '{title}' using candidates: {titles}")
                     self.last_error = "search_no_results"
                     continue
+                logger.info(f"⏳ Downloading '{display_title}' via {provider} (matched '{matched_title}')")
 
                 # Anime seasons split across several provider entries ("Part 1",
                 # "Part 2", ...) need the absolute Sonarr episode number translated
@@ -277,6 +284,11 @@ class ArrDownloaderService:
 
     # ── movie ────────────────────────────────────────────
     def _process_movie(self, movie: dict) -> bool:
+        """Process one movie item; its log lines go to the title's own file."""
+        with item_log(movie.get("title", "")):
+            return self._process_movie_item(movie)
+
+    def _process_movie_item(self, movie: dict) -> bool:
         from searchapp.views import _run_download_in_thread
 
         self.last_error = None
@@ -305,7 +317,7 @@ class ArrDownloaderService:
         year = movie.get("year")
         year_range = self._build_year_range(year)
 
-        logger.info(f"⏳ Downloading movie '{titles[0]}' ({year}) via {provider or 'configured fallback order'}; candidates={titles}")
+        logger.info(f"🔎 Searching movie '{titles[0]}' ({year}) via {provider or 'configured fallback order'}; candidates={titles}")
 
         item_payload, provider, matched_title = self._search_with_fallback_titles(
             titles,
@@ -320,6 +332,7 @@ class ArrDownloaderService:
             logger.error(f"Could not find movie '{title}' using candidates: {titles}")
             self.last_error = "search_no_results"
             return False
+        logger.info(f"⏳ Downloading movie '{titles[0]}' ({year}) via {provider} (matched '{matched_title}')")
 
         # Use Radarr's path for the movie, fallback to OUTPUT config root
         target_folder = movie.get("path", "")
@@ -1226,12 +1239,14 @@ class ArrDownloaderService:
                     if split_cour_local_episode is not None:
                         logger.info(f"[split_cour] absolute episode {episode_number} of S{season_int} -> '{strict_candidates[0].name}' local episode {split_cour_local_episode}")
 
+                rejected: dict[str, int] = {}
                 for r in strict_candidates:
                     r_name = r.name or ""
                     r_year = r.year or ""
                     result_media_type = self._result_media_type(r)
                     if result_media_type != media_type:
-                        logger.warning(
+                        rejected["type mismatch"] = rejected.get("type mismatch", 0) + 1
+                        logger.debug(
                             f"[type_check] SKIP '{r_name}' ({r_year}) — provider type={result_media_type or 'unknown'} "
                             f"cannot satisfy TMDB type={media_type}"
                         )
@@ -1242,7 +1257,8 @@ class ArrDownloaderService:
                         # The request's own id is only lent to this result, so it proves nothing
                         # about identity: the title has to vouch for it.
                         if not self._titles_plausible(title, r_name):
-                            logger.warning(
+                            rejected["title mismatch"] = rejected.get("title mismatch", 0) + 1
+                            logger.debug(
                                 f"[title_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id "
                                 f"and the title is too different from '{title}'"
                             )
@@ -1253,16 +1269,22 @@ class ArrDownloaderService:
                         )
 
                     if not result_tmdb:
-                        logger.warning(f"[tmdb_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id")
+                        rejected["no tmdb id"] = rejected.get("no tmdb id", 0) + 1
+                        logger.debug(f"[tmdb_check] SKIP '{r_name}' ({r_year}) — provider cannot attest a TMDB id")
                         continue
 
                     if result_tmdb != expected_tmdb_str:
-                        logger.warning(f"[tmdb_check] SKIP '{r_name}' ({r_year}) — {media_type} tmdb_id mismatch: got={result_tmdb} expected={expected_tmdb_str}")
+                        rejected["tmdb_id mismatch"] = rejected.get("tmdb_id mismatch", 0) + 1
+                        logger.debug(f"[tmdb_check] SKIP '{r_name}' ({r_year}) — {media_type} tmdb_id mismatch: got={result_tmdb} expected={expected_tmdb_str}")
                         continue
 
                     best = r
                     logger.info(f"[tmdb_check] MATCH '{r_name}' ({r_year}) — identity=({media_type}, {result_tmdb})")
                     break
+
+                if rejected:
+                    reasons = ", ".join(f"{count} {reason}" for reason, count in rejected.items())
+                    logger.info(f"[search] {sum(rejected.values())} candidates rejected on '{provider}' ({reasons})")
             else:
                 # Legacy matching is intentionally retained only when no TMDB
                 # key is configured.
@@ -1298,14 +1320,14 @@ class ArrDownloaderService:
                     r_type = str(getattr(r, "type", "") or "").lower()
 
                     if media_type == "tv" and r_type == "movie":
-                        logger.warning(
+                        logger.debug(
                             f"[type_check] SKIP '{r_name}' ({r_year}) — movie result cannot satisfy a Sonarr TV request"
                         )
                         continue
 
                     if expected_tmdb_str and r_tmdb:
                         if r_tmdb != expected_tmdb_str:
-                            logger.warning(
+                            logger.debug(
                                 f"[tmdb_check] SKIP '{r_name}' ({r_year}) — "
                                 f"tmdb_id mismatch: got={r_tmdb} expected={expected_tmdb_str}"
                             )
@@ -1315,7 +1337,7 @@ class ArrDownloaderService:
                         break
 
                     if not self._titles_are_compatible(title, r_name):
-                        logger.warning(
+                        logger.debug(
                             f"[title_check] SKIP '{r_name}' ({r_year}) — title too different from '{title}'"
                         )
                         continue

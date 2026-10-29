@@ -536,7 +536,7 @@ def arr_trigger_sync(request: HttpRequest) -> JsonResponse:
             try:
                 from django.db import close_old_connections
                 close_old_connections()
-                count = trigger_polling_sync(full_resync=True)
+                count = trigger_polling_sync(full_resync=True, manual=True)
                 logger.info("Manual sync complete: %d items enqueued", count)
             except Exception as exc:
                 logger.exception("Manual sync error: %s", exc)

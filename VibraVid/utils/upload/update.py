@@ -566,7 +566,7 @@ def status_info() -> tuple[tuple[str, str], ...]:
         ("Geo", f"[purple]{country_code if country_code else 'None'}"),
         ("Sys", f"[cyan]{binary_paths.system} {binary_paths.arch}"),
         ("Ver", f"[red]{current_version}"),
-        ("Type", f"[green]{mode.replace('_', ' ').capitalize()}"),
+        ("Typ", f"[green]{mode.replace('_', ' ').capitalize()}"),
     )
 
 

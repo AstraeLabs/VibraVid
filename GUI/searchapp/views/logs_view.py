@@ -7,10 +7,13 @@ from django.conf import settings
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods
 
+from ..log_retention import active_log_files
+
 logger = logging.getLogger(__name__)
 
 _CATEGORY_DIRS = {"logs": ".cache/logs", "arr": ".cache/arr"}
-
+_TAIL_BLOCK = 64 * 1024
+_TAIL_MAX_BYTES = 8 * 1024 * 1024
 
 def _log_dirs() -> dict[str, Path]:
     root = getattr(settings, "PROJECT_ROOT", None)
@@ -27,6 +30,28 @@ def _list_dir(d: Path) -> list[dict]:
         {"name": f.name, "size": f.stat().st_size, "mtime": f.stat().st_mtime}
         for f in files
     ]
+
+
+def _tail_lines(path: Path, count: int, max_bytes: int = _TAIL_MAX_BYTES) -> list[str]:
+    """Return the last `count` lines of `path`, reading backwards from EOF in blocks."""
+    with path.open("rb") as fh:
+        pos = fh.seek(0, 2)
+        stop = max(0, pos - max_bytes)
+        chunks: list[bytes] = []
+        newlines = 0
+        while pos > stop and newlines <= count:
+            step = min(_TAIL_BLOCK, pos - stop)
+            pos -= step
+            fh.seek(pos)
+            chunk = fh.read(step)
+            chunks.append(chunk)
+            newlines += chunk.count(b"\n")
+
+    data = b"".join(reversed(chunks))
+    if pos > 0:
+        # Drop the (probably partial) first line when the file was not read from its start.
+        data = data.split(b"\n", 1)[-1]
+    return data.decode("utf-8", errors="replace").splitlines()[-count:]
 
 
 @require_http_methods(["GET"])
@@ -57,13 +82,12 @@ def logs_content(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": "Unknown log file"}, status=400)
 
     try:
-        with (d / name).open(encoding="utf-8", errors="replace") as fh:
-            content_lines = fh.read().splitlines()
+        content_lines = _tail_lines(d / name, lines)
     except OSError as exc:
         logger.warning("Log file '%s/%s' non leggibile: %s", category, name, exc)
         return JsonResponse({"error": str(exc)}, status=500)
 
-    return JsonResponse({"name": name, "lines": content_lines[-lines:]})
+    return JsonResponse({"name": name, "lines": content_lines})
 
 
 @require_http_methods(["POST"])
@@ -72,12 +96,8 @@ def logs_clear(request: HttpRequest) -> JsonResponse:
     directory = _log_dirs().get(request.POST.get("category", ""))
     if directory is None:
         return JsonResponse({"error": "Invalid category"}, status=400)
-    active = set()
-    for log in [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]:
-        if isinstance(log, logging.Logger):
-            for handler in log.handlers:
-                if isinstance(handler, logging.FileHandler):
-                    active.add(Path(handler.baseFilename).resolve())
+    
+    active = active_log_files()
     cleared = 0
     failed = []
     for path in directory.glob("*.log"):

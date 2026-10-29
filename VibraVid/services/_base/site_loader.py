@@ -23,7 +23,7 @@ folder_name = "services"
 imp_sources = config_manager.config.get_list("DEFAULT", "imp_service")
 _HIDDEN_SITES_ENV_VARS = ("VIBRAVID_HIDDEN_SITES", "VIBRAVID_DISABLED_SITES")
 _warned_unknown_hidden: set[str] = set()
-KNOWN_CONTENT_TYPES = ("Anime", "Film_Serie", "Serie", "Song", "Tor")
+KNOWN_CONTENT_TYPES = ("Anime", "Film_Serie", "Live", "Serie", "Song", "Tor")
 current_site_var: "contextvars.ContextVar[str | None]" = contextvars.ContextVar("vibravid_current_site", default=None)
 _BINARY_MISMATCH_MARKERS = (
     "dll load failed",

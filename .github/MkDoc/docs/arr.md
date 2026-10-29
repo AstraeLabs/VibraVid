@@ -81,6 +81,7 @@ webhook_secret = ""
 | `polling_interval` | `300` | Seconds between incremental polling cycles |
 | `full_resync_interval` | `21600` | Seconds between full reconciliation syncs |
 | `max_concurrent_downloads` | `1` | Maximum parallel ARR-triggered downloads |
+| `max_retry_attempts` | `5` | Polling stops retrying an item (not found on any provider, season missing...)  |
 | `webhook_priority_enabled` | `true` | Native Sonarr/Radarr webhooks take priority over Seerr to avoid duplicates |
 | `native_webhook_priority_window_seconds` | `120` | Dedup window for near-simultaneous webhook events |
 | `seerr_fallback_delay_seconds` | `20` | Delay before processing a Seerr event when a native webhook may follow |
@@ -119,6 +120,7 @@ ENABLE_SEERR_WEBHOOK=true             # enable_seerr_webhook
 ENABLE_SONARR_WEBHOOK=true            # enable_sonarr_webhook
 ENABLE_RADARR_WEBHOOK=true            # enable_radarr_webhook
 ARR_MAX_CONCURRENT_DOWNLOADS=1        # max_concurrent_downloads
+ARR_MAX_RETRY_ATTEMPTS=5              # max_retry_attempts
 ARR_WEBHOOK_PRIORITY_ENABLED=true     # webhook_priority_enabled
 ARR_NATIVE_WEBHOOK_PRIORITY_WINDOW_SECONDS=120  # native_webhook_priority_window_seconds
 ARR_SEERR_FALLBACK_DELAY_SECONDS=20   # seerr_fallback_delay_seconds

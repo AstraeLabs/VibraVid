@@ -20,7 +20,7 @@ The split isn't enforced: only `__init__.py` with a `search()` function is requi
 
 ```python
 indice = 900            # position in the CLI/GUI site list; pick a free number, the loader renumbers on the next run
-_useFor = "Film_Serie"  # Anime, Film_Serie, Serie, Song or Tor
+_useFor = "Film_Serie"  # Anime, Film_Serie, Live, Serie, Song or Tor
 ```
 
 To keep a service out of the CLI, TUI and GUI while you build it, list its folder name in `hidden_services` ([configuration](configuration.md#default)); it is not loaded at all until you remove it.

@@ -40,6 +40,7 @@ _CONTEXT_KEYS = [
     ("R (Ricerca)", "hk_search_retry"),
     ("i (Ricerca)", "hk_search_detail"),
     ("1 - 5", "hk_search_select_provider"),
+    ("g (Serie)", "hk_toggle_season"),
     ("a (Serie)", "hk_select_all"),
     ("u (Serie/Batch)", "hk_deselect_all"),
     ("r (Serie)", "hk_range_modal"),

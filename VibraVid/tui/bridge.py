@@ -7,7 +7,7 @@ import logging
 import sys
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import NamedTuple
 
@@ -113,12 +113,15 @@ class ServiceExit(RuntimeError):
     """A service called ``sys.exit()`` (failed login, missing config...): in the TUI that must be an error message, never the end of the app."""
 
 
+def _printed_reason(*buffers: io.StringIO) -> str:
+    """The last lines a service printed (its own explanation of a failure), or ``""``."""
+    lines = [line.strip() for buf in buffers for line in buf.getvalue().splitlines() if line.strip()]
+    return " / ".join(lines[-3:])
+
+
 def _exit_message(exc: SystemExit, *buffers: io.StringIO) -> str:
     """What the service said before exiting (its last printed lines), else a generic note."""
-    lines = [line.strip() for buf in buffers for line in buf.getvalue().splitlines() if line.strip()]
-    if lines:
-        return " / ".join(lines[-3:])
-    return f"the service stopped the run (exit code {exc.code})"
+    return _printed_reason(*buffers) or f"the service stopped the run (exit code {exc.code})"
 
 
 @contextlib.contextmanager
@@ -165,6 +168,41 @@ def available_adapters() -> list[str]:
     return api.get_available_sites()
 
 
+# Sites that return nothing (or fail) without an account, so the global search leaves them out until one is set up.
+LOGIN_REQUIRED = ("amazon_music", "crunchyroll", "timvision")
+
+
+def has_login(site: str) -> bool:
+    """Whether *site* needs no account, or has a credential in login.toml or a cached session."""
+    if site not in LOGIN_REQUIRED:
+        return True
+
+    from VibraVid.tui.screens.settings import service_is_set_up
+    from VibraVid.utils import config_manager, disk_cache
+
+    if service_is_set_up(config_manager.login.get_section(site, default={})):
+        return True
+    return any(
+        isinstance(cached, dict) and (cached.get("access_token") or cached.get("refresh_token"))
+        for cached in (disk_cache.load(site, "token"), disk_cache.load(site, "token_tv"))
+    )
+
+
+# Home category -> the `_useFor` groups of the sites worth searching for it ("global" = all of them)
+SCOPE_USE_FOR = {"anime": {"anime"}, "film": {"film_serie"}, "serie": {"film_serie", "serie", "anime"}, "music": {"song"}}
+
+
+def global_search_sites(scope: str = "global") -> tuple[list[str], list[str]]:
+    """``(sites to search, sites left out for want of a login)`` for a search over every site, or only those of a Home *scope*."""
+    sites = available_adapters()
+    groups = SCOPE_USE_FOR.get(scope)
+    if groups is not None:
+        in_scope = {site.name for use_for, listed in sites_by_category().items() if use_for in groups for site in listed}
+        sites = [site for site in sites if site in in_scope]
+    skipped = [site for site in sites if not has_login(site)]
+    return [site for site in sites if site not in skipped], skipped
+
+
 def _get_api(site: str):
     from GUI.searchapp import api
     return api.get_api(site)
@@ -176,11 +214,18 @@ def search_titles(site: str, query: str) -> list:
         return _get_api(site).search(query)
 
 
-def search_global(query: str, sites: list[str] | None = None, max_workers: int = 6) -> tuple[dict[str, list], dict[str, str]]:
+def search_global(
+    query: str,
+    sites: list[str] | None = None,
+    max_workers: int = 6,
+    on_site_done: Callable[[str, list, int, int], None] | None = None,
+) -> tuple[dict[str, list], dict[str, str]]:
     """Search every available adapter in parallel.
 
     Returns (results, errors): results maps site -> [Entries], errors maps
     site -> message for adapters that failed (offline, login required, ...).
+    *on_site_done(site, items, done, total)* is called as each adapter finishes (items is empty on
+    failure), so a caller can show the fast sites without waiting for the slowest one.
     """
     available = sites if sites is not None else available_adapters()
     results: dict[str, list] = {}
@@ -188,8 +233,9 @@ def search_global(query: str, sites: list[str] | None = None, max_workers: int =
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(search_titles, site, query): site for site in available}
-        for future in as_completed(futures):
+        for done, future in enumerate(as_completed(futures), start=1):
             site = futures[future]
+            items = []
             try:
                 items = future.result()
                 if items:
@@ -197,6 +243,11 @@ def search_global(query: str, sites: list[str] | None = None, max_workers: int =
             except Exception as e:
                 logger.warning("global search failed on %s: %s", site, e)
                 errors[site] = str(e)
+            if on_site_done:
+                try:
+                    on_site_done(site, items or [], done, len(futures))
+                except Exception:
+                    logger.exception("search progress callback failed")
     return results, errors
 
 
@@ -220,8 +271,11 @@ def start_download(site: str, item, season: str | None = None, episodes: str | N
         context_tracker.video_quality = None
         context_tracker.download_id = download_id
     try:
-        with capture_stdio():
-            return _get_api(site).start_download(item, season=season, episodes=episodes)
+        with capture_stdio() as (out_buf, err_buf):
+            started = _get_api(site).start_download(item, season=season, episodes=episodes)
+        if not started:
+            raise RuntimeError(_printed_reason(out_buf, err_buf) or "the download did not start")
+        return True
     finally:
         if manual:
             context_tracker.manual_tracks = False

@@ -106,6 +106,7 @@ A switch missing from `process` falls back to the global one in `config.toml` (`
 ```toml
 [DEFAULT]
 log_level = "INFO"
+log_retention_days = 7
 close_console = true
 show_message = true
 fetch_domain_online = true
@@ -125,6 +126,7 @@ tui_images = "auto"
 |-----|---------|-------------|
 | `close_console` | `true` | Close the console after the download |
 | `log_level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `log_retention_days` | `7` | GUI: days to keep the files in `.cache/logs` and `.cache/arr` (also `LOG_RETENTION_DAYS`); older ones are removed at start and at every ARR poll. `0` keeps everything |
 | `show_message` | `true` | Show the startup banner and clear the console first |
 | `fetch_domain_online` | `true` | Fetch the latest domains from GitHub |
 | `disable_scraper_cache` | `false` | GUI only: disable the 15-minute per-title scraper cache |

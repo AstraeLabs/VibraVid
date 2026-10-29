@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Prompt
 
 from VibraVid.core.downloader.base import DownloadCancelled, DownloadResult
@@ -119,7 +120,7 @@ def _handle_download_result(result: Any) -> None:
         console.print("[yellow]Download cancelled by user.")
         raise DownloadCancelled("Download cancelled by user.")
     
-    console.print(f"[red]{err}")
+    console.print(f"[red]{escape(str(err))}", soft_wrap=True)
 
 
 def _parse_index_selection(cmd_insert: str, max_count: int) -> list[int]:

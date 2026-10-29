@@ -101,6 +101,19 @@ def _movie_detail(movie_id: str, market: str | None) -> dict:
         return {}
 
 
+def _stream_failure(title: str, kind: str, price: str, error: Exception) -> DownloadResult:
+    """The failed stream request as a visible, reasoned result (rent/buy titles play only for the account that owns them)."""
+    if kind == "avod":
+        message = f"Error getting stream: {error}"
+    else:
+        cost = f" ({price})" if price else ""
+        message = (
+            f"'{title}' is not free on Rakuten TV{cost}: it plays only with an account that rented or bought it "
+            f"(email/password under [rakutentv] in login.toml). {error}"
+        )
+    return DownloadResult(None, True, message)
+
+
 def download_film(select_title: Entries) -> DownloadResult:
     start_message()
     print_download_header(select_title)
@@ -130,8 +143,7 @@ def download_film(select_title: Entries) -> DownloadResult:
         else:
             stream = api.get_me_streaming(content_id, "movies", market=market)
     except Exception as e:
-        console.print(f"[red]Error getting stream: {e}")
-        return DownloadResult(None, True)
+        return _stream_failure(select_title.name, kind, api.price_label(detail), e)
 
     path_components, filename = map_movie_path(select_title.name, getattr(select_title, "year", None))
     output_path = os.path.join(movie_folder(*path_components), f"{filename}.{extension_output}")
@@ -169,8 +181,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
         else:
             stream = api.get_me_streaming(obj_episode.id, "episodes", market=market)
     except Exception as e:
-        console.print(f"[red]Error getting stream: {e}")
-        return DownloadResult(None, True)
+        return _stream_failure(obj_episode.name, kind, "", e)
 
     return _dash_download(
         stream["url"], stream.get("license_url"), api.streaming_uuid(stream), output_path, _subtitle_tracks(stream)

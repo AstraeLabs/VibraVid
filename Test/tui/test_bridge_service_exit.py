@@ -43,3 +43,19 @@ def test_one_site_exiting_does_not_hide_the_others(monkeypatch):
 def _run(fn, site, query):
     with bridge.capture_stdio():
         return fn(site, query)
+
+
+def test_a_failed_download_start_raises_the_services_own_reason(monkeypatch):
+    class FailingApi:
+        def start_download(self, item, season=None, episodes=None):  # noqa: ARG002
+            print("Error getting stream: Rakuten TV email/password not set")
+            return False
+
+    monkeypatch.setattr(bridge, "_get_api", lambda site: FailingApi())
+
+    bridge.install_stdio_proxy()
+    try:
+        with pytest.raises(RuntimeError, match="email/password not set"):
+            bridge.start_download("rakutentv", object())
+    finally:
+        sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__

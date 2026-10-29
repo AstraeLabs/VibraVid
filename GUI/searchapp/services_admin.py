@@ -12,6 +12,7 @@ BUILTIN_SERVICES = frozenset({
     "aurora",
     "chili",
     "crunchyroll",
+    "dazn",
     "discoveryplus",
     "guardoseries",
     "la7",

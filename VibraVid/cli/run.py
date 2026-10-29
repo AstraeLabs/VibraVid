@@ -53,7 +53,7 @@ console = Console()
 msg = Prompt()
 logger = logging.getLogger(__name__)
 
-COLOR_MAP = {"anime": "red", "film_serie": "yellow", "serie": "green", "song": "grey35", "tor": "blue"}
+COLOR_MAP = {"anime": "red", "film_serie": "yellow", "serie": "green", "song": "grey35", "live": "magenta", "tor": "blue"}
 
 CLOSE_CONSOLE = config_manager.config.get_bool("DEFAULT", "close_console")
 PERSISTENT_ARGS = {"use_proxy", "proxy_scope", "extension", "close_console"}

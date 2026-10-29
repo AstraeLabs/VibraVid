@@ -197,10 +197,19 @@ LOGGING = {
             "datefmt": "%H:%M:%S",
         },
     },
+    "filters": {
+        "arr_no_item": {"()": "searchapp.arr.item_log.NoItemFilter"},
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "stream": "ext://sys.stderr",
+        },
+        "arr_console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+            "filters": ["arr_no_item"],
             "stream": "ext://sys.stderr",
         },
         "vibravid_file": {
@@ -212,14 +221,17 @@ LOGGING = {
             "encoding": "utf-8",
         },
         "arr_file": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "formatter": "verbose",
+            "filters": ["arr_no_item"],
             "filename": os.path.join(
                 PROJECT_ROOT,
                 ".cache",
                 "arr",
                 datetime.now().strftime("arr_%Y%m%d_%H%M%S.log"),
             ),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 5,
             "encoding": "utf-8",
         },
     },
@@ -239,8 +251,8 @@ LOGGING = {
             "propagate": False,
         },
         "ARR": {
-            "handlers": ["console", "arr_file"],
-            "level": "INFO",
+            "handlers": ["arr_console", "arr_file"],
+            "level": os.environ.get("DJANGO_LOG_LEVEL", _VIBRAVID_LOG_LEVEL),
             "propagate": False,
         },
     },

@@ -4,6 +4,7 @@
 [DEFAULT]
 # DEBUG, INFO, WARNING or ERROR
 log_level = "INFO"
+log_retention_days = 7
 close_console = true
 show_message = true
 fetch_domain_online = true
@@ -206,6 +207,8 @@ polling_interval = 300
 full_resync_interval = 21600
 # Simultaneous downloads started by ARR
 max_concurrent_downloads = 2
+# Polling gives up on an item after this many failed attempts (0 = retry forever); a manual sync or a webhook retries it
+max_retry_attempts = 5
 webhook_priority_enabled = true
 native_webhook_priority_window_seconds = 120
 seerr_fallback_delay_seconds = 20

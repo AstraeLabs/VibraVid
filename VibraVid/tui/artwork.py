@@ -1,14 +1,9 @@
 # 19.10.26
 
 import hashlib
-import io
 import logging
 import threading
 from pathlib import Path
-
-from rich.color import Color
-from rich.style import Style
-from rich.text import Text
 
 from VibraVid.utils import config_manager
 
@@ -176,41 +171,3 @@ def fetch_cover(url: str | None) -> bytes | None:
     with _lock:
         _bytes_cache[url] = data
     return data
-
-
-# ── drawing it ────────────────────────────────────────────────────────────
-
-def render_cover(data: bytes, max_cells_w: int, max_cells_h: int) -> Text | None:
-    """The image as half-block characters (``▀``: top pixel = foreground, bottom pixel = background), fitted into the given cell box."""
-    try:
-        from PIL import Image
-
-        with Image.open(io.BytesIO(data)) as source:
-            image = source.convert("RGB")
-    except Exception as exc:
-        logger.debug("cover is not a readable image: %s", exc)
-        return None
-
-    src_w, src_h = image.size
-    if src_w < 1 or src_h < 1 or max_cells_w < 1 or max_cells_h < 1:
-        return None
-
-    scale = min(max_cells_w / src_w, (max_cells_h * 2) / src_h)
-    out_w = max(1, int(src_w * scale))
-    out_h = max(2, int(src_h * scale) // 2 * 2)
-    image = image.resize((out_w, out_h), Image.LANCZOS)
-    pixels = image.load()
-
-    styles: dict[tuple, Style] = {}
-    text = Text(no_wrap=True, overflow="crop")
-    for y in range(0, out_h, 2):
-        for x in range(out_w):
-            top, bottom = pixels[x, y], pixels[x, y + 1]
-            style = styles.get((top, bottom))
-            if style is None:
-                style = Style(color=Color.from_rgb(*top), bgcolor=Color.from_rgb(*bottom))
-                styles[(top, bottom)] = style
-            text.append("▀", style)
-        if y + 2 < out_h:
-            text.append("\n")
-    return text

@@ -31,7 +31,7 @@ How it is drawn follows `tui_images` ([DEFAULT](configuration.md#default)):
 
 | Value | Result |
 |-------|--------|
-| `auto` | A real, scaled image if the terminal supports the Kitty or Sixel protocol and `textual-image` is installed, otherwise characters |
+| `auto` | A real, scaled image if the terminal supports the Kitty or Sixel protocol, otherwise characters (`textual-image` picks) |
 | `sixel` / `kitty` | Force that protocol |
 | `blocks` | Half-block characters (two pixels per cell): works in any truecolor terminal but is coarse |
 | `off` | No covers |

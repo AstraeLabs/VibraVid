@@ -30,6 +30,8 @@ services:
       - ${VIBRAVID_TMP_DIR:-vibravid_tmp}:/app/tmp
       # Logs persistence
       - ${VIBRAVID_LOGS_DIR:-vibravid_logs}:/app/.cache/logs
+      # ARR logs (one file per title and day), kept out of the container layer
+      - ${VIBRAVID_ARR_LOGS_DIR:-vibravid_arr_logs}:/app/.cache/arr
       # Configuration persistence
       - ${VIBRAVID_CONFIG_DIR:-vibravid_config}:/app/Conf
       # CDM / binary directory persistence
@@ -159,6 +161,8 @@ volumes:
   vibravid_tmp:
     driver: local
   vibravid_logs:
+    driver: local
+  vibravid_arr_logs:
     driver: local
   vibravid_config:
     driver: local

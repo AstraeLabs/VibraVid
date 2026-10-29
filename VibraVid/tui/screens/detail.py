@@ -66,6 +66,8 @@ class TitleDetailScreen(Screen):
         Binding("r", "range_select_modal", t("range_selection")),
         Binding("v", "toggle_visual_anchor", t("visual_range")),
         Binding("i", "invert_episodes", t("invert_selection")),
+        Binding("g", "toggle_season", t("toggle_season")),
+        Binding("space", "toggle_season_if_listed", t("toggle_season"), show=False),
     ]
 
     def __init__(
@@ -97,28 +99,29 @@ class TitleDetailScreen(Screen):
         with Vertical(id="detail-panel"):
             with Horizontal(id="detail-head"):
                 yield CoverImage(max_cells=(40, 18), reserve=18, id="detail-cover")
+                # the seasons/episodes browser sits beside the cover, not below it: a tall cover would push it off screen
                 with Vertical(id="detail-info"):
                     yield Static(str(getattr(self._item, "name", "?")), classes="detail-title")
                     yield Static(self._meta_line(), classes="detail-meta")
                     yield Static(self._desc_line(), classes="detail-meta")
-            with Vertical(id="series-area"):
-                yield Static(t("seasons_episodes_title"), classes="panel-title")
-                yield LoadingIndicator(id="seasons-loading")
-                with Horizontal(id="series-browser"):
-                    with Vertical(id="providers-box"):
-                        yield Static(t("providers"), classes="box-title")
-                        yield ListView(id="providers")
-                    with Vertical(id="seasons-box"):
-                        yield Static(t("seasons"), classes="box-title")
-                        yield ListView(id="seasons")
-                    with Vertical(id="episodes-box"):
-                        yield Static(t("episodes"), classes="box-title")
-                        yield RangeSelectionList(id="episodes")
-                yield Static("", id="dsl-preview", classes="dsl-preview")
-                with Horizontal(id="actions-row"):
-                    yield Button(t("download_selected_episodes"), id="dl", variant="primary")
-                    yield Button(t("add_to_queue"), id="queue")
-        yield CustomFooter([("a", t("select_all")), ("u", t("clear_selection")), ("r", t("range_selection")), ("v", t("visual_range")), ("i", t("invert_selection"))])
+                    with Vertical(id="series-area"):
+                        yield Static(t("seasons_episodes_title"), classes="panel-title")
+                        yield LoadingIndicator(id="seasons-loading")
+                        with Horizontal(id="series-browser"):
+                            with Vertical(id="providers-box"):
+                                yield Static(t("providers"), classes="box-title")
+                                yield ListView(id="providers")
+                            with Vertical(id="seasons-box"):
+                                yield Static(t("seasons"), classes="box-title")
+                                yield ListView(id="seasons")
+                            with Vertical(id="episodes-box"):
+                                yield Static(t("episodes"), classes="box-title")
+                                yield RangeSelectionList(id="episodes")
+                        yield Static("", id="dsl-preview", classes="dsl-preview")
+                        with Horizontal(id="actions-row"):
+                            yield Button(t("download_selected_episodes"), id="dl", variant="primary")
+                            yield Button(t("add_to_queue"), id="queue")
+        yield CustomFooter([("g", t("toggle_season")), ("a", t("select_all")), ("u", t("clear_selection")), ("r", t("range_selection")), ("v", t("visual_range")), ("i", t("invert_selection"))])
 
     def _meta_line(self) -> str:
         parts = [
@@ -237,6 +240,38 @@ class TitleDetailScreen(Screen):
 
     # ── Episode Selection Shortcuts (a / u) ──────────────────────────────
 
+    def action_toggle_season(self) -> None:
+        """Shortcut 'S' (or space on the seasons list): select every episode of the highlighted season, or clear it when it is already whole."""
+        if self._current_season is None or self._is_single:
+            return
+        episodes: RangeSelectionList = self.query_one("#episodes", RangeSelectionList)
+        total = self._season_episode_count(self._current_season)
+        if total and len(episodes.selected) >= total:
+            episodes.deselect_all()
+        else:
+            episodes.select_all()
+
+    def action_toggle_season_if_listed(self) -> None:
+        """Space picks the whole season only from the seasons list: on the episodes it toggles that one episode."""
+        if isinstance(self.focused, ListView) and self.focused.id == "seasons":
+            self.action_toggle_season()
+
+    def _season_label(self, season) -> str:
+        """``S2  ·  10 ep``, ``S2  ·  3/10 ep`` once some are picked, ``✓ S2  ·  10/10 ep`` when the whole season is."""
+        count = len(getattr(season, "episodes", []) or [])
+        picked = len(self._episode_selections.get(season.number, ()))
+        if picked and picked >= count:
+            return f"[bold green]✓[/] S{season.number}  ·  {picked}/{count} ep"
+        if picked:
+            return f"S{season.number}  ·  {picked}/{count} ep"
+        return f"S{season.number}  ·  {count} ep"
+
+    def _refresh_season_labels(self) -> None:
+        for item in self.query_one("#seasons", ListView).children:
+            season = getattr(item, "season_payload", None)
+            if season is not None:
+                item.query_one(Static).update(self._season_label(season))
+
     def action_select_all_episodes(self) -> None:
         """Shortcut 'a': Select all episodes in current season."""
         if self._current_season is None or self._is_single:
@@ -340,9 +375,7 @@ class TitleDetailScreen(Screen):
                 return
 
             for season in self._seasons:
-                count = len(getattr(season, "episodes", []) or [])
-                label = f"S{season.number}  ·  {count} ep"
-                item = ListItem(Static(label))
+                item = ListItem(Static(self._season_label(season)))
                 item.season_payload = season
                 season_list.append(item)
             season_list.index = 0
@@ -383,6 +416,7 @@ class TitleDetailScreen(Screen):
             return
         selected = set(self.query_one("#episodes", SelectionList).selected)
         self._episode_selections[self._current_season] = selected
+        self._refresh_season_labels()
         self._update_dsl()
 
     # ── DSL preview ───────────────────────────────────────────────────────
@@ -416,6 +450,7 @@ class TitleDetailScreen(Screen):
     def _on_download(self) -> None:
         if self._is_single:
             self._start_download_worker(None, None)
+            self.app.action_open_area("downloads")
         else:
             picked = {s: eps for s, eps in self._episode_selections.items() if eps}
             if not picked:
@@ -432,6 +467,7 @@ class TitleDetailScreen(Screen):
                 season_str = seasons
                 episode_str = "*" if all_full else "1-*"
             self._start_download_worker(season_str, episode_str)
+            self.app.action_open_area("downloads")
 
     @work(thread=True, exclusive=True, group="download")
     def _start_download_worker(self, season: str | None, episodes: str | None) -> None:

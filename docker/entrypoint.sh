@@ -22,9 +22,9 @@ if [ -n "$PUID" ] || [ -n "$PGID" ]; then
     chown -R appuser:appuser /app/Video /app/Conf /app/data /app/logs /app/.cache /app/tmp /home/appuser/.local/bin/binary 2>/dev/null || true
 fi
 
-# Create a logs cache directory for the appuser to write to, if it doesn't exist.
-mkdir -p /app/.cache/logs
-chown appuser:appuser /app/.cache /app/.cache/logs 2>/dev/null || true
+# Create the logs cache directories (app logs and ARR logs) for the appuser to write to, if they don't exist.
+mkdir -p /app/.cache/logs /app/.cache/arr
+chown appuser:appuser /app/.cache /app/.cache/logs /app/.cache/arr 2>/dev/null || true
 
 # Scratch folder for the downloader's temporary files (VIBRAVID_TEMP_DIR): a fresh named volume is owned by root.
 mkdir -p /app/tmp

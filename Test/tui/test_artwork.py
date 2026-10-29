@@ -95,19 +95,6 @@ def test_result_is_cached(enabled, monkeypatch):
     assert len(calls) == 1
 
 
-def test_render_cover_fits_the_box_and_uses_half_blocks():
-    art = artwork.render_cover(_png(40, 60), 20, 8)
-    assert art is not None
-    lines = art.plain.split("\n")
-    assert len(lines) <= 8
-    assert max(len(line) for line in lines) <= 20
-    assert set(art.plain) <= {"▀", "\n"}
-
-
-def test_render_cover_rejects_garbage():
-    assert artwork.render_cover(b"not an image", 20, 8) is None
-
-
 def test_fetch_cover_caches_on_disk(enabled, monkeypatch, tmp_path):
     monkeypatch.setattr(artwork, "_cache_file", lambda url: tmp_path / "c.img")
     hits = []

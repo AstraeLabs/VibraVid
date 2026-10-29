@@ -143,6 +143,7 @@ class ArrProcessingQueue(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     success = models.BooleanField(null=True)
+    attempts = models.PositiveIntegerField(default=0, help_text="Consecutive failed attempts; polling stops retrying at ARR.max_retry_attempts")
 
     class Meta:
         ordering = ["-enqueued_at"]

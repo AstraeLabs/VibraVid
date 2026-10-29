@@ -30,6 +30,14 @@ class SearchappConfig(AppConfig):
         except Exception as exc:
             logger.exception("[Logger] Failed to initialize: %s", exc)
 
+        # Remove log files older than DEFAULT.log_retention_days
+        try:
+            from .log_retention import purge_old_logs
+
+            purge_old_logs()
+        except Exception as exc:
+            logger.exception("[Logs] Retention cleanup failed: %s", exc)
+
         # Start the auto loop for the watchlist
         try:
             from .watchlist_auto import start_watchlist_auto_loop

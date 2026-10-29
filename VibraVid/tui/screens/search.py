@@ -3,6 +3,7 @@
 
 """Search screen: query input + category filters + mouse-hover live metadata preview card + QoL hotkeys & batch actions."""
 
+import difflib
 import logging
 import re
 from dataclasses import dataclass
@@ -111,11 +112,22 @@ def deduplicate_search_results(results: list[tuple[str, object]]) -> list[tuple[
     return [groups[k] for k in ordered_keys]
 
 
+def _relevance(item: object, query: str) -> float:
+    """How close the title is to the query (0..1), whatever site it came from and in what order the sites answered."""
+    title = _normalize_title(str(getattr(item, "name", "") or getattr(item, "title", "") or ""))
+    return difflib.SequenceMatcher(None, query, title).ratio() if title else 0.0
+
+
 def _sort_results(
     results: list[tuple[str, object, list[tuple[str, object]]]],
     sort_mode: str,
+    query: str = "",
 ) -> list[tuple[str, object, list[tuple[str, object]]]]:
     """Sort search results based on selected criteria."""
+    if sort_mode == "relevance" and _normalize_title(query):
+        normalized = _normalize_title(query)
+        # best match first; among equals the title on more providers, then the arrival order (sorted is stable)
+        return sorted(results, key=lambda r: (-_relevance(r[1], normalized), -len(r[2])))
     if sort_mode == "year_desc":
         return sorted(results, key=lambda r: _item_year(r[1]) or -9999, reverse=True)
     elif sort_mode == "year_asc":
@@ -204,12 +216,15 @@ class SearchScreen(Screen):
         Binding("5", "select_preview_provider_4", "Prov 5", show=False),
     ]
 
-    def __init__(self, site: str | None, initial_query: str = "") -> None:
+    def __init__(self, site: str | None, initial_query: str = "", scope: str = "global") -> None:
         super().__init__()
         self._site = site
+        self._scope = scope
         self._initial_query = initial_query
         self._raw: list[tuple[str, object, list[tuple[str, object]]]] = []
-        self._current_filter_category: str = "all"
+        self._skipped_sites: list[str] = []
+        self._search_id = 0 
+        self._current_filter_category: str = scope if scope in ("film", "serie", "music") else "all"
         self._current_sort_mode: str = "relevance"
         self._highlighted_payload: tuple | None = None
         self._selected_keys: set[str] = set()
@@ -230,9 +245,9 @@ class SearchScreen(Screen):
 
             with Grid(id="category-filter-pills"):
                 yield Button(f"{t('all')} (0)", id="filter-all", variant="primary", classes="filter-pill")
-                yield Button(f"🎬 {t('film')} (0)", id="filter-film", classes="filter-pill")
-                yield Button(f"📺 {t('serie_anime')} (0)", id="filter-serie", classes="filter-pill")
-                yield Button(f"🎵 {t('music')} (0)", id="filter-music", classes="filter-pill")
+                yield Button(f"{t('film')} (0)", id="filter-film", classes="filter-pill")
+                yield Button(f"{t('serie_anime')} (0)", id="filter-serie", classes="filter-pill")
+                yield Button(f"{t('music')} (0)", id="filter-music", classes="filter-pill")
 
             yield LoadingIndicator(id="search-loading")
             yield Static("", id="search-status")
@@ -274,6 +289,7 @@ class SearchScreen(Screen):
         self.query_one("#preview-providers-box", Vertical).display = False
         self.query_one("#retry-failed-btn", Button).display = False
         self.query_one("#batch-actions-bar", Horizontal).display = False
+        self._sync_filter_pills()
         self.query_one("#query", Input).focus()
         if self._initial_query:
             self._start_search()
@@ -333,24 +349,46 @@ class SearchScreen(Screen):
             return
         self._last_query = query
         year_spec = _parse_year_filter(self.query_one("#year", Input).value)
+        self._raw = []  # the new search streams in site by site: nothing of the previous one may linger
+        self._search_id += 1
         self._set_loading(True)
-        self._search_worker(query, year_spec)
+        self._search_worker(query, year_spec, self._search_id)
 
     @work(thread=True, exclusive=True, group="search")
-    def _search_worker(self, query: str, year_spec: tuple[int, int] | None) -> None:
+    def _search_worker(self, query: str, year_spec: tuple[int, int] | None, search_id: int) -> None:
         try:
             if self._site:
                 items = bridge.search_titles(self._site, query)
                 results = [(self._site, it) for it in items]
                 errors: dict[str, str] = {}
             else:
-                found, errors = bridge.search_global(query)
-                results = [(site, it) for site, items in found.items() for it in items]
+                sites, self._skipped_sites = bridge.global_search_sites(self._scope)
+                found, errors = bridge.search_global(
+                    query,
+                    sites,
+                    on_site_done=lambda site, items, done, total: self.app.call_from_thread(
+                        self._apply_site_results, site, items, done, total, year_spec, search_id
+                    ),
+                )
+                results = []  # already on screen, one site at a time
         except Exception as e:
             logger.exception("search failed")
             self.app.call_from_thread(self._search_failed, str(e))
             return
-        self.app.call_from_thread(self._apply_results, results, errors, year_spec)
+        if search_id == self._search_id:
+            self.app.call_from_thread(self._apply_results, results, errors, year_spec, not self._site)
+
+    def _apply_site_results(
+        self, site: str, items: list, done: int, total: int, year_spec: tuple[int, int] | None, search_id: int
+    ) -> None:
+        """Show one finished site right away; the loading indicator stays until every site is in."""
+        if search_id != self._search_id:
+            return
+        if items:
+            self._apply_results([(site, it) for it in items], {}, year_spec, merge=True)
+            self._set_loading(True)
+        shown = t("results_found_status", count=len(self._raw))
+        self.query_one("#search-status", Static).update(f"{shown}  [dim]· {t('searching_sites_status', done=done, total=total)}[/dim]")
 
     def _set_loading(self, active: bool) -> None:
         self.query_one("#search-loading", LoadingIndicator).display = active
@@ -401,6 +439,8 @@ class SearchScreen(Screen):
         elif not deduped:
             status = t("no_results_status")
 
+        if self._skipped_sites and not self._site:
+            status += f"  [dim]· {t('sites_skipped_no_login_status', sites=', '.join(self._skipped_sites))}[/dim]"
         self.query_one("#search-status", Static).update(status)
         self._store_snapshot()
 
@@ -434,14 +474,7 @@ class SearchScreen(Screen):
         self.query_one("#year", Input).value = snapshot.year
         self.query_one("#sort-btn", Button).label = t("sort_by", mode=t(SORT_LABELS[self._current_sort_mode]))
 
-        for btn_id, category in (
-            ("#filter-all", "all"),
-            ("#filter-film", "film"),
-            ("#filter-serie", "serie"),
-            ("#filter-music", "music"),
-        ):
-            btn = self.query_one(btn_id, Button)
-            btn.variant = "primary" if category == self._current_filter_category else "default"
+        self._sync_filter_pills()
 
         retry_btn = self.query_one("#retry-failed-btn", Button)
         if self._failed_sites:
@@ -455,6 +488,11 @@ class SearchScreen(Screen):
         )
         return True
 
+    def _sync_filter_pills(self) -> None:
+        """Highlight the pill of the active category (the one picked on Home, or restored)."""
+        for category in ("all", "film", "serie", "music"):
+            self.query_one(f"#filter-{category}", Button).variant = "primary" if category == self._current_filter_category else "default"
+
     def _update_category_counts(self, results: list[tuple[str, object, list[tuple[str, object]]]]) -> None:
         total = len(results)
         films = sum(1 for _, it, _ in results if getattr(it, "is_movie", False))
@@ -464,9 +502,9 @@ class SearchScreen(Screen):
         music = sum(1 for _, it, _ in results if getattr(it, "is_song", False))
 
         self.query_one("#filter-all", Button).label = f"{t('all')} ({total})"
-        self.query_one("#filter-film", Button).label = f"🎬 {t('film')} ({films})"
-        self.query_one("#filter-serie", Button).label = f"📺 {t('serie_anime')} ({series})"
-        self.query_one("#filter-music", Button).label = f"🎵 {t('music')} ({music})"
+        self.query_one("#filter-film", Button).label = f"{t('film')} ({films})"
+        self.query_one("#filter-serie", Button).label = f"{t('serie_anime')} ({series})"
+        self.query_one("#filter-music", Button).label = f"{t('music')} ({music})"
 
     def _populate_results_list(self) -> None:
         filtered = []
@@ -483,7 +521,7 @@ class SearchScreen(Screen):
 
             filtered.append((site, it, providers))
 
-        sorted_filtered = _sort_results(filtered, self._current_sort_mode)
+        sorted_filtered = _sort_results(filtered, self._current_sort_mode, self._last_query)
         global_mode = self._site is None
         items = []
 
@@ -494,11 +532,11 @@ class SearchScreen(Screen):
             is_song = getattr(it, "is_song", False)
 
             if is_movie:
-                type_tag = "[bold yellow]🎬 FILM[/bold yellow]"
+                type_tag = "[bold yellow]FILM[/bold yellow]"
             elif is_song:
-                type_tag = "[bold magenta]🎵 MUSIC[/bold magenta]"
+                type_tag = "[bold magenta]MUSIC[/bold magenta]"
             else:
-                type_tag = "[bold green]📺 SERIE[/bold green]"
+                type_tag = "[bold green]SERIE[/bold green]"
 
             provider_names = [p[0] for p in providers]
             if len(provider_names) > 1 or global_mode:
@@ -652,14 +690,14 @@ class SearchScreen(Screen):
 
         open_btn = self.query_one("#preview-open-btn", Button)
         if is_movie:
-            badge = f"[bold yellow]🎬 {t('film').upper()}[/bold yellow]"
+            badge = f"[bold yellow]{t('film').upper()}[/bold yellow]"
             open_btn.label = f"⬇️ {t('download_movie')}"
         elif is_song:
-            badge = f"[bold magenta]🎵 {t('music').upper()}[/bold magenta]"
+            badge = f"[bold magenta]{t('music').upper()}[/bold magenta]"
             open_btn.label = f"⬇️ {t('download_track')}"
         else:
-            badge = f"[bold green]📺 {t('serie_anime').upper()}[/bold green]"
-            open_btn.label = f"📺 {t('select_seasons_episodes')}"
+            badge = f"[bold green]{t('serie_anime').upper()}[/bold green]"
+            open_btn.label = t('select_seasons_episodes')
 
         prov_str = ", ".join(p[0] for p in providers)
         lib_status = _get_library_status(active_item, active_site)
@@ -773,6 +811,7 @@ class SearchScreen(Screen):
 
         if is_movie or is_song:
             self._start_direct_download(site, item)
+            self.app.action_open_area("downloads")
         else:
             from VibraVid.tui.screens.detail import TitleDetailScreen
 

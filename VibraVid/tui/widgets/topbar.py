@@ -10,7 +10,7 @@ from textual.widgets import Static
 from VibraVid.core.ui.tracker import download_tracker
 from VibraVid.tui.i18n import t
 from VibraVid.tui.palette import ACCENT, FG_MUTED, SUCCESS
-from VibraVid.utils.upload.version import __version__
+from VibraVid.utils.console.message import format_status
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,6 @@ RUNNING_STATUSES = ("downloading", "active", "running")
 
 
 class TopBar(Widget):
-    """``TopBar("Settings", "config.toml and login.toml")``: a bold title and a muted description under the brand line."""
-
     DEFAULT_CSS = """
     TopBar {
         dock: top;
@@ -27,16 +25,20 @@ class TopBar(Widget):
         background: #121212;
     }
     #topbar-row {
+        layers: base above;
         height: 1;
         width: 100%;
         padding: 0 2;
     }
-    #topbar-brand {
-        width: 1fr;
+    #topbar-status {
+        layer: base;
+        width: 100%;
         height: 1;
+        text-align: center;
         color: #71717a;
     }
     #topbar-activity {
+        layer: above;
         width: auto;
         height: 1;
         color: #86efac;
@@ -55,7 +57,7 @@ class TopBar(Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="topbar-row"):
-            yield Static(f"[bold {ACCENT}]◆ VibraVid[/] v{__version__}", id="topbar-brand")
+            yield Static(self._status_text(), id="topbar-status")
             yield Static("", id="topbar-activity")
         yield Static(self._context_text(), id="topbar-context")
 
@@ -66,6 +68,18 @@ class TopBar(Widget):
     def set_context(self, title: str, subtitle: str = "") -> None:
         self._title, self._subtitle = title, subtitle
         self.query_one("#topbar-context", Static).update(self._context_text())
+
+    @staticmethod
+    def _status_text() -> str:
+        """``VibraVid  Geo: IT  Sys: windows x64  Ver: 1.4.8  Typ: Source code``, the items the CLI banner shows next to its logo."""
+        try:
+            from VibraVid.utils.upload.update import status_info
+
+            items = format_status(status_info())
+        except Exception:
+            logger.debug("top bar status not available", exc_info=True)
+            items = []
+        return "  ".join([f"[bold {ACCENT}]VibraVid[/]", *items])
 
     def _context_text(self) -> str:
         if not self._title:

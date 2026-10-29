@@ -182,7 +182,7 @@ class DownloadBarManager:
             or f"{parsed.get('track', 'trk')}_{parsed.get('label', '')}"
         )
         explicit_label = parsed.get("label")
-        label = explicit_label or key
+        label = explicit_label or key  # first-seen row only; never pushed to the tracker
 
         # ── Create task if first time we see this key ──────────────────────
         if key not in self.tasks:
@@ -222,7 +222,7 @@ class DownloadBarManager:
                 parsed.get("speed"),
                 parsed.get("size"),
                 parsed.get("segments"),
-                label=label,
+                label=explicit_label,  # a tick without a label must not overwrite the rich one with the raw key
                 display_label=parsed.get("display_label"),
                 quality=parsed.get("quality"),
                 language=parsed.get("language"),

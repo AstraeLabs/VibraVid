@@ -12,6 +12,7 @@ _CATEGORY_LABELS = {
     "Film_Serie": "Film e Serie",
     "Serie": "Serie TV",
     "Anime": "Anime",
+    "Live": "Dirette",
     "song": "Musica",
     "Song": "Musica",
 }
