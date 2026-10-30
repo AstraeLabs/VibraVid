@@ -181,9 +181,8 @@ def title_search(query: str) -> int:
                 console.print(f"[red]Error parsing a film entry ({lang}): {e}")
 
     if not loaded_catalogs:
-        raise RuntimeError(
-            "Unable to load StreamingCommunity catalogs. Check the site or VPN/DNS connection and retry."
-        ) from last_error
+        raise RuntimeError("Unable to load StreamingCommunity catalogs. Check the site or VPN/DNS connection and retry.") from last_error
+    
     missing = [lang.upper() for lang in languages if lang not in loaded_catalogs]
     if missing:
         warning = f"Partial StreamingCommunity results: catalog(s) {', '.join(missing)} unavailable. Retry the search to include those languages."

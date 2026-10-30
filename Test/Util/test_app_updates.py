@@ -235,7 +235,7 @@ def test_release_cache_lasts_24_hours_and_errors_are_cached(monkeypatch, tmp_pat
 
 
 def test_startup_prefetch_update_job_runs_in_background(monkeypatch):
-    from VibraVid.utils import _startup_prefetch as prefetch
+    from VibraVid.utils.bootstrap import _startup_prefetch as prefetch
 
     monkeypatch.setattr(prefetch, "_futures", {})
     assert prefetch.collect("update", timeout=0) is None

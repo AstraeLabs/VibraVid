@@ -10,7 +10,8 @@ import re
 import time
 from typing import Any
 
-from VibraVid.utils import anime_id_map, config_manager
+from VibraVid.utils import config_manager
+from VibraVid.utils.media import anime_id_map
 
 from .clients.radarr_client import RadarrClient
 from .clients.sonarr_client import SonarrClient

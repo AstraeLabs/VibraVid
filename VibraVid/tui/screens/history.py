@@ -20,7 +20,7 @@ from VibraVid.tui.formatting import format_time
 from VibraVid.tui.i18n import t
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.tui.widgets.topbar import TopBar
-from VibraVid.utils.system_open import open_file, open_folder
+from VibraVid.utils.system.system_open import open_file, open_folder
 
 logger = logging.getLogger(__name__)
 

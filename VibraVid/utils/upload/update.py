@@ -19,7 +19,7 @@ from rich.console import Console
 from VibraVid.setup import get_is_binary_installation
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.utils import config_manager
-from VibraVid.utils.console.message import SHOW, format_status
+from VibraVid.utils.console.message import SHOW, _cells, format_status, links_column
 from VibraVid.utils.http_client import create_client
 
 from .version import __author__, __title__
@@ -571,6 +571,9 @@ def status_info() -> tuple[tuple[str, str], ...]:
 
 
 def update():
-    """Print the community links under the banner, which carries the status items (``status_info``) in a column; with the banner switched off (DEFAULT.show_message) they go in front of the links on one line."""
+    """Print the community links centred right under the banner art; with the banner switched off (DEFAULT.show_message) they go after the status items on one line."""
     links = "[link=https://discord.com/invite/8vV68UGRc7][#5865F2]Discord[/link] [dim]·[/] [link=https://www.paypal.com/donate/?hosted_button_id=UXTWMT8P6HE2C][#ea4aaa]Donate[/link]"
-    console.print(f"           {links if SHOW else ' [dim]·[/] '.join((*format_status(status_info()), links))}")
+    if SHOW:
+        console.print(f"{' ' * links_column(status_info(), console.width, _cells(links))}{links}")
+    else:
+        console.print(f"           {' [dim]·[/] '.join((*format_status(status_info()), links))}")

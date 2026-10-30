@@ -18,7 +18,7 @@ import tomlkit
 from curl_cffi import requests
 from rich.console import Console
 
-from . import _startup_prefetch
+from .bootstrap import _startup_prefetch
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -51,9 +51,16 @@ class LoginConfigError(ValueError):
 
 class ConfigAccessor:
     def __init__(
-        self, config_dict: dict, cache: dict, cache_prefix: str, cache_enabled: bool = True, repair_callback=None
+        self,
+        config_dict: dict,
+        cache: dict,
+        cache_prefix: str,
+        cache_enabled: bool = True,
+        repair_callback=None,
+        ready_fn=None,
     ):
         self._config_dict = config_dict
+        self._ready_fn = ready_fn
         self._cache = cache
         self._cache_prefix = cache_prefix
         self._cache_enabled = cache_enabled
@@ -189,6 +196,9 @@ class ConfigAccessor:
         Returns:
             Any: The key value converted to the specified data type, or default if not found
         """
+        if self._ready_fn is not None:
+            self._ready_fn()
+
         cache_key = f"{self._cache_prefix}.{section}.{key}"
 
         scoped = self._scoped_section(section)
@@ -326,6 +336,9 @@ class ConfigAccessor:
 
     def get_section(self, section: str, default: dict | None = None) -> dict:
         """Return the entire section as a dict (e.g. all cookies/keys for a service's login block), uncached and un-typed."""
+        if self._ready_fn is not None:
+            self._ready_fn()
+
         scoped = self._scoped_section(section)
         if scoped is not None:
             return dict(self._normalize_login_section(scoped))
@@ -341,6 +354,9 @@ class ConfigAccessor:
 
     def has_section(self, section: str) -> bool:
         """True if the section exists, even when empty (get_section cannot tell an empty section from a missing one)."""
+        if self._ready_fn is not None:
+            self._ready_fn()
+
         scoped = self._scoped_section(section)
         if scoped is not None:
             return bool(scoped)
@@ -445,7 +461,11 @@ class ConfigManager:
         )
         self.login = ConfigAccessor(self._login_data, self.cache, "login", self._cache_enabled)
         self.login.honors_scope = True
-        self.domain = ConfigAccessor(self._domains_data, self.cache, "domain", self._cache_enabled)
+        self._domains_lock = threading.RLock()
+        self._domains_pending = False
+        self.domain = ConfigAccessor(
+            self._domains_data, self.cache, "domain", self._cache_enabled, ready_fn=self._ensure_domains
+        )
 
         # Load the configuration
         self.fetch_domain_online = True
@@ -665,6 +685,7 @@ class ConfigManager:
 
     def _load_site_data(self) -> None:
         """Load site data based on fetch_domain_online setting."""
+        self._domains_pending = False
         if self.fetch_domain_online:
             self._load_site_data_online()
         else:
@@ -699,9 +720,22 @@ class ConfigManager:
                 logger.warning(f"Background domain refresh failed: {e}")
 
     def _load_site_data_online(self) -> None:
-        """Load site data from GitHub and update local domains.json file."""
+        """Start fetching the domains from GitHub; the first domain read waits for them (see _ensure_domains)."""
+        _startup_prefetch.start()
+        self._domains_pending = True
+
+    def _ensure_domains(self) -> None:
+        """Wait once for the prefetched domains (or fall back to the local file), then stay out of the way."""
+        if not self._domains_pending:
+            return
+        with self._domains_lock:
+            if self._domains_pending:
+                self._resolve_domains_online()
+                self._domains_pending = False
+
+    def _resolve_domains_online(self) -> None:
+        """Collect the prefetched domains and update the local domains.json file."""
         try:
-            _startup_prefetch.start()
             data = _startup_prefetch.collect("domains", timeout=5)
 
             if data is not None:
@@ -749,6 +783,7 @@ class ConfigManager:
             else:
                 console.print("[dim]Domain file not found locally, trying online fallback...")
                 self._load_site_data_online()
+                self._ensure_domains()
                 if self._domains_data:
                     return
 

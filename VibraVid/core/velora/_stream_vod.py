@@ -336,6 +336,13 @@ class VodStreamMixin:
         self._finish_bar_task(bar_manager, task_key, "Failed", self._skipped_track_bar_label(stream, task_key))
         self._record_track_done(self._stream_task_key(stream), None)
 
+    def _report_stream_error(self, stream, bar_manager, exc: Exception) -> None:
+        """Mark a track whose playlist could not be fetched as "Error <HTTP status>" on its progress-bar row; the track is dropped, not retried at another quality."""
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        task_key = self._stream_task_key(stream)
+        self._finish_bar_task(bar_manager, task_key, f"Error {status}" if status else "Error", self._skipped_track_bar_label(stream, task_key))
+        self._record_track_done(task_key, None)
+
     # Live trial: wait until the growing single-file segment passes
     _SIDX_CHUNK_BYTES = 16 * 1024 * 1024
     _TRIAL_FIRST_FLOOR = 64 * 1024 * 1024
@@ -660,6 +667,7 @@ class VodStreamMixin:
                     base_url = hls_base_url(playlist_url)
                 except Exception as exc:
                     logger.error(f"Failed to fetch HLS playlist for live detection: {exc}")
+                    self._report_stream_error(stream, bar_manager, exc)
                     return
                 self._download_hls_live_stream(
                     stream, bar_manager, live_decryption=effective_live, first_content=first_content, base_url=base_url
@@ -691,6 +699,7 @@ class VodStreamMixin:
                 playlist_content = resp.text
         except Exception as exc:
             logger.error(f"Failed to fetch HLS variant playlist: {exc}")
+            self._report_stream_error(stream, bar_manager, exc)
             return
 
         base_url = hls_base_url(playlist_url)

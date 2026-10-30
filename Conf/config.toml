@@ -121,6 +121,9 @@ merge_subtitle = true
 # "auto", "on" or "off"
 force_subtitle = "auto"
 mux_dtsx = false
+# Re-mux each downloaded fMP4 track with ffmpeg to reset its fragment timestamps (a full extra pass: slow on large files).
+# false = skip it; fine with the streaming mux (use_live_mux), which does not need it
+normalize_timestamps = true
 # mkv, mp4, ...
 extension = "mkv"
 

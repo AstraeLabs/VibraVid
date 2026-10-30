@@ -8,7 +8,7 @@ from rich.prompt import Prompt
 from VibraVid.core.downloader import MP4_Downloader
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.player.sweetpixel import VideoSource
-from VibraVid.services._base import Entries, anime_folder, print_episode_header, site_constants
+from VibraVid.services._base import Entries, anime_folder, print_episode_header, site_constants, site_tag
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import os_manager, start_message
@@ -29,7 +29,7 @@ def download_film(select_title: Entries):
 
     # Get episode information
     episode_data = episodes[0]
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> ([cyan]{scrape_serie.get_name()}) \n")
+    console.print(f"[red]{site_tag()} ([cyan]{scrape_serie.get_name()}) \n")
 
     # Define filename and path for the downloaded video
     serie_name_with_year = os_manager.get_sanitize_file(scrape_serie.get_name(), select_title.year)

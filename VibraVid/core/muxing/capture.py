@@ -12,7 +12,7 @@ from VibraVid.core.ui.bar_manager import console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.velora.util.formatting import parse_time_scalar
 from VibraVid.utils.os import internet_manager
-from VibraVid.utils.proc import log_command
+from VibraVid.utils.system.proc import log_command
 
 logger = logging.getLogger(__name__)
 terminate_flag = threading.Event()

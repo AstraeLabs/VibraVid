@@ -1,7 +1,7 @@
 # 18.12.25
 # ruff: noqa: E402
 
-from ._log_buffer import install_startup_buffer
+from .bootstrap._log_buffer import install_startup_buffer
 
 install_startup_buffer()
 

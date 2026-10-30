@@ -4,10 +4,8 @@
 import logging
 import os
 
-from rich.console import Console
-
 from VibraVid.core.downloader import HLS_Downloader
-from VibraVid.services._base import Entries, movie_folder, series_folder, site_constants
+from VibraVid.services._base import Entries, movie_folder, print_download_header, print_episode_header, series_folder
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.services.guardoseries.scrapper import (
@@ -19,7 +17,6 @@ from VibraVid.services.guardoseries.scrapper import (
 )
 from VibraVid.utils import config_manager, start_message
 
-console = Console()
 logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 
@@ -69,7 +66,7 @@ def download_film(select_title: Entries) -> str:
         - str: output path
     """
     start_message()
-    console.print(f"[bold yellow]Download: [red]{site_constants.SITE_NAME}[/red] -> [cyan]{select_title.name} \n")
+    print_download_header(select_title)
 
     slug, content_type = _resolve_slug(select_title)
     if not slug:
@@ -93,7 +90,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     """Downloads a specific episode from a Guardaserie-backed series."""
     start_message()
     series_display = getattr(scrape_serie, "series_display_name", None) or scrape_serie.series_name
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> [cyan]{series_display} [white]\\ [magenta]{obj_episode.name} ([cyan]S{index_season_selected}E{index_episode_selected}) \n")
+    print_episode_header(series_display, obj_episode.name, index_season_selected, index_episode_selected)
 
     # Find the episode URL from scrape_serie's cached episodes
     episodes_by_season = getattr(scrape_serie, "_episodes_by_season", {}) or {}

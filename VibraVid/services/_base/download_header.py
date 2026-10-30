@@ -10,6 +10,11 @@ from .site_costant import site_constants
 console = Console()
 
 
+def site_tag() -> str:
+    """``[site]`` for the header: escaped, otherwise Rich reads a lowercase name like ``[la7]`` as a style tag and drops it."""
+    return escape(f"[{site_constants.SITE_NAME}]")
+
+
 def _known_match(select_title, media_type: str) -> tuple[str, str] | None:
     """Provider and id already known for the download, without any new lookup."""
     if context_tracker.metadata_provider and context_tracker.metadata_id:
@@ -72,7 +77,7 @@ def known_series_tmdb_id() -> str | None:
 
 
 def print_download_header(select_title, tmdb_id: str | None = None, year=None, suffix: str = "") -> None:
-    """The ``Download: SITE -> title (year) [tmdb_id]`` line shown right before a download."""
+    """The ``[site] title (year) [tmdb_id]`` line shown right before a download."""
     tmdb_id = str(tmdb_id) if tmdb_id else known_tmdb_id(select_title)
     year = str(year) if year and str(year) != "9999" else None
 
@@ -84,13 +89,13 @@ def print_download_header(select_title, tmdb_id: str | None = None, year=None, s
     if suffix:
         label += f" {suffix}"
 
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> {label} \n")
+    console.print(f"[red]{site_tag()} {label} \n")
 
 
 def print_episode_header(
     series_name, episode_name=None, season=None, episode=None, tmdb_id: str | None = None, year=None
 ) -> None:
-    """The ``Download: SITE -> series (year) [tmdb_id] [episode_name] (SxxExx)`` line shown right before a download."""
+    """The ``[site] series (year) [tmdb_id]  episode_name (SxxExx)`` line shown right before a download."""
     tmdb_id = str(tmdb_id) if tmdb_id else known_series_tmdb_id()
     year = str(year) if year and str(year) != "9999" else None
 
@@ -104,4 +109,4 @@ def print_episode_header(
     if episode is not None:
         label += f" ([cyan]S{season}E{episode})" if season is not None else f" ([cyan]E{episode})"
 
-    console.print(f"\n[yellow]Download: [red]{site_constants.SITE_NAME} -> {label} \n")
+    console.print(f"[red]{site_tag()} {label} \n")

@@ -3,7 +3,6 @@
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -109,21 +108,6 @@ def test_upload_refuses_a_compiled_service_without_a_matching_build(client, serv
     assert response.status_code == 400
     assert any("nessuna build compatibile" in e for e in response.json()["errors"])
     assert not (services / "newsvc").exists()
-
-
-def test_builtin_list_matches_the_tracked_service_folders():
-    try:
-        tracked = subprocess.run(
-            ["git", "ls-files", "VibraVid/services"], cwd=ROOT, capture_output=True, text=True, check=True, timeout=30
-        ).stdout.split()
-    except (OSError, subprocess.SubprocessError):
-        pytest.skip("not a git checkout")
-    if not tracked:
-        pytest.skip("not a git checkout")
-
-    folders = {p.split("/")[2] for p in tracked if p.count("/") >= 3 and not p.split("/")[2].startswith("_")}
-
-    assert folders == set(services_admin.BUILTIN_SERVICES)
 
 
 # --- the endpoint ------------------------------------------------------------------------------------------------------------

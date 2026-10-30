@@ -804,6 +804,10 @@ class DecryptPipelineMixin(
         if is_plain_subtitle or out_path.suffix.lower() not in (".mp4", ".m4s", ".m4a"):
             return
 
+        if not config_manager.config.get_bool("PROCESS", "normalize_timestamps", default=True):
+            logger.info(f"[normalize] normalize_timestamps=false in PROCESS: leaving {out_path.name} as merged")
+            return
+
         from VibraVid.core.muxing.helper.video import normalize_timestamps
 
         norm_path = normalize_timestamps(out_path, logger)

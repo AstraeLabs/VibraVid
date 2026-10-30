@@ -31,7 +31,7 @@ from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import track_title_and_iso_lang
 from VibraVid.setup import get_dovi_tool_path, get_ffmpeg_path, get_ffprobe_path, get_mkvmerge_path
 from VibraVid.utils import config_manager, os_manager
-from VibraVid.utils.proc import run_logged
+from VibraVid.utils.system.proc import run_logged
 
 console = Console()
 

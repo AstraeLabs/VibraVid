@@ -5,7 +5,7 @@ import logging
 from rich.console import Console
 
 from VibraVid.core.ui.ui import build_table, sort_streams_key
-from VibraVid.utils.keyboard import get_key
+from VibraVid.utils.system.keyboard import get_key
 
 logger = logging.getLogger(__name__)
 console = Console(force_terminal=True)

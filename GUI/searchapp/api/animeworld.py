@@ -4,8 +4,9 @@ import re
 import time
 
 from VibraVid.services.animeworld.scrapper import ScrapSerie
-from VibraVid.utils import anime_id_map, config_manager
+from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.media import anime_id_map
 
 from .base import BaseStreamingAPI, Entries, Episode, Season
 

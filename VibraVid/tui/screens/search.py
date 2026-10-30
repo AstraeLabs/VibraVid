@@ -31,7 +31,7 @@ from VibraVid.tui.widgets.cover import CoverImage
 from VibraVid.tui.widgets.custom_footer import CustomFooter
 from VibraVid.tui.widgets.fuzzy_list import FuzzyItem, FuzzyList
 from VibraVid.tui.widgets.topbar import TopBar
-from VibraVid.utils.system_open import copy_to_clipboard
+from VibraVid.utils.system.system_open import copy_to_clipboard
 
 logger = logging.getLogger(__name__)
 

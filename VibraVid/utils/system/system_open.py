@@ -1,8 +1,6 @@
 # 29.07.26
 # by @ManoloZocco
 
-"""Cross-platform helper to launch files and reveal them in OS file managers."""
-
 import os
 import platform
 import subprocess
@@ -63,10 +61,7 @@ def open_folder(path: str) -> tuple[bool, str]:
 
 
 def copy_to_clipboard(text: str) -> tuple[bool, str]:
-    """Copy text to system clipboard (cross-platform).
-
-    Returns (success, message).
-    """
+    """Copy text to system clipboard (cross-platform)."""
     if not text:
         return False, "Nessun testo da copiare."
 

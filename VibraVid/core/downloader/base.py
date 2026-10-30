@@ -40,7 +40,7 @@ from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
-from VibraVid.utils.proc import run_logged
+from VibraVid.utils.system.proc import run_logged
 
 console = Console()
 logger = logging.getLogger(__name__)

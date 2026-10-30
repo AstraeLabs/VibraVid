@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from VibraVid.utils import config_manager
-from VibraVid.utils._log_buffer import flush_startup_buffer
+from VibraVid.utils.bootstrap._log_buffer import flush_startup_buffer
 
 conf_log_level = str(config_manager.config.get("DEFAULT", "log_level") or "").upper()
 _log_file = None

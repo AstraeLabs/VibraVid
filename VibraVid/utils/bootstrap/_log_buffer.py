@@ -7,7 +7,6 @@ _buffer_handler = None
 
 class _StartupBufferHandler(logging.Handler):
     """Handler that stores records in memory instead of writing them out."""
-
     def __init__(self):
         super().__init__(level=logging.DEBUG)
         self.records = []
@@ -23,10 +22,6 @@ def install_startup_buffer():
         return
 
     root = logging.getLogger()
-
-    # Default root level is WARNING, which would drop INFO/DEBUG records before
-    # they ever reach a handler. Capture everything; the final level filtering
-    # happens at flush time against the real file handler's level.
     root.setLevel(logging.DEBUG)
 
     _buffer_handler = _StartupBufferHandler()
@@ -34,11 +29,7 @@ def install_startup_buffer():
 
 
 def flush_startup_buffer(target_handler=None):
-    """Replay buffered records into ``target_handler`` and remove the buffer.
-
-    When ``target_handler`` is ``None`` (e.g. ``--no-log``) the buffer is simply
-    discarded so the records don't pile up in memory for the session.
-    """
+    """Replay buffered records into ``target_handler`` and remove the buffer."""
     global _buffer_handler
     if _buffer_handler is None:
         return
