@@ -254,12 +254,6 @@ def print_failed_segments_report(failed_by_stream: list) -> None:
 
 
 class SilentDownloadBarManager(DownloadBarManager):
-    """
-    A no-op drop-in for ``DownloadBarManager`` that skips all Rich
-    Live/Progress setup.  Used when ``show_progress=False`` is passed to
-    ``MediaDownloader.start_download()``.
-    """
-
     def __init__(self, download_id: str | None = None) -> None:
         # Intentionally skip super().__init__() — we do not want Rich objects.
         self.download_id = download_id

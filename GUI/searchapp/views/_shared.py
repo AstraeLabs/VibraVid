@@ -246,12 +246,19 @@ def _run_download_in_thread(
     poster: str = None, _submit: bool = True, _metadata: list | None = None,
     _batch_id: str | None = None, quality: str | None = None,
     manual_tracks: bool = False, audio_language: str | None = None,
+    strict_audio: bool = False,
 ) -> concurrent.futures.Future | Callable[[], bool]:
     """Register a job, then submit it or return its worker for a sequential batch."""
     from VibraVid.core.utils.quality import normalize_quality
     quality = normalize_quality(quality) or None
-    audio_language = normalize_audio_language(audio_language or item_payload.get("_audio_language"))
+    audio_language = audio_language or item_payload.get("_audio_language")
+
+    if strict_audio and not audio_language and get_api(site).supports_audio_selection:
+        audio_language = "all"
+    
+    audio_language = normalize_audio_language(audio_language)
     audio_filter = audio_filter_for_selection(audio_language)
+    
     if quality and not get_api(site).supports_quality_discovery:
         logger.warning("%s cannot honor a chosen quality; ignoring %s", site, quality)
         quality = None

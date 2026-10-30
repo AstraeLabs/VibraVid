@@ -173,6 +173,8 @@ class DASH_Downloader(BaseDownloader):
         sanitize_path: bool = True,
         display_selected_only: bool = False,
         ad_decision_fn: Callable[[str, str | None, dict | None], dict] | None = None,
+        stop_when: Callable[[], bool] | None = None,
+        live_tail_seconds: float | None = None,
     ):
         """
         Parameters:
@@ -193,7 +195,11 @@ class DASH_Downloader(BaseDownloader):
             - chapters: Chapter markers to inject into the muxed output, e.g. [{"name": str, "seconds": int}]. Default: context_tracker.chapters.
             - poster_url: Poster/still image URL to embed in the muxed output. Default: context_tracker.poster_url.
             - display_selected_only: Show only the selected tracks in the stream table
+            - stop_when: Live only. Cheap, thread-safe callable polled by the live loop; once it returns True the recording stops and what was downloaded is merged, like a first Ctrl+C. For sources that know when the live really ended but whose manifest never says so.
+            - live_tail_seconds: Live only, when max_time is not set. Seconds of the DVR back-window to take on the first poll, counted back from the live edge (e.g. the time since the event started); the loop then follows the live edge. Default: None (the whole window).
         """
+        self.stop_when = stop_when
+        self.live_tail_seconds = live_tail_seconds
         self.chapters = chapters if chapters is not None else context_tracker.chapters
         self.poster_url = context_tracker.poster_url or poster_url or context_tracker.fallback_poster_url
         context_tracker.poster_url = self.poster_url

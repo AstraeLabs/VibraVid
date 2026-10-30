@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import logging
 import os
+import re
 import sys
 
 from rich.console import Console
@@ -61,6 +62,37 @@ def hidden_services() -> set[str]:
         names.update(name.strip().lower() for name in os.environ.get(var, "").split(","))
     names.discard("")
     return names
+
+
+def site_codes(names) -> dict[str, str]:
+    """Map each service name (lower-case) to a short, unique code of at most 4 characters, usable wherever a site name is accepted (``-i``)."""
+    names = sorted({str(name).strip().lower() for name in names if name}, key=lambda n: (len(re.sub(r"[^a-z0-9]", "", n)), n))
+    clean = {n: re.sub(r"[^a-z0-9]", "", n) for n in names}
+
+    def candidates(name: str) -> list[str]:
+        letters = clean[name]
+        words = [w for w in re.split(r"[^a-z0-9]+", name) if w]
+        options = [letters[:4]]
+        if len(letters) > 4:
+            if len(words) > 1:
+                options.append(words[0][:2] + words[1][:2])
+            options += [letters[:2] + letters[-2:], letters[:1] + letters[-3:]]
+            options += [letters[:3] + extra for extra in letters[3:] + "123456789"]
+        return list(dict.fromkeys(options))
+
+    options = {n: candidates(n) for n in names}
+    prefix_owners: dict[str, int] = {}
+    for opts in options.values():
+        prefix_owners[opts[0]] = prefix_owners.get(opts[0], 0) + 1
+
+    codes = {n: opts[0] for n, opts in options.items() if prefix_owners[opts[0]] == 1}
+    for name in names:
+        if name in codes:
+            continue
+        used = set(codes.values())
+        codes[name] = next((c for c in options[name] if c not in used and (c == name or c not in names)), options[name][0])
+
+    return codes
 
 
 class CompiledService:

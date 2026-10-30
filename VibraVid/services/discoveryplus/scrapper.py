@@ -125,6 +125,18 @@ class GetLiveInfo:
         except Exception as e:
             logger.error(f"Error in GetLiveInfo._get_content_info: {e}")
 
+    def is_live(self) -> bool:
+        """Whether the loaded info says the event is on air: it is a LIVE video until it ends, then it turns into a STANDALONE_EVENT."""
+        return (self.content_info or {}).get("attributes", {}).get("videoType") == "LIVE"
+
+    def is_live_now(self) -> bool:
+        """Asks the service again whether the event is still on air. Raises when it cannot be told, so that a failed check is not taken as the end."""
+        self.content_info = None
+        self._get_content_info()
+        if not self.content_info:
+            raise RuntimeError(f"live event {self.video_id} not reachable")
+        return self.is_live()
+
     def get_edit_id(self):
         """
         Get the edit ID for playback.

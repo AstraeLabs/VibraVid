@@ -128,7 +128,7 @@ tui_images = "auto"
 | `log_level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `log_retention_days` | `7` | GUI: days to keep the files in `.cache/logs` and `.cache/arr` (also `LOG_RETENTION_DAYS`); older ones are removed at start and at every ARR poll. `0` keeps everything |
 | `show_message` | `true` | Show the startup banner and clear the console first |
-| `fetch_domain_online` | `true` | Fetch the latest domains from GitHub |
+| `fetch_domain_online` | `true` | Fetch the latest domains from GitHub at every start, in the background while the program loads |
 | `disable_scraper_cache` | `false` | GUI only: disable the 15-minute per-title scraper cache |
 | `imp_service` | `["default"]` | Where to load site modules from: `"default"` (built-ins), local directories (each module needs `__init__.py` defining `indice` and `_useFor`), or a GitHub/Gitea repo URL. Custom modules override built-ins of the same name |
 | `hidden_services` | `[]` | Services to switch off completely, by folder name (e.g. `["aurora", "tubitv"]`): they are not loaded, so they disappear from the CLI menu and `-i`, the TUI and the GUI, and ARR / the watchlist skip them. The remaining services are renumbered without gaps, but the `indice` in the service files is never touched. The `VIBRAVID_HIDDEN_SITES` env var (comma-separated, see `docker-compose.yml`) adds to this list. Saved from the GUI Settings page it applies without a restart |
@@ -319,6 +319,7 @@ merge_audio = true
 merge_subtitle = true
 force_subtitle = "auto"
 mux_dtsx = false
+normalize_timestamps = true
 extension = "mkv"
 ```
 
@@ -334,6 +335,7 @@ extension = "mkv"
 | `merge_audio`, `merge_subtitle` | `true` | Merge all audio / subtitle tracks into the output file |
 | `subtitle_disposition_language` | `"it-it_forced"` | Subtitle track to mark default/forced |
 | `mux_dtsx` | `false` | Keep DTS:X/Atmos-lossless audio instead of dropping it at selection (ffmpeg can't demux DTS:X: needs mkvmerge) |
+| `normalize_timestamps` | `true` | After the merge, re-mux each downloaded fMP4 track with ffmpeg (`-c copy`) to reset its fragment timestamps. It is a full extra pass over the file (about 20 s for 9 GB). `false` skips it: use it with the streaming mux, where the output is already written. The cheap in-place rebase and the fix applied during the final join are not affected |
 | `extension` | `"mkv"` | Output container: `"mkv"` or `"mp4"` (CLI overrides per run) |
 | `force_subtitle` | `"auto"` | Subtitle handling before remux (below) |
 

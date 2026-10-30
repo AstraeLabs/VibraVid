@@ -1,6 +1,7 @@
 # 03.07.26
 
 import logging
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
 from curl_cffi import requests
@@ -14,9 +15,12 @@ _futures: dict[str, Future] = {}
 
 def _fetch_domains():
     logger.info("Fetching domains from GitHub...")
+    started = time.perf_counter()
     response = requests.get(DOMAINS_URL, headers=_HEADERS, timeout=4)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    logger.info("Domains fetched in %d ms.", (time.perf_counter() - started) * 1000)
+    return data
 
 
 def _check_update():

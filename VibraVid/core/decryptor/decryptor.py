@@ -37,6 +37,7 @@ _OPEN_RETRY_MAX_DELAY = 3.0
 _FLUX_CHUNKS_MIN_VERSION = (0, 5, 3)
 _FLUX_TFDT_REBASE_MIN_VERSION = (0, 5, 4)
 _flux_versions: dict[str, tuple[int, ...] | None] = {}
+_flux_tfdt_base: dict[str, bool] = {}
 
 
 def _flux_version(flux_path: str) -> tuple[int, ...] | None:
@@ -70,6 +71,31 @@ def flux_supports_chunks(flux_path: str | None) -> bool:
         return False
     version = _flux_version(flux_path)
     return version is not None and version >= _FLUX_CHUNKS_MIN_VERSION
+
+
+def flux_supports_tfdt_base(flux_path: str | None) -> bool:
+    """Whether this flux binary takes ``--tfdt-base N`` (rebases a ``--fragments-info`` fragment's tfdt itself). Same version number as builds without it, so ``--help`` is asked, once per binary path + mtime."""
+    if not flux_path:
+        return False
+    try:
+        cache_key = f"{flux_path}|{os.stat(flux_path).st_mtime_ns}"
+    except OSError:
+        return False
+    if cache_key not in _flux_tfdt_base:
+        supported = False
+        try:
+            out = subprocess.run(
+                [flux_path, "--help"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+            ).stdout
+            supported = "--tfdt-base" in (out or "")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        _flux_tfdt_base[cache_key] = supported
+    return _flux_tfdt_base[cache_key]
 
 
 def flux_supports_tfdt_rebase(flux_path: str | None) -> bool:
@@ -224,6 +250,7 @@ class _FluxDaemon:
         aes128: bool = False,
         key_sanity: bool = False,
         ffmpeg_path: str | None = None,
+        tfdt_base: int | None = None,
     ) -> tuple[bool, str | None]:
         """Run one job through the daemon. Returns (ok, error_message)."""
         if self._dead or self._proc.poll() is not None:
@@ -240,6 +267,10 @@ class _FluxDaemon:
         if key_sanity:
             job_dict["key_sanity"] = True
             job_dict["ffmpeg_path"] = ffmpeg_path
+            
+        if tfdt_base is not None:
+            job_dict["tfdt_base"] = tfdt_base
+        
         job = json.dumps(job_dict)
 
         with self._lock:
@@ -493,6 +524,7 @@ class Decryptor:
         normalized_keys: list[tuple[str, str]],
         init_path: str | None = None,
         key_sanity: bool = False,
+        tfdt_base: int | None = None,
     ) -> tuple:
         """Decrypt a live (streaming) encrypted segment using `flux`.
 
@@ -502,6 +534,7 @@ class Decryptor:
             normalized_keys: List of tuples containing (KID, raw_key) pairs for decryption.
             init_path: Optional path to the initialization segment (if applicable).
             key_sanity: If True, enables a post-decrypt check for wrong keys.
+            tfdt_base: If set (and the init is given), flux subtracts it from the segment's tfdt (see ``supports_tfdt_base``).
         """
         logger.debug(f"decrypt_flux_live(): {os.path.basename(encrypted_path)} -> {os.path.basename(decrypted_path)}")
 
@@ -521,7 +554,7 @@ class Decryptor:
                     daemon_init = init_path if (init_path and os.path.exists(init_path)) else None
                     ok, err = daemon.decrypt(
                         guard.safe_encrypted_path, guard.safe_output_path, keys_arg, daemon_init,
-                        key_sanity=key_sanity, ffmpeg_path=ffmpeg_path,
+                        key_sanity=key_sanity, ffmpeg_path=ffmpeg_path, tfdt_base=tfdt_base if daemon_init else None,
                     )
 
                     if ok:
@@ -540,6 +573,8 @@ class Decryptor:
                 cmd = [self.flux_path]
                 if init_path and os.path.exists(init_path):
                     cmd.extend(["--fragments-info", init_path])
+                    if tfdt_base is not None:
+                        cmd.extend(["--tfdt-base", str(tfdt_base)])
                 
                 if key_sanity and ffmpeg_path:
                     cmd.extend(["--key-sanity-check", "--ffmpeg-path", ffmpeg_path])
@@ -760,10 +795,40 @@ class Decryptor:
             logger.warning(f"flux --chunks failed, falling back to merge + decrypt: {exc}")
             return False
 
+    def clear_init(self, init_path: str, output_path: str) -> bool:
+        """Write *init_path* to *output_path* with its protection signalling (encv/enca, sinf, tenc) removed, for a track whose fragments are already decrypted. False when flux cannot."""
+        if not self.flux_path or not os.path.exists(init_path):
+            return False
+        try:
+            with _AnsiSafePathGuard(str(init_path), str(output_path)) as guard:
+                result = subprocess.run(
+                    [self.flux_path, "--fragments-info", guard.safe_encrypted_path, "-i", guard.safe_encrypted_path, "-o", guard.safe_output_path, "-f", "progressive"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=60,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+                )
+                if result.returncode != 0 or not os.path.exists(guard.safe_output_path) or os.path.getsize(guard.safe_output_path) <= 0:
+                    logger.debug(f"flux clear_init failed (rc={result.returncode}): {(result.stderr or '')[-200:]}")
+                    return False
+                guard.finalize()
+                return True
+        except Exception as exc:
+            logger.debug(f"flux clear_init error: {exc}")
+            return False
+
+    @property
+    def supports_tfdt_base(self) -> bool:
+        """Whether ``decrypt_segment_live(tfdt_base=...)`` really rebases the segment (an older flux would ignore it silently)."""
+        return flux_supports_tfdt_base(self.flux_path)
+
     def decrypt_segment_live(
-        self, encrypted_path: str, decrypted_path: str, raw_keys, init_path: str | None = None, key_sanity: bool = False
+        self, encrypted_path: str, decrypted_path: str, raw_keys, init_path: str | None = None, key_sanity: bool = False, tfdt_base: int | None = None
     ) -> tuple:
         """Decrypt a live (streaming) encrypted segment using the provided keys and return a tuple indicating success and an optional error message."""
         norm_keys = KeysManager.unique_by_kid(KeysManager.normalize(raw_keys))
         logger.debug(f"decrypt_segment_live(): {os.path.basename(encrypted_path)} -> {os.path.basename(decrypted_path)} [LIVE -> flux]")
-        return self._decrypt_flux_live(encrypted_path, decrypted_path, norm_keys, init_path=init_path, key_sanity=key_sanity)
+        return self._decrypt_flux_live(encrypted_path, decrypted_path, norm_keys, init_path=init_path, key_sanity=key_sanity, tfdt_base=tfdt_base)

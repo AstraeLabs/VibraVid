@@ -48,7 +48,7 @@ def get_key():
                 return "ENTER"
             if ch1 == " ":
                 return "SPACE"
-            return None
+            return ch1
 
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)

@@ -6,14 +6,12 @@ from collections.abc import Callable
 
 
 def pause_if_needed() -> None:
-    from VibraVid.utils.exit_pause import pause_if_needed as pause
-
+    from VibraVid.utils.bootstrap.exit_pause import pause_if_needed as pause
     pause()
 
 
 def fix_ld_library_path() -> None:
     from VibraVid.utils.frozen import fix_ld_library_path as fix
-
     fix()
 
 
@@ -41,9 +39,7 @@ def _is_expected_failure(exc: BaseException) -> bool:
 
 
 def run_guarded(entry: Callable[[], None]) -> None:
-    """Run *entry* after fixing the library path; an unhandled error prints the traceback, pauses if needed and exits with 1."""
-    # Importing utils initializes configuration and can download files. Migration
-    # must run before that, including through the TUI and frozen launchers.
+    """Run the given entry point, handling exceptions and Ctrl+C gracefully."""
     if "--migrate-config" in sys.argv[1:] or any(a.startswith("--migrate-config=") for a in sys.argv[1:]):
         from VibraVid.migrate_config import main
 
@@ -74,7 +70,6 @@ def run_guarded(entry: Callable[[], None]) -> None:
 
 def run_cli() -> None:
     from VibraVid.cli.run import main
-
     main()
 
 

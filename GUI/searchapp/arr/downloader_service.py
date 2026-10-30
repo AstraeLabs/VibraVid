@@ -10,7 +10,8 @@ import re
 import time
 from typing import Any
 
-from VibraVid.utils import anime_id_map, config_manager
+from VibraVid.utils import config_manager
+from VibraVid.utils.media import anime_id_map
 
 from .clients.radarr_client import RadarrClient
 from .clients.sonarr_client import SonarrClient
@@ -194,6 +195,7 @@ class ArrDownloaderService:
                     episodes=str(download_episode),
                     media_type="Serie",
                     output_path=download_folder,
+                    strict_audio=True,
                 )
                 any_success = True
 
@@ -351,6 +353,7 @@ class ArrDownloaderService:
             episodes=None,
             media_type="Film",
             output_path=download_folder,
+            strict_audio=True,
         )
 
         try:

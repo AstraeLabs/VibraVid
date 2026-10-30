@@ -75,19 +75,22 @@ def _subtitle_tracks(stream_info: dict) -> list[dict]:
 
 
 def _dash_download(mpd_url: str, license_url: str, streaming_id: str, output_path: str, subs: list):
+    certificate = None
     if api.is_playready_license(license_url):
         drm = DRMType.PLAYREADY
         license_headers = api.playready_license_headers(streaming_id)
     else:
         drm = DRMType.WIDEVINE
         license_headers = api.widevine_license_headers()
-    
+        certificate = api.widevine_service_certificate(license_url) if license_url else None
+
     return DASH_Downloader(
         mpd_url=mpd_url,
         mpd_headers=api.mpd_headers(),
         output_path=output_path,
         license_url=license_url,
         license_headers=license_headers,
+        license_certificate=certificate,
         drm_preference=drm,
         other_tracks=subs or None,
     ).start()

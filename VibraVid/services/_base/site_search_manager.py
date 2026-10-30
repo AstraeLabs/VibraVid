@@ -19,6 +19,7 @@ msg = Prompt()
 logger = logging.getLogger(__name__)
 available_colors = ["red", "magenta", "yellow", "cyan", "green", "blue", "white"]
 column_to_hide = [
+    "Asset_id",
     "Slug",
     "Sub_ita",
     "First_air_date",
@@ -32,7 +33,10 @@ column_to_hide = [
     "Desc",
     "Genres",
     "Duration",
-    "Tmdb_id"
+    "Tmdb_id",
+    "Is_linear",
+    "Competition",
+    "Sport"
 ]
 
 

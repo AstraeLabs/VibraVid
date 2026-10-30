@@ -7,7 +7,7 @@ from VibraVid.tui.screens.search import (
     _sort_results,
     deduplicate_search_results,
 )
-from VibraVid.utils.system_open import copy_to_clipboard
+from VibraVid.utils.system.system_open import copy_to_clipboard
 
 
 class MockItem:

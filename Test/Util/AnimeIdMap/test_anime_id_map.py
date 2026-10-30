@@ -9,7 +9,7 @@ workspace_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(workspace_root))
 
 
-from VibraVid.utils import anime_id_map
+from VibraVid.utils.media import anime_id_map
 
 _results = {"pass": 0, "fail": 0}
 

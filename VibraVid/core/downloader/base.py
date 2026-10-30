@@ -40,7 +40,7 @@ from VibraVid.services._base.sidecars import Sidecars
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager, os_manager
 from VibraVid.utils.hooks import execute_hooks
-from VibraVid.utils.proc import run_logged
+from VibraVid.utils.system.proc import run_logged
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -336,6 +336,8 @@ class BaseDownloader:
             max_time=self.max_time,
             manifest_content=manifest_content,
             manifest_protocol=manifest_protocol,
+            stop_when=getattr(self, "stop_when", None),
+            live_tail_seconds=getattr(self, "live_tail_seconds", None),
             **extra,
         )
 

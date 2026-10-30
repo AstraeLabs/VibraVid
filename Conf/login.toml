@@ -124,5 +124,10 @@ password = ""
 cdm = ""
 process = { live_mux = true, live_decrypt = true }
 
-[tester]
+[marionetv]
+cookies = '''[paste here]'''
+storage = '''[paste here]'''
+cdm = ""
+args = ""
+profile = ""
 process = { live_mux = true, live_decrypt = true }

@@ -194,6 +194,11 @@ class BaseStreamingAPI(ABC):
         """True when the provider overrides get_available_qualities (can honor a chosen quality)."""
         return type(self).get_available_qualities is not BaseStreamingAPI.get_available_qualities
 
+    @property
+    def supports_audio_selection(self) -> bool:
+        """True when the provider overrides get_available_audio_languages (can refuse a missing audio language)."""
+        return type(self).get_available_audio_languages is not BaseStreamingAPI.get_available_audio_languages
+
     @abstractmethod
     def start_download(self, media_item: Entries, season: str | None = None, episodes: str | None = None) -> bool:
         """

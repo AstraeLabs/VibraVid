@@ -19,7 +19,7 @@ from VibraVid.core.utils.language import (
 )
 from VibraVid.setup import binary_paths, get_ffmpeg_path, get_mkvmerge_path
 from VibraVid.utils import config_manager, internet_manager
-from VibraVid.utils.image_cache import get_cached_tmdb_image
+from VibraVid.utils.media.image_cache import get_cached_tmdb_image
 
 from .capture import capture_ffmpeg_real_time
 from .helper.audio import (

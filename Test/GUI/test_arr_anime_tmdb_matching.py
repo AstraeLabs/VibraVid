@@ -23,7 +23,7 @@ from searchapp.api.animeunity import AnimeUnityAPI
 from searchapp.api.animeworld import AnimeWorldAPI
 from searchapp.api.base import Entries
 from searchapp.arr.downloader_service import ArrDownloaderService
-from VibraVid.utils import anime_id_map
+from VibraVid.utils.media import anime_id_map
 
 
 @pytest.fixture

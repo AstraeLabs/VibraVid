@@ -1,7 +1,8 @@
 # 06.06.25
 
 from VibraVid.services.animeunity.scrapper import ScrapeSerieAnime
-from VibraVid.utils import anime_id_map, config_manager
+from VibraVid.utils import config_manager
+from VibraVid.utils.media import anime_id_map
 
 from .base import BaseStreamingAPI, Entries, Episode, Season
 

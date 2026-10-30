@@ -2,13 +2,16 @@
 
 import logging
 import os
+from contextlib import nullcontext
 from datetime import datetime
 
 from rich.console import Console
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.drm.system import DRMType
+from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import Entries, movie_folder, print_download_header, print_episode_header, series_folder
+from VibraVid.services._base.live_event import LiveEndWatcher, LiveEvent
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, os_manager, start_message
@@ -26,23 +29,18 @@ def _drm_preference(playback_info: dict) -> str:
     return DRMType.WIDEVINE if playback_info.get("drm_type") == "widevine" else DRMType.PLAYREADY
 
 
-def _compute_event_duration(scrape_content) -> float | None:
-    """
-    Derive the scheduled duration (seconds) of a live event from its EPG window
-    """
-    try:
-        attrs = (getattr(scrape_content, "content_info", None) or {}).get("attributes", {})
-        start_raw, end_raw = attrs.get("scheduleStart"), attrs.get("scheduleEnd")
-        if not start_raw or not end_raw:
+def _event_window(scrape_content) -> tuple[datetime | None, datetime | None]:
+    """The scheduled (start, end) of a live event from its EPG window; None for a bound that is missing or unreadable"""
+    attrs = (getattr(scrape_content, "content_info", None) or {}).get("attributes", {})
+
+    def parse(raw):
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")) if raw else None
+        except (AttributeError, ValueError) as exc:
+            logger.debug(f"Could not read live event time {raw!r}: {exc}")
             return None
 
-        start = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
-        duration = (end - start).total_seconds()
-        return duration if duration > 0 else None
-    except Exception as exc:
-        logger.debug(f"Could not compute live event duration: {exc}")
-        return None
+    return parse(attrs.get("scheduleStart")), parse(attrs.get("scheduleEnd"))
 
 
 def download_live(select_title: Entries):
@@ -66,20 +64,28 @@ def download_live(select_title: Entries):
 
     client = get_client()
     playback_info = client.get_playback_info(edit_id)
-    event_duration = _compute_event_duration(scrape_content)
+    starts_at, ends_at = _event_window(scrape_content)
+    elapsed = None if context_tracker.max_time else LiveEvent(starts_at).elapsed_seconds()
+    
+    if elapsed:
+        h, m = divmod(int(elapsed) // 60, 60)
+        console.print(f"[cyan]The event started [green]{h:02d}:{m:02d}[/green] ago: recording from its start until the live ends")
+    
+    if ends_at:
+        console.print(f"[cyan]Scheduled end: [green]{ends_at.astimezone():%H:%M}[/green] — the recording follows the stream, not the schedule")
 
-    if event_duration:
-        h, m = divmod(int(event_duration) // 60, 60)
-        console.print(f"[cyan]Scheduled event duration: [green]{h:02d}:{m:02d}[/green] — recording will stop at the scheduled end")
-
-    return DASH_Downloader(
-        mpd_url=playback_info["manifest"],
-        license_url=playback_info["license"],
-        license_headers=playback_info.get("license_headers", {}),
-        output_path=os.path.join(live_path, live_name),
-        drm_preference=_drm_preference(playback_info),
-        max_time=event_duration,
-    ).start()
+    watcher = LiveEndWatcher(scrape_content.is_live_now)
+    watch_end = watcher if scrape_content.is_live() and not context_tracker.max_time else nullcontext()
+    with watch_end:
+        return DASH_Downloader(
+            mpd_url=playback_info["manifest"],
+            license_url=playback_info["license"],
+            license_headers=playback_info.get("license_headers", {}),
+            output_path=os.path.join(live_path, live_name),
+            drm_preference=_drm_preference(playback_info),
+            stop_when=watcher.is_ended,
+            live_tail_seconds=elapsed,
+        ).start()
 
 
 def download_film(select_title: Entries):

@@ -67,6 +67,8 @@ class MediaDownloader(
         has_drm: bool = False,
         display_selected_only: bool = False,
         ad_decision_fn=None,
+        stop_when=None,
+        live_tail_seconds: float | None = None,
     ) -> None:
         super().__init__(
             url=url,
@@ -86,6 +88,15 @@ class MediaDownloader(
         )
         self.max_segments = max_segments
         self.max_time = max_time
+        self.stop_when = stop_when
+        self.live_tail_seconds = live_tail_seconds
+
+        # Live DASH mux shared by the track threads (see _live_mux_session()).
+        self._live_mux = None
+        self._live_mux_decided = False
+        self._live_mux_lock = threading.Lock()
+        self._live_aligner = None
+        self._live_aligner_decided = False
 
         # Cancellation
         self._stop_event: threading.Event = threading.Event()
@@ -482,7 +493,18 @@ class MediaDownloader(
                     pass
 
     def _stop_check(self) -> bool:
-        return self._stop_event.is_set() or bool(self.download_id and download_tracker.is_stopped(self.download_id))
+        return self._stop_event.is_set() or bool(self.download_id and download_tracker.is_stopped(self.download_id)) or self.is_stop_when_met()
+
+    def is_stop_when_met(self) -> bool:
+        """True once the caller's ``stop_when`` callable says the live is over (a failing callable never stops the download)."""
+        if self.stop_when is None:
+            return False
+        
+        try:
+            return bool(self.stop_when())
+        except Exception:
+            logger.debug("stop_when callback failed (ignored)", exc_info=True)
+            return False
 
     def _run_dl(
         self,

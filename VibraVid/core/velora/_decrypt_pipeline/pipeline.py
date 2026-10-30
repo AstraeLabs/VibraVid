@@ -799,14 +799,18 @@ class DecryptPipelineMixin(
         self._normalize_timestamps(ctx, out_path, is_plain_subtitle, stream_is_encrypted, already_decrypted_per_segment)
         return self._decrypt_merged_file(ctx, out_path, is_plain_subtitle, stream_is_encrypted, already_decrypted_per_segment)
 
-    def _normalize_out_path(self, out_path: Path, is_plain_subtitle: bool) -> None:
-        """Reset absolute fragment timestamps of an fMP4 track (must run AFTER decryption)."""
+    def _normalize_out_path(self, out_path: Path, is_plain_subtitle: bool, flux_path: str | None = None) -> None:
+        """Reset absolute fragment timestamps of an fMP4 track (must run AFTER decryption). *flux_path*: let flux do the re-mux (see normalize_timestamps)."""
         if is_plain_subtitle or out_path.suffix.lower() not in (".mp4", ".m4s", ".m4a"):
+            return
+
+        if not config_manager.config.get_bool("PROCESS", "normalize_timestamps", default=True):
+            logger.info(f"[normalize] normalize_timestamps=false in PROCESS: leaving {out_path.name} as merged")
             return
 
         from VibraVid.core.muxing.helper.video import normalize_timestamps
 
-        norm_path = normalize_timestamps(out_path, logger)
+        norm_path = normalize_timestamps(out_path, logger, flux_path=flux_path) if flux_path else normalize_timestamps(out_path, logger)
         if norm_path is None:
             return
 

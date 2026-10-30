@@ -22,12 +22,24 @@ from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client
 
 from ..decryptor._segment_crypto import decrypt_aes128_file
+from ._decrypt_pipeline.live_merge import _LiveMerger
+from ._live_ad_break import LiveAdBreak
+from ._live_align import LiveStartAligner
+from ._live_mux import LiveMux
 from .util._hls import hls_base_url, parse_hls_live_playlist
 from .util._stream_helpers import detect_seg_ext, is_valid_frag_init, merged_segment_ext, repair_init_segment
+from .util._tfdt_rebase import FragmentContinuity, first_fragment_tfdt, rebase_fragment_timestamps, track_timescale
 
 logger = logging.getLogger("manual")
 REQUEST_TIMEOUT: int = config_manager.config.get_int("REQUESTS", "timeout")
 MAX_EMPTY_POLLS: int = config_manager.config.get_int("DOWNLOAD", "live_max_empty_polls")
+
+# A big first batch (recording from the start of an event) is downloaded, decrypted and handed to the merge / live mux in groups of this many segments,
+# so the file starts to be written after the first group instead of after the whole backlog.
+LIVE_BACKLOG_CHUNK: int = 120
+
+# An ad break shorter than this is not worth an INFO line.
+LIVE_AD_BREAK_LOG_SECONDS: float = 30.0
 
 
 def _sleep_interruptible(seconds: float, stop_check, poll: float = 0.25) -> None:
@@ -144,6 +156,35 @@ def _emit_merge_progress(bar_manager, task_key: str, seg_done: int, merge_size: 
 
 
 class LiveDownloadMixin:
+    @staticmethod
+    def _most_recent_segments(segs: list, seconds: float) -> list:
+        """The tail of *segs* (nearest the live edge) that covers *seconds*; all of *segs* when they cover less."""
+        tail: list = []
+        acc = 0.0
+        for seg in reversed(segs):
+            tail.append(seg)
+            acc += getattr(seg, "duration", 0.0)
+            if acc >= seconds:
+                break
+        tail.reverse()
+        return tail
+
+    def _live_mux_session(self) -> "LiveMux | None":
+        """The live mux shared by this download's live DASH tracks, created (or ruled out) once."""
+        with self._live_mux_lock:
+            if not self._live_mux_decided:
+                self._live_mux_decided = True
+                self._live_mux = LiveMux.create(self)
+            return self._live_mux
+
+    def _live_start_aligner(self) -> "LiveStartAligner | None":
+        """The start aligner shared by this download's live DASH tracks, created (or ruled out) once."""
+        with self._live_mux_lock:
+            if not self._live_aligner_decided:
+                self._live_aligner_decided = True
+                self._live_aligner = LiveStartAligner.create(self)
+            return self._live_aligner
+
     def _live_download_batch(
         self, dl_batch: list[dict], stream_dir: Path, headers: dict, stream, progress_cb=None
     ) -> list[Path]:
@@ -517,9 +558,29 @@ class LiveDownloadMixin:
         total_time_seen: float = 0.0
         init_path: Path | None = None
         min_update_period: float = 4.0
+        tail_pending: bool = self.live_tail_seconds is not None
+
+        # Live merge
+        merge_order: list[int] = []
+        merger: _LiveMerger | None = None
+        merge_out: Path | None = None
+
+        # Live mux
+        live_mux = self._live_mux_session()
+        mux_send = None
+
+        # All tracks start from the same instant
+        aligner = self._live_start_aligner()
+        align_start: float | None = None
+        align_decided: bool = False
+        track_scale: int | None = None
 
         # Checked once per track (this track's first media segment) to fail fast on a wrong key.
         _key_sanity_pending: bool = True
+        tfdt_base: int | None = None
+        tfdt_base_decided: bool = False
+        merge_init_clear: bool = False
+        continuity = FragmentContinuity()
 
         _decryptor = None
         if live_decryption and self.key:
@@ -531,7 +592,7 @@ class LiveDownloadMixin:
 
         def _decrypt_seg(fp: Path, is_init: bool = False) -> bool:
             """Returns True if segment is usable (decrypted or no-decrypt-needed), False if failed."""
-            nonlocal init_path, _key_sanity_pending
+            nonlocal init_path, _key_sanity_pending, tfdt_base, tfdt_base_decided
             if is_init:
                 init_path = fp
                 logger.debug(f"Live DASH: init segment cached -> {fp.name}")
@@ -542,6 +603,12 @@ class LiveDownloadMixin:
 
             run_key_sanity = _key_sanity_pending
             _key_sanity_pending = False
+            if not tfdt_base_decided:
+                tfdt_base_decided = True
+                if _decryptor.supports_tfdt_base and init_path and init_path.exists():
+                    tfdt_base = first_fragment_tfdt(fp)
+                    logger.info(f"Live DASH: {stream.type} timeline zeroed by flux (tfdt base {tfdt_base})" if tfdt_base is not None else f"Live DASH: {stream.type} segment has no tfdt, timeline rebased afterwards")
+            
             dec_tmp = fp.with_suffix(fp.suffix + ".dec")
             try:
                 ok, message, _data = _decryptor.decrypt_segment_live(
@@ -550,6 +617,7 @@ class LiveDownloadMixin:
                     raw_keys=self.key,
                     init_path=str(init_path) if init_path and init_path.exists() else None,
                     key_sanity=run_key_sanity,
+                    tfdt_base=tfdt_base,
                 )
 
                 if not ok and message and "key is wrong" in message and self._recover_wrong_key(
@@ -560,6 +628,7 @@ class LiveDownloadMixin:
                         raw_keys=keys,
                         init_path=str(init_path) if init_path and init_path.exists() else None,
                         key_sanity=True,
+                        tfdt_base=tfdt_base,
                     )[:2],
                 ):
                     ok = True
@@ -594,8 +663,36 @@ class LiveDownloadMixin:
                 dec_tmp.unlink(missing_ok=True)
                 return False
 
+        def _live_merge(fp: Path, key: int, url: str) -> None:
+            """Append segment *fp* (position *key*) to the track file, creating it from the init segment on the first one."""
+            nonlocal merger, merge_out, mux_send, merge_init_clear
+            if merger is None:
+                ext = detect_seg_ext(url, default="mp4")
+                merge_out = self.output_dir / self._out_filename(stream, "mp4" if ext == "m4s" else ext)
+                merger = _LiveMerger(merge_out, merge_order)
+                if init_path is not None and init_path.exists():
+                    merge_order.append(0)
+                    merge_init = init_path
+                    if _decryptor is not None and self.key:
+                        clear_init = init_path.with_name(f"{init_path.stem}.clear{init_path.suffix}")
+                        if _decryptor.clear_init(init_path, clear_init):
+                            merge_init, merge_init_clear = clear_init, True
+                    merger.submit(0, merge_init)
+                if live_mux is not None:
+                    mux_send = live_mux.join(stream, init_path, self._stop_check, rebased=tfdt_base is not None)
+            merge_order.append(key)
+            merger.submit(key, fp)
+
+            continuity.observe(key, first_fragment_tfdt(fp))
+            if mux_send is not None:
+                try:
+                    mux_send(fp.read_bytes())
+                except Exception as exc:
+                    live_mux.abort(f"piping {stream.type} failed: {exc}")
+                    mux_send = None
+
         def _fetch_and_parse_mpd() -> tuple[list | None, float, bool]:
-            nonlocal min_update_period
+            nonlocal min_update_period, manifest_has_ads
             try:
                 # quiet=True: the live loop re-parses the MPD every few seconds;
                 # without it the full stream list is re-logged on every poll.
@@ -604,6 +701,7 @@ class LiveDownloadMixin:
                     return None, min_update_period, False
 
                 streams = parser.parse_streams()
+                manifest_has_ads = bool(getattr(parser, "ad_periods_skipped", 0))
                 meta = parser.live_meta
                 upd_period = meta["min_update_period"]
                 is_static = meta["is_ended"]
@@ -628,6 +726,8 @@ class LiveDownloadMixin:
         current_segments = list(stream.segments)
         is_ended = False
         empty_polls: int = 0
+        manifest_has_ads: bool = False
+        ad_break = LiveAdBreak()
         poll_failures: int = 0
 
         _emit_live_progress(bar_manager, task_key, seg_done, total_bytes, 0.0, 0.0)
@@ -689,6 +789,11 @@ class LiveDownloadMixin:
 
             if fresh_segs:
                 empty_polls = 0
+                if ad_break.is_started():
+                    # Most polls between two segments see the stitched ad periods, so only a break that really held the recording is worth a line.
+                    long_break = ad_break.elapsed() >= LIVE_AD_BREAK_LOG_SECONDS
+                    (logger.info if long_break else logger.debug)(f"Live DASH: the ad break is over after {ad_break.elapsed():.0f}s, content is back")
+                ad_break.reset()
 
                 if seg_end is not None and seg_done >= (seg_end - seg_start):
                     break
@@ -719,17 +824,23 @@ class LiveDownloadMixin:
                 # Keep the MOST RECENT segments (tail, nearest the live edge)
                 if time_end is not None and elapsed_dur < (time_end - time_start):
                     budget = (time_end - time_start) - elapsed_dur
-                    clamped: list = []
-                    acc = 0.0
-                    for s in reversed(fresh_segs):
-                        clamped.append(s)
-                        acc += getattr(s, "duration", 0.0)
-                        if acc >= budget:
-                            break
-                    clamped.reverse()
+                    clamped = self._most_recent_segments(fresh_segs, budget)
                     if len(clamped) < len(fresh_segs):
-                        logger.info(f"Live DASH: clamping batch to most recent {len(clamped)}/{len(fresh_segs)} segs (~{acc:.0f}s) for max_time budget {budget:.0f}s")
+                        logger.info(f"Live DASH: clamping batch to most recent {len(clamped)}/{len(fresh_segs)} segs (~{sum(getattr(s, 'duration', 0.0) for s in clamped):.0f}s) for max_time budget {budget:.0f}s")
                     fresh_segs = clamped
+
+                # No max_time: the recording runs until the live really ends, so the
+                # first poll only goes back as far as the caller asked (e.g. the start
+                # of the event) instead of grabbing the whole DVR back-window.
+                elif time_end is None and tail_pending:
+                    tail_pending = False
+                    window = sum(getattr(s, "duration", 0.0) for s in fresh_segs)
+                    tail = self._most_recent_segments(fresh_segs, self.live_tail_seconds)
+                    if len(tail) < len(fresh_segs):
+                        logger.info(f"Live DASH: starting {self.live_tail_seconds:.0f}s behind the live edge: {len(tail)}/{len(fresh_segs)} segs of the DVR window")
+                    else:
+                        logger.warning(f"Live DASH: the DVR window ({window:.0f}s) is shorter than the {self.live_tail_seconds:.0f}s asked: recording from the start of the window")
+                    fresh_segs = tail
 
                 dl_batch: list[dict] = []
                 for seg in fresh_segs:
@@ -745,37 +856,65 @@ class LiveDownloadMixin:
                     seg_index += 1
 
                 _batch_avg_dur = sum(getattr(s, "duration", 0.0) for s in fresh_segs) / max(len(fresh_segs), 1)
-                _segs_before = seg_done
-                _bytes_before = total_bytes
-                _elapsed_before = elapsed_dur
-
-                _batch_progress_cb = _make_batch_progress_cb(bar_manager, task_key, _segs_before, _bytes_before, _elapsed_before, _batch_avg_dur)
 
                 logger.debug(f"Live DASH: batch first URL: {getattr(fresh_segs[0], 'url', '?')[:120]}")
                 batch_t0 = time.monotonic()
-                batch_paths = self._live_download_batch(dl_batch, stream_dir, headers, stream, progress_cb=_batch_progress_cb)
-                elapsed = max(time.monotonic() - batch_t0, 0.001)
                 batch_bytes = 0
                 decrypt_fails = 0
                 raw_bytes = 0
+                batch_size = len(dl_batch)
 
-                for fp in batch_paths:
-                    if not fp.exists() or fp.stat().st_size == 0:
-                        logger.warning(f"Live DASH: empty or missing segment {fp.name}")
-                        continue
+                for first in range(0, batch_size, LIVE_BACKLOG_CHUNK):
+                    # A stop (Ctrl+C, end of the live) between two groups keeps what was already merged and skips the rest.
+                    if first and self._stop_check():
+                        logger.info(f"Live DASH: stop requested after {first}/{batch_size} segs of this batch")
+                        break
 
-                    raw_bytes += fp.stat().st_size
-                    ok = _decrypt_seg(fp, is_init=False)
-                    if not ok:
-                        decrypt_fails += 1
-                        continue
+                    chunk = dl_batch[first:first + LIVE_BACKLOG_CHUNK]
+                    chunk_segs = fresh_segs[first:first + LIVE_BACKLOG_CHUNK]
+                    chunk_durs = sum(getattr(seg, "duration", 0.0) for seg in fresh_segs[first:first + LIVE_BACKLOG_CHUNK])
+                    _batch_progress_cb = _make_batch_progress_cb(bar_manager, task_key, seg_done, total_bytes, elapsed_dur, _batch_avg_dur)
+                    chunk_paths = self._live_download_batch(chunk, stream_dir, headers, stream, progress_cb=_batch_progress_cb)
 
-                    sz = fp.stat().st_size if fp.exists() else 0
-                    batch_bytes += sz
-                    total_bytes += sz
-                    all_paths.append(fp)
-                    seg_done += 1
+                    for fp, dl_entry, chunk_seg in zip(chunk_paths, chunk, chunk_segs, strict=True):
+                        if not fp.exists() or fp.stat().st_size == 0:
+                            logger.warning(f"Live DASH: empty or missing segment {fp.name}")
+                            continue
 
+                        # Start every track from the same instant: the first segment of this track tells when it starts, the tracks agree on the latest start,
+                        # and a track that began earlier drops the segments that end before it.
+                        if track_scale is None and init_path is not None and init_path.exists():
+                            track_scale = track_timescale(init_path)
+                        scale = track_scale
+                        frag_tfdt = first_fragment_tfdt(fp) if scale else None
+                        if not align_decided:
+                            align_decided = True
+                            if aligner is not None and frag_tfdt is not None:
+                                align_start = aligner.common_start(stream, frag_tfdt / scale, self._stop_check)
+                                if align_start is not None and align_start - frag_tfdt / scale > 0.001:
+                                    logger.info(f"Live DASH: {stream.type} starts {align_start - frag_tfdt / scale:.2f}s before the other track(s): dropping the segments before the common start")
+                            elif aligner is not None:
+                                aligner.leave(stream)
+                        if align_start is not None and frag_tfdt is not None and frag_tfdt / scale + getattr(chunk_seg, "duration", 0.0) / 2 <= align_start:
+                            fp.unlink(missing_ok=True)
+                            continue
+
+                        raw_bytes += fp.stat().st_size
+                        ok = _decrypt_seg(fp, is_init=False)
+                        if not ok:
+                            decrypt_fails += 1
+                            continue
+
+                        sz = fp.stat().st_size if fp.exists() else 0
+                        batch_bytes += sz
+                        total_bytes += sz
+                        all_paths.append(fp)
+                        seg_done += 1
+                        _live_merge(fp, dl_entry["number"], dl_entry["url"])
+
+                    elapsed_dur += chunk_durs
+
+                elapsed = max(time.monotonic() - batch_t0, 0.001)
                 if decrypt_fails:
                     avg_raw = raw_bytes / max(decrypt_fails, 1)
                     hint = (
@@ -783,10 +922,9 @@ class LiveDownloadMixin:
                         if avg_raw < 16 * 1024
                         else "segments may be corrupt or keys mismatched"
                     )
-                    logger.warning(f"Live DASH: {decrypt_fails}/{len(batch_paths)} segments failed decrypt (avg {_fmt_size(int(avg_raw))}/seg — {hint})")
+                    logger.warning(f"Live DASH: {decrypt_fails}/{batch_size} segments failed decrypt (avg {_fmt_size(int(avg_raw))}/seg — {hint})")
 
                 speed_bps = batch_bytes / elapsed
-                elapsed_dur += sum(getattr(seg, "duration", 0.0) for seg in fresh_segs)
                 _emit_live_progress(bar_manager, task_key, seg_done, total_bytes, speed_bps, elapsed_dur)
                 logger.info(f"Live DASH: +{len(fresh_segs)} segs | total={seg_done} | {_fmt_size(total_bytes)} | {speed_bps / 1024:.1f} KB/s | dur={_fmt_dur(elapsed_dur)}")
 
@@ -802,11 +940,16 @@ class LiveDownloadMixin:
                         break
 
             if not fresh_segs:
-                empty_polls += 1
-                logger.info(f"Live DASH: no new segments (empty_polls={empty_polls}/{MAX_EMPTY_POLLS})")
-                if empty_polls >= MAX_EMPTY_POLLS:
-                    logger.info(f"Live DASH: {MAX_EMPTY_POLLS} consecutive polls with no new segments — stream appears ended, stopping")
-                    break
+                was_in_break = ad_break.is_started()
+                if ad_break.holds(manifest_has_ads):
+                    if not was_in_break:
+                        logger.debug("Live DASH: no new content and the manifest has advertisement periods: ad break, waiting for the content to come back")
+                else:
+                    empty_polls += 1
+                    logger.info(f"Live DASH: no new segments (empty_polls={empty_polls}/{MAX_EMPTY_POLLS})")
+                    if empty_polls >= MAX_EMPTY_POLLS:
+                        logger.info(f"Live DASH: {MAX_EMPTY_POLLS} consecutive polls with no new segments — stream appears ended, stopping")
+                        break
 
             if is_ended:
                 logger.info("Live DASH: MPD type=static — stream finished")
@@ -821,6 +964,16 @@ class LiveDownloadMixin:
             _sleep_interruptible(poll_sleep, self._stop_check)
             current_segments = None
 
+        # Close this track's pipe; the last track out waits for ffmpeg to finish the file.
+        live_muxed = False
+        if aligner is not None:
+            aligner.leave(stream)
+        if live_mux is not None:
+            live_mux.leave(stream)
+            if live_mux.result:
+                self.streaming_mux_result = live_mux.result
+                live_muxed = True
+
         if not all_paths:
             logger.error("Live DASH: no segments were downloaded — nothing to merge")
             if _decryptor is not None:
@@ -834,22 +987,40 @@ class LiveDownloadMixin:
                 _decryptor.close_flux_daemon()
             return
 
-        ext = detect_seg_ext(last_media_url, default="mp4")
-        if ext == "m4s":
-            ext = "mp4"
+        if merger is not None:
+            merger.close()
+        if merger is not None and merge_out is not None and not merger.failed and merger.complete:
+            out_path = merge_out
+            merge_size = out_path.stat().st_size if out_path.exists() else 0
+            logger.info(f"Live DASH live merge | segs={len(all_paths)} | {_fmt_size(merge_size)} -> {out_path.name}")
+            _emit_merge_progress(bar_manager, task_key, seg_done, merge_size)
+        else:
+            ext = detect_seg_ext(last_media_url, default="mp4")
+            if ext == "m4s":
+                ext = "mp4"
 
-        out_path = self.output_dir / self._out_filename(stream, ext)
-        merge_size = sum(p.stat().st_size for p in all_paths if p.exists())
+            out_path = self.output_dir / self._out_filename(stream, ext)
+            merge_size = sum(p.stat().st_size for p in all_paths if p.exists())
 
-        logger.info(f"Live DASH binary merge | segs={len(all_paths)} | {_fmt_size(merge_size)} -> {out_path.name}")
-        _emit_merge_progress(bar_manager, task_key, seg_done, merge_size)
-        binary_merge_segments(all_paths, out_path, merge_logger=logger)
+            logger.info(f"Live DASH binary merge (live merge unavailable) | segs={len(all_paths)} | {_fmt_size(merge_size)} -> {out_path.name}")
+            _emit_merge_progress(bar_manager, task_key, seg_done, merge_size)
+            binary_merge_segments(all_paths, out_path, merge_logger=logger)
 
         # Reset absolute fragment timestamps (e.g. the huge PCR/PTS base offset
         # left by 'startover'/live HLS archives). Without this the merged file
         # keeps an absurd absolute start time that corrupts its duration.
-        if out_path.suffix.lower() in (".mp4", ".m4s", ".m4a", ".ts"):
-            _reset_live_timestamps(out_path)
+        # Subtracting the first tfdt in place is a few small writes; then PROCESS.normalize_timestamps decides
+        # whether the track also gets the ffmpeg re-mux that fixes its container duration (as for every other fMP4 track).
+        # When the rebase cannot be done the ffmpeg reset stays as the fallback.
+        # Not needed when the live mux already wrote the final file: this track file is then only a leftover.
+        if out_path.suffix.lower() in (".mp4", ".m4s", ".m4a", ".ts") and not live_muxed:
+            if tfdt_base is not None or rebase_fragment_timestamps(out_path, logger=logger):
+                flux_progressive = merge_init_clear and continuity.is_contiguous() and out_path == merge_out and _decryptor is not None
+                if not continuity.is_contiguous():
+                    logger.info(f"Live DASH: {stream.type} fragments are not contiguous, container fixed with ffmpeg (flux would close the gaps)")
+                self._normalize_out_path(out_path, False, flux_path=_decryptor.flux_path if flux_progressive else None)
+            else:
+                _reset_live_timestamps(out_path)
 
         if not (out_path.exists() and out_path.stat().st_size > 0):
             logger.error(f"Live DASH binary merge produced an empty file: {out_path}")

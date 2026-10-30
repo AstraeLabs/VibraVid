@@ -18,11 +18,13 @@ from VibraVid.cli.command.equivalent_command import equivalent_command_builder
 from VibraVid.cli.command.global_search import global_search as call_global_search
 from VibraVid.cli.command.limits import add_limit_arguments, apply_limits
 from VibraVid.cli.command.queue import add_queue_arguments, handle_queue_dispatch
+from VibraVid.cli.site_menu import SiteMenu
 from VibraVid.core.downloader.util._export import get_written_exports
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.services._base import load_search_functions
 from VibraVid.services._base.site_extra_args import resolve_persisted_site_options
+from VibraVid.services._base.site_loader import site_codes
 from VibraVid.setup import CLI_ORIGIN, parse_cdm_cli, validate_cdm_settings
 from VibraVid.setup.binary_paths import binary_paths
 from VibraVid.setup.system import (
@@ -31,7 +33,6 @@ from VibraVid.setup.system import (
     get_ffprobe_path,
 )
 from VibraVid.utils import (
-    _startup_prefetch,
     config_manager,
     disk_cache,
     get_log_file_path,
@@ -39,6 +40,7 @@ from VibraVid.utils import (
     setup_logger,
     start_message,
 )
+from VibraVid.utils.bootstrap import _startup_prefetch
 from VibraVid.utils.hooks import execute_hooks, get_last_hook_context
 from VibraVid.utils.upload import binary_update, git_update
 from VibraVid.utils.upload.update import (
@@ -53,7 +55,7 @@ console = Console()
 msg = Prompt()
 logger = logging.getLogger(__name__)
 
-COLOR_MAP = {"anime": "red", "film_serie": "yellow", "serie": "green", "song": "grey35", "live": "magenta", "tor": "blue"}
+COLOR_MAP = {"anime": "red", "film_serie": "dark_orange", "serie": "green", "song": "grey35", "live": "magenta", "tor": "yellow"}
 
 CLOSE_CONSOLE = config_manager.config.get_bool("DEFAULT", "close_console")
 PERSISTENT_ARGS = {"use_proxy", "proxy_scope", "extension", "close_console"}
@@ -99,8 +101,9 @@ def _resolve_site_module(site_value, search_functions):
         return None
 
     key = site_value.strip().lower()
+    codes = site_codes(func.module_name for func in search_functions.values())
     for func in search_functions.values():
-        if key == str(func.indice) or key == func.module_name.lower():
+        if key == str(func.indice) or key == func.module_name.lower() or key == codes.get(func.module_name.lower()):
             try:
                 return func.get_module()
             except Exception:
@@ -144,18 +147,20 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
 
     available_names = ", ".join(sorted(module_info.keys()))
     available_indices = ", ".join([f"{idx}={name.capitalize()}" for name, idx in sorted(module_info.items(), key=lambda x: x[1])])
+    codes = site_codes(module_info)
+    available_codes = ", ".join([f"{codes[name.lower()]}={name.capitalize()}" for name in sorted(module_info, key=module_info.get)])
 
     parser = argparse.ArgumentParser(
         description="Script to download movies, series and anime.",
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog=f"Sites by name:  {available_names}\nSites by index: {available_indices}",
+        epilog=f"Sites by name:  {available_names}\nSites by index: {available_indices}\nSites by code:  {available_codes}",
     )
     parser.add_argument("--migrate-config", nargs="?", metavar="DIR", help="Migrate config.json/login.json locally (default: Conf); use --migrate-config --help for migration options")
 
     # ── Search & selection
     search_group = parser.add_argument_group("Search & selection")
     search_group.add_argument("-s", "--search", default=None, metavar="QUERY", help="Search terms")
-    search_group.add_argument("-i", dest="site", type=str, metavar="NAME|INDEX", help="Target site (name or index)")
+    search_group.add_argument("-i", dest="site", type=str, metavar="NAME|INDEX|CODE", help="Target site (name, index or short code)")
     search_group.add_argument("--global", dest="global_search", action="store_true", help="Search across all sites")
     search_group.add_argument("--category", type=int, metavar="N", help="Category filter for global search\n  1=Anime  2=Movies/Series  3=Series  4=Movies",)
     search_group.add_argument("--item", type=int, default=None, metavar="N", help="Select the Nth search result directly, 0-based (requires -i and --search)",)
@@ -379,9 +384,11 @@ def build_function_mappings(search_functions):
     choice_labels = {}
     module_name_to_function = {}
 
+    codes = site_codes(func.module_name for func in search_functions.values())
     for func in search_functions.values():
         module_name = func.module_name
         module_name_to_function[module_name.lower()] = func
+        module_name_to_function.setdefault(codes[module_name.lower()], func)  # short code, resolved like a name (-i)
 
         site_index = str(func.indice)
         input_to_function[site_index] = func
@@ -468,6 +475,9 @@ def _show_update_notice(info: dict) -> None:
 
 def get_user_site_selection(args, choice_labels):
     """Get site selection from user (interactive or category-based)."""
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        return SiteMenu(choice_labels, COLOR_MAP, console).run()
+
     counts: dict[str, int] = {}
     for _key, (_name, cat) in choice_labels.items():
         counts[cat] = counts.get(cat, 0) + 1
@@ -482,11 +492,12 @@ def get_user_site_selection(args, choice_labels):
     name_width = max([len(label[0]) for label in choice_labels.values()] + [len("(global) Global")])
     cell_width = name_width + 4  # "12:" + space + name
     site_entries = [
-        f"[dim]{key:>2}:[/dim] [{COLOR_MAP.get(label[1], 'white')}]{label[0]:<{name_width}}[/{COLOR_MAP.get(label[1], 'white')}]"
+        f"[{COLOR_MAP.get(label[1], 'white')}]{key:>2}:[/] [cyan]{label[0]:<{name_width}}[/cyan]"
         for key, label in choice_labels.items()
     ] + [f"[magenta]{'(global) Global':<{cell_width}}[/magenta]"]
 
-    site_rows = [" ".join(site_entries[i : i + 6]) for i in range(0, len(site_entries), 6)]
+    columns = 4
+    site_rows = [" ".join(site_entries[i : i + columns]) for i in range(0, len(site_entries), columns)]
     for row in site_rows:
         console.print(row)
 
@@ -652,6 +663,14 @@ def main():
                 _show_update_notice(info)
             return
 
+        # A service's own account check (e.g. -i dazn --check email:password): defined by the site module itself, run and exit before
+        # anything else needs to start (ffmpeg checks, auto-update, interactive menu).
+        check_value = getattr(args, "check", None)
+        if check_value and site_module is not None:
+            check_fn = getattr(site_module, "check_account", None)
+            if callable(check_fn):
+                sys.exit(0 if check_fn(check_value) else 1)
+
         if not args.skip_update_check and auto_check_enabled() and sys.stdin.isatty() and sys.stdout.isatty() and not getattr(args, "tui", False):
             _startup_prefetch.start_update_check()
 
@@ -701,7 +720,7 @@ def main():
 
         # Execute pre-run hooks with context from post-download if available, otherwise with empty context
         execute_hooks("pre_run")
-        start_message(False)
+        start_message(False, spacer=False)
         _startup_prefetch.start_vault_warm()
 
         # Attempt git update but continue even if it fails (e.g., no network, git not available)

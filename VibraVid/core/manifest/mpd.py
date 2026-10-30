@@ -369,6 +369,9 @@ class DashParser:
 
         # Reset range-split tracking
         self._uses_range_split = False
+        
+        # Advertisement periods dropped by this parse (a live poll that only sees ads is a break, not the end of the stream)
+        self.ad_periods_skipped = 0
 
         def _period_has_thumbnail(period_element) -> bool:
             return any(
@@ -389,6 +392,7 @@ class DashParser:
                 period_duration=period_duration,
             ):
                 logger.info(f"DASH period skipped (advertisement) | period={period_idx} url={period_base_url}")
+                self.ad_periods_skipped += 1
                 continue
 
             period_durations[period_idx] = period_duration

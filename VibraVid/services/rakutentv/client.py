@@ -39,6 +39,7 @@ DEVICES = {
     "atvui40": {"player": "atvui40:DASH-CENC:WVM", "drm": "widevine"},
     "web": {"player": "web:DASH-CENC:WVM", "drm": "widevine"},
 }
+SESSION_DEVICE = "web"
 APP_VERSION_LG = "v2.77.0"
 DEVICE_SERIAL_LG = "203WRMD8U920"
 
@@ -363,6 +364,15 @@ def _raise_if_error(data: dict, content_id: str) -> None:
 def _post_json_url(url: str, body: dict) -> dict:
     with create_client(headers=_api_headers("application/json")) as client:
         response = client.post(url, json=body)
+
+    if response.status_code >= 400:
+        try:
+            err = (response.json().get("errors") or [{}])[0]
+        except Exception:
+            err = {}
+        if err.get("code"):
+            raise RuntimeError(f"HTTP {response.status_code} {err.get('code')}: {err.get('message')}")
+    
     response.raise_for_status()
     return response.json()
 
@@ -373,6 +383,16 @@ def _signature(access_token: str, url: str, method: str = "POST") -> str:
     return base64.b64encode(digester.digest()).decode("utf-8").replace("+", "-").replace("/", "_")
 
 
+def device_uid() -> str:
+    """Stable per-install device id: the concurrent-stream limit is counted per device_uid, a fresh one per request fills it."""
+    cached = disk_cache.load_fresh("rakutentv", "device_uid")
+    if cached and cached.get("uid"):
+        return str(cached["uid"])
+    value = str(uuid.uuid4())
+    disk_cache.save("rakutentv", "device_uid", {"uid": value}, ttl=10 * 365 * 24 * 3600)
+    return value
+
+
 def _credentials() -> tuple[str | None, str | None]:
     login_cfg = config_manager.login.get_section("rakutentv")
     email = (login_cfg.get("email") or "").strip() or None
@@ -380,10 +400,29 @@ def _credentials() -> tuple[str | None, str | None]:
     return email, password
 
 
-def login(force: bool = False, market: str | None = None) -> dict:
-    """Login via /me/login_or_wuaki_link. Cached on disk (~12h), one session per country."""
+def _device_metadata(device: str) -> dict:
+    if device == "lgui40":
+        return {
+            "app_version": APP_VERSION_LG, "audio_quality": "2.0", "brand": "lg", "firmware": "XX.XX.XX", "hdr": False,
+            "model": "GENERIC", "os": "webOS", "sdk": "6.0", "serial_number": DEVICE_SERIAL_LG, "trusted_uid": False,
+            "uid": device_uid(), "video_quality": "FHD", "year": 2021,
+        }
+    
+    return {
+        "app_version": "v5.5.356", "audio_quality": "2.0", "brand": "edge-chromium", "firmware": "XX.XX.XX", "hdr": False,
+        "model": "GENERIC", "os": "Windows 10", "sdk": "154.0.0", "serial_number": "not implemented",
+        "trusted_uid": False, "uid": device_uid(), "video_quality": "FHD", "year": 1970,
+    }
+
+
+def login(force: bool = False, market: str | None = None, device: str = SESSION_DEVICE) -> dict:
+    """Login via /me/login_or_wuaki_link. Cached on disk (~12h), one session per country and device."""
     market = resolve_market(market)
+    device = device if device in ("web", "lgui40") else SESSION_DEVICE
     cache_name = "session" if market == DEFAULT_MARKET else f"session_{market}"
+    if device != SESSION_DEVICE:
+        cache_name += f"_{device}"
+    
     if not force:
         cached = disk_cache.load_fresh("rakutentv", cache_name, buffer_seconds=60)
         if cached and cached.get("access_token"):
@@ -394,26 +433,12 @@ def login(force: bool = False, market: str | None = None) -> dict:
     if not email or not password:
         raise RuntimeError("Rakuten TV email/password not set in Conf/login under 'rakutentv'.")
 
-    params = _base_params(market=market)
+    params = _base_params({"device_identifier": device}, market=market)
     body = {
         "user": {"password": password, "username": email},
         "remote_pairing_activation_code": "",
-        "device_identifier": "web",
-        "device_metadata": {
-            "app_version": "v5.5.356",
-            "audio_quality": "2.0",
-            "brand": "edge-chromium",
-            "firmware": "XX.XX.XX",
-            "hdr": False,
-            "model": "GENERIC",
-            "os": "Windows 10",
-            "sdk": "154.0.0",
-            "serial_number": "not implemented",
-            "trusted_uid": False,
-            "uid": str(uuid.uuid4()),
-            "video_quality": "FHD",
-            "year": 1970,
-        },
+        "device_identifier": device,
+        "device_metadata": _device_metadata(device),
         "ifa_id": str(uuid.uuid4()),
     }
     data = _post_json("/me/login_or_wuaki_link", params, body)
@@ -445,8 +470,9 @@ def get_me_streaming(
     market: str | None = None,
 ) -> dict:
     """POST /me/streamings (signed) for owned/rented titles. Requires login."""
-    session = login(market=market)
-    player = DEVICES.get(device, DEVICES["lgui40"])["player"]
+    device = device if device in ("web", "lgui40") else "lgui40"  # the only devices a session can be created for
+    session = login(market=market, device=device)
+    player = DEVICES[device]["player"]
     params = {
         "audio_language": audio_language,
         "audio_quality": "2.0",
@@ -458,7 +484,7 @@ def get_me_streaming(
         "device_stream_audio_quality": "2.0",
         "device_stream_hdr_type": hdr_type,
         "device_stream_video_quality": video_quality,
-        "device_uid": str(uuid.uuid4()),
+        "device_uid": device_uid(),
         "device_year": "2021",
         "disable_dash_legacy_packages": "false",
         "locale": session["locale"],
@@ -470,6 +496,7 @@ def get_me_streaming(
         "strict_video_quality": "false",
         "subtitle_language": "MIS",
         "timestamp": f"{int(time.time())}122",
+        "unique_session_id": str(uuid.uuid4()),
         "video_type": "stream",
     }
     url = f"{GIZMO}/me/streamings?{urllib.parse.urlencode(params)}"
@@ -502,6 +529,19 @@ def widevine_license_headers() -> dict:
         "User-Agent": get_userAgent(),
         "Content-Type": "application/octet-stream",
     }
+
+
+def widevine_service_certificate(license_url: str) -> str | None:
+    """Base64 service certificate, asked like the web player does (POST of the 2-byte 0x08 0x04 request to the license URL)."""
+    try:
+        with create_client(headers=widevine_license_headers()) as client:
+            response = client.post(license_url, data=b"\x08\x04")
+        if response.status_code == 200 and response.content:
+            return base64.b64encode(response.content).decode("utf-8")
+        logger.warning(f"Widevine service certificate request returned HTTP {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Widevine service certificate request failed: {e}")
+    return None
 
 
 def mpd_headers() -> dict:
