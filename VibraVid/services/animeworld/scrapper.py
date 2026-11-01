@@ -36,6 +36,11 @@ class ScrapSerie:
         soup = BeautifulSoup(self.response.content, "html.parser")
         return os_manager.get_sanitize_file(soup.find("h1", {"id": "anime-title"}).get_text(strip=True))
 
+    def get_external_ids(self):
+        """MyAnimeList and AniList ids linked from the detail page (None when absent)."""
+        from VibraVid.utils.media.anime_naming import external_ids_from_html
+        return external_ids_from_html(self.response.text)
+
     def get_episodes(self, nums=None):
         """Fetch and return the list of episodes, optionally filtering by specific episode numbers."""
         soup = BeautifulSoup(self.response.content, "html.parser")

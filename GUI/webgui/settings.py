@@ -100,6 +100,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "searchapp.middleware.LoginRequiredMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -118,6 +119,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "searchapp.context_processors.version_context",
+                "searchapp.context_processors.i18n_context",
                 "searchapp.context_processors.audio_language_context",
                 "searchapp.context_processors.active_downloads_context",
                 "searchapp.context_processors.arr_stack_context",
@@ -150,6 +152,9 @@ CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
 USE_X_FORWARDED_HOST = _env_flag("USE_X_FORWARDED_HOST", False)
 CSRF_COOKIE_SECURE = _env_flag("CSRF_COOKIE_SECURE", False)
 SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE", False)
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+LOGIN_URL = "/login/"
 
 if _env_flag("SECURE_PROXY_SSL_HEADER_ENABLED", False):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

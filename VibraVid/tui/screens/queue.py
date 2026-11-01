@@ -7,7 +7,10 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
+import threading
 
+from rich.markup import escape
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -21,10 +24,12 @@ from VibraVid.cli.command.queue import (
     _claim_next_any,
     _finish_item,
     _load_queue,
+    _queue_dir,
     _QueueLock,
     _save_queue,
     clear,
     enqueue_argv,
+    queue_item_label,
     remove,
 )
 from VibraVid.tui.i18n import t
@@ -75,6 +80,9 @@ class QueueScreen(Screen):
         self._refresh_timer: Timer | None = None
         self._loaded_items: list[tuple[dict, str]] = []  # (item_dict, queue_file_path)
         self._is_worker_running: bool = False
+        self._proc: subprocess.Popen | None = None
+        self._stop = threading.Event()
+        self._last_signature: tuple | None = None
 
     def compose(self) -> ComposeResult:
         yield TopBar(t("nav_queue"), t("ctx_queue"))
@@ -116,6 +124,27 @@ class QueueScreen(Screen):
     def on_unmount(self) -> None:
         if self._refresh_timer:
             self._refresh_timer.stop()
+        if self._is_worker_running:
+            self._stop.set()
+            self._kill_child()
+
+    @staticmethod
+    def _log_path(item_id: str, create: bool = False) -> str:
+        """Per-item log of the child process (its output cannot go to the terminal the TUI is drawing on)."""
+        log_dir = os.path.join(_queue_dir(), "logs")
+        if create:
+            os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, f"{item_id}.log")
+
+    def _log_tail(self, item_id: str, lines: int = 3) -> list[str]:
+        try:
+            with open(self._log_path(item_id), "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 4096))
+                text = fh.read().decode("utf-8", errors="replace")
+        except OSError:
+            return []
+        return [ln.strip()[:150] for ln in text.splitlines() if ln.strip()][-lines:]
 
     def _refresh_queue(self) -> None:
         """Reload all queued items from .cache/queue and update table & details."""
@@ -131,6 +160,15 @@ class QueueScreen(Screen):
                 st = it.get("status", "unknown")
                 counts[st] = counts.get(st, 0) + 1
 
+        signature = (
+            self._is_worker_running,
+            tuple((it.get("id"), it.get("status"), it.get("attempts"), path) for it, path in loaded),
+        )
+        if signature == self._last_signature:
+            self._update_item_detail()  # the log tail of a running item keeps moving
+            return
+        self._last_signature = signature
+
         self._loaded_items = loaded
         table = self.query_one("#queue-table", DataTable)
         current_cursor = table.cursor_row
@@ -141,7 +179,7 @@ class QueueScreen(Screen):
             item_id = item.get("id", "?")
             tag = item.get("tag") or os.path.splitext(os.path.basename(path))[0]
             status = item.get("status", "pending")
-            argv_str = " ".join(item.get("argv", []))
+            argv_str = queue_item_label(item)
             enqueued = item.get("enqueued_at", "-")
             attempts = str(item.get("attempts", 0))
 
@@ -161,7 +199,7 @@ class QueueScreen(Screen):
                 item_id,
                 tag,
                 status_formatted,
-                argv_str[:60] + ("..." if len(argv_str) > 60 else ""),
+                argv_str[:70] + ("..." if len(argv_str) > 70 else ""),
                 enqueued,
                 attempts,
                 key=item_id,
@@ -200,6 +238,10 @@ class QueueScreen(Screen):
         ]
         if item.get("returncode") is not None:
             lines.append(f"[bold cyan]Return Code:[/] {item.get('returncode')}")
+        
+        tail = self._log_tail(item.get("id", ""))
+        if tail:
+            lines.append("[bold cyan]Log:[/] " + escape(tail[-1]))
 
         detail_box.update("\n".join(lines))
 
@@ -244,36 +286,87 @@ class QueueScreen(Screen):
         self.app.notify("Starting background queue worker...", severity="information")
         self._run_queue_worker()
 
+    def _ui(self, fn, *args, **kwargs) -> None:
+        """Run *fn* on the UI thread; a no-op once the app is gone (the worker may outlive the screen)."""
+        try:
+            self.app.call_from_thread(fn, *args, **kwargs)
+        except Exception:
+            logger.debug("UI call skipped: app already closed", exc_info=True)
+
+    def _kill_child(self) -> None:
+        """Stop the running job *and* whatever it spawned (ffmpeg, the downloader binaries)."""
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=10)
+            else:
+                proc.terminate()
+        except Exception:
+            logger.exception("Could not stop queue child process")
+
     @work(thread=True, exclusive=True, group="queue_runner")
     def _run_queue_worker(self) -> None:
-        paths = _all_queue_paths()
         processed = 0
+        error: str | None = None
+        self._stop.clear()
 
-        while True:
-            item, path = _claim_next_any(paths, None)
-            if item is None:
-                break
+        try:
+            while not self._stop.is_set():
+                # Re-read the queue files every cycle so items enqueued after "Run" are picked up.
+                item, path = _claim_next_any(_all_queue_paths(), None)
+                if item is None:
+                    break
 
-            processed += 1
-            self.app.call_from_thread(self._refresh_queue)
+                processed += 1
+                self._ui(self._refresh_queue)
 
-            cmd = _child_command(item["argv"])
-            try:
-                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
-                rc = proc.wait()
-                status = "done" if rc == 0 else "failed"
-            except Exception:
-                logger.exception("Error executing queued item %s", item.get("id"))
-                rc = -1
-                status = "failed"
+                cmd = _child_command(item["argv"])
+                if "--no-progress" not in cmd and "--plain-progress" not in cmd:
+                    cmd.append("--plain-progress")  # live bars redrawn in a log file are unreadable
+                try:
+                    # The child must never write to our terminal: its progress bars would be drawn over the TUI.
+                    with open(self._log_path(item["id"], create=True), "ab") as log:
+                        self._proc = subprocess.Popen(
+                            cmd,
+                            stdin=subprocess.DEVNULL,
+                            stdout=log,
+                            stderr=subprocess.STDOUT,
+                            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                        )
+                        if self._stop.is_set():  # left the screen between spawn and now
+                            self._kill_child()
+                        rc = self._proc.wait()
+                    status = "done" if rc == 0 else "failed"
+                except Exception:
+                    logger.exception("Error executing queued item %s", item.get("id"))
+                    rc = -1
+                    status = "failed"
+                finally:
+                    self._proc = None
 
-            _finish_item(path, item["id"], status, rc)
-            self.app.call_from_thread(self._refresh_queue)
+                if self._stop.is_set():
+                    status, rc = "failed", -1  # left the screen mid-download: an error to retry later (Retry button)
+                _finish_item(path, item["id"], status, rc)
+                self._ui(self._refresh_queue)
+        except (Exception, SystemExit) as e:
+            # _QueueLock raises SystemExit when the queue is busy; never let it kill the worker silently.
+            logger.exception("Queue worker aborted")
+            error = str(e) if isinstance(e, Exception) and str(e) else "queue is busy (stale .lock file in .cache/queue?)"
+        finally:
+            self._is_worker_running = False
 
-        self._is_worker_running = False
+        if self._stop.is_set():
+            return
+        if error:
+            self._ui(self.app.notify, f"Queue runner stopped: {error}", severity="error")
+            self._ui(self._refresh_queue)
+            return
         msg = f"Queue runner finished: {processed} job(s) processed." if processed > 0 else "Queue runner finished: no pending jobs."
-        self.app.call_from_thread(self.app.notify, msg, severity="information")
-        self.app.call_from_thread(self._refresh_queue)
+        self._ui(self.app.notify, msg, severity="information")
+        self._ui(self._refresh_queue)
 
     @on(Button.Pressed, "#remove-btn")
     def _on_remove(self) -> None:

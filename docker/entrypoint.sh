@@ -46,6 +46,7 @@ check_flux()
 
 # ── 2b. Docker socket access (in-app updater) ────────────────────────────────
 if [ -S /var/run/docker.sock ]; then
+    echo "VibraVid: WARNING - /var/run/docker.sock is mounted: this container can control the host's Docker daemon (root-equivalent). Protect the GUI with VIBRAVID_USERNAME/VIBRAVID_PASSWORD."
     SOCK_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
     if [ -n "$SOCK_GID" ] && [ "$SOCK_GID" != "0" ]; then
         if ! getent group "$SOCK_GID" >/dev/null 2>&1; then

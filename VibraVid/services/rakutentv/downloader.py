@@ -1,5 +1,6 @@
 # 09.10.26
 
+import logging
 import os
 
 from rich.console import Console
@@ -17,6 +18,7 @@ from . import client as api
 from .scrapper import GetSerieInfo
 
 console = Console()
+logger = logging.getLogger(__name__)
 extension_output = config_manager.config.get("PROCESS", "extension")
 _SDH_TYPES = {"sdh", "hearing_impaired", "hard_of_hearing", "hi"}
 _CC_TYPES = {"cc", "closed_captions", "closed_caption"}
@@ -41,6 +43,23 @@ def _resolve_stream(content_id: str, content_type: str, market: str | None = Non
     if kind == "avod":
         return api.get_avod_streaming(content_id, content_type, audio, quality, device, market=market), kind
     return api.get_me_streaming(content_id, content_type, audio, quality, device, market=market), kind
+
+
+def _request_stream(kind: str, args: tuple, market: str | None, detail: dict | None = None) -> dict:
+    """Stream request asking for every subtitle ('MIS'); a title that offers only some (e.g. burnt-in ITA) rejects it, so retry with the ones it lists."""
+    request = api.get_avod_streaming if kind == "avod" else api.get_me_streaming
+    try:
+        stream = request(*args, market=market)
+    except Exception as e:
+        offered = api.subtitle_languages(market, detail)
+        if "invalid.subtitle_language" not in str(e) or not offered:
+            raise
+        logger.warning(f"Subtitle language 'MIS' rejected, retrying with {offered[0]}")
+        stream = request(*args, market=market, subtitle_language=offered[0])
+
+    if stream.get("burnt_subtitle_language") and not stream.get("all_subtitles"):
+        console.print(f"[yellow]Subtitles ({stream['burnt_subtitle_language']}) are burnt into the video: no separate subtitle track exists.")
+    return stream
 
 
 def _subtitle_tracks(stream_info: dict) -> list[dict]:
@@ -106,7 +125,7 @@ def _movie_detail(movie_id: str, market: str | None) -> dict:
 
 def _stream_failure(title: str, kind: str, price: str, error: Exception) -> DownloadResult:
     """The failed stream request as a visible, reasoned result (rent/buy titles play only for the account that owns them)."""
-    if kind == "avod":
+    if kind == "avod" or not any(marker in str(error) for marker in ("no_active_right", "No rights for")):
         message = f"Error getting stream: {error}"
     else:
         cost = f" ({price})" if price else ""
@@ -133,18 +152,15 @@ def download_film(select_title: Entries) -> DownloadResult:
         console.print(f"[cyan]Title kind: {kind} — using authenticated /me streaming.")
     
     try:
-        if kind == "avod":
-            opts = _options()
-            stream = api.get_avod_streaming(
-                content_id,
-                "movies",
-                api.audio_language(market, detail, opts.get("audio_lang")),
-                (opts.get("quality") or "FHD").upper(),
-                (opts.get("device") or "lgui40").lower(),
-                market=market,
-            )
-        else:
-            stream = api.get_me_streaming(content_id, "movies", market=market)
+        opts = _options()
+        args = (
+            content_id,
+            "movies",
+            api.audio_language(market, detail, opts.get("audio_lang")),
+            (opts.get("quality") or "FHD").upper(),
+            (opts.get("device") or "lgui40").lower(),
+        )
+        stream = _request_stream(kind, args, market, detail)
     except Exception as e:
         return _stream_failure(select_title.name, kind, api.price_label(detail), e)
 
@@ -170,19 +186,16 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     kind = getattr(scrape_serie, "kind", "avod")
     market = getattr(scrape_serie, "market", None)
     try:
-        if kind == "avod":
-            opts = _options()
-            audio = api.audio_language(market, None, opts.get("audio_lang")) if opts.get("audio_lang") else (getattr(scrape_serie, "audio", None) or api.audio_language(market))
-            stream = api.get_avod_streaming(
-                obj_episode.id,
-                "episodes",
-                audio,
-                (opts.get("quality") or "FHD").upper(),
-                (opts.get("device") or "lgui40").lower(),
-                market=market,
-            )
-        else:
-            stream = api.get_me_streaming(obj_episode.id, "episodes", market=market)
+        opts = _options()
+        audio = api.audio_language(market, None, opts.get("audio_lang")) if opts.get("audio_lang") else (getattr(scrape_serie, "audio", None) or api.audio_language(market))
+        args = (
+            obj_episode.id,
+            "episodes",
+            audio,
+            (opts.get("quality") or "FHD").upper(),
+            (opts.get("device") or "lgui40").lower(),
+        )
+        stream = _request_stream(kind, args, market)
     except Exception as e:
         return _stream_failure(obj_episode.name, kind, "", e)
 

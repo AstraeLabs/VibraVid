@@ -23,6 +23,7 @@ prd_dir = ""
 # In order of preference: tmdb, imdb, tvdb (comma separated)
 metadata_provider = "tvdb,tmdb,imdb"
 tui_images = "auto"
+gui_language = "auto"
 
 
 [OUTPUT]
@@ -157,6 +158,7 @@ log_engine_output = true
 [DRM.vault.default]
 url = "https://drm-db.server66.workers.dev"
 token = ""
+track_downloads = true
 
 [DRM.vault.local]
 enabled = false

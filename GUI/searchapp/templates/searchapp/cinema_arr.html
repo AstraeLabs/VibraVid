@@ -99,7 +99,7 @@
 						{% with item=entry.media_request %}
 							<tr>
 								<td>
-									<b>{{ item.title }}</b>
+									<b data-no-tr>{{ item.title }}</b>
 									<span class="cn-s">
 										{% if item.content_type == "movie" %}Movie{% else %}Series{% endif %}
 										{% if item.year %} · {{ item.year }}{% endif %}

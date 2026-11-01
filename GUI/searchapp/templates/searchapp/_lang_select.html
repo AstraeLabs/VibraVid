@@ -1,0 +1,11 @@
+{% if gui_languages|length > 1 %}
+<select class="cn-lang" id="cn-lang" aria-label="Language" data-no-tr>
+	{% for language in gui_languages %}<option value="{{ language.code }}"{% if language.code == gui_lang %} selected{% endif %}>{{ language.name }}</option>{% endfor %}
+</select>
+<script>
+	document.getElementById("cn-lang").addEventListener("change", function (event) {
+		document.cookie = "vv_lang=" + encodeURIComponent(event.target.value) + "; path=/; max-age=31536000; samesite=lax";
+		location.reload();
+	});
+</script>
+{% endif %}

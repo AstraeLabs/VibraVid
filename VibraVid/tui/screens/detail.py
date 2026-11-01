@@ -492,6 +492,7 @@ class TitleDetailScreen(Screen):
 
         from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
         from VibraVid.cli.command.queue import enqueue_argv
+        from VibraVid.tui.screens.search import _pick_options
 
         search_term = str(getattr(self._item, "name", "") or getattr(self._item, "title", "") or "")
         season_str = None
@@ -517,9 +518,10 @@ class TitleDetailScreen(Screen):
         argv = builder.build_argv_from_params(
             site=self._site,
             search=search_term,
-            item="1",
+            item="0",
             season=season_str,
             episode=episode_str,
+            options=_pick_options(self._item),
         )
 
         if not argv:

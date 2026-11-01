@@ -5,6 +5,10 @@ from django.urls import path
 from . import api_bot, api_remote, views
 
 urlpatterns = [
+    # Optional GUI login (VIBRAVID_USERNAME / VIBRAVID_PASSWORD — see security.py)
+    path("login/", views.login_view, name="login"),
+    path("logout/", views.logout_view, name="logout"),
+
     # Search is the home page.
     path("", views.cinema_search, name="search_home"),
     path("", views.cinema_search, name="search_page"),

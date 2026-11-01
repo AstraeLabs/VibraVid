@@ -120,6 +120,7 @@ wvd_dir = ""
 prd_dir = ""
 metadata_provider = "tmdb,imdb"
 tui_images = "auto"
+gui_language = "auto"
 ```
 
 | Key | Default | Description |
@@ -138,6 +139,7 @@ tui_images = "auto"
 | `wvd_dir` | `""` | Folder searched first for Widevine `.wvd` devices (sub-folders included). Empty: `wvd` inside the binary directory (e.g. `C:\binary\VibraVid\wvd`, see [Local CDM devices](#local-cdm-devices)) |
 | `prd_dir` | `""` | Same for PlayReady `.prd` devices. Empty: `prd` inside the binary directory (e.g. `C:\binary\VibraVid\prd`) |
 | `metadata_provider` | `tmdb,imdb` | Sidecar providers, tried in order (`tmdb`, `imdb`, `tvdb`). CLI: `--metadata-provider` |
+| `gui_language` | `auto` | Web GUI language: `auto` (the browser's), `en` or `it`. The selector in the GUI header overrides it for that browser (see [GUI](gui.md#language)) |
 | `tui_images` | `auto` | TUI cover art: `auto`, `sixel`, `kitty` (real images, see [TUI](tui.md#cover-art)), `blocks` (drawn with characters, works anywhere) or `off` |
 
 ```toml
@@ -391,6 +393,7 @@ log_engine_output = false
 [DRM.vault.default]
 url = "https://drm-db.server66.workers.dev"
 token = ""
+track_downloads = true
 ```
 
 | Key | Default | Description |
@@ -400,6 +403,7 @@ token = ""
 | `bypass_vault_cache` | `false` | Skip the vault lookup and request a fresh license every run |
 | `log_engine_output` | `false` | Log the decrypt engine's stdout/stderr (verbose). CLI: `--log-decryptor-output` |
 | `vault` | - | External key store(s), queried before CDM extraction |
+| `vault.default.track_downloads` | `true` | Send the service, type and title of each finished download to the default vault (anonymous usage statistics). `false` stops it; key lookups and uploads keep working |
 
 ### Local vault
 

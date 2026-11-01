@@ -164,6 +164,8 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     search_group.add_argument("--global", dest="global_search", action="store_true", help="Search across all sites")
     search_group.add_argument("--category", type=int, metavar="N", help="Category filter for global search\n  1=Anime  2=Movies/Series  3=Series  4=Movies",)
     search_group.add_argument("--item", type=int, default=None, metavar="N", help="Select the Nth search result directly, 0-based (requires -i and --search)",)
+    search_group.add_argument("--item-title", dest="item_title", type=str, default=None, metavar="TITLE", help="With --item: pick the result whose title matches TITLE (and --item-year) instead of trusting the index, which can shift between searches")
+    search_group.add_argument("--item-year", dest="item_year", type=int, default=None, metavar="YEAR", help="With --item-title: also require this release year")
     search_group.add_argument("--year", type=str, metavar="RANGE", help='Year filter, e.g. "2020" or "1990-2015"')
 
     # ── Series navigation
@@ -405,6 +407,28 @@ def clear_args_error(args):
     return None
 
 
+def _resolve_item_index(media_list, index: int, title: str | None, year: int | None) -> int:
+    """Index of the result matching *title* (and *year*); falls back to *index* when nothing matches."""
+    if not title:
+        return index
+
+    def norm(value) -> str:
+        return " ".join(re.sub(r"[^\w\s]", "", str(value or "").lower()).split())
+
+    wanted = norm(title)
+    for pos, entry in enumerate(media_list):
+        name = getattr(entry, "name", None) or getattr(entry, "title", None)
+        if norm(name) != wanted:
+            continue
+        entry_year = str(getattr(entry, "year", "") or "").split("-")[0].strip()
+        if year is not None and entry_year.isdigit() and int(entry_year) != year:
+            continue
+        return pos
+
+    logger.warning(f"--item-title '{title}' not found among {len(media_list)} results, using --item {index}.")
+    return index
+
+
 def handle_direct_site_selection(args, input_to_function, module_name_to_function, search_terms, selections=None):
     """Handle direct site selection via command line."""
     if not args.site:
@@ -440,6 +464,7 @@ def handle_direct_site_selection(args, input_to_function, module_name_to_functio
 
         media_list = getattr(database, "media_list", None) if database else None
         if media_list:
+            requested_index = _resolve_item_index(media_list, requested_index, getattr(args, "item_title", None), getattr(args, "item_year", None))
             if 0 <= requested_index < len(media_list):
                 logger.info(f"Direct item selection: executing result at index {requested_index} directly.")
                 context_tracker.cli_search = search_terms

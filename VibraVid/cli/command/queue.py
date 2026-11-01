@@ -204,6 +204,38 @@ def _strip_queue_flags(argv: list) -> list:
     return result
 
 
+def argv_option(argv: list, flag: str) -> str | None:
+    """Value of *flag* (`--flag value` or `--flag=value`) in a job argv, or None."""
+    for pos, tok in enumerate(argv):
+        if tok == flag and pos + 1 < len(argv):
+            return str(argv[pos + 1])
+        if tok.startswith(flag + "="):
+            return tok.split("=", 1)[1]
+    return None
+
+
+def queue_item_label(item: dict) -> str:
+    """Human readable one-liner for a queued job: `Title (year) · site · S1 E1-3` (falls back to the raw argv)."""
+    argv = item.get("argv", [])
+    title = argv_option(argv, "--item-title") or argv_option(argv, "-s") or argv_option(argv, "--search")
+    if not title:
+        return " ".join(argv)
+
+    label = title.strip()
+    year = argv_option(argv, "--item-year")
+    if year:
+        label += f" ({year})"
+    site = argv_option(argv, "-i")
+    season = argv_option(argv, "--season") or argv_option(argv, "-S")
+    episode = argv_option(argv, "--episode") or argv_option(argv, "-E")
+    parts = [label]
+    if site:
+        parts.append(site)
+    if season:
+        parts.append(f"S{season}" + (f" E{episode}" if episode else ""))
+    return " · ".join(parts)
+
+
 def _new_queue_item(argv: list, tag: str) -> dict:
     return {
         "id": uuid.uuid4().hex[:8],

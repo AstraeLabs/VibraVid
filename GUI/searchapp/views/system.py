@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from VibraVid.utils import config_manager
 
 from .. import services_admin
+from ..security import require_service_upload
 from ._shared import _UPDATE_CHECK_TTL, _update_check_cache
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,7 @@ def trigger_binaries_update(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
+@require_service_upload
 def refresh_external_import(request: HttpRequest) -> JsonResponse:
     """Check the git sources of `imp_service` now, apply any newer commit and reload the services."""
     from VibraVid.services._base.site_loader import refresh_external_sources

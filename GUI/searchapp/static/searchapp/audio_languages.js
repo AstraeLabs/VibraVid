@@ -28,7 +28,7 @@
     }
     function eligible(element) {
         const available = codes(element.dataset.verifiedLanguages || element.dataset.languages);
-        if (!available.length) return selected === "all";
+        if (!available.length) return true;
         const wanted = selected === "all" ? languages.map(language => language.code.toLowerCase()) : [selected.toLowerCase()];
         return !wanted.length || wanted.some(language => available.some(code => matches(code, language)));
     }
@@ -178,12 +178,15 @@
         dialog.querySelector("[data-audio-download]").disabled = true;
         dialog.querySelector("#cn-audio-dialog-movie").textContent = form.closest(".cn-tile").dataset.name;
         dialog.showModal();
-        form.closest(".cn-tile").querySelector(".cn-quality-check").click();
+        const check = form.closest(".cn-tile").querySelector(".cn-quality-check");
+        check.disabled = false;
+        check.click();
     }, true);
     if (dialog) {
         dialog.querySelector("[data-audio-cancel]").addEventListener("click", () => dialog.close());
         dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
         dialog.addEventListener("close", () => {
+            if (dialog.open) return;
             const quality = movieForm?.closest(".cn-tile").querySelector(".cn-quality-picker");
             if (quality) {
                 quality._generation = (quality._generation || 0) + 1;
@@ -205,7 +208,18 @@
             else movieForm.requestSubmit();
         });
     }
+    // Some providers cannot switch language at all (no per-episode/per-title language data):
+    // the filter would only be a button that does nothing, so hide it and reset the choice.
+    function hideFilterWithoutLanguageData() {
+        const items = document.querySelectorAll("#cn-results .cn-tile, .cn-ep");
+        if (!items.length) return;
+        const hasData = [...items].some(item => codes(item.dataset.verifiedLanguages || item.dataset.languages).length);
+        if (hasData) return;
+        selected = "all";
+        document.querySelectorAll("[data-language-filter]").forEach(filter => { filter.hidden = true; });
+    }
     document.addEventListener("DOMContentLoaded", function () {
+        hideFilterWithoutLanguageData();
         document.querySelectorAll("[data-language-filter]").forEach(filter => filter.addEventListener("click", event => {
             const button = event.target.closest("[data-audio-language]");
             if (button) setFilter(button.dataset.audioLanguage);

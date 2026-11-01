@@ -120,6 +120,26 @@ def audio_language(market: str | None = None, detail: dict | None = None, reques
     return offered[0] if offered else (wanted or "ENG")
 
 
+def subtitle_languages(market: str | None = None, detail: dict | None = None) -> list[str]:
+    """Subtitle languages the title offers, the market language first (a title may offer only e.g. ITA, never the 'MIS' wildcard)."""
+    offered: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "subtitle_languages" and isinstance(value, list):
+                    offered.extend(str(v.get("id")) for v in value if isinstance(v, dict) and v.get("id"))
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk((detail or {}).get("view_options"))
+    wanted = MARKET_AUDIO.get(resolve_market(market))
+    return sorted(dict.fromkeys(offered), key=lambda lang: lang != wanted)
+
+
 def _api_headers(content_type: str | None = None) -> dict:
     headers = get_headers()
     headers["Origin"] = ORIGIN
@@ -247,6 +267,7 @@ def get_avod_streaming(
     hdr_type: str = "NONE",
     session: dict | None = None,
     market: str | None = None,
+    subtitle_language: str = "MIS",
 ) -> dict:
     """POST /avod/streamings -> first stream_infos entry."""
     market = resolve_market(market)
@@ -281,7 +302,7 @@ def get_avod_streaming(
         "hdr_type": hdr_type,
         "video_type": "stream",
         "subtitle_formats": ["vtt"],
-        "subtitle_language": "MIS",
+        "subtitle_language": subtitle_language,
         "support_closed_captions": True,
     }
 
@@ -304,7 +325,7 @@ def get_avod_streaming(
             "device_serial": DEVICE_SERIAL_LG,
             "content_type": content_type,
             "classification_id": int(session.get("classification_id") or classification),
-            "subtitle_language": "MIS",
+            "subtitle_language": subtitle_language,
             "player": player,
         }
         url = f"{GIZMO}/avod/streamings?{urllib.parse.urlencode(params)}"
@@ -468,10 +489,22 @@ def get_me_streaming(
     device: str = "lgui40",
     hdr_type: str = "NONE",
     market: str | None = None,
+    subtitle_language: str = "MIS",
 ) -> dict:
     """POST /me/streamings (signed) for owned/rented titles. Requires login."""
     device = device if device in ("web", "lgui40") else "lgui40"  # the only devices a session can be created for
     session = login(market=market, device=device)
+    for attempt in range(2):
+        try:
+            return _me_streaming(session, content_id, content_type, audio_language, video_quality, device, hdr_type, subtitle_language)
+        except RuntimeError as e:
+            if attempt or "invalid_signature" not in str(e):
+                raise
+            logger.warning("Rakuten session token rejected (logged in elsewhere?), logging in again")
+            session = login(force=True, market=market, device=device)
+
+
+def _me_streaming(session: dict, content_id: str, content_type: str, audio_language: str, video_quality: str, device: str, hdr_type: str, subtitle_language: str) -> dict:
     player = DEVICES[device]["player"]
     params = {
         "audio_language": audio_language,
@@ -494,7 +527,7 @@ def get_me_streaming(
         "player_width": "1920",
         "session_uuid": session["session_uuid"],
         "strict_video_quality": "false",
-        "subtitle_language": "MIS",
+        "subtitle_language": subtitle_language,
         "timestamp": f"{int(time.time())}122",
         "unique_session_id": str(uuid.uuid4()),
         "video_type": "stream",

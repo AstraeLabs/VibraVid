@@ -3,6 +3,7 @@
 from .._download_infra import set_max_download_slots  # noqa: F401
 from ._shared import *  # noqa: F401,F403
 from .arr import *  # noqa: F401,F403
+from .auth import login_view, logout_view  # noqa: F401
 from .cinema import *  # noqa: F401,F403
 from .dashboard import *  # noqa: F401,F403
 from .download import *  # noqa: F401,F403

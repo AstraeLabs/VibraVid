@@ -200,8 +200,25 @@ class ArrDownloaderService:
                 any_success = True
 
                 try:
-                    future.result(timeout=self.download_timeout)  # wait for download to actually finish
+                    download_ok = future.result(timeout=self.download_timeout)  # wait for download to actually finish
                     time.sleep(2)
+
+                    # The provider matched the series but has no such episode (different
+                    # season/episode numbering): the download ends in seconds, writes nothing,
+                    # and rescan + manual import would only burn ~2.5 min before failing.
+                    if download_ok is False:
+                        probe_name = item_payload.get("name", matched_title)
+                        probe_year = item_payload.get("year", year)
+                        probe_root = serie.get("path", "") or self._fallback_series_root(title)
+                        probe_folders = [download_folder]
+                        probe_fallback = self._get_vibrativo_serie_output(probe_root, probe_name, season_num, probe_year)
+                        if probe_fallback:
+                            probe_folders.append(self._translate_path(probe_fallback, reverse=True))
+                        if not self._wrote_files_since(probe_folders, download_started):
+                            logger.warning(f"[S{season_num}E{ep_num}] '{provider}' wrote no file for this episode (not available under this numbering), skipping import")
+                            self.last_error = "episode_not_available"
+                            any_success = False
+                            continue
 
                     # The file is named after the provider's numbering (e.g. S14E02) but lives in
                     # Sonarr's season folder: renumber it, otherwise Sonarr's parser would import it
@@ -346,6 +363,7 @@ class ArrDownloaderService:
         if download_folder != target_folder:
             logger.info(f"[_process_movie] Download folder (VibraVid path): '{download_folder}'")
 
+        movie_download_started = time.time()
         future = _run_download_in_thread(
             site=provider,
             item_payload=item_payload,
@@ -357,12 +375,21 @@ class ArrDownloaderService:
         )
 
         try:
-            future.result(timeout=self.download_timeout)  # wait for download to actually finish
+            download_ok = future.result(timeout=self.download_timeout)  # wait for download to actually finish
             time.sleep(2)
 
             result_name = item_payload.get("name", matched_title)
             result_year = item_payload.get("year", year)
             fallback_folder = self._get_vibrativo_movie_output(target_folder, result_name, result_year)
+
+            if download_ok is False:
+                probe_folders = [download_folder]
+                if fallback_folder:
+                    probe_folders.append(self._translate_path(fallback_folder, reverse=True))
+                if not self._wrote_files_since(probe_folders, movie_download_started):
+                    logger.warning(f"Movie '{title}': '{provider}' wrote no file, skipping import")
+                    self.last_error = "episode_not_available"
+                    return False
 
             # The download can run for hours; the movie may have been removed meanwhile.
             # RescanMovie on a stale id makes Radarr raise ModelNotFoundException.
@@ -728,6 +755,18 @@ class ArrDownloaderService:
         if not renamed:
             logger.warning(f"[auto_map] No downloaded file in '{folder}' carried S{provider_season}E{provider_ep}")
         return renamed
+
+    @staticmethod
+    def _wrote_files_since(folders: list[str], since: float) -> bool:
+        """True if any file under ``folders`` was modified after ``since`` (download output probe)."""
+        for folder in folders:
+            try:
+                for entry in pathlib.Path(folder).rglob("*"):
+                    if entry.is_file() and entry.stat().st_mtime >= since - 2:
+                        return True
+            except OSError:
+                continue
+        return False
 
     @staticmethod
     def _tmdb_client():

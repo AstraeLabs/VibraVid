@@ -172,3 +172,16 @@ def test_language_filter_is_on_the_results_page_and_not_on_the_home_page():
 
     assert "data-language-filter" not in home and 'name="audio_language"' in home
     assert "data-language-filter" in results
+
+
+def test_filter_script_treats_unknown_language_as_eligible_and_is_versioned():
+    """#791: providers without language data (AnimeUnity, AnimeWorld...) must not lose every episode."""
+    from django.test import Client
+    from VibraVid.utils.upload.version import __version__
+
+    script = (ROOT / "GUI" / "searchapp" / "static" / "searchapp" / "audio_languages.js").read_text(encoding="utf-8")
+    assert "if (!available.length) return true;" in script
+    assert "hideFilterWithoutLanguageData" in script
+
+    home = Client().get("/", HTTP_HOST="127.0.0.1").content.decode("utf-8")
+    assert f"audio_languages.js?v={__version__}" in home

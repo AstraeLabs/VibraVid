@@ -2,8 +2,8 @@ from unittest.mock import patch
 import pytest
 
 from VibraVid.tui.screens.search import (
+    LibraryIndex,
     SearchScreen,
-    _get_library_status,
     _sort_results,
     deduplicate_search_results,
 )
@@ -79,20 +79,28 @@ def test_relevance_ties_prefer_the_title_on_more_providers():
     assert [r[1].year for r in _sort_results(raw, "relevance", "dune")] == [1984, 2021]
 
 
+def _library_status(item, active=(), history=(), queue_items=()):
+    with patch("VibraVid.core.ui.tracker.download_tracker.get_active_downloads", return_value=list(active)),          patch("VibraVid.core.ui.tracker.download_tracker.get_history", return_value=list(history)),          patch("VibraVid.tui.screens.search._all_queue_paths", return_value=["queue.json"]),          patch("VibraVid.tui.screens.search._load_queue", return_value={"items": list(queue_items)}):
+        return LibraryIndex().status(item)
+
+
 def test_library_status_detection():
     item = MockItem("Inception", 2010, is_movie=True)
 
-    with patch("VibraVid.core.ui.tracker.download_tracker.get_active_downloads", return_value=[]), \
-         patch("VibraVid.core.ui.tracker.download_tracker.get_history", return_value=[{"title": "Inception", "status": "completed"}]), \
-         patch("VibraVid.tui.screens.search._load_queue", return_value={"items": []}):
-        status = _get_library_status(item, "streamingcommunity")
-        assert status == "in_library"
+    assert _library_status(item, history=[{"title": "Inception", "status": "completed"}]) == "in_library"
+    assert _library_status(item, active=[{"title": "Inception", "status": "downloading"}]) == "in_queue"
+    assert _library_status(item) is None
 
-    with patch("VibraVid.core.ui.tracker.download_tracker.get_active_downloads", return_value=[{"title": "Inception", "status": "downloading"}]), \
-         patch("VibraVid.core.ui.tracker.download_tracker.get_history", return_value=[]), \
-         patch("VibraVid.tui.screens.search._load_queue", return_value={"items": []}):
-        status = _get_library_status(item, "streamingcommunity")
-        assert status == "in_queue"
+
+def test_library_status_queue_matches_title_and_year():
+    item = MockItem("Inception", 2010, is_movie=True)
+    queued = {"status": "pending", "argv": ["--item-title", "Inception", "--item-year", "2010"]}
+    other_year = {"status": "pending", "argv": ["--item-title", "Inception", "--item-year", "1999"]}
+    finished = {"status": "done", "argv": ["--item-title", "Inception", "--item-year", "2010"]}
+
+    assert _library_status(item, queue_items=[queued]) == "in_queue"
+    assert _library_status(item, queue_items=[other_year]) is None
+    assert _library_status(item, queue_items=[finished]) is None
 
 
 def test_copy_to_clipboard():

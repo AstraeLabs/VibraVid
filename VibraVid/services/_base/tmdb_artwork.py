@@ -12,7 +12,6 @@ _TV_MATCH_SITES = {
     "tubitv",
     "animeunity",
     "animeworld",
-    "loonex",
     "crunchyroll",
     "appletv",
     "primevideo",

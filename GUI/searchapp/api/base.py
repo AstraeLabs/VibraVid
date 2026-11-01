@@ -40,6 +40,10 @@ class Entries:
         return str(self.type or "").lower() in ["song", "track", "music"]
 
     @property
+    def is_series(self) -> bool:
+        return not self.is_movie and not self.is_song
+
+    @property
     def is_album(self) -> bool:
         return str(self.type or "").lower() == "album"
 

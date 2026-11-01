@@ -11,8 +11,8 @@ import pytest
 from VibraVid.utils.bootstrap import _startup_prefetch
 from VibraVid.utils.config import ConfigAccessor, ConfigManager
 
-ONLINE = {"loonex": {"full_url": "https://online.example/"}}
-LOCAL = {"loonex": {"full_url": "https://local.example/"}}
+ONLINE = {"examplesite": {"full_url": "https://online.example/"}}
+LOCAL = {"examplesite": {"full_url": "https://local.example/"}}
 
 
 def _manager(tmp_path) -> ConfigManager:
@@ -64,11 +64,11 @@ def test_first_domain_read_gets_the_online_value(tmp_path):
     manager = _manager(tmp_path)
     manager._load_site_data()
 
-    assert manager.domain.get("loonex", "full_url") == "https://online.example/"
+    assert manager.domain.get("examplesite", "full_url") == "https://online.example/"
     assert json.loads((tmp_path / "domains.json").read_text(encoding="utf-8")) == ONLINE
 
 
-@pytest.mark.parametrize("read", [lambda d: d.get_section("loonex"), lambda d: d.has_section("loonex")])
+@pytest.mark.parametrize("read", [lambda d: d.get_section("examplesite"), lambda d: d.has_section("examplesite")])
 def test_every_domain_read_waits_for_the_fetch(tmp_path, read):
     manager = _manager(tmp_path)
     manager._load_site_data()
@@ -82,7 +82,7 @@ def test_failed_fetch_falls_back_to_the_local_file(tmp_path, prefetch):
     prefetch["collect"] = None
     manager._load_site_data()
 
-    assert manager.domain.get("loonex", "full_url") == "https://local.example/"
+    assert manager.domain.get("examplesite", "full_url") == "https://local.example/"
 
 
 def test_concurrent_first_reads_resolve_once(tmp_path, prefetch):
@@ -91,7 +91,7 @@ def test_concurrent_first_reads_resolve_once(tmp_path, prefetch):
     manager._load_site_data()
     seen = []
 
-    threads = [threading.Thread(target=lambda: seen.append(manager.domain.get("loonex", "full_url"))) for _ in range(6)]
+    threads = [threading.Thread(target=lambda: seen.append(manager.domain.get("examplesite", "full_url"))) for _ in range(6)]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -106,7 +106,7 @@ def test_offline_setting_reads_the_file_without_any_fetch(tmp_path, prefetch):
     manager.fetch_domain_online = False
     manager._load_site_data()
 
-    assert manager.domain.get("loonex", "full_url") == "https://local.example/"
+    assert manager.domain.get("examplesite", "full_url") == "https://local.example/"
     assert prefetch["started"] == 0 and prefetch["calls"] == 0
 
 
@@ -116,5 +116,5 @@ def test_offline_setting_without_a_local_file_still_downloads_once(tmp_path, pre
     manager.fetch_domain_online = False
     manager._load_site_data()
 
-    assert manager.domain.get("loonex", "full_url") == "https://online.example/"
+    assert manager.domain.get("examplesite", "full_url") == "https://online.example/"
     assert prefetch["calls"] == 1

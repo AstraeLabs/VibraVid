@@ -161,7 +161,8 @@ def test_series_metadata_requires_parameters(client):
     assert "error" in response.json()
 
 
-def test_upload_service_validation(client):
+def test_upload_service_validation(client, monkeypatch):
+    monkeypatch.setenv("VIBRAVID_ALLOW_SERVICE_UPLOAD", "1")
     assert client.post("/api/upload-service/").status_code == 400
     not_a_zip = SimpleUploadedFile("service.txt", b"hello")
     assert client.post("/api/upload-service/", {"service_zip": not_a_zip}).status_code == 400

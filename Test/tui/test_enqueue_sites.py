@@ -103,7 +103,9 @@ def test_search_quick_enqueue_queues_the_highlighted_item():
     (item,) = _items()
     _assert_pending_item(item)
     argv = item["argv"]
-    assert argv[argv.index("-i") + 1] == "mysite" and argv[argv.index("-s") + 1] == "My Show" and argv[argv.index("--item") + 1] == "1"
+    assert argv[argv.index("-i") + 1] == "mysite" and argv[argv.index("-s") + 1] == "My Show"
+    # --item is a 0-based index into a fresh search; --item-title pins the exact highlighted result.
+    assert argv[argv.index("--item") + 1] == "0" and argv[argv.index("--item-title") + 1] == "My Show"
 
 
 def test_search_batch_enqueue_queues_every_selected_item_in_one_write():

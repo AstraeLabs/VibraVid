@@ -15,7 +15,6 @@ BUILTIN_SERVICES = frozenset({
     "discoveryplus",
     "guardoseries",
     "la7",
-    "loonex",
     "mediasetinfinity",
     "plutotv",
     "raiplay",

@@ -30,10 +30,26 @@ def audio_language_context(request):
     }}
 
 
+def i18n_context(request):
+    """GUI language: the active code, the catalog to ship to the browser (none for English) and the choices."""
+    from . import i18n
+
+    code = i18n.resolve_language(request)
+    return {
+        "gui_lang": code,
+        "gui_catalog": i18n.load_catalog(code) or None,
+        "gui_languages": [{"code": c, "name": i18n.LANGUAGE_NAMES.get(c, c)} for c in i18n.available_languages()],
+    }
+
+
 def version_context(request):
     """Add version to template context."""
+    from .security import gui_auth_enabled, service_upload_allowed
+
     return {
         "app_version": __version__,
+        "gui_auth_enabled": gui_auth_enabled(),
+        "service_upload_allowed": service_upload_allowed(),
     }
 
 

@@ -250,6 +250,12 @@
 		<div class="cn-duo">
 			<div class="cn-box">
 				<h3>Add a provider</h3>
+				{% if not service_upload_allowed %}
+				<p class="cn-sub" role="note" style="margin-bottom:15px;color:var(--cn-gold)">
+					Disabled: installing provider code runs arbitrary code on the server. Set <code>VIBRAVID_ALLOW_SERVICE_UPLOAD=1</code> to enable it
+					(this also unlocks editing <code>[HOOKS]</code> and <code>imp_service</code> from this page).
+				</p>
+				{% endif %}
 				<p class="cn-sub" style="margin-bottom:15px">
 					A ZIP containing the service folder
 					(<code>Spotify/__init__.py</code>, <code>downloader.py</code>, <code>scrapper.py</code>).

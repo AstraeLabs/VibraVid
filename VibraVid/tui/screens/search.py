@@ -18,9 +18,9 @@ from textual.widgets import Button, Input, LoadingIndicator, Static
 
 from VibraVid.cli.command.equivalent_command import EquivalentCommandBuilder
 from VibraVid.cli.command.queue import (
-    _PROCESS_TAG,
+    _all_queue_paths,
     _load_queue,
-    _queue_path,
+    argv_option,
     enqueue_argv,
     enqueue_many,
 )
@@ -75,6 +75,11 @@ def _item_year(item) -> int | None:
         return int(str(getattr(item, "year", "")).split("-")[0].strip())
     except (ValueError, TypeError):
         return None
+
+
+def _pick_options(item: object) -> dict:
+    """CLI options that make the child process pick *this* result (--item is a 0-based index into a fresh search)."""
+    return {"item_title": str(getattr(item, "name", "") or getattr(item, "title", "") or "").strip(), "item_year": _item_year(item)}
 
 
 def _normalize_title(title: str) -> str:
@@ -142,40 +147,52 @@ def _sort_results(
     return list(results)
 
 
-def _get_library_status(item: object, site: str) -> str | None:
-    """Check if item is already in history ('in_library') or queue ('in_queue')."""
-    try:
+class LibraryIndex:
+    def __init__(self) -> None:
+        self._active: list[str] = []
+        self._queued: list[tuple[str, int | None]] = []
+        self._history: list[str] = []
+        try:
+            self._active = [str(d.get("title", "")).strip().lower() for d in download_tracker.get_active_downloads()]
+            self._history = [
+                str(h.get("title", "")).strip().lower()
+                for h in download_tracker.get_history()
+                if h.get("status") == "completed"
+            ]
+        except Exception:
+            logger.debug("library index: tracker unavailable", exc_info=True)
+        
+        try:
+            for path in _all_queue_paths():
+                for q_item in _load_queue(path).get("items", []):
+                    if q_item.get("status") not in ("pending", "running"):
+                        continue
+                    argv = q_item.get("argv", [])
+                    title = argv_option(argv, "--item-title") or argv_option(argv, "-s") or argv_option(argv, "--search")
+                    if not title:
+                        continue
+                    year = argv_option(argv, "--item-year")
+                    self._queued.append((_normalize_title(title), int(year) if year and year.isdigit() else None))
+        except Exception:
+            logger.debug("library index: queue unavailable", exc_info=True)
+
+    def status(self, item: object) -> str | None:
+        """'in_queue' when downloading or queued (same title AND year), 'in_library' when already downloaded."""
         name = str(getattr(item, "name", "") or getattr(item, "title", "")).strip().lower()
         if not name:
             return None
 
-        # 1. Check active downloads
-        active = download_tracker.get_active_downloads()
-        for d in active:
-            d_title = str(d.get("title", "")).strip().lower()
-            if name in d_title or d_title in name:
+        if any(name in title or title in name for title in self._active if title):
+            return "in_queue"
+
+        norm, year = _normalize_title(name), _item_year(item)
+        for q_title, q_year in self._queued:
+            if q_title == norm and (q_year is None or year is None or q_year == year):
                 return "in_queue"
 
-        # 2. Check queue
-        tag = _PROCESS_TAG
-        path = _queue_path(tag)
-        q_data = _load_queue(path)
-        for q_item in q_data.get("items", []):
-            if q_item.get("status") in ("pending", "running"):
-                argv = " ".join(q_item.get("argv", [])).lower()
-                if name in argv:
-                    return "in_queue"
-
-        # 3. Check history
-        history = download_tracker.get_history()
-        for h in history:
-            if h.get("status") == "completed":
-                h_title = str(h.get("title", "")).strip().lower()
-                if name == h_title or (len(name) > 4 and name in h_title):
-                    return "in_library"
-    except Exception:
-        pass
-    return None
+        if any(name == title or (len(name) > 4 and name in title) for title in self._history):
+            return "in_library"
+        return None
 
 
 @dataclass
@@ -523,6 +540,7 @@ class SearchScreen(Screen):
 
         sorted_filtered = _sort_results(filtered, self._current_sort_mode, self._last_query)
         global_mode = self._site is None
+        library = LibraryIndex()
         items = []
 
         for site, it, providers in sorted_filtered:
@@ -549,7 +567,7 @@ class SearchScreen(Screen):
             is_selected = item_key in self._selected_keys
             sel_badge = "[bold green]✓[/bold green] " if is_selected else ""
 
-            lib_status = _get_library_status(it, site)
+            lib_status = library.status(it)
             if lib_status == "in_library":
                 lib_badge = f" [bold green][{t('in_library_badge')}][/bold green]"
             elif lib_status == "in_queue":
@@ -700,7 +718,7 @@ class SearchScreen(Screen):
             open_btn.label = t('select_seasons_episodes')
 
         prov_str = ", ".join(p[0] for p in providers)
-        lib_status = _get_library_status(active_item, active_site)
+        lib_status = LibraryIndex().status(active_item)
         if lib_status == "in_library":
             status_line = f"\n[bold green]{t('in_library_badge')}[/bold green]"
         elif lib_status == "in_queue":
@@ -860,13 +878,19 @@ class SearchScreen(Screen):
         """Enqueue highlighted item to background queue immediately."""
         if isinstance(self.focused, Input):
             return
+        
         target = self._get_active_target()
         if not target:
             return
+        
         site, item, _ = target
+        if getattr(item, "is_series", False):
+            self.app.notify(t("series_needs_episode_choice", count=1), severity="warning")
+            return
+        
         search_term = str(getattr(item, "name", "") or getattr(item, "title", "") or "")
         builder = EquivalentCommandBuilder(excluded_dests=[])
-        argv = builder.build_argv_from_params(site=site, search=search_term, item="1")
+        argv = builder.build_argv_from_params(site=site, search=search_term, item="0", options=_pick_options(item))
 
         if not argv:
             self.app.notify(t("could_not_build_cmd"), severity="error")
@@ -879,8 +903,8 @@ class SearchScreen(Screen):
                 severity="information",
             )
             self._populate_results_list()
-        except Exception as e:
-            self.app.notify(t("queue_error", error=str(e)), severity="error")
+        except (Exception, SystemExit) as e:
+            self.app.notify(t("queue_error", error=str(e) or "queue busy"), severity="error")
 
     @on(Button.Pressed, "#preview-copy-btn")
     def _on_preview_copy(self) -> None:
@@ -896,7 +920,7 @@ class SearchScreen(Screen):
         site, item, _ = target
         search_term = str(getattr(item, "name", "") or getattr(item, "title", "") or "")
         builder = EquivalentCommandBuilder(excluded_dests=[])
-        argv = builder.build_argv_from_params(site=site, search=search_term, item="1")
+        argv = builder.build_argv_from_params(site=site, search=search_term, item="0", options=_pick_options(item))
 
         if not argv:
             self.app.notify(t("could_not_build_cmd"), severity="error")
@@ -961,20 +985,33 @@ class SearchScreen(Screen):
 
         builder = EquivalentCommandBuilder(excluded_dests=[])
         argv_list = []
+        skipped_series = 0
 
         for site, item, _providers in self._raw:
             item_key = f"{site}:{getattr(item, 'id', getattr(item, 'name', ''))}"
             if item_key in self._selected_keys:
+                if getattr(item, "is_series", False):
+                    skipped_series += 1
+                    continue
+
                 search_term = str(getattr(item, "name", "") or getattr(item, "title", "") or "")
-                argv = builder.build_argv_from_params(site=site, search=search_term, item="1")
+                argv = builder.build_argv_from_params(site=site, search=search_term, item="0", options=_pick_options(item))
                 if argv:
                     argv_list.append(argv)
 
-        enqueued_count = len(enqueue_many(argv_list))
+        try:
+            enqueued_count = len(enqueue_many(argv_list)) if argv_list else 0
+        except (Exception, SystemExit) as e:
+            self.app.notify(t("queue_error", error=str(e) or "queue busy"), severity="error")
+            return
 
         self._selected_keys.clear()
         self._populate_results_list()
-        self.app.notify(t("batch_enqueued_msg", count=enqueued_count), severity="information")
+        if enqueued_count:
+            self.app.notify(t("batch_enqueued_msg", count=enqueued_count), severity="information")
+        
+        if skipped_series:
+            self.app.notify(t("series_needs_episode_choice", count=skipped_series), severity="warning")
 
     @on(FuzzyList.Chosen, "#results")
     def _on_chosen(self, event: FuzzyList.Chosen) -> None:

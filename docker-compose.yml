@@ -7,8 +7,10 @@ services:
     container_name: ${VIBRAVID_CONTAINER_NAME:-vibravid}
 
     ### Networking
+    # VIBRAVID_BIND limits the interface the GUI listens on: 127.0.0.1 = this machine only
+    # (put a reverse proxy in front for remote access). Default 0.0.0.0 = every interface.
     ports:
-      - "${VIBRAVID_PORT:-8000}:8000"
+      - "${VIBRAVID_BIND:-0.0.0.0}:${VIBRAVID_PORT:-8000}:8000"
     # Bypass Docker's embedded DNS proxy (127.0.0.11)
     dns:
       - 1.1.1.1
@@ -36,9 +38,13 @@ services:
       - ${VIBRAVID_CONFIG_DIR:-vibravid_config}:/app/Conf
       # CDM / binary directory persistence
       - ${VIBRAVID_BINARY_DIR:-vibravid_binary}:/home/appuser/.local/bin/binary
-      # Docker socket — enables the in-app "Update now" button to pull the new
+      # Docker socket — OPTIONAL. Enables the in-app "Update now" button to pull the new
       # image and recreate the container by driving the host Docker daemon.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # SECURITY: access to this socket is root on the host. Anyone who can run code inside the
+      # container (or reach an unprotected GUI) can start privileged containers. Leave it
+      # commented out unless the GUI is protected (VIBRAVID_USERNAME/PASSWORD) and you accept
+      # that; update manually with `docker compose pull && docker compose up -d` instead.
+      # - /var/run/docker.sock:/var/run/docker.sock
       # NOTE: /app/VibraVid/services is INTENTIONALLY NOT a named volume.
       # If it were, the volume would freeze the services directory to the
       # snapshot captured the first time the container started, and any
@@ -70,6 +76,17 @@ services:
       # Host Configuration (override both in .env when you reach the UI from another machine)
       ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1,vibravid}"
       CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
+
+      # ── GUI access control ──
+      # Set both to require a login on every GUI page (webhooks, the Telegram bot and the remote API
+      # keep their own tokens). Without them the GUI is open to anyone who can reach the port.
+      VIBRAVID_USERNAME: "${VIBRAVID_USERNAME:-}"
+      VIBRAVID_PASSWORD: "${VIBRAVID_PASSWORD:-}"
+      # Off by default. 1 = allow uploading provider ZIPs, importing git sources and editing
+      # [HOOKS] / imp_service from the web UI. All of them run code on the server.
+      VIBRAVID_ALLOW_SERVICE_UPLOAD: "${VIBRAVID_ALLOW_SERVICE_UPLOAD:-0}"
+      # Shared secret the Telegram bot sends as X-VibraVid-Token (needed to keep /coda working once the login is on)
+      VIBRAVID_BOT_SECRET: "${VIBRAVID_BOT_SECRET:-}"
 
       # Uncomment for private network deployment (behind reverse proxy)
       # USE_X_FORWARDED_HOST: "true"

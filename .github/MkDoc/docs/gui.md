@@ -77,7 +77,20 @@ Open `http://<host>:8000`. For Docker/NAS use the [Docker](docker.md) and [NAS](
 
 Set `VIBRAVID_BOT_SECRET` to require a matching `X-VibraVid-Token` header. Without it these endpoints are unauthenticated: set it before exposing the GUI beyond your LAN.
 
+### Language
+
+The GUI is available in English and Italian. The selector in the header picks the language for that browser; `gui_language` in `config.toml` (`auto`, `en`, `it`) sets the default, and `auto` follows the browser's language.
+
+Translations live in `GUI/searchapp/i18n/<code>.json`: a flat object that maps the English text to its translation, with `{name}` capturing variable parts (`"{n} seasons": "{n} stagioni"`). A missing entry simply stays in English, so a new language is one file and no code; the selector lists it automatically. Provider content (titles, captions) and log lines are never translated.
+
+### Login
+
+By default the GUI has no login. Set `VIBRAVID_USERNAME` and `VIBRAVID_PASSWORD` to require one on every page (5 failed attempts per address lock the login for 5 minutes). Webhooks, the Telegram bot (`VIBRAVID_BOT_SECRET`) and the remote API keep their own tokens. See [Securing the GUI](docker.md#securing-the-gui).
+
 ### Custom service upload
+
+!!! warning "Disabled by default"
+    Installing provider code runs it on the server, so the upload, **Refresh external import** and editing `[HOOKS]`/`imp_service` need `VIBRAVID_ALLOW_SERVICE_UPLOAD=1`.
 
 Settings -> *Providers* -> **Add a provider** installs a site module ZIP (`api/upload-service/`) into `VibraVid/services/<name>` and reloads the registry (`api/registry-status/`). It only appears in the GUI dropdown if it ships `GUI/searchapp/api/<service_name>.py`. **Uploaded providers** lists your uploads, each with a **Remove** button (click twice to confirm); built-in services and `imp_service` sources can't be removed. With Docker, uploads live in the container's writable layer and are lost when it is recreated: re-upload or use an `imp_service` source.
 

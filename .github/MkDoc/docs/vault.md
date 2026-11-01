@@ -9,6 +9,7 @@ for the fields.
 [DRM.vault.default]
 url = "https://drm-db.dev"
 token = ""
+track_downloads = true
 
 [DRM.vault.myvault]
 url = "https://drm.example.com"

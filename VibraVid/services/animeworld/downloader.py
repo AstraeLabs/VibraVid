@@ -12,6 +12,7 @@ from VibraVid.services._base import Entries, anime_folder, print_episode_header,
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import os_manager, start_message
+from VibraVid.utils.media.anime_naming import series_name_and_year
 
 from .scrapper import ScrapSerie
 
@@ -61,6 +62,7 @@ def download_episode(episode_data, index_select, scrape_serie, season_number=1):
     episode_name = f"Episode {episode_number}"
     series_name = scrape_serie.get_name()
     print_episode_header(series_name, episode=episode_number)
+    folder_name, folder_year = getattr(scrape_serie, "series_identity", None) or (series_name, None)
 
     # Add episode information to context tracker
     context_tracker.season = season_number
@@ -68,8 +70,8 @@ def download_episode(episode_data, index_select, scrape_serie, season_number=1):
     context_tracker.episode_name = episode_name
 
     path_components, filename = map_episode_path(
-        series_name=series_name,
-        series_year=None,
+        series_name=folder_name,
+        series_year=folder_year,
         season_number=season_number,
         episode_number=episode_number,
         episode_name=episode_name,
@@ -115,6 +117,10 @@ def download_series(
         last_command = episode_selection
 
     list_episode_select = manage_selection(last_command, len(episodes))
+    mal_id, anilist_id = getattr(scrape_serie, "get_external_ids", lambda: (None, None))()
+    scrape_serie.series_identity = series_name_and_year(
+        scrape_serie.get_name(), mal_id=mal_id, anilist_id=anilist_id, tmdb_id=getattr(select_title, "tmdb_id", None)
+    )
     season_number = int(season_selection) if str(season_selection or "").isdigit() and int(season_selection) > 0 else 1
 
     # Download selected episodes

@@ -18,6 +18,9 @@ from VibraVid.utils.config import tomllib
 
 from .. import services_admin
 from .._download_infra import set_max_download_slots
+from ..security import require_service_upload, service_upload_allowed
+
+MAX_SERVICE_ZIP_BYTES = 50 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +69,15 @@ def _sites_snapshot() -> dict:
 
 
 @require_http_methods(["POST"])
+@require_service_upload
 def upload_service_zip(request: HttpRequest) -> JsonResponse:
     """Handle ZIP file upload to install a new service plugin."""
     uploaded = request.FILES.get("service_zip")
     if not uploaded:
         return JsonResponse({"success": False, "error": "Nessun file ZIP caricato."}, status=400)
+
+    if uploaded.size > MAX_SERVICE_ZIP_BYTES:
+        return JsonResponse({"success": False, "error": "Archive too large."}, status=413)
 
     if not uploaded.name.lower().endswith(".zip"):
         return JsonResponse({"success": False, "error": "Il file deve essere un archivio .zip"}, status=400)
@@ -129,6 +136,9 @@ def upload_service_zip(request: HttpRequest) -> JsonResponse:
 
             if svc_name.startswith("_") or svc_name in {"base", "_base"}:
                 errors.append(f"'{svc_name}': reserved name, cannot be installed as a service")
+                continue
+            if svc_name in services_admin.BUILTIN_SERVICES:
+                errors.append(f"'{svc_name}': built-in service, cannot be replaced by an upload")
                 continue
 
             compiled = CompiledService(svc_name, svc_path)
@@ -261,6 +271,40 @@ def remove_service_view(request: HttpRequest) -> JsonResponse:
     })
 
 
+def _deep_merge(base: dict, patch: dict) -> dict:
+    merged = dict(base)
+    for key, value in patch.items():
+        merged[key] = _deep_merge(merged[key], value) if isinstance(value, dict) and isinstance(merged.get(key), dict) else value
+    return merged
+
+
+def _executable_surface(cfg: dict) -> tuple:
+    """The settings that make VibraVid run commands or import code: [HOOKS] and ``imp_service``."""
+    default = cfg.get("DEFAULT") if isinstance(cfg.get("DEFAULT"), dict) else {}
+    return (json.dumps(cfg.get("HOOKS"), sort_keys=True, default=str),
+            json.dumps(default.get("imp_service"), sort_keys=True, default=str),
+            json.dumps(cfg.get("imp_service"), sort_keys=True, default=str))
+
+
+def _changes_executable_surface(file_path: str, content: str | None, patch: dict | None, delete: list) -> bool:
+    try:
+        with open(file_path, encoding="utf-8") as fh:
+            current = tomllib.loads(fh.read())
+    except (OSError, tomllib.TOMLDecodeError):
+        current = {}
+    if patch is None:
+        proposed = tomllib.loads(content or "")
+    else:
+        proposed = _deep_merge(current, patch)
+        for key_path in delete:
+            node = proposed
+            for key in key_path[:-1]:
+                node = node.get(key) if isinstance(node, dict) else None
+            if isinstance(node, dict):
+                node.pop(key_path[-1], None)
+    return _executable_surface(current) != _executable_surface(proposed)
+
+
 @require_http_methods(["POST"])
 def save_settings(request: HttpRequest) -> JsonResponse:
     try:
@@ -297,10 +341,20 @@ def save_settings(request: HttpRequest) -> JsonResponse:
             try:
                 tomllib.loads(content)
             except tomllib.TOMLDecodeError as e:
+                # The parser message (line/column) goes to the log, not back to the browser.
+                logger.warning("Rejected invalid %s.toml: %s", file_type, e)
                 return JsonResponse({
                     "success": False,
-                    "error": f"TOML non valido: {str(e)}"
+                    "error": "TOML non valido: controlla la sintassi (il dettaglio è nel log)."
                 }, status=400)
+
+        if (file_type == 'config' and not service_upload_allowed()
+                and _changes_executable_surface(file_path, content, patch, data.get('delete') or [])):
+            return JsonResponse({
+                "success": False,
+                "error": "Changing [HOOKS] or imp_service is disabled: they run commands/code on the server. "
+                         "Set VIBRAVID_ALLOW_SERVICE_UPLOAD=1 to enable it, or edit config.toml on disk.",
+            }, status=403)
 
         hidden_before = hidden_services() if file_type == 'config' else None
 
@@ -351,10 +405,11 @@ def save_settings(request: HttpRequest) -> JsonResponse:
             "parsed": tomllib.loads(content_saved),
         })
 
-    except Exception as e:
+    except Exception:
+        logger.exception("Saving settings failed")
         return JsonResponse({
             "success": False,
-            "error": f"Errore nel salvataggio: {str(e)}"
+            "error": "Errore nel salvataggio: dettaglio nel log."
         }, status=500)
 
 

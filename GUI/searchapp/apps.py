@@ -30,6 +30,13 @@ class SearchappConfig(AppConfig):
         except Exception as exc:
             logger.exception("[Logger] Failed to initialize: %s", exc)
 
+        try:
+            from .security import log_startup_warning
+
+            log_startup_warning()
+        except Exception as exc:
+            logger.exception("[Security] Startup check failed: %s", exc)
+
         # Remove log files older than DEFAULT.log_retention_days
         try:
             from .log_retention import purge_old_logs

@@ -28,7 +28,7 @@ from django.core.management import call_command
 from searchapp import log_retention
 from searchapp.arr import arr_service
 from searchapp.arr.item_log import NoItemFilter, item_log
-from searchapp.models import ArrProcessingQueue
+from searchapp.models import ArrMediaRequest, ArrProcessingQueue
 from searchapp.views.logs_view import _tail_lines
 
 
@@ -157,6 +157,37 @@ def test_unlimited_and_unmonitored_failures_do_not_count(queue_db, monkeypatch):
 
     arr_service._mark_failed(item, "radarr_unmonitored")
     assert ArrProcessingQueue.objects.get().attempts == 4
+
+
+def test_import_not_confirmed_counts_as_attempt(queue_db, monkeypatch):
+    monkeypatch.setattr(arr_service, "_load_arr_config", lambda: {"max_retry_attempts": 2})
+    item = {"id": 30, "title": "Different numbering", "content_type": "episode", "tmdbId": 4}
+
+    for _ in range(2):
+        assert arr_service._enqueue_if_new(item, "polling")
+        arr_service._mark_failed(item, "import_not_confirmed")
+
+    entry = ArrProcessingQueue.objects.get()
+    assert entry.attempts == 2
+    assert entry.media_request.status == ArrMediaRequest.Status.IMPORT_PENDING
+    assert arr_service._enqueue_if_new(item, "polling") is False  # gave up, no more 2.5 min cycles
+
+
+def test_wrote_files_since_detects_download_output(tmp_path):
+    from searchapp.arr.downloader_service import ArrDownloaderService
+
+    probe = ArrDownloaderService._wrote_files_since
+    started = time.time()
+    assert probe([str(tmp_path), str(tmp_path / "missing")], started) is False
+
+    old = tmp_path / "old.mkv"
+    old.write_bytes(b"x")
+    os.utime(old, (started - 3600, started - 3600))
+    assert probe([str(tmp_path)], started) is False
+
+    (tmp_path / "Season 1").mkdir()
+    (tmp_path / "Season 1" / "new.mkv").write_bytes(b"x")
+    assert probe([str(tmp_path)], started) is True
 
 
 def test_success_resets_attempts(queue_db, monkeypatch):

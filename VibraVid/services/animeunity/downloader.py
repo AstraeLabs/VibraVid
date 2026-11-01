@@ -12,6 +12,7 @@ from VibraVid.services._base import Entries, anime_folder, movie_folder, print_e
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import config_manager, os_manager, start_message
+from VibraVid.utils.media.anime_naming import series_name_and_year
 
 from .scrapper import ScrapeSerieAnime
 
@@ -61,9 +62,10 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
         context_tracker.episode = episode_number
         context_tracker.episode_name = episode_name
 
+        series_name, series_year = getattr(scrape_serie, "series_identity", None) or (scrape_serie.series_name, None)
         path_components, filename = map_episode_path(
-            series_name=scrape_serie.series_name,
-            series_year=None,
+            series_name=series_name,
+            series_year=series_year,
             season_number=season_number,
             episode_number=episode_number,
             episode_name=episode_name,
@@ -120,6 +122,14 @@ def download_series(
     if scrape_serie is None:
         scrape_serie = ScrapeSerieAnime(site_constants.FULL_URL)
         scrape_serie.setup(None, select_title.id, select_title.slug)
+
+    # One "Title (Year)" folder for every season/part/dub of the show (TMDB via the MAL/AniList crosswalk)
+    scrape_serie.series_identity = series_name_and_year(
+        scrape_serie.series_name,
+        mal_id=getattr(select_title, "mal_id", None),
+        anilist_id=getattr(select_title, "anilist_id", None),
+        tmdb_id=getattr(select_title, "tmdb_id", None),
+    )
 
     video_source = VideoSourceAnime(site_constants.FULL_URL)
     season_number = int(season_selection) if str(season_selection or "").isdigit() and int(season_selection) > 0 else 1

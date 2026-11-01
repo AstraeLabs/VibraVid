@@ -51,6 +51,17 @@ class Vault_di_default(BaseVault):
     def is_writable(self) -> bool:
         return SAVE_KEYS
 
+    def is_tracking_enabled(self) -> bool:
+        """Download tracking (service/type/title of each finished download) can be switched off."""
+        try:
+            cfg = config_manager.config.get_dict("DRM", "vault").get("default") or {}
+        except Exception:
+            cfg = _default_cfg
+        value = cfg.get("track_downloads", True)
+        if isinstance(value, str):
+            return value.strip().lower() not in {"false", "0", "no", "off"}
+        return bool(value)
+
     def _post(self, endpoint: str, payload: dict) -> dict | None:
         url = f"{self.base_url}/{endpoint}"
         try:
@@ -94,6 +105,10 @@ class Vault_di_default(BaseVault):
             try:
                 if not self.is_connected:
                     logger.warning("track_download_async: default_vault not configured")
+                    return
+                
+                if not self.is_tracking_enabled():
+                    logger.debug("[TRACK] Download tracking disabled (track_downloads = false)")
                     return
 
                 title_str = (title or "").strip()

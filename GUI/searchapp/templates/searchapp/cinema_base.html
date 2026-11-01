@@ -4,7 +4,7 @@
 	Guscio della UI. Layout tutto in cinema.css, palette fissa (niente
 	selettore temi).
 {% endcomment %}
-<html lang="en">
+<html lang="{{ gui_lang|default:'en' }}">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -38,6 +38,7 @@
 		{% endcomment %}
 		<script src="{% static 'searchapp/cinema.js' %}"></script>
 		{% block head %}{% endblock %}
+		{% include "searchapp/_i18n_boot.html" %}
 	</head>
 
 	<body class="cn">
@@ -67,6 +68,10 @@
 
 			<div class="cn-top-right">
 				<span class="cn-vtag">v{{ app_version }}</span>
+				{% include "searchapp/_lang_select.html" %}
+				{% if gui_auth_enabled %}
+				<form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button class="cn-donate" type="submit" style="cursor:pointer">Logout</button></form>
+				{% endif %}
 				<a class="cn-donate" href="https://www.paypal.com/donate/?hosted_button_id=UXTWMT8P6HE2C" target="_blank" rel="noopener">Donate</a>
 			</div>
 		</header>
@@ -158,7 +163,7 @@
 		</script>
 
         {{ audio_language_config|json_script:"cn-audio-config" }}
-        <script src="{% static 'searchapp/audio_languages.js' %}"></script>
+        <script src="{% static 'searchapp/audio_languages.js' %}?v={{ app_version }}"></script>
         <script src="{% static 'searchapp/quality.js' %}"
                 data-quality-url="{% url 'available_qualities' %}"
                 data-download-url="{% url 'start_download' %}"

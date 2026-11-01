@@ -47,6 +47,7 @@ def services(tmp_path, monkeypatch):
     (root / "no_init" / "readme.txt").write_text("x", encoding="utf-8")
     monkeypatch.setattr(services_admin, "services_dir", lambda: str(root))
     monkeypatch.setattr(settings_view, "_reload_service_registries", lambda names: [])
+    monkeypatch.setenv("VIBRAVID_ALLOW_SERVICE_UPLOAD", "1")
     return root
 
 

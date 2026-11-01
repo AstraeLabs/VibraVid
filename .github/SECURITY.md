@@ -7,6 +7,11 @@ fixes. The app itself checks for and prompts you to update to the latest
 release — please update before reporting an issue to confirm it still
 reproduces there.
 
+## Deployment hardening
+
+The web GUI has no login unless you set `VIBRAVID_USERNAME` and `VIBRAVID_PASSWORD`, and it listens on every interface by default. Do not expose it to untrusted networks without a login; see
+[Securing the GUI](https://astraelabs.github.io/VibraVid/docker/#securing-the-gui).
+
 ## Reporting a Vulnerability
 
 Please **do not** open a public GitHub issue for security vulnerabilities.

@@ -828,3 +828,6 @@ a.cn-tile:focus-visible { outline: 2px solid var(--cn-gold); outline-offset: 3px
   border-radius:6px; background:var(--cn-surf); color:var(--cn-mute); font-size:11px; }
 .cn-track-spec b { color:var(--cn-white); font-weight:650; }
 .cn-facts .cn-selected-tracks { flex-basis:100%; }
+
+/* GUI language selector (header + login page) */
+.cn-lang { background: var(--cn-surf); color: var(--cn-white); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }

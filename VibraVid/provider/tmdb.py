@@ -313,6 +313,12 @@ class TMDBClient:
 
         return None
 
+    def get_first_air_year(self, tmdb_id: int) -> int | None:
+        """Return the first-air year of a TV show from its TMDB id."""
+        details = self._make_request(f"tv/{tmdb_id}", {"language": "en-US"})
+        first_air_date = str(details.get("first_air_date") or "")
+        return int(first_air_date[:4]) if first_air_date[:4].isdigit() else None
+
     def get_year_by_slug_and_type(self, slug: str, media_type: str, language_preference: str = "it"):
         """Returns the year from the first search result that matches the slug."""
         if media_type == "movie":

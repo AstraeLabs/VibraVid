@@ -1398,9 +1398,11 @@ def _mark_failed(item: dict, error: str, season_num=None, ep_num=None):
             queue_entry.success = False
             status = ArrMediaRequest.Status.FAILED
             normalized_error = (error or "").lower()
+            
             if "import_not_confirmed" in normalized_error or "import not confirmed" in normalized_error:
                 status = ArrMediaRequest.Status.IMPORT_PENDING
-            elif "unmonitored" not in normalized_error:
+            
+            if "unmonitored" not in normalized_error:
                 queue_entry.attempts += 1
                 max_attempts = int(_load_arr_config().get("max_retry_attempts") or 0)
                 if max_attempts and queue_entry.attempts == max_attempts:
