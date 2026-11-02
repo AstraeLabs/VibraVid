@@ -65,6 +65,7 @@ from .helper.video import (
     convert_ts_to_mp4,
     detect_ts_timestamp_issues,
     get_media_metadata,
+    audio_editlist_args,
     get_stream_codecs,
     is_mpegts_file,
     resolve_compatible_extension,
@@ -959,6 +960,8 @@ def _join_media_ffmpeg(
 
         if is_mpegts_file(audio_path):
             ffmpeg_cmd.extend(["-f", "mpegts"])
+        else:
+            ffmpeg_cmd.extend(audio_editlist_args(audio_path))
 
         ffmpeg_cmd.extend(audio_offset_args(audio_track.get("_offset_sec", 0.0), audio_track.get("name")))
         ffmpeg_cmd.extend(["-i", audio_path])

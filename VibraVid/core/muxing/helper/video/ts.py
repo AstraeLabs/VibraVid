@@ -19,6 +19,18 @@ def _has_mpegts_sync(buf: bytes, start: int) -> bool:
     return end < len(buf) and buf[start] == 0x47 and buf[end] == 0x47
 
 
+def audio_editlist_args(path: str | None = None) -> list[str]:
+    """ffmpeg input option for an fMP4 audio input (before its ``-i``): ignore its edit list."""
+    if path is not None:
+        try:
+            with open(path, "rb") as f:
+                if f.read(12)[4:8] != b"ftyp":
+                    return []
+        except OSError:
+            return []
+    return ["-ignore_editlist", "1"]
+
+
 def is_mpegts_file(file_path: str) -> bool:
     """
     Detect whether a file is raw MPEG-TS by its packet sync bytes.

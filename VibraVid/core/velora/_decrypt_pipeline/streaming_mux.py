@@ -15,7 +15,7 @@ from VibraVid.core.muxing.helper.sub.disposition import (
     build_subtitle_disposition_args,
     get_configured_disposition_language,
 )
-from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
+from VibraVid.core.muxing.helper.video.ts import audio_editlist_args, is_mpegts_file
 from VibraVid.core.muxing.streaming_mux import StreamingMuxFeeder
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import track_title_and_iso_lang
@@ -320,6 +320,9 @@ class StreamingMuxMixin:
         for p, offset, (title, _lang) in zip(audio_paths, audio_offsets, audio_infos, strict=True):
             if is_mpegts_file(str(p)):
                 cmd += ["-f", "mpegts"]
+            else:
+                cmd += audio_editlist_args(str(p))
+            
             cmd += audio_offset_args(offset, title)
             cmd += ["-i", str(p)]
 

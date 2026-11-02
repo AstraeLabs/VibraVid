@@ -10,7 +10,7 @@ from .merge import (
 )
 from .metadata import get_media_metadata
 from .normalize import normalize_timestamps
-from .ts import convert_ts_to_mp4, detect_ts_timestamp_issues, is_mpegts_file
+from .ts import audio_editlist_args, convert_ts_to_mp4, detect_ts_timestamp_issues, is_mpegts_file
 
 __all__ = [
     "binary_merge_segments",
@@ -21,6 +21,7 @@ __all__ = [
     "normalize_timestamps",
     "get_stream_codecs",
     "resolve_compatible_extension",
+    "audio_editlist_args",
     "is_mpegts_file",
     "detect_ts_timestamp_issues",
     "convert_ts_to_mp4",

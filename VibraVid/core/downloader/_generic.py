@@ -25,7 +25,7 @@ from VibraVid.core.muxing.helper.sub.disposition import (
     build_subtitle_disposition_args,
     get_configured_disposition_language,
 )
-from VibraVid.core.muxing.helper.video.ts import is_mpegts_file
+from VibraVid.core.muxing.helper.video.ts import audio_editlist_args, is_mpegts_file
 from VibraVid.core.muxing.streaming_mux import ChunkRelay, NamedPipeMuxer, StreamingMuxFeeder
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 from VibraVid.core.ui.manual_tracks import manual_track_broker
@@ -669,6 +669,9 @@ class Generic_Downloader(BaseDownloader):
         for p in audio_paths:
             if is_mpegts_file(p):
                 cmd += ["-f", "mpegts"]
+            else:
+                cmd += audio_editlist_args(p)
+            
             cmd += ["-i", p]
         for p in subtitle_paths:
             cmd += ["-i", p]
@@ -1487,7 +1490,10 @@ class Generic_Downloader(BaseDownloader):
 
         def _build_cmd(audio_paths: list[str], sub_paths: list[tuple[int, str]]) -> list[str]:
             cmd = [ffmpeg_path, "-y", "-f", "mp4", "-i", video_pipe]
-            for p in audio_paths + [p for _, p in sub_paths]:
+            for p in audio_paths:
+                cmd += audio_editlist_args(p) + ["-i", p]
+            
+            for _, p in sub_paths:
                 cmd += ["-i", p]
 
             cmd += ["-map", "0:v:0"]

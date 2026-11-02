@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from VibraVid.core.decryptor._models import _run_flux_dump
+from VibraVid.core.muxing.helper.video.ts import audio_editlist_args
 from VibraVid.core.muxing.streaming_mux import NamedPipeMuxer
 from VibraVid.core.utils.language import track_title_and_iso_lang
 from VibraVid.core.utils.resolution import classify_resolution
@@ -147,8 +148,8 @@ class LiveMux:
         video, audios = self._tracks[0], self._tracks[1:]
         pipes = self._muxer.pipe_paths
         cmd = [get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "warning", "-nostats"]
-        for pipe in pipes:
-            cmd += ["-thread_queue_size", "1024", "-f", "mp4", "-i", pipe]
+        for idx, pipe in enumerate(pipes):
+            cmd += ["-thread_queue_size", "1024", "-f", "mp4", *(audio_editlist_args() if idx else []), "-i", pipe]
 
         cmd += ["-map", "0:v:0"]
         quality = classify_resolution(getattr(video, "width", 0), getattr(video, "height", 0))
