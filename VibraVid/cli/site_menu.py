@@ -85,24 +85,25 @@ class SiteMenu:
 
         first = keys[0] if typed.strip() else None
         cells: list[tuple[Text, Text, Text]] = []
-        border_width = self.name_width + 5
+        border_width = self.name_width + 6
         for key in keys:
             if key == GLOBAL_KEY:
                 color = "magenta"
                 name = Text.assemble(("(global) ", "bright_magenta"), ("Global", "bold bright_magenta"))
-                name.append(" " * (self.name_width - name.cell_len))
-                index = "  "
+                name.align("center", border_width - 2)
+                index = ""
             else:
                 name_value, cat = self.choice_labels[key]
                 color = self.category_colors.get(cat, "white")
                 name = Text(name_value.ljust(self.name_width), style="bold bright_white")
-                index = f"{key:>2}"
+                index = f"{key:>2}:"
 
             border_style = f"bold {color}"
             top = Text("┌" + "─" * border_width + "┐", style=border_style)
             middle = Text("│ ", style=border_style)
-            middle.append(index, style=f"bold {color}")
-            middle.append(" ")
+            if index:
+                middle.append(index, style=f"bold {color}")
+                middle.append(" ")
             if key == first:
                 name.stylize("on #30343b")
             middle.append_text(name)
