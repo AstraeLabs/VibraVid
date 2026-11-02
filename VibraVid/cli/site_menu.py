@@ -10,12 +10,14 @@ GLOBAL_KEY = "global"
 GLOBAL_LABEL = "(global) Global"
 DEFAULT_KEY = "0"
 COLUMNS = 4
+CELL_GAP = 2
 BACKSPACE_KEYS = ("\x08", "\x7f")
 CANCEL_KEYS = ("ESC", "\x03")
 
 
 class SiteMenu:
-    def __init__(self, choice_labels: dict[str, tuple[str, str]], category_colors: dict[str, str], console: Console):
+    def __init__(self, choice_labels: dict[str, tuple[str, str]], category_colors: dict[str, str], console: Console, category_labels: dict[str, str] | None = None):
+        self.category_labels = category_labels or {}
         self.choice_labels = choice_labels
         self.category_colors = category_colors
         self.console = console
@@ -58,7 +60,7 @@ class SiteMenu:
         keys = [
             key
             for key, (name, cat) in self.choice_labels.items()
-            if not needle or needle == key or needle in name.lower() or cat.startswith(needle)
+            if not needle or needle == key or needle in name.lower() or cat.startswith(needle) or needle in self.category_labels.get(cat, "").lower()
         ]
         if GLOBAL_KEY.startswith(needle):
             keys.append(GLOBAL_KEY)
@@ -69,9 +71,12 @@ class SiteMenu:
         for _, cat in self.choice_labels.values():
             counts[cat] = counts.get(cat, 0) + 1
 
-        legend = Text("  Category: ", style="cyan")
-        for cat, color in self.category_colors.items():
-            legend.append(f"{cat.capitalize()}({counts.get(cat, 0)})  ", style=color)
+        legend = Text("  Category: ", style="bold bright_white")
+        for index, (cat, color) in enumerate(self.category_colors.items()):
+            if index:
+                legend.append("  ")
+            legend.append(self.category_labels.get(cat, cat.capitalize()), style=f"bold {color}")
+            legend.append(f" ({counts.get(cat, 0)})", style="dim bright_white")
         return legend
 
     def _grid(self, typed: str) -> Text:
@@ -80,22 +85,53 @@ class SiteMenu:
             return Text("  no match", style="dim")
 
         first = keys[0] if typed.strip() else None
-        cells = []
+        cells: list[tuple[Text, Text, Text]] = []
+        border_width = self.name_width + 6
         for key in keys:
             if key == GLOBAL_KEY:
-                cell = Text(GLOBAL_LABEL.ljust(self.name_width + 4), style="magenta")
+                color = "magenta"
+                name = Text.assemble(("(global) ", "bright_magenta"), ("Global", "bold bright_magenta"))
+                name.align("center", border_width - 2)
+                index = ""
             else:
-                name, cat = self.choice_labels[key]
-                cell = Text.assemble((f"{key:>2}:", self.category_colors.get(cat, "white")), " ", (name.ljust(self.name_width), "cyan"))
-            if key == first:
-                cell.stylize("reverse")
-            cells.append(cell)
+                name_value, cat = self.choice_labels[key]
+                color = self.category_colors.get(cat, "white")
+                name = Text(name_value.ljust(self.name_width), style="bold bright_white")
+                index = f"{key:>2}:"
 
-        rows = [Text(" ").join(cells[i : i + COLUMNS]) for i in range(0, len(cells), COLUMNS)]
+            border_style = f"bold {color}"
+            top = Text("┌" + "─" * border_width + "┐", style=border_style)
+            middle = Text("│ ", style=border_style)
+            if index:
+                middle.append(index, style=f"bold {color}")
+                middle.append(" ")
+            if key == first:
+                name.stylize("on #30343b")
+            middle.append_text(name)
+            middle.append(" │", style=border_style)
+            bottom = Text("└" + "─" * border_width + "┘", style=border_style)
+            cells.append((top, middle, bottom))
+
+        columns = max(1, min(COLUMNS, (self.console.width + CELL_GAP) // (border_width + 2 + CELL_GAP)))
+        rows = []
+        for start in range(0, len(cells), columns):
+            row = cells[start : start + columns]
+            rows.extend(
+                Text(" " * CELL_GAP).join(cell[line] for cell in row)
+                for line in range(3)
+            )
         return Text("\n").join(rows)
 
     def _render(self, typed: str, active: bool = True) -> Group:
-        prompt = Text.assemble(("Insert site index", "cyan"), f" (number or name) [{DEFAULT_KEY}]: {typed}")
+        default_category = self.choice_labels.get(DEFAULT_KEY, ("", ""))[1]
+        default_color = self.category_colors.get(default_category, "bright_white")
+        prompt = Text.assemble(
+            ("Insert site index", "bold bright_white"),
+            ("  (number or name) ", "dim"),
+            (f"[{DEFAULT_KEY}]", f"bold {default_color}"),
+            (": ", "dim"),
+            (typed, "bold bright_white"),
+        )
         if active:
             prompt.append(" ", style="reverse")
         return Group(Text(), self._legend(), Text(), self._grid(typed), Text(), prompt)
