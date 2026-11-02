@@ -55,7 +55,9 @@ console = Console()
 msg = Prompt()
 logger = logging.getLogger(__name__)
 
-COLOR_MAP = {"anime": "red", "film_serie": "dark_orange", "serie": "green", "song": "grey35", "live": "magenta", "tor": "yellow"}
+COLOR_MAP = {"anime": "red", "serie": "dark_orange", "song": "grey35", "live": "magenta", "tor": "yellow"}
+CATEGORY_ALIASES = {"film_serie": "serie"}  # services declaring Film_Serie are listed under Serie
+CATEGORY_LABELS = {"serie": "Serie/Film"}
 
 CLOSE_CONSOLE = config_manager.config.get_bool("DEFAULT", "close_console")
 PERSISTENT_ARGS = {"use_proxy", "proxy_scope", "extension", "close_console"}
@@ -394,7 +396,8 @@ def build_function_mappings(search_functions):
 
         site_index = str(func.indice)
         input_to_function[site_index] = func
-        choice_labels[site_index] = (module_name.capitalize(), func.use_for.lower())
+        use_for = func.use_for.lower()
+        choice_labels[site_index] = (module_name.capitalize(), CATEGORY_ALIASES.get(use_for, use_for))
 
     logger.debug(f"Built function mappings: {input_to_function.keys()} and module names: {module_name_to_function.keys()}")
     return input_to_function, choice_labels, module_name_to_function
@@ -501,14 +504,14 @@ def _show_update_notice(info: dict) -> None:
 def get_user_site_selection(args, choice_labels):
     """Get site selection from user (interactive or category-based)."""
     if sys.stdin.isatty() and sys.stdout.isatty():
-        return SiteMenu(choice_labels, COLOR_MAP, console).run()
+        return SiteMenu(choice_labels, COLOR_MAP, console, CATEGORY_LABELS).run()
 
     counts: dict[str, int] = {}
     for _key, (_name, cat) in choice_labels.items():
         counts[cat] = counts.get(cat, 0) + 1
         
     legend_text = "  ".join(
-        [f"[{color}]{cat.capitalize()}({counts.get(cat, 0)})[/{color}]" for cat, color in COLOR_MAP.items()]
+        [f"[{color}]{CATEGORY_LABELS.get(cat, cat.capitalize())}({counts.get(cat, 0)})[/{color}]" for cat, color in COLOR_MAP.items()]
     )
     console.print(f"\n  [cyan]Category: {legend_text}")
     console.print()

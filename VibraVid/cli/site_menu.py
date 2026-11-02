@@ -16,7 +16,8 @@ CANCEL_KEYS = ("ESC", "\x03")
 
 
 class SiteMenu:
-    def __init__(self, choice_labels: dict[str, tuple[str, str]], category_colors: dict[str, str], console: Console):
+    def __init__(self, choice_labels: dict[str, tuple[str, str]], category_colors: dict[str, str], console: Console, category_labels: dict[str, str] | None = None):
+        self.category_labels = category_labels or {}
         self.choice_labels = choice_labels
         self.category_colors = category_colors
         self.console = console
@@ -59,7 +60,7 @@ class SiteMenu:
         keys = [
             key
             for key, (name, cat) in self.choice_labels.items()
-            if not needle or needle == key or needle in name.lower() or cat.startswith(needle)
+            if not needle or needle == key or needle in name.lower() or cat.startswith(needle) or needle in self.category_labels.get(cat, "").lower()
         ]
         if GLOBAL_KEY.startswith(needle):
             keys.append(GLOBAL_KEY)
@@ -74,7 +75,7 @@ class SiteMenu:
         for index, (cat, color) in enumerate(self.category_colors.items()):
             if index:
                 legend.append("  ")
-            legend.append(cat.capitalize(), style=f"bold {color}")
+            legend.append(self.category_labels.get(cat, cat.capitalize()), style=f"bold {color}")
             legend.append(f" ({counts.get(cat, 0)})", style="dim bright_white")
         return legend
 
