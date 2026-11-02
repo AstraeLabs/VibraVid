@@ -19,3 +19,4 @@ tomli; python_version < "3.11"
 pyyaml
 jsonpickle
 pycountry
+ytmusicapi
