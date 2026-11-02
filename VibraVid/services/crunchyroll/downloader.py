@@ -159,14 +159,25 @@ def download_film(select_title: Entries) -> str:
 
     # Extract media ID
     url_id = select_title.get("url").split("/")[-1]
-    preferred_groups = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
+    select_audio = config_manager.config.get("DOWNLOAD", "select_audio", default="")
+    preferred_groups = parse_select_audio_filter(select_audio)
 
     # Build the locale -> version GUID map from the playback API
     available = client.get_available_versions(url_id)
     time.sleep(2)
     locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
 
-    preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
+    # "all" must expand to every available Crunchyroll audio version.
+    # parse_select_audio_filter("all") intentionally returns no filter groups,
+    # so we handle it here using the playback API's locale-to-GUID map.
+    if str(select_audio or "").strip().lower() == "all":
+        preferred_locales = list(locale_to_guid.keys())
+        if preferred_locales:
+            console.print(f"[dim]Available audio versions: {', '.join(preferred_locales)}")
+        else:
+            console.print("[yellow]No audio versions returned by Crunchyroll; using the default audio only.")
+    else:
+        preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
     if not preferred_locales and len(preferred_groups) > 1:
         console.print("[yellow]Skipping — no audio slot matched the requested select_audio filter.")
         client.close()
@@ -249,7 +260,8 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     main_guid = getattr(obj_episode, "main_guid", None)
 
     # Parse preferred audio locale groups
-    preferred_groups = parse_select_audio_filter(config_manager.config.get("DOWNLOAD", "select_audio", default=""))
+    select_audio = config_manager.config.get("DOWNLOAD", "select_audio", default="")
+    preferred_groups = parse_select_audio_filter(select_audio)
 
     # Build the map of audio locale -> version GUID from the playback API.
     available = client.get_available_versions(url_id)
@@ -257,7 +269,17 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     locale_to_guid = {v["audio_locale"]: v["guid"] for v in available}
     api_main_guid = next((v["guid"] for v in available if "main" in v.get("roles", [])), None)
 
-    preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
+    # "all" must expand to every available Crunchyroll audio version.
+    # parse_select_audio_filter("all") intentionally returns no filter groups,
+    # so we handle it here using the playback API's locale-to-GUID map.
+    if str(select_audio or "").strip().lower() == "all":
+        preferred_locales = list(locale_to_guid.keys())
+        if preferred_locales:
+            console.print(f"[dim]Available audio versions: {', '.join(preferred_locales)}")
+        else:
+            console.print("[yellow]No audio versions returned by Crunchyroll; using the default audio only.")
+    else:
+        preferred_locales = next((g for g in preferred_groups if any(loc in locale_to_guid for loc in g)), [])
     if not preferred_locales and len(preferred_groups) > 1:
         console.print("[yellow]Skipping — no audio slot matched the requested select_audio filter.")
         return None, True, "no audio slot matched select_audio filter"
