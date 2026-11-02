@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from rich.console import Console
 from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, resolve_media_tokens, strip_media_tokens
 from VibraVid.core.muxing.helper.video import get_media_metadata
 from VibraVid.core.ui.bar_manager import DownloadBarManager
+from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.setup import get_yt_dlp_path
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,10 @@ class YTDLPDownloader:
         self.audio_quality = audio_quality
         self.playlist_end = playlist_end
         self.extractor_args = extractor_args or []
-        self.download_id = download_id
+        self.download_id = download_id or context_tracker.download_id
+        if self.download_id is None and context_tracker.is_gui:
+            self.download_id = str(uuid.uuid4())
+        self._tracking_started = False
         self.extra_args = kwargs
         self._yt_dlp_last_pct: dict[str, float] = {}
         self._yt_dlp_speed_hist: list[float] = []
@@ -216,6 +221,18 @@ class YTDLPDownloader:
         cmd.append(self.url)
         logger.info(f"Running yt-dlp: {' '.join(cmd)}")
 
+        if self.download_id and not (self.list_formats or self.interactive_format):
+            output_path = str(self.output_dir / self.filename) if self.filename else str(self.output_dir)
+            download_tracker.start_download(
+                self.download_id,
+                context_tracker.title or self.filename or self.url,
+                context_tracker.site_name or "yt-dlp",
+                context_tracker.media_type,
+                path=output_path,
+            )
+            download_tracker.update_status(self.download_id, "Downloading ...")
+            self._tracking_started = True
+
         output_lines: list[str] = []
         try:
             process = subprocess.Popen(
@@ -225,6 +242,8 @@ class YTDLPDownloader:
                 text=True,
                 env=env,
             )
+            if self.download_id and self._tracking_started:
+                download_tracker.register_process(self.download_id, process)
 
             if not (self.list_formats or self.interactive_format):
                 with DownloadBarManager(self.download_id) as bar_manager:
@@ -243,7 +262,12 @@ class YTDLPDownloader:
             if process.returncode != 0:
                 error = "\n".join(output_lines[-20:]).strip() or f"Exit code {process.returncode}"
                 logger.error(f"yt-dlp failed: {error}")
-                return None, False, error
+                stopped = bool(self.download_id and download_tracker.is_stopped(self.download_id))
+                self._complete_tracking(
+                    success=False,
+                    error="cancelled" if stopped else error,
+                )
+                return None, stopped, error
 
             if self.list_formats or self.interactive_format:
                 self._print_formats(output_lines)
@@ -267,19 +291,32 @@ class YTDLPDownloader:
             if downloaded:
                 if downloaded in files_before:
                     console.print(f"[yellow]File already exists: {downloaded}[/yellow]")
+                    self._complete_tracking(success=True, path=str(downloaded))
                     return downloaded, False, None
-                return self._resolve_media_tokens(downloaded), False, None
+                downloaded = self._resolve_media_tokens(downloaded)
+                self._complete_tracking(success=True, path=str(downloaded))
+                return downloaded, False, None
 
-            return None, False, "Download completed but output file not found"
+            error = "Download completed but output file not found"
+            self._complete_tracking(success=False, error=error)
+            return None, False, error
 
         except subprocess.TimeoutExpired:
             process.kill()
+            self._complete_tracking(success=False, error="Download timed out")
             return None, True, "Download timed out"
         except KeyboardInterrupt:
+            self._complete_tracking(success=False, error="cancelled")
             return None, True, "Cancelled by user"
         except Exception as exc:
             logger.exception(f"yt-dlp execution failed: {exc}")
+            self._complete_tracking(success=False, error=str(exc))
             return None, False, str(exc)
+
+    def _complete_tracking(self, *, success: bool, path: str | None = None, error: str | None = None) -> None:
+        if self._tracking_started and self.download_id:
+            download_tracker.complete_download(self.download_id, success=success, path=path, error=error)
+            self._tracking_started = False
 
     def _resolve_media_tokens(self, downloaded: Path) -> Path:
         """Probe the finished file and rename it so quality/codec/language tokens of the name template are filled."""

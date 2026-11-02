@@ -308,6 +308,17 @@ class DownloadTracker(metaclass=SingletonMeta):
             except Exception:
                 pass
 
+    def register_process(self, download_id: str, process: Any) -> None:
+        """Register a child process so a stop request can terminate it."""
+        with self._lock:
+            if download_id in self.active_processes:
+                self.active_processes[download_id].append(process)
+                should_stop = download_id in self.cancelled_downloads
+            else:
+                should_stop = False
+        if should_stop:
+            process.terminate()
+
     def is_stopped(self, download_id: str) -> bool:
         with self._lock:
             event = self.stop_events.get(download_id)
