@@ -63,7 +63,7 @@ def test_cancel_keys_raise_keyboard_interrupt(monkeypatch, key):
 def test_grid_hides_what_does_not_match_and_marks_the_first_match():
     text = menu()._grid("anime")
     assert "Animeunity" in text.plain and "Animeworld" in text.plain and "La7" not in text.plain
-    assert any(span.style == "reverse" for span in text.spans)
+    assert any(span.style == "on #30343b" for span in text.spans)
 
 
 def test_output_is_drawn_in_the_normal_buffer_without_clearing_the_screen(monkeypatch):
