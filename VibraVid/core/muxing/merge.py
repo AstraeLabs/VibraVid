@@ -62,10 +62,10 @@ from .helper.sub import (
     trim_subtitle_to_duration,
 )
 from .helper.video import (
+    audio_editlist_args,
     convert_ts_to_mp4,
     detect_ts_timestamp_issues,
     get_media_metadata,
-    audio_editlist_args,
     get_stream_codecs,
     is_mpegts_file,
     resolve_compatible_extension,
