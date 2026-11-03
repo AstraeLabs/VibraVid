@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 
-from VibraVid.utils.http_client import create_client
+from VibraVid.utils.http_client import SharedSession, create_client
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ def _quote(value: str) -> str:
 class IMDbClient:
     def __init__(self):
         self._cache: dict = {}
+        self._session = SharedSession(lambda: create_client())
 
     def graphql(self, operation: str, query: str) -> dict | None:
         """Run *query* and return its ``data``, or None on any error."""
@@ -56,13 +57,14 @@ class IMDbClient:
 
         extensions = {"persistedQuery": {"version": 1, "sha256Hash": hashlib.sha256(query.encode()).hexdigest()}}
         params = {"operationName": operation, "variables": "{}", "extensions": json.dumps(extensions, separators=(",", ":"))}
+        client = self._session.get()
         try:
-            with create_client() as client:
-                body = client.get(GRAPHQL_URL, params=params, headers=GRAPHQL_HEADERS, timeout=30).json()
-                if self._persisted_query_missing(body):
-                    payload = {"operationName": operation, "variables": {}, "query": query, "extensions": extensions}
-                    body = client.post(GRAPHQL_URL, json=payload, headers=GRAPHQL_HEADERS, timeout=30).json()
+            body = client.get(GRAPHQL_URL, params=params, headers=GRAPHQL_HEADERS, timeout=30).json()
+            if self._persisted_query_missing(body):
+                payload = {"operationName": operation, "variables": {}, "query": query, "extensions": extensions}
+                body = client.post(GRAPHQL_URL, json=payload, headers=GRAPHQL_HEADERS, timeout=30).json()
         except Exception as exc:
+            self._session.drop(client)
             logger.warning(f"IMDb request {operation} failed: {exc}")
             return None
 

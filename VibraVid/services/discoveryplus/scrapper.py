@@ -181,6 +181,75 @@ class GetSerieInfo:
         self._all_episodes = None
         self._get_show_info()
 
+    def _find_episodes_content_block(self, included: list) -> dict | None:
+        """Locate the show-page rail block that lists the show's episodes."""
+        candidates = []
+        for x in included:
+            attrs = x.get("attributes", {}) or {}
+            alias = attrs.get("alias", "")
+            component = attrs.get("component", {}) or {}
+            filters = component.get("filters", []) or []
+            has_season_filter = any(f.get("id") == "seasonNumber" for f in filters)
+            if "show-page-rail-episodes-tabbed-content" in alias and has_season_filter:
+                return x
+            
+            if "episodes" in alias and has_season_filter:
+                candidates.append(x)
+            
+        if candidates:
+            return candidates[0]
+        
+        aliases = ", ".join(
+            (x.get("attributes", {}) or {}).get("alias", "") for x in included if x.get("attributes")
+        )
+        logger.debug(f"Available included aliases for show {self.show_id}: {aliases}")
+        return None
+
+    def _fetch_collection_episodes(self, content_id: str, season_param: str, show_params: str) -> list:
+        """Fetch all episodes of one season from the collections endpoint, paging through all results."""
+        episodes = []
+        seen_ids = set()
+        page = 1
+        max_pages = 100
+        while page <= max_pages:
+            coll_url = f"{self.client.base_url}/cms/collections/{content_id}?{season_param}&{show_params}"
+            coll_params = {
+                "include": "default",
+                "decorators": "viewingHistory,badges,isFavorite,contentAction",
+                "page[items.number]": str(page),
+                "page[items.size]": "100",
+            }
+            with create_client(headers=self.client.headers, cookies=self.client.cookies) as client:
+                response = client.get(coll_url, params=coll_params)
+            response.raise_for_status()
+            season_data = response.json()
+
+            page_episodes = 0
+            for item in season_data.get("included", []):
+                if item.get("type") == "video" and item.get("attributes", {}).get("videoType") == "EPISODE":
+                    attrs = item["attributes"]
+                    relationships = item.get("relationships", {})
+                    edit_id = relationships.get("edit", {}).get("data", {}).get("id") or item.get("id")
+                    if not edit_id or edit_id in seen_ids:
+                        continue
+                    seen_ids.add(edit_id)
+                    episodes.append(
+                        {
+                            "id": edit_id,
+                            "show": self.series_name,
+                            "season": attrs.get("seasonNumber"),
+                            "episode": attrs.get("episodeNumber"),
+                            "title": attrs.get("name"),
+                        }
+                    )
+                    page_episodes += 1
+
+            # No new episodes on this page: we have reached the end of the season.
+            if page_episodes == 0:
+                break
+            page += 1
+        return episodes
+
     def _fetch_all_episodes(self):
         """Fetch all episodes for the show"""
         try:
@@ -204,24 +273,18 @@ class GetSerieInfo:
             self.series_name = show_info.get("attributes", {}).get("name", "Unknown")
 
             # Locate the episodes content block
-            content = next(
-                (
-                    x
-                    for x in included
-                    if "show-page-rail-episodes-tabbed-content" in x.get("attributes", {}).get("alias", "")
-                ),
-                None,
-            )
+            content = self._find_episodes_content_block(included)
             if not content:
                 logger.error(f"Episodes content block not found for show {self.show_id}")
                 return []
 
             content_id = content.get("id")
-            show_params = content["attributes"]["component"].get("mandatoryParams", "")
+            component = content.get("attributes", {}).get("component", {}) or {}
+            show_params = component.get("mandatoryParams", "")
 
             # Season filter options (parameters for each season)
             season_filter = next(
-                (f for f in content["attributes"]["component"].get("filters", []) if f.get("id") == "seasonNumber"),
+                (f for f in component.get("filters", []) if f.get("id") == "seasonNumber"),
                 None,
             )
             if not season_filter:
@@ -233,30 +296,9 @@ class GetSerieInfo:
 
             if season_params:
                 for season_param in season_params:
-                    coll_url = f"{self.client.base_url}/cms/collections/{content_id}?{season_param}&{show_params}"
-                    coll_params = {
-                        "include": "default",
-                        "decorators": "viewingHistory,badges,isFavorite,contentAction",
-                    }
-                    with create_client(headers=self.client.headers, cookies=self.client.cookies) as client:
-                        response = client.get(coll_url, params=coll_params)
-                    response.raise_for_status()
-                    season_data = response.json()
-
-                    for item in season_data.get("included", []):
-                        if item.get("type") == "video" and item.get("attributes", {}).get("videoType") == "EPISODE":
-                            attrs = item["attributes"]
-                            relationships = item.get("relationships", {})
-                            edit_id = relationships.get("edit", {}).get("data", {}).get("id") or item.get("id")
-                            all_episodes.append(
-                                {
-                                    "id": edit_id,
-                                    "show": self.series_name,
-                                    "season": attrs.get("seasonNumber"),
-                                    "episode": attrs.get("episodeNumber"),
-                                    "title": attrs.get("name"),
-                                }
-                            )
+                    all_episodes.extend(
+                        self._fetch_collection_episodes(content_id, season_param, show_params)
+                    )
             else:
                 item_refs = content.get("relationships", {}).get("items", {}).get("data", [])
                 collection_items = {x["id"]: x for x in included if x.get("type") == "collectionItem"}

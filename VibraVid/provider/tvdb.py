@@ -4,7 +4,7 @@ import logging
 import os
 
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client
+from VibraVid.utils.http_client import SharedSession, create_client
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class TVDBClient:
         self._api_key = api_key
         self._token: str | None = None
         self._cache: dict = {}
+        self._session = SharedSession(lambda: create_client())
 
     @property
     def api_key(self) -> str | None:
@@ -35,8 +36,12 @@ class TVDBClient:
         if not self.api_key:
             return None
         try:
-            with create_client() as client:
+            client = self._session.get()
+            try:
                 response = client.post(f"{BASE_URL}/login", json={"apikey": self.api_key}, timeout=30)
+            except Exception:
+                self._session.drop(client)
+                raise
             response.raise_for_status()
             self._token = response.json()["data"]["token"]
         except Exception as exc:
@@ -54,9 +59,9 @@ class TVDBClient:
         for _ in range(2):
             if not token:
                 return None
+            client = self._session.get()
             try:
-                with create_client() as client:
-                    response = client.get(f"{BASE_URL}{path}", params=params, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+                response = client.get(f"{BASE_URL}{path}", params=params, headers={"Authorization": f"Bearer {token}"}, timeout=30)
 
                 if response.status_code == 401:
                     token = self._login()
@@ -70,6 +75,8 @@ class TVDBClient:
                 self._cache[cache_key] = data
                 return data
             except Exception as exc:
+                if getattr(getattr(exc, "response", None), "status_code", None) is None:
+                    self._session.drop(client)
                 logger.debug(f"TVDB request {path} failed: {exc}")
                 return None
         return None

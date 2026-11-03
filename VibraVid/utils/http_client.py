@@ -5,6 +5,7 @@ import functools
 import json
 import logging
 import os
+import threading
 import urllib.request
 from contextlib import asynccontextmanager, contextmanager
 
@@ -192,6 +193,29 @@ def create_client(
     session.allow_redirects = follow_redirects
 
     return session
+
+
+class SharedSession:
+    def __init__(self, factory=create_client):
+        self._factory = factory
+        self._session = None
+        self._lock = threading.Lock()
+
+    def get(self) -> requests.Session:
+        with self._lock:
+            if self._session is None:
+                self._session = self._factory()
+            return self._session
+
+    def drop(self, session: requests.Session) -> None:
+        """Forget *session* after a transport error so the next call starts from a fresh connection."""
+        with self._lock:
+            if self._session is session:
+                self._session = None
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 def get_with_retry(session: requests.Session, url: str, retries: int | None = None, **kwargs) -> requests.Response:

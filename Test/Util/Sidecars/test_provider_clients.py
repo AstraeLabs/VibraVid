@@ -66,6 +66,38 @@ def _imdb(monkeypatch, **queues):
     return IMDbClient(), http
 
 
+def test_shared_session_is_reused_until_a_transport_error_drops_it():
+    from VibraVid.utils.http_client import SharedSession
+
+    made = []
+
+    def factory():
+        made.append(object())
+        return made[-1]
+
+    shared = SharedSession(factory)
+    first = shared.get()
+    assert shared.get() is first and len(made) == 1  # one connection serves every call
+
+    shared.drop(first)  # a stand-in without close() must not break the drop
+    second = shared.get()
+    assert second is not first and len(made) == 2
+
+    shared.drop(first)  # dropping a session that is no longer current leaves the current one alone
+    assert shared.get() is second
+
+
+def test_imdb_reuses_one_session_for_several_requests_and_recovers_after_a_network_error(monkeypatch):
+    client, http = _imdb(monkeypatch, gets=[_Response({"data": {"a": 1}}), ConnectionError("reset"), _Response({"data": {"b": 2}})])
+    made = []
+    monkeypatch.setattr(imdb_module, "create_client", lambda: made.append(1) or http)
+
+    assert client.graphql("Op", "query { a }") == {"a": 1}
+    assert client.graphql("Op", "query { b }") is None  # network error -> None, session dropped
+    assert client.graphql("Op", "query { c }") == {"b": 2}
+    assert len(made) == 2  # one session for the first call, a fresh one after the failure
+
+
 def test_imdb_uses_the_persisted_query_get_first(monkeypatch):
     client, http = _imdb(monkeypatch, gets=[_Response({"data": {"title": {"id": "tt1"}}})])
     assert client.graphql("Op", "query Op { x }") == {"title": {"id": "tt1"}}

@@ -131,3 +131,6 @@ cdm = ""
 args = ""
 profile = ""
 process = { live_mux = true, live_decrypt = true }
+
+[justwatch]
+tv_login = false

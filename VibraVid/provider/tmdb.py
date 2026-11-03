@@ -11,7 +11,7 @@ from rich.console import Console
 from unidecode import unidecode
 
 from VibraVid.utils import config_manager
-from VibraVid.utils.http_client import create_client, get_headers
+from VibraVid.utils.http_client import SharedSession, create_client, get_headers
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -56,6 +56,7 @@ class TMDBClient:
         self.base_url = "https://api.themoviedb.org/3"
         self._cache: dict = {}
         self._warned_no_api_key = False
+        self._session = SharedSession(lambda: create_client(headers=get_headers()))
 
     @property
     def api_key(self) -> str | None:
@@ -85,16 +86,18 @@ class TMDBClient:
         url = f"{self.base_url}/{endpoint}"
 
         for attempt in range(retries + 1):
+            client = self._session.get()
             try:
-                with create_client(headers=get_headers()) as client:
-                    logger.debug(f"Make req: {url} with params: {_redact_params(params)}")
-                    response = client.get(url, params=params)
+                logger.debug(f"Make req: {url} with params: {_redact_params(params)}")
+                response = client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
                 self._cache[cache_key] = data
                 return data
 
             except Exception as e:
+                if getattr(getattr(e, "response", None), "status_code", None) is None:
+                    self._session.drop(client)  # transport error: do not reuse a possibly broken connection
                 status_code = getattr(getattr(e, "response", None), "status_code", None)
                 if status_code == 404:
                     logger.debug(f"TMDB has no {endpoint}")  # e.g. an episode the show does not list yet: not an error

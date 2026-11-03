@@ -50,18 +50,20 @@ def _downloader(tmp_path, language, required, monkeypatch):
     return downloader
 
 
-def test_single_english_selection_produces_one_english_audio(local_media, tmp_path, monkeypatch):
-    downloader = _downloader(tmp_path, "en", ["en"], monkeypatch)
+@pytest.mark.parametrize("language", ["en", "en-US"])
+def test_single_english_selection_produces_one_english_audio(local_media, tmp_path, monkeypatch, language):
+    downloader = _downloader(tmp_path, language, [language], monkeypatch)
     output = downloader._merge_files({"video": {"path": str(local_media["en"])}, "audios": []})
     assert output, downloader.error
     tracks = get_media_metadata(output)["audio_tracks"]
     assert [track["language"] for track in tracks] == ["ENG"]
 
 
-def test_both_separate_catalog_audios_are_present_in_one_file(local_media, tmp_path, monkeypatch):
-    downloader = _downloader(tmp_path, "it", ["it", "en"], monkeypatch)
+@pytest.mark.parametrize(("italian", "english"), [("it", "en"), ("it-IT", "en-US")])
+def test_both_separate_catalog_audios_are_present_in_one_file(local_media, tmp_path, monkeypatch, italian, english):
+    downloader = _downloader(tmp_path, italian, [italian, english], monkeypatch)
     output = downloader._merge_files({"video": {"path": str(local_media["it"])}, "audios": [],
-        "other_tracks_downloaded": [{"path": str(local_media["en"]), "kind": "audio", "language": "en"}]})
+        "other_tracks_downloaded": [{"path": str(local_media["en"]), "kind": "audio", "language": english}]})
     assert output, downloader.error
     tracks = get_media_metadata(output)["audio_tracks"]
     assert sorted(track["language"] for track in tracks) == ["ENG", "ITA"]
@@ -79,3 +81,18 @@ def test_mux_dropping_an_audio_track_is_rejected(local_media, tmp_path, monkeypa
     monkeypatch.setattr(base.BaseDownloader, "_merge_files", lambda self, status: str(local_media["en"]))
     assert downloader._merge_files({}) is None
     assert "every requested available audio" in downloader.error
+
+
+def test_mux_with_a_different_audio_region_is_rejected(local_media, tmp_path, monkeypatch):
+    downloader = _downloader(tmp_path, "en-GB", ["en-GB"], monkeypatch)
+    monkeypatch.setattr(base.BaseDownloader, "_merge_files", lambda self, status: str(local_media["en"]))
+    assert downloader._merge_files({}) is None
+    assert "every requested available audio" in downloader.error
+
+
+def test_mux_validation_falls_back_to_legacy_language_metadata(local_media, tmp_path, monkeypatch):
+    downloader = _downloader(tmp_path, "en", ["en"], monkeypatch)
+    monkeypatch.setattr(base.BaseDownloader, "_merge_files", lambda self, status: str(local_media["en"]))
+    monkeypatch.setattr("VibraVid.core.muxing.helper.video.get_media_metadata",
+                        lambda path: {"audio_tracks": [{"language": "ENG"}]})
+    assert downloader._merge_files({}) == str(local_media["en"])
