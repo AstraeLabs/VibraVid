@@ -463,7 +463,10 @@ class HLS_Downloader(BaseDownloader):
         if merged and required:
             from VibraVid.core.muxing.helper.video import get_media_metadata
             from VibraVid.core.utils.audio_selection import matches_audio_language
-            actual = [track.get("language") for track in get_media_metadata(merged).get("audio_tracks") or []]
+            actual = [
+                track.get("language_bcp47") or track.get("language")
+                for track in get_media_metadata(merged).get("audio_tracks") or []
+            ]
             if not actual or any(not matches_audio_language(actual, language) for language in required):
                 self.error = "The final file does not contain every requested available audio track"
                 return None
