@@ -37,6 +37,7 @@ _classification_cache: dict[str, str] = {}
 DEVICES = {
     "lgui40": {"player": "lgui40:DASH-CENC:PR", "drm": "playready"},
     "atvui40": {"player": "atvui40:DASH-CENC:WVM", "drm": "widevine"},
+    "atvui40pr": {"player": "atvui40:DASH-CENC:PR", "drm": "playready", "identifier": "atvui40"},  # Android TV device, PlayReady player (free AVOD only)
     "web": {"player": "web:DASH-CENC:WVM", "drm": "widevine"},
 }
 SESSION_DEVICE = "web"
@@ -268,15 +269,18 @@ def get_avod_streaming(
     session: dict | None = None,
     market: str | None = None,
     subtitle_language: str = "MIS",
+    audio_quality: str = "2.0",
 ) -> dict:
-    """POST /avod/streamings -> first stream_infos entry."""
+    """POST /avod/streamings -> first stream_infos entry. *audio_quality*: "2.0" (stereo AAC) or "5.1" (E-AC-3), when the title offers it."""
     market = resolve_market(market)
     classification = classification_id(market)
-    player = DEVICES.get(device, DEVICES["lgui40"])["player"]
+    profile = DEVICES.get(device, DEVICES["lgui40"])
+    player = profile["player"]
+    device = profile.get("identifier", device)
     params = {
         "classification_id": classification,
         "device_identifier": device,
-        "device_stream_audio_quality": "2.0",
+        "device_stream_audio_quality": audio_quality,
         "device_stream_hdr_type": hdr_type,
         "device_stream_video_quality": video_quality,
         "disable_dash_legacy_packages": "false",
@@ -286,7 +290,7 @@ def get_avod_streaming(
 
     body = {
         "audio_language": audio_language,
-        "audio_quality": "2.0",
+        "audio_quality": audio_quality,
         "classification_id": int(classification),
         "content_id": content_id,
         "content_type": content_type,
@@ -304,6 +308,8 @@ def get_avod_streaming(
         "subtitle_formats": ["vtt"],
         "subtitle_language": subtitle_language,
         "support_closed_captions": True,
+        "device_stream_video_quality": video_quality,
+        "device_identifier": device,
     }
 
     if session:
@@ -316,7 +322,7 @@ def get_avod_streaming(
         }
         body = {
             "hdr_type": hdr_type,
-            "audio_quality": "2.0",
+            "audio_quality": audio_quality,
             "app_version": APP_VERSION_LG,
             "content_id": content_id,
             "video_quality": video_quality,
@@ -490,13 +496,14 @@ def get_me_streaming(
     hdr_type: str = "NONE",
     market: str | None = None,
     subtitle_language: str = "MIS",
+    audio_quality: str = "2.0",
 ) -> dict:
     """POST /me/streamings (signed) for owned/rented titles. Requires login."""
     device = device if device in ("web", "lgui40") else "lgui40"  # the only devices a session can be created for
     session = login(market=market, device=device)
     for attempt in range(2):
         try:
-            return _me_streaming(session, content_id, content_type, audio_language, video_quality, device, hdr_type, subtitle_language)
+            return _me_streaming(session, content_id, content_type, audio_language, video_quality, device, hdr_type, subtitle_language, audio_quality)
         except RuntimeError as e:
             if attempt or "invalid_signature" not in str(e):
                 raise
@@ -504,17 +511,17 @@ def get_me_streaming(
             session = login(force=True, market=market, device=device)
 
 
-def _me_streaming(session: dict, content_id: str, content_type: str, audio_language: str, video_quality: str, device: str, hdr_type: str, subtitle_language: str) -> dict:
+def _me_streaming(session: dict, content_id: str, content_type: str, audio_language: str, video_quality: str, device: str, hdr_type: str, subtitle_language: str, audio_quality: str = "2.0") -> dict:
     player = DEVICES[device]["player"]
     params = {
         "audio_language": audio_language,
-        "audio_quality": "2.0",
+        "audio_quality": audio_quality,
         "classification_id": session["classification_id"],
         "content_id": content_id,
         "content_type": content_type,
         "device_identifier": device,
         "device_serial": "not_implemented",
-        "device_stream_audio_quality": "2.0",
+        "device_stream_audio_quality": audio_quality,
         "device_stream_hdr_type": hdr_type,
         "device_stream_video_quality": video_quality,
         "device_uid": device_uid(),

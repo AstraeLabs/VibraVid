@@ -28,11 +28,11 @@ def register_cli_args(parser) -> list:
     """Register CLI options."""
     group = parser.add_argument_group("Rakuten TV options")
     group.add_argument("--url", dest="url", default=None, metavar="URL", help="Rakuten TV title URL (movie, show or player/stream page).")
-    group.add_argument("--device", dest="device", default="lgui40", choices=["lgui40", "atvui40", "web"], help="Device profile: lgui40 = 1080p PlayReady (default), atvui40 = 1080p Widevine, web = 720p Widevine.")
+    group.add_argument("--device", dest="device", default="lgui40", choices=["lgui40", "atvui40", "atvui40pr", "web"], help="Device profile: lgui40 = 1080p PlayReady (default), atvui40 = 1080p Widevine, atvui40pr = Android TV with PlayReady (free titles only; may offer 4K where the title has it), web = 720p Widevine.")
     group.add_argument("--quality", dest="quality", default="FHD", choices=["FHD", "UHD"], help="Requested video quality (UHD only if the title offers it).")
     group.add_argument("--audio-lang", dest="audio_lang", default=None, help="Audio language code, e.g. ITA, NLD, ENG (default: the main language of the country).")
     group.add_argument("--country", dest="country", default=None, metavar="CC", help="Rakuten TV country for search and titles, e.g. it, nl, fr, de, es, uk (default: from the URL, else 'country' in login, else it).")
-    return ["url", "device", "quality", "audio_lang", "country"]
+    return ["url", "device", "quality", "audio_lang", "audio_quality", "country"]
 
 
 def _market_of(url_match, fallback: str | None = None) -> str:

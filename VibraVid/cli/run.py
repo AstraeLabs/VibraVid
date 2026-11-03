@@ -245,7 +245,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     dl_group.add_argument("--interactive-format", dest="interactive_format", action="store_true", help="Show the available yt-dlp formats and prompt for the format ID before downloading")
     dl_group.add_argument("--extract-audio", dest="extract_audio", action="store_true", help="Extract audio with yt-dlp")
     dl_group.add_argument("--audio-format", dest="audio_format", metavar="FORMAT", help="Audio format for yt-dlp extraction (e.g. mp3, m4a, wav, opus)")
-    dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY", help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k)")
+    dl_group.add_argument("--audio-quality", dest="audio_quality", metavar="QUALITY", help="Audio quality for yt-dlp extraction (e.g. 0, 5, 8k); Rakuten TV: audio layout 2.0 (stereo AAC, default) or 5.1 (E-AC-3)")
     dl_group.add_argument("--playlist-end", dest="playlist_end", type=int, metavar="N", help="Only process the first N entries of a playlist")
     dl_group.add_argument("--write-subs", dest="write_subs", action="store_true", help="Write subtitles")
     dl_group.add_argument("--write-auto-subs", dest="write_auto_subs", action="store_true", help="Write auto-generated subtitles")

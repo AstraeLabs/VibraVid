@@ -17,10 +17,11 @@ if TYPE_CHECKING:
 
 class SegmentIOMixin:
     def _replace_segment_file(self, source_path: Path, target_path: Path, reason: str) -> None:
+        """Swap *source_path* over *target_path*. The first attempt replaces atomically: the failed-segment census runs while the decrypt workers are still swapping files, and a target removed first would look like a missing segment (a 4 s wait and a useless re-download). Only a locked target (antivirus, indexer) is removed before the next attempt."""
         last_exc: Exception | None = None
         for attempt in range(1, 9):
             try:
-                if target_path.exists():
+                if attempt > 1 and target_path.exists():
                     try:
                         target_path.unlink()
                     except Exception:
@@ -41,6 +42,16 @@ class SegmentIOMixin:
 
         if last_exc:
             raise last_exc
+
+    def _write_segment_file(self, target_path: Path, data: bytes, reason: str) -> None:
+        """Rewrite *target_path* with *data* through a sibling file and an atomic swap: writing in place empties the segment first, and a zero-byte segment is what the failed-segment census calls missing. A failed write leaves the original bytes untouched."""
+        tmp_path = target_path.with_suffix(target_path.suffix + ".fix")  # not ".part": that one belongs to velora's in-flight downloads
+        try:
+            tmp_path.write_bytes(data)
+            self._replace_segment_file(tmp_path, target_path, reason)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def _want_key_sanity(self, ctx: "_SegmentDownloadContext", fp: Path, decryptor: "Decryptor | None") -> bool:
         """True only for the first chunk with >= 1 senc fragment."""
@@ -121,7 +132,7 @@ class SegmentIOMixin:
         if len(repaired) != expected_len or not looks_like_bare_fragment(repaired):
             raise RuntimeError(f"{ctx.protocol.upper()} media segment {fp.name} still wrong after repair (got {len(repaired)} bytes, expected {expected_len})")
 
-        fp.write_bytes(repaired)
+        self._write_segment_file(fp, repaired, f"{ctx.protocol.upper()} repair")
         logger.info(f"{ctx.protocol.upper()} media segment repaired -> {fp.name}")
 
     def _refetch_media_segment(self, ctx: "_SegmentDownloadContext", fp: Path, seg: dict[str, Any]) -> None:
@@ -141,4 +152,4 @@ class SegmentIOMixin:
                 resp = c.get(seg["url"])
                 resp.raise_for_status()
                 data = resp.content
-        fp.write_bytes(data)
+        self._write_segment_file(fp, data, f"{ctx.protocol.upper()} refetch")

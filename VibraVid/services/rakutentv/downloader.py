@@ -48,14 +48,17 @@ def _resolve_stream(content_id: str, content_type: str, market: str | None = Non
 def _request_stream(kind: str, args: tuple, market: str | None, detail: dict | None = None) -> dict:
     """Stream request asking for every subtitle ('MIS'); a title that offers only some (e.g. burnt-in ITA) rejects it, so retry with the ones it lists."""
     request = api.get_avod_streaming if kind == "avod" else api.get_me_streaming
+    audio_quality = str(_options().get("audio_quality") or "2.0")
+    if audio_quality not in ("2.0", "5.1"):
+        audio_quality = "2.0"
     try:
-        stream = request(*args, market=market)
+        stream = request(*args, market=market, audio_quality=audio_quality)
     except Exception as e:
         offered = api.subtitle_languages(market, detail)
         if "invalid.subtitle_language" not in str(e) or not offered:
             raise
         logger.warning(f"Subtitle language 'MIS' rejected, retrying with {offered[0]}")
-        stream = request(*args, market=market, subtitle_language=offered[0])
+        stream = request(*args, market=market, subtitle_language=offered[0], audio_quality=audio_quality)
 
     if stream.get("burnt_subtitle_language") and not stream.get("all_subtitles"):
         console.print(f"[yellow]Subtitles ({stream['burnt_subtitle_language']}) are burnt into the video: no separate subtitle track exists.")

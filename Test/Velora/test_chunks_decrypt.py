@@ -119,51 +119,20 @@ def test_success_renames_the_output_in_place(tmp_path, monkeypatch):
     out.unlink()
 
 
-def test_flux_chunks_support_follows_version_and_env(monkeypatch, tmp_path):
+def test_flux_chunks_support_follows_path_and_env_without_spawning_flux(monkeypatch, tmp_path):
     fake = tmp_path / "flux.exe"
     fake.write_bytes(b"")
-    monkeypatch.setattr(decryptor_module, "_flux_versions", {})
 
-    def run_version(version, check=decryptor_module.flux_supports_chunks):
-        decryptor_module._flux_versions.clear()
-        monkeypatch.setattr(
-            decryptor_module.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=f"flux {version}\n")
-        )
-        return check(str(fake))
+    def no_spawn(*args, **kwargs):
+        raise AssertionError("deciding this must not start a flux process")
 
-    assert run_version("0.5.3")
-    assert run_version("0.6.0")
-    assert not run_version("0.5.2")
+    monkeypatch.setattr(decryptor_module.subprocess, "run", no_spawn)
+    assert decryptor_module.flux_supports_chunks(str(fake))
+    assert decryptor_module.flux_supports_tfdt_rebase(str(fake))
     assert not decryptor_module.flux_supports_chunks(None)
-
-    assert run_version("0.5.3")
-    monkeypatch.setenv("VV_FLUX_CHUNKS", "0")
-    assert not decryptor_module.flux_supports_chunks(str(fake))
-
-
-def test_tfdt_rebase_needs_flux_054(monkeypatch, tmp_path):
-    fake = tmp_path / "flux.exe"
-    fake.write_bytes(b"")
-    monkeypatch.setattr(decryptor_module, "_flux_versions", {})
-
-    def supports(version):
-        decryptor_module._flux_versions.clear()
-        monkeypatch.setattr(
-            decryptor_module.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=f"flux {version}\n")
-        )
-        return decryptor_module.flux_supports_tfdt_rebase(str(fake))
-
-    assert not supports("0.5.3")
-    assert supports("0.5.4")
-    assert supports("0.6.0")
     assert not decryptor_module.flux_supports_tfdt_rebase(None)
 
-
-def test_unparseable_flux_version_disables_both_features(monkeypatch, tmp_path):
-    fake = tmp_path / "flux.exe"
-    fake.write_bytes(b"")
-    monkeypatch.setattr(decryptor_module, "_flux_versions", {})
-    monkeypatch.setattr(decryptor_module.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout="garbage\n"))
+    monkeypatch.setenv("VV_FLUX_CHUNKS", "0")
     assert not decryptor_module.flux_supports_chunks(str(fake))
     assert not decryptor_module.flux_supports_tfdt_rebase(str(fake))
 

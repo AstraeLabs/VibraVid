@@ -253,16 +253,6 @@ def test_not_eligible_when_flux_cannot_rebase_tfdt(pipe_allowed, monkeypatch):
     assert not _eligible_host()._chunks_pipe_eligible()
 
 
-def test_flux_053_has_chunks_but_not_the_pipe(monkeypatch, tmp_path):
-    fake = tmp_path / "flux.exe"
-    fake.write_bytes(b"")
-    monkeypatch.setattr(decryptor_module, "_flux_version", lambda path: (0, 5, 3))
-    assert decryptor_module.flux_supports_chunks(str(fake))
-    assert not decryptor_module.flux_supports_tfdt_rebase(str(fake))
-    monkeypatch.setattr(decryptor_module, "_flux_version", lambda path: (0, 5, 4))
-    assert decryptor_module.flux_supports_tfdt_rebase(str(fake))
-
-
 def test_flux_path_prefers_the_configured_attribute():
     assert _eligible_host(flux_path="/opt/flux")._flux_path() == "/opt/flux"
 

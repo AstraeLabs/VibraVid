@@ -13,6 +13,8 @@ from rich.console import Console
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import DownloadBarManager
 
+from .formatting import normalize_path_key
+
 console = Console()
 logger = logging.getLogger("manual")
 
@@ -209,9 +211,7 @@ def collect_failed_segments(dl_segs: list, downloaded_paths: list, stream_dir, d
     Return a list of (seg_number, url) tuples for segments that were not
     successfully downloaded (missing file or zero-byte file).
     """
-    downloaded_set = {
-        str(p.resolve()).casefold() for p in (downloaded_paths or []) if p.exists() and p.stat().st_size > 0
-    }
+    downloaded_set = {normalize_path_key(str(p)) for p in (downloaded_paths or []) if p.exists() and p.stat().st_size > 0}
 
     failed = []
     for seg in dl_segs:
@@ -220,8 +220,7 @@ def collect_failed_segments(dl_segs: list, downloaded_paths: list, stream_dir, d
             seg_ext = "mp4"
 
         expected_path = Path(stream_dir) / f"seg_{seg['number']:05d}.{seg_ext}"
-        key = str(expected_path.resolve()).casefold()
-        if key not in downloaded_set:
+        if normalize_path_key(str(expected_path)) not in downloaded_set:
             failed.append((seg["number"], seg.get("url", "N/A")))
 
     return failed

@@ -34,76 +34,14 @@ _TRANSIENT_OPEN_ERROR_MARKERS = (
 _OPEN_RETRY_ATTEMPTS = 6
 _OPEN_RETRY_BASE_DELAY = 0.4
 _OPEN_RETRY_MAX_DELAY = 3.0
-_FLUX_CHUNKS_MIN_VERSION = (0, 5, 3)
-_FLUX_TFDT_REBASE_MIN_VERSION = (0, 5, 4)
-_flux_versions: dict[str, tuple[int, ...] | None] = {}
-_flux_tfdt_base: dict[str, bool] = {}
-
-
-def _flux_version(flux_path: str) -> tuple[int, ...] | None:
-    """``flux --version`` as a tuple, cached per binary path + mtime (None when it cannot be read)."""
-    try:
-        cache_key = f"{flux_path}|{os.stat(flux_path).st_mtime_ns}"
-    except OSError:
-        return None
-    if cache_key not in _flux_versions:
-        version = None
-        try:
-            out = subprocess.run(
-                [flux_path, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
-            ).stdout
-            match = re.search(r"flux\s+(\d+)\.(\d+)\.(\d+)", out or "")
-            if match:
-                version = tuple(int(g) for g in match.groups())
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        _flux_versions[cache_key] = version
-    return _flux_versions[cache_key]
-
-
 def flux_supports_chunks(flux_path: str | None) -> bool:
-    """Whether this flux binary understands ``--chunks`` (``VV_FLUX_CHUNKS=0`` turns it off)."""
-    if not flux_path or os.environ.get("VV_FLUX_CHUNKS", "1") == "0":
-        return False
-    version = _flux_version(flux_path)
-    return version is not None and version >= _FLUX_CHUNKS_MIN_VERSION
-
-
-def flux_supports_tfdt_base(flux_path: str | None) -> bool:
-    """Whether this flux binary takes ``--tfdt-base N`` (rebases a ``--fragments-info`` fragment's tfdt itself). Same version number as builds without it, so ``--help`` is asked, once per binary path + mtime."""
-    if not flux_path:
-        return False
-    try:
-        cache_key = f"{flux_path}|{os.stat(flux_path).st_mtime_ns}"
-    except OSError:
-        return False
-    if cache_key not in _flux_tfdt_base:
-        supported = False
-        try:
-            out = subprocess.run(
-                [flux_path, "--help"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
-            ).stdout
-            supported = "--tfdt-base" in (out or "")
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        _flux_tfdt_base[cache_key] = supported
-    return _flux_tfdt_base[cache_key]
+    """Whether flux is usable for ``--chunks`` (always, with a flux path: the bundled flux is the latest; ``VV_FLUX_CHUNKS=0`` turns it off)."""
+    return bool(flux_path) and os.environ.get("VV_FLUX_CHUNKS", "1") != "0"
 
 
 def flux_supports_tfdt_rebase(flux_path: str | None) -> bool:
-    """Whether this flux binary can rebase the output's tfdt itself (``--tfdt-rebase``)."""
-    if not flux_path or not flux_supports_chunks(flux_path):
-        return False
-    version = _flux_version(flux_path)
-    return version is not None and version >= _FLUX_TFDT_REBASE_MIN_VERSION
+    """Whether flux rebases the output's tfdt itself (``--tfdt-rebase``): it comes with the chunks mode."""
+    return flux_supports_chunks(flux_path)
 
 
 def _is_transient_open_error(stderr_text: str | None) -> bool:
@@ -534,7 +472,7 @@ class Decryptor:
             normalized_keys: List of tuples containing (KID, raw_key) pairs for decryption.
             init_path: Optional path to the initialization segment (if applicable).
             key_sanity: If True, enables a post-decrypt check for wrong keys.
-            tfdt_base: If set (and the init is given), flux subtracts it from the segment's tfdt (see ``supports_tfdt_base``).
+            tfdt_base: If set (and the init is given), flux subtracts it from the segment's tfdt.
         """
         logger.debug(f"decrypt_flux_live(): {os.path.basename(encrypted_path)} -> {os.path.basename(decrypted_path)}")
 
@@ -708,7 +646,7 @@ class Decryptor:
         key_fallback=None,
         tfdt_rebase: bool = False,
     ) -> bool:
-        """Merge and decrypt the ``seg_<n>.mp4`` chunks of *chunks_dir* in one flux pass (``--chunks``), writing a clear fragmented MP4. *tfdt_rebase* also zeroes the first tfdt (needs flux >= 0.5.4, see ``flux_supports_tfdt_rebase``)."""
+        """Merge and decrypt the ``seg_<n>.mp4`` chunks of *chunks_dir* in one flux pass (``--chunks``), writing a clear fragmented MP4. *tfdt_rebase* also zeroes the first tfdt."""
         try:
             if not flux_supports_chunks(self.flux_path):
                 logger.info(f"flux --chunks requires flux >= 0.5.3 at {self.flux_path}; using the regular merge + decrypt")
@@ -819,11 +757,6 @@ class Decryptor:
         except Exception as exc:
             logger.debug(f"flux clear_init error: {exc}")
             return False
-
-    @property
-    def supports_tfdt_base(self) -> bool:
-        """Whether ``decrypt_segment_live(tfdt_base=...)`` really rebases the segment (an older flux would ignore it silently)."""
-        return flux_supports_tfdt_base(self.flux_path)
 
     def decrypt_segment_live(
         self, encrypted_path: str, decrypted_path: str, raw_keys, init_path: str | None = None, key_sanity: bool = False, tfdt_base: int | None = None

@@ -1,4 +1,4 @@
-"""End to end: the real flux feeds the real ffmpeg through an OS pipe. Skipped when either binary is missing or flux is too old."""
+"""End to end: the real flux feeds the real ffmpeg through an OS pipe. Skipped when either binary is missing."""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from VibraVid.core.decryptor import decryptor as decryptor_module
 from VibraVid.core.velora._decrypt_pipeline.pipeline import DecryptPipelineMixin
 from VibraVid.core.velora._decrypt_pipeline.streaming_mux import StreamingMuxPlan
 
@@ -32,9 +31,6 @@ def binaries() -> tuple[str, str]:
     flux, ffmpeg = _binary("get_flux_path"), _binary("get_ffmpeg_path")
     if not flux or not ffmpeg:
         pytest.skip("flux and ffmpeg are both needed")
-    decryptor_module._flux_versions.clear()
-    if not decryptor_module.flux_supports_tfdt_rebase(flux):
-        pytest.skip("flux >= 0.5.4 is needed for --chunks -o - --tfdt-rebase")
     return flux, ffmpeg
 
 

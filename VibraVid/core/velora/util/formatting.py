@@ -1,5 +1,6 @@
 # 01.04.24
 
+import functools
 import time
 from collections import deque
 from pathlib import Path
@@ -23,13 +24,19 @@ class SpeedWindow:
         return (total_bytes - window_start_bytes) / max(now - window_start_at, 0.001)
 
 
+@functools.lru_cache(maxsize=512)
+def _resolved_dir(directory: str) -> str:
+    return str(Path(directory).resolve(strict=False))
+
+
 def normalize_path_key(path_value: str) -> str:
-    """
-    Return a canonical, case-folded absolute path string suitable for use as a dict key when comparing paths across the Python/C# boundary.
-    """
+    """Return a canonical, case-folded absolute path string suitable for use as a dict key when comparing paths across the Python/Velora boundary."""
     if not path_value:
         return ""
-    return str(Path(path_value).resolve(strict=False)).casefold()
+    path = Path(path_value)
+    if not path.is_absolute() or path.name in ("", ".", ".."):
+        return str(path.resolve(strict=False)).casefold()
+    return str(Path(_resolved_dir(str(path.parent))) / path.name).casefold()
 
 
 def format_size(nb: int) -> str:

@@ -618,13 +618,20 @@ def _matches_codec(s, token: str) -> bool:
     """Prefix/substring match; unknown codec treated as matching."""
     if not token:
         return True
+    
     normalized_token = token.lower()
     if normalized_token in {"dv", "dvh"} or normalized_token.startswith(DV_CODEC_PREFIXES):
         return _is_dv(s)
+    
     raw = _codecs(s)
     if not raw:
         return True
-    return raw.startswith(normalized_token) or normalized_token in raw
+    
+    # Both sides also by codec family ("AAC" -> "mp4a", service "aac" -> "mp4a")
+    stream_type = getattr(s, "type", "")
+    wanted = {normalized_token, get_codec_token(normalized_token, stream_type).lower()}
+    names = {raw, get_codec_token(raw, stream_type).lower()}
+    return any(name.startswith(want) or want in name for want in wanted for name in names)
 
 
 def _strip_lang_flag_affixes(tag: str) -> str:

@@ -277,17 +277,7 @@ class LiveDownloadMixin:
 
             tmp = fp.with_suffix(fp.suffix + ".dec")
             decrypt_aes128_file(fp, tmp, key_data, enc.get("iv"), seg_number)
-
-            for attempt in range(1, 6):
-                try:
-                    if fp.exists():
-                        fp.unlink()
-                    tmp.replace(fp)
-                    break
-                except OSError:
-                    if attempt >= 5:
-                        raise
-                    time.sleep(0.05 * attempt)
+            self._replace_segment_file(tmp, fp, "Live HLS AES-128")
             logger.debug(f"AES-128 live-decrypted -> {fp.name}")
 
         def _process_batch(dl_batch: list[dict], batch_paths: list[Path]) -> int:
@@ -605,7 +595,7 @@ class LiveDownloadMixin:
             _key_sanity_pending = False
             if not tfdt_base_decided:
                 tfdt_base_decided = True
-                if _decryptor.supports_tfdt_base and init_path and init_path.exists():
+                if init_path and init_path.exists():
                     tfdt_base = first_fragment_tfdt(fp)
                     logger.info(f"Live DASH: {stream.type} timeline zeroed by flux (tfdt base {tfdt_base})" if tfdt_base is not None else f"Live DASH: {stream.type} segment has no tfdt, timeline rebased afterwards")
             
@@ -646,15 +636,7 @@ class LiveDownloadMixin:
                     logger.error(f"Live DASH: decrypt produced no output for {fp.name}")
                     return False
 
-                for attempt in range(1, 6):
-                    try:
-                        fp.unlink(missing_ok=True)
-                        dec_tmp.replace(fp)
-                        break
-                    except OSError:
-                        if attempt >= 5:
-                            raise
-                        time.sleep(0.05 * attempt)
+                self._replace_segment_file(dec_tmp, fp, "Live DASH")
                 logger.debug(f"Live DASH: CENC decrypted -> {fp.name}")
                 return True
 
