@@ -33,6 +33,7 @@ def download_film(select_title: Entries):
     # Set up video source (only configure scrape_serie now)
     scrape_serie.setup(None, select_title.id, select_title.slug)
     scrape_serie.is_series = False
+    scrape_serie.movie_identity = (select_title.name or select_title.slug, getattr(select_title, "year", None))
     obj_episode = scrape_serie.get_info_episode(0)
     return download_episode(obj_episode, 0, scrape_serie, video_source)
 
@@ -74,7 +75,8 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
         mp4_path = os_manager.get_sanitize_path(anime_folder(*path_components))
         mp4_name = filename
     else:
-        path_components, filename = map_movie_path(scrape_serie.series_name, None)
+        movie_name, movie_year = getattr(scrape_serie, "movie_identity", (scrape_serie.series_name, None))
+        path_components, filename = map_movie_path(movie_name, movie_year)
         mp4_path = os_manager.get_sanitize_path(movie_folder(*path_components))
         mp4_name = filename
 
@@ -125,7 +127,7 @@ def download_series(
 
     # One "Title (Year)" folder for every season/part/dub of the show (TMDB via the MAL/AniList crosswalk)
     scrape_serie.series_identity = series_name_and_year(
-        scrape_serie.series_name,
+        getattr(select_title, "name", None) or scrape_serie.series_name,
         mal_id=getattr(select_title, "mal_id", None),
         anilist_id=getattr(select_title, "anilist_id", None),
         tmdb_id=getattr(select_title, "tmdb_id", None),

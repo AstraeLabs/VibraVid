@@ -8,6 +8,7 @@ from rich.console import Console
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.utils.language import resolve_locale
 from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
+from VibraVid.core.utils.track_order import effective_select_filter
 from VibraVid.services._base import Entries, anime_folder, movie_folder, print_download_header, print_episode_header
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
@@ -159,7 +160,7 @@ def download_film(select_title: Entries) -> str:
 
     # Extract media ID
     url_id = select_title.get("url").split("/")[-1]
-    select_audio = config_manager.config.get("DOWNLOAD", "select_audio", default="")
+    select_audio = effective_select_filter("audio")
     preferred_groups = parse_select_audio_filter(select_audio)
 
     # Build the locale -> version GUID map from the playback API
@@ -260,7 +261,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
     main_guid = getattr(obj_episode, "main_guid", None)
 
     # Parse preferred audio locale groups
-    select_audio = config_manager.config.get("DOWNLOAD", "select_audio", default="")
+    select_audio = effective_select_filter("audio")
     preferred_groups = parse_select_audio_filter(select_audio)
 
     # Build the map of audio locale -> version GUID from the playback API.

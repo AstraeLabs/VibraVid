@@ -118,6 +118,7 @@ def process_results(records: list, seen_titles: set, entries_manager: EntriesMan
                     id=title_id,
                     slug=dict_title.get("slug"),
                     name=dict_title.get("name"),
+                    year=dict_title.get("year"),
                     type=dict_title.get("type"),
                     status=dict_title.get("status"),
                     episodes_count=dict_title.get("episodes_count"),

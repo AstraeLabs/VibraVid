@@ -23,7 +23,7 @@ def audio_language_context(request):
         selection = None
     return {"audio_language_config": {
         "languages": choices,
-        "selection": selection or "all",
+        "selection": selection or "auto",
         "explicit": selection is not None,
         "allLabel": "Both configured languages" if len(choices) == 2 else
                     "All configured languages" if choices else "All available audio",

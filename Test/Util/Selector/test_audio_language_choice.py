@@ -135,3 +135,59 @@ def test_separate_source_audio_is_validated_after_sources_are_combined():
         downloader.custom_filters = {"dv_auto": False}
         selected = downloader._select([(SimpleNamespace(streams=tracks), {}), (SimpleNamespace(streams=audio), {})])
         assert any(stream.type == "audio" and stream.language == "en" for stream in selected)
+
+
+@pytest.mark.parametrize("languages", [[], ["und"], ["ja"]])
+def test_automatic_does_not_impose_configured_languages(languages):
+    tracks = _tracks(languages)
+    with audio_language_context("auto"):
+        assert context_tracker.audio_filter is None
+        BaseMediaDownloader._apply_selection(SimpleNamespace(custom_filters={"dv_auto": False}, streams=tracks))
+    assert any(stream.type == "video" and stream.selected for stream in tracks)
+
+
+@pytest.mark.parametrize("languages", [[], ["und"]])
+def test_unknown_audio_is_reported_as_unverifiable(languages):
+    with audio_language_context("en"), pytest.raises(ValueError, match="cannot be verified"):
+        BaseMediaDownloader._apply_selection(SimpleNamespace(custom_filters={"dv_auto": False}, streams=_tracks(languages)))
+
+
+def test_combined_mp4_accepts_automatic_but_rejects_unverifiable_explicit_choice(tmp_path):
+    from VibraVid.core.downloader.mp4 import MP4FileDownloader
+
+    downloader = SimpleNamespace(_expected_language=None, close_tracking=True,
+                                 path=str(tmp_path / "film.mp4"), url="https://example.invalid/film.mp4")
+    with audio_language_context("auto"):
+        assert MP4FileDownloader._preflight(downloader)
+    with audio_language_context("en"), pytest.raises(ValueError, match="Choose Automatic"):
+        MP4FileDownloader._preflight(downloader)
+
+
+@pytest.mark.parametrize("kind", ["film", "episode"])
+def test_crunchyroll_requests_gui_language_before_playback(monkeypatch, tmp_path, kind):
+    from unittest.mock import Mock
+    from VibraVid.services.crunchyroll import downloader as cr
+
+    client = Mock()
+    client.get_available_versions.return_value = [
+        {"audio_locale": "it-IT", "guid": "italian"},
+        {"audio_locale": "en-US", "guid": "english"},
+    ]
+    monkeypatch.setattr(cr, "CrunchyrollClient", lambda: client)
+    monkeypatch.setattr(cr, "start_message", lambda: None)
+    monkeypatch.setattr(cr, "print_download_header", lambda *args: None)
+    monkeypatch.setattr(cr, "print_episode_header", lambda *args: None)
+    monkeypatch.setattr(cr.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(cr, "map_movie_path", lambda *args: ([], "film"))
+    monkeypatch.setattr(cr, "map_episode_path", lambda *args: ([], "episode"))
+    monkeypatch.setattr(cr, "movie_folder", lambda *args: str(tmp_path))
+    monkeypatch.setattr(cr, "anime_folder", lambda *args: str(tmp_path))
+    playback = Mock(side_effect=RuntimeError("stop before network"))
+    monkeypatch.setattr(cr, "get_playback_session", playback)
+    with audio_language_context("en"), pytest.raises(RuntimeError, match="stop before network"):
+        if kind == "film":
+            cr.download_film(SimpleNamespace(name="Film", year="2026", get=lambda key: "https://example.invalid/original"))
+        else:
+            cr.download_episode(SimpleNamespace(url="https://example.invalid/original", name="Episode"),
+                                1, 1, SimpleNamespace(client=client, series_name="Series", year="2026"))
+    assert playback.call_args.args[1] == "english"

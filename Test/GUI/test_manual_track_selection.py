@@ -342,3 +342,69 @@ def test_manual_picker_can_override_external_audio_and_subtitle_filters(monkeypa
     finally:
         context_tracker.is_gui, context_tracker.manual_tracks, context_tracker.defer_manual_tracks = old_values
         context_tracker.download_id = old_download
+
+
+@pytest.mark.parametrize("extra,cleanup,removed", [
+    (None, True, True),
+    ("segment.ts", True, False),
+    ("segments", True, False),
+    (None, False, False),
+])
+def test_cancelled_manual_selection_only_cleans_manifest(monkeypatch, tmp_path, extra, cleanup, removed):
+    from VibraVid.core.manifest.stream import Stream
+    from VibraVid.core.velora import base as base_module
+
+    directory = tmp_path / "scratch"
+    directory.mkdir()
+    if extra == "segments":
+        (directory / extra).mkdir()
+    elif extra:
+        (directory / extra).write_bytes(b"downloaded data")
+
+    class FakeHLSParser:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fetch_manifest(self):
+            return True
+
+        def save_raw(self, path):
+            manifest = path / "raw.m3u8"
+            manifest.write_text("#EXTM3U")
+            return manifest
+
+        def parse_streams(self):
+            return [Stream(type="video", selected=True)]
+
+    monkeypatch.setattr(base_module, "HLSParser", FakeHLSParser)
+    monkeypatch.setattr(base_module.config_manager.config, "get_bool", lambda *args, **kwargs: cleanup)
+    def cancel(*args, **kwargs):
+        raise TrackSelectionError("Track selection cancelled")
+    monkeypatch.setattr(base_module.manual_track_broker, "choose", cancel)
+    downloader = base_module.BaseMediaDownloader.__new__(base_module.BaseMediaDownloader)
+    downloader.download_id = "cancel-test"
+    downloader.url = "https://example.invalid/test.m3u8"
+    downloader.manifest_protocol = "hls"
+    downloader.manifest_content = None
+    downloader.headers = {}
+    downloader.has_drm = False
+    downloader._tmp_dir = directory
+    downloader.external_subtitles = []
+    downloader.external_audios = []
+    downloader.external_other_tracks = []
+    downloader._apply_selection = lambda: None
+    old = (context_tracker.is_gui, context_tracker.manual_tracks, context_tracker.defer_manual_tracks, context_tracker.download_id)
+    try:
+        context_tracker.is_gui = True
+        context_tracker.manual_tracks = True
+        context_tracker.defer_manual_tracks = False
+        context_tracker.download_id = "cancel-test"
+        with pytest.raises(TrackSelectionError, match="cancelled"):
+            downloader.parse_stream(show_table=False)
+    finally:
+        context_tracker.is_gui, context_tracker.manual_tracks, context_tracker.defer_manual_tracks, context_tracker.download_id = old
+    assert directory.exists() is not removed
+    if not removed:
+        assert (directory / "raw.m3u8").exists()
+        if extra:
+            assert (directory / extra).exists()
