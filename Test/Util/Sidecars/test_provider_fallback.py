@@ -166,6 +166,7 @@ def test_tmdb_404_is_quiet_and_not_retried(monkeypatch):
     monkeypatch.setattr(tmdb_module, "console", SimpleNamespace(log=lambda *a, **k: logged.append(a)))
     monkeypatch.setattr(tmdb_client, "_api_key", "test-key")
     monkeypatch.setattr(tmdb_client, "_cache", {})
+    monkeypatch.setattr(tmdb_client._session, "_session", None)  # drop a client cached by an earlier test so the mock is used
 
     assert tmdb_client._make_request("tv/1/season/1/episode/9") == {}
     assert logged == [] and http.calls == 1
