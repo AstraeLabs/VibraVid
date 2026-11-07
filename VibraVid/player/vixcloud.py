@@ -26,11 +26,12 @@ class VideoSource:
             media_id (int, optional): Unique identifier for media item
             tmdb_data (dict, optional): TMDB data with 'id' key for API V2
         """
-        self.headers = {"user-agent": get_userAgent()}
+        self.headers = {}
         self.url = url
         self.is_series = is_series
         self.media_id = media_id
         self.iframe_src = None
+        self.iframe_page_url = None
         self.window_parameter = None
         self.canPlayFHD = False
         self.window_video = None
@@ -45,6 +46,12 @@ class VideoSource:
         else:
             self.tmdb_id = None
 
+    def _set_referer(self, referer: str | None) -> None:
+        """Set the Referer header so the target host sees a browser-like navigation."""
+        self.headers.pop("Referer", None)
+        if referer:
+            self.headers["Referer"] = referer
+
     def get_iframe(self, episode_id: int) -> None:
         """
         Retrieve iframe source for specified episode.
@@ -58,10 +65,16 @@ class VideoSource:
         if self.is_series:
             params = {"episode_id": episode_id, "next_episode": "1"}
 
+        watch_page = f"{self.url.rstrip('/')}/watch/{self.media_id}"
+        if self.is_series:
+            watch_page += f"?e={episode_id}"
+        self._set_referer(watch_page)
+
         try:
             with create_client(headers=self.headers) as client:
                 response = get_with_retry(client, f"{self.url}/iframe/{self.media_id}", params=params, retries=1)
             response.raise_for_status()
+            self.iframe_page_url = response.url
 
             # Parse response with BeautifulSoup to get iframe source
             soup = BeautifulSoup(response.text, "html.parser")
@@ -112,9 +125,14 @@ class VideoSource:
         if self.is_series:
             if self.season_number is None or self.episode_number is None:
                 return
+            vix_page = f"https://vixsrc.to/tv/{self.tmdb_id}/{self.season_number}/{self.episode_number}?lang={language}"
             api_url = f"https://vixsrc.to/api/tv/{self.tmdb_id}/{self.season_number}/{self.episode_number}?lang={language}"
         else:
+            vix_page = f"https://vixsrc.to/movie/{self.tmdb_id}?lang={language}"
             api_url = f"https://vixsrc.to/api/movie/{self.tmdb_id}?lang={language}"
+
+        self._set_referer(vix_page)
+        self.iframe_page_url = vix_page
 
         client = create_client(headers=self.headers)
         try:
@@ -133,6 +151,12 @@ class VideoSource:
         Fetch and process video content from iframe source.
         """
         try:
+            if self.iframe_page_url is None:
+                watch_page = f"{self.url.rstrip('/')}/watch/{self.media_id}"
+                if self.is_series and self.episode_id is not None:
+                    watch_page += f"?e={self.episode_id}"
+                self.iframe_page_url = watch_page
+
             if ENABLE_VIXCLOUD_API_V2 and self.tmdb_id is not None:
                 try:
                     self._resolve_tmdb_embed_url()
@@ -145,10 +169,12 @@ class VideoSource:
 
             # Fetch content from iframe source
             if self.iframe_src is not None:
+                self._set_referer(self.iframe_page_url)
                 with create_client(headers=self.headers) as client:
                     response = get_with_retry(client, self.iframe_src, retries=1)
                 response.raise_for_status()
                 self.parse_script(script_text=response.text)
+                self._set_referer(self.iframe_src)
 
         except Exception as e:
             logger.error(f"Error getting content: {e}")

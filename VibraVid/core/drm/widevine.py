@@ -23,6 +23,7 @@ def get_widevine_keys(
     license_url: str,
     cdm_device_path: str = None,
     cdm_remote_api: list[str] = None,
+    cdm_local: dict = None,
     headers: dict = None,
     key: str = None,
     license_data: dict = None,
@@ -39,6 +40,7 @@ def get_widevine_keys(
         license_url (str): Widevine license URL.
         cdm_device_path (str): Path to local CDM file (device.wvd). Optional if using remote.
         cdm_remote_api (list[str]): Remote CDM API config. Optional if using local device.
+        cdm_local (dict): A DRM.local_cdm block (+ its "id"): a Device built in memory, no .wvd needed.
         headers (dict): Optional HTTP headers for the license request (from fetch).
         key (str): Optional raw license data to bypass HTTP request.
         license_data (dict): Optional pre-fetched license data.
@@ -58,7 +60,7 @@ def get_widevine_keys(
         return manual if manual else None
 
     cdm_remote_api = cdm_remote_api if cdm_remote_api else None
-    if cdm_device_path is None and cdm_remote_api is None:
+    if cdm_device_path is None and cdm_remote_api is None and not cdm_local:
         logger.error("Widevine: no CDM configured (no .wvd file and no remote CDM)")
         console.print(
             "[red]Error: no Widevine CDM configured. Database lookup will continue."
@@ -71,12 +73,16 @@ def get_widevine_keys(
 
     if cdm_remote_api is not None:
         cdm_device_path = None  # a remote CDM was chosen explicitly: a local device file must not win over it
+        cdm_local = None
+    elif cdm_local:
+        cdm_device_path = None  # a local_cdm block was chosen explicitly: a plain device file must not win over it
 
     return _get_widevine_keys(
         pssh_list,
         license_url,
         cdm_device_path,
         cdm_remote_api,
+        cdm_local,
         headers,
         license_data,
         license_certificate,
@@ -91,6 +97,7 @@ def _get_widevine_keys(
     license_url: str,
     cdm_device_path: str,
     cdm_remote_api: list[str],
+    cdm_local: dict = None,
     headers: dict = None,
     license_data: dict = None,
     license_certificate: str = None,
@@ -123,6 +130,17 @@ def _get_widevine_keys(
         console.print(f"\n{cdm_load_line(os.path.basename(cdm_device_path), cdm_origin, detail)}")
         try:
             device = Device.load(cdm_device_path)
+            cdm = Cdm.from_device(device)
+        except Exception as e:
+            logger.error(f"Error loading local CDM device: {e}")
+            console.print(f"[red]Error loading local CDM device: {e}")
+            return None
+    elif cdm_local:
+        console.print(f"\n{cdm_load_line('local:' + str(cdm_local.get('id', '?')), cdm_origin)}")
+        try:
+            from VibraVid.core.drm.cdm.local.local_cdm import build_local_device
+
+            device = build_local_device(cdm_local)
             cdm = Cdm.from_device(device)
         except Exception as e:
             logger.error(f"Error loading local CDM device: {e}")

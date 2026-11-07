@@ -276,17 +276,23 @@ def resolve_service_cdm_info(site_name: str | None, height: int | None = None) -
 
     chosen = resolve_cdm(site_name, height)
 
-    def describe(system: str, path: str | None, remote: dict | None, reader) -> dict | None:
+    def describe(system: str, path: str | None, remote: dict | None, reader, local: dict | None = None) -> dict | None:
+        if local:
+            from VibraVid.core.drm.cdm.local.local_cdm import describe_local_cdm
+            return {"system": system, "path": local.get("path"), "remote": False, "local": True, **describe_local_cdm(local)}
+        
         if remote:
             return {"system": system, "path": None, "remote": True, **describe_remote_cdm(remote)}
+        
         if not path:
             return None
+        
         try:
             return {**reader(path), "remote": False}
         except Exception as e:
             return {"path": path, "remote": False, "error": str(e)}
 
     return {
-        "widevine": describe("widevine", chosen.wvd_path, chosen.widevine_remote, read_device_wvd),
-        "playready": describe("playready", chosen.prd_path, chosen.playready_remote, read_device_prd),
+        "widevine": describe("widevine", chosen.wvd_path, chosen.widevine_remote, read_device_wvd, chosen.widevine_local),
+        "playready": describe("playready", chosen.prd_path, chosen.playready_remote, read_device_prd, chosen.playready_local),
     }

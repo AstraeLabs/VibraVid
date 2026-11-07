@@ -22,6 +22,7 @@ def get_playready_keys(
     license_url: str,
     cdm_device_path: str = None,
     cdm_remote_api: list[str] = None,
+    cdm_local: dict = None,
     headers: dict = None,
     key: str = None,
     license_data: dict = None,
@@ -36,6 +37,7 @@ def get_playready_keys(
         license_url (str): PlayReady license URL (may include query params).
         cdm_device_path (str): Path to local .prd CDM file. Optional if using remote.
         cdm_remote_api (list): Remote CDM API config. Optional if using local device.
+        cdm_local (dict): A DRM.local_cdm block (+ its "id"): a Device built in memory, no .prd needed.
         headers (dict): HTTP headers for the license request.
         key (str): Pre-existing KID:KEY — bypasses CDM entirely.
         license_data (dict):    Extra fields merged into the license request body BEFORE the challenge is added.
@@ -52,7 +54,7 @@ def get_playready_keys(
         return manual if manual else None
 
     cdm_remote_api = cdm_remote_api if cdm_remote_api else None
-    if cdm_device_path is None and cdm_remote_api is None:
+    if cdm_device_path is None and cdm_remote_api is None and not cdm_local:
         logger.error("PlayReady: no CDM configured (no .prd file and no remote CDM)")
         console.print(
             "[red]Error: no PlayReady CDM configured. Database lookup will continue."
@@ -65,9 +67,12 @@ def get_playready_keys(
 
     if cdm_remote_api is not None:
         cdm_device_path = None  # a remote CDM was chosen explicitly: a local device file must not win over it
+        cdm_local = None
+    elif cdm_local:
+        cdm_device_path = None  # a local_cdm block was chosen explicitly: a plain device file must not win over it
 
     return _get_playready_keys_local_cdm(
-        pssh_list, license_url, cdm_device_path, cdm_remote_api, headers, license_data, license_request_fn, cdm_origin
+        pssh_list, license_url, cdm_device_path, cdm_remote_api, cdm_local, headers, license_data, license_request_fn, cdm_origin
     )
 
 
@@ -76,6 +81,7 @@ def _get_playready_keys_local_cdm(
     license_url: str,
     cdm_device_path: str,
     cdm_remote_api: list[str],
+    cdm_local: dict = None,
     headers: dict = None,
     license_data: dict = None,
     license_request_fn=None,
@@ -103,6 +109,17 @@ def _get_playready_keys_local_cdm(
         console.print(f"\n{cdm_load_line(os.path.basename(cdm_device_path), cdm_origin, detail)}")
         try:
             device = Device.load(cdm_device_path)
+            cdm = Cdm.from_device(device)
+        except Exception as e:
+            logger.error(f"Error loading local CDM device: {e}")
+            console.print(f"[red]Error loading local CDM device: {e}")
+            return None
+    elif cdm_local:
+        console.print(f"\n{cdm_load_line('local:' + str(cdm_local.get('id', '?')), cdm_origin)}")
+        try:
+            from VibraVid.core.drm.cdm.local.local_cdm import build_local_device
+
+            device = build_local_device(cdm_local)
             cdm = Cdm.from_device(device)
         except Exception as e:
             logger.error(f"Error loading local CDM device: {e}")

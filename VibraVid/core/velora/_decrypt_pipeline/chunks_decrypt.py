@@ -39,6 +39,9 @@ class ChunksDecryptMixin:
             norm_keys = KeysManager.normalize(key_fallback.apply([f"{k}:{v}" for k, v in norm_keys]))
 
         if kid and not KeysManager.is_zero_kid(kid):
+            if key_fallback is not None and kid.lower() not in {k.lower() for k, _ in norm_keys}:
+                norm_keys = KeysManager.normalize(key_fallback.add_missing_kid(kid, [f"{k}:{v}" for k, v in norm_keys]))
+            
             available_kids = {k.lower() for k, _ in norm_keys}
             if kid.lower() not in available_kids:
                 logger.error(f"No key matches required KID {kid}; refusing chunks decrypt")
