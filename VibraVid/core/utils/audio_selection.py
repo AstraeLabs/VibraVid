@@ -40,8 +40,8 @@ def configured_audio_languages(raw: str | None = None) -> list[dict[str, str]]:
 def normalize_audio_language(value: str | None) -> str | None:
     if value in (None, "", "config"):
         return None
-    if value == "all":
-        return "all"
+    if value in ("all", "auto"):
+        return value
     code = language_code(value)
     configured = configured_audio_languages()
     if code and (not configured or code in {choice["code"] for choice in configured}):
@@ -51,7 +51,7 @@ def normalize_audio_language(value: str | None) -> str | None:
 
 def audio_filter_for_selection(value: str | None) -> str | None:
     value = normalize_audio_language(value)
-    if value is None:
+    if value is None or value == "auto":
         return None
     if value == "all":
         return "|".join(choice["code"] for choice in configured_audio_languages()) or "all"
@@ -89,6 +89,12 @@ def enforce_audio_selection(streams: list, embedded_language: str | None = None)
     if not selected:
         if embedded_language and _matches_lang(SimpleNamespace(language=embedded_language), requested):
             return
+        audios = [stream for stream in streams if getattr(stream, "type", "") == "audio"]
+        if not embedded_language and (not audios or any(
+            not language_code(getattr(stream, "resolved_language", None) or getattr(stream, "language", None))
+            for stream in audios
+        )):
+            raise ValueError("The requested audio language cannot be verified for this source. Choose Automatic to download its original audio, or select tracks manually.")
         names = ", ".join(resolve_language_display_name(code) for code in requested_audio_languages())
         raise ValueError(f"Requested audio is unavailable for this video: {names}. No other language was selected.")
 

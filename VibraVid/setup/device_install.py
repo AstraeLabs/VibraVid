@@ -172,6 +172,8 @@ class ServiceCdm:
     prd_path: str | None = None
     widevine_remote: dict | None = None
     playready_remote: dict | None = None
+    playready_local: dict | None = None
+    widevine_local: dict | None = None
     widevine_origin: str | None = None
     playready_origin: str | None = None
 
@@ -181,6 +183,14 @@ def get_remote_cdm_registry() -> dict:
     from VibraVid.utils import config_manager
 
     registry = config_manager.config.get_dict("DRM", "remote_cdm", default={})
+    return registry if isinstance(registry, dict) else {}
+
+
+def get_local_cdm_registry() -> dict:
+    """Named local CDMs from config.toml (``DRM.local_cdm``): ``{id: <local CDM block>}`` (Widevine or PlayReady)."""
+    from VibraVid.utils import config_manager
+
+    registry = config_manager.config.get_dict("DRM", "local_cdm", default={})
     return registry if isinstance(registry, dict) else {}
 
 
@@ -308,12 +318,26 @@ def _apply_cdm_entry(entry: str, origin: str, short: str, registry: dict, result
         fill(system, "wvd_path" if system == "widevine" else "prd_path", resolved)
         return
 
+    local_cfg = get_local_cdm_registry().get(entry)
+    if isinstance(local_cfg, dict) and local_cfg:
+        from VibraVid.core.drm.cdm.local.local_cdm import validate_local_cdm
+
+        problem = validate_local_cdm(local_cfg)
+        if problem:
+            message = f"local cdm '{entry}' configured for {origin}: {problem}."
+            console.print(f"[red]Error: {message}")
+            raise FileNotFoundError(message)
+        system = str(local_cfg.get("system", "playready")).lower()
+        if system not in filled:
+            fill(system, "playready_local" if system == "playready" else "widevine_local", {**local_cfg, "id": entry})
+        return
+
     remote_cfg = registry.get(entry)
     if not isinstance(remote_cfg, dict) or not remote_cfg:
-        known = ", ".join(sorted(registry)) or "none defined"
+        known = ", ".join(sorted([*registry, *get_local_cdm_registry()])) or "none defined"
         message = (
             f"cdm '{entry}' configured for {origin} is neither a .wvd/.prd file, "
-            f"'{CDM_SEARCH}', '{CDM_DEFAULT}' nor a remote CDM id in config.toml DRM.remote_cdm (known ids: {known})."
+            f"'{CDM_SEARCH}', '{CDM_DEFAULT}' nor a CDM id in config.toml DRM.remote_cdm / DRM.local_cdm (known ids: {known})."
         )
         console.print(f"[red]Error: {message}")
         raise FileNotFoundError(message)
@@ -346,11 +370,19 @@ def _cdm_levels(site_name: str | None) -> list[tuple[str, str, object]]:
 
 
 def _reserved_ids(registry: dict) -> list[str]:
-    return [
+    problems = [
         f"DRM.remote_cdm id '{name}' is reserved (it means a CDM choice): rename it in config.toml."
         for name in registry
         if name.lower() in _RESERVED_CDM_IDS
     ]
+    local = get_local_cdm_registry()
+    problems += [
+        f"DRM.local_cdm id '{name}' is reserved (it means a CDM choice): rename it in config.toml."
+        for name in local
+        if name.lower() in _RESERVED_CDM_IDS
+    ]
+    problems += [f"CDM id '{name}' is defined in both DRM.remote_cdm and DRM.local_cdm: rename one in config.toml." for name in local if name in registry]
+    return problems
 
 
 def resolve_cdm(site_name: str | None, height: int | None = None) -> ServiceCdm:
@@ -381,6 +413,7 @@ Check that the ``cdm`` settings in config.toml, login.toml and the command line 
     from VibraVid.utils import config_manager
 
     registry = get_remote_cdm_registry()
+    local_registry = get_local_cdm_registry()
     problems = _reserved_ids(registry)
 
     levels: list[tuple[str, object]] = []
@@ -417,8 +450,14 @@ Check that the ``cdm`` settings in config.toml, login.toml and the command line 
                 searcher = searcher or DeviceSearcher()
                 if not searcher.search(filename=entry):
                     problems.append(f"cdm file '{entry}' in {origin} was not found in the binary directory.")
+            elif entry in local_registry:
+                from VibraVid.core.drm.cdm.local.local_cdm import validate_local_cdm
+
+                problem = validate_local_cdm(local_registry[entry])
+                if problem:
+                    problems.append(f"local cdm '{entry}' in {origin}: {problem}.")
             elif entry not in registry:
-                known = ", ".join(sorted(registry)) or "none defined"
-                problems.append(f"cdm '{entry}' in {origin} is neither a .wvd/.prd file nor a remote CDM id (known ids: {known}).")
+                known = ", ".join(sorted([*registry, *local_registry])) or "none defined"
+                problems.append(f"cdm '{entry}' in {origin} is neither a .wvd/.prd file nor a CDM id from DRM.remote_cdm / DRM.local_cdm (known ids: {known}).")
 
     return problems

@@ -1,10 +1,12 @@
 <div class="cn-language-filter" data-language-filter>
     <span class="cn-tag">Languages</span>
     <div class="cn-opts" role="group" aria-label="Filter by audio language">
-        <button class="cn-opt" type="button" data-audio-language="all" aria-pressed="true">{{ audio_language_config.allLabel|default:"All configured languages" }}</button>
+        <button class="cn-opt" type="button" data-audio-language="auto" aria-pressed="true">Automatic</button>
+        <button class="cn-opt" type="button" data-audio-language="all" aria-pressed="false">{{ audio_language_config.allLabel|default:"All configured languages" }}</button>
         {% for language in audio_language_config.languages %}
         <button class="cn-opt" type="button" data-audio-language="{{ language.code }}" aria-pressed="false">{{ language.name }}</button>
         {% endfor %}
     </div>
     <p class="cn-seek-hint">The filter also sets download audio. Only available tracks in your selection are downloaded.</p>
+    <p class="cn-seek-hint">Automatic uses configured preferences or the source's original audio; it does not guarantee a specific language.</p>
 </div>

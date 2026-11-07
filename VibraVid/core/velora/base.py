@@ -17,7 +17,7 @@ from VibraVid.core.manifest.m3u8 import HLSParser
 from VibraVid.core.manifest.mpd import DashParser
 from VibraVid.core.manifest.stream import Stream
 from VibraVid.core.ui.bar_manager import DownloadBarManager
-from VibraVid.core.ui.manual_tracks import manual_track_broker
+from VibraVid.core.ui.manual_tracks import TrackSelectionError, manual_track_broker
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
 from VibraVid.core.ui.ui import build_table
 from VibraVid.core.utils.codec import (
@@ -61,6 +61,24 @@ def lang_variants(normalized_lang: str) -> set[str]:
 
 class BaseMediaDownloader:
     ad_decision_fn = None
+
+    def _cleanup_cancelled_selection(self) -> None:
+        """Remove a lone generated manifest, never a resumable download."""
+        if not config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder"):
+            return
+        directory = self._tmp_dir
+        try:
+            if directory.is_symlink():
+                return
+            entries = list(directory.iterdir())
+            manifests = [getattr(self, name, None) for name in ("raw_m3u8", "raw_mpd", "raw_ism", "raw_custom")]
+            generated = {Path(path) for path in manifests if path is not None}
+            if len(entries) != 1 or entries[0] not in generated or entries[0].is_symlink() or not entries[0].is_file():
+                return
+            entries[0].unlink()
+            directory.rmdir()  # Never recursively delete files that appeared in the meantime.
+        except OSError as exc:
+            logger.warning("Could not clean up cancelled track selection in %s: %s", directory, exc)
 
     def __init__(
         self,
@@ -293,13 +311,18 @@ class BaseMediaDownloader:
                 if not stream.is_external or getattr(stream, "_manual_external_entry", None) is not None
             ]
             download_tracker.update_status(selection_id, "Waiting for track selection")
-            manual_track_broker.choose(
-                selection_id,
-                selectable,
-                cancelled=lambda: download_tracker.is_stopped(selection_id),
-                on_wait=context_tracker.manual_track_on_wait,
-                on_confirm=context_tracker.manual_track_on_confirm,
-            )
+            try:
+                manual_track_broker.choose(
+                    selection_id,
+                    selectable,
+                    cancelled=lambda: download_tracker.is_stopped(selection_id),
+                    on_wait=context_tracker.manual_track_on_wait,
+                    on_confirm=context_tracker.manual_track_on_confirm,
+                )
+            except TrackSelectionError as exc:
+                if str(exc) == "Track selection cancelled":
+                    self._cleanup_cancelled_selection()
+                raise
             for stream in selectable:
                 entry = getattr(stream, "_manual_external_entry", None)
                 if entry is not None:

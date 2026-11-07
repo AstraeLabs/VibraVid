@@ -48,6 +48,8 @@ class KeyFallback:
         self._resolved: dict[str, str] = {}         # kid -> key proven good
         self._tried: dict[str, set[str]] = {}       # kid -> "kid:key" pairs already tested
         self._exhausted: set[str] = set()
+        self._discovered: dict[str, str] = {}       # segment kid (absent from the manifest) -> key found for it
+        self._discovery_failed: set[str] = set()
         self._report_threads: dict[str, threading.Thread | None] = {}  # kid -> its wrong-key report in flight
         self._kid_locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
@@ -86,6 +88,64 @@ class KeyFallback:
         if not any(k in resolved for k, _ in pairs):
             return keys
         return [f"{k}:{resolved.get(k, v)}" for k, v in pairs]
+
+    def add_missing_kid(self, kid: str, keys: Any) -> Any:
+        """*keys* plus a key for *kid* when none of them is for it."""
+        kid = normalize_kid(kid)
+        pairs = KeysManager.normalize(keys)
+        if not kid or any(k == kid for k, _ in pairs):
+            return keys
+
+        with self._kid_lock(kid):
+            key = self._discovered.get(kid)
+            if key is None and kid not in self._discovery_failed:
+                key, source = self._find_key_for_kid(kid)
+                if key is None:
+                    self._discovery_failed.add(kid)
+                else:
+                    self._discovered[kid] = key
+                    logger.info(f"Key for segment KID {kid} (not declared by the manifest) found via {source}")
+                    if source != "license":  # already shown with the other keys of that license
+                        console.print(f"[green]\\[+][/green] Key for segment KID [red]{kid}[/red] [cyan]| [#a855f7]{self.drm_manager.vault_label(source)}")
+
+        if key is None:
+            return keys
+        return [f"{k}:{v}" for k, v in pairs] + [f"{kid}:{key}"]
+
+    def _find_key_for_kid(self, kid: str) -> tuple[str | None, str]:
+        logger.warning(f"Segments are encrypted with KID {kid}, which no resolved key covers (manifest KID mismatch) -- asking the vaults, then the CDM")
+        key = self.drm_manager._license_extra_keys.get(kid)
+        if key:
+            logger.info(f"Key for segment KID {kid} already returned by the license request made for the manifest KIDs -- no new request")
+            self.drm_manager._store_keys([f"{kid}:{key}"], self.drm_type, self.base_license_url, self.pssh)
+            return key, "license"
+
+        if not self.drm_manager._bypass_cache():
+            for pair, source in self.drm_manager._db_lookup_all([kid], self.base_license_url, self.pssh):
+                pair = self._norm_pair(pair)
+                found_kid, _, key = pair.partition(":")
+                if found_kid == kid and key:
+                    return key, source
+
+        if not self.is_cdm_usable():
+            logger.info(f"Key for segment KID {kid}: CDM not usable here (disabled, no license or no PSSH) -- vaults only")
+            return None, ""
+
+        try:
+            cdm_keys = self.drm_manager._cdm_extract(self.pssh_list, self.license_url, [kid], self.cdm_fn, self.cdm_kwargs, self.drm_type)
+        except Exception as e:
+            logger.warning(f"Key for segment KID {kid}: CDM extraction failed: {e}")
+            return None, ""
+
+        for pair in cdm_keys:
+            pair = self._norm_pair(pair)
+            found_kid, _, key = pair.partition(":")
+            if found_kid == kid and key:
+                self.drm_manager._store_keys([pair], self.drm_type, self.base_license_url, self.pssh)
+                return key, "cdm"
+
+        logger.error(f"Key for segment KID {kid}: not returned by the license either")
+        return None, ""
 
     def _candidates(self, kid: str, tried: set[str], found: list[tuple[str, str]]) -> Iterator[tuple[str, str]]:
         """Yield ("kid:key", source): the keys *found* in the vaults first, the CDM only once they are used up."""

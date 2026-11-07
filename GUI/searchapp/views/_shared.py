@@ -254,7 +254,7 @@ def _run_download_in_thread(
     audio_language = audio_language or item_payload.get("_audio_language")
 
     if strict_audio and not audio_language and get_api(site).supports_audio_selection:
-        audio_language = "all"
+        audio_language = "auto"
     
     audio_language = normalize_audio_language(audio_language)
     audio_filter = audio_filter_for_selection(audio_language)

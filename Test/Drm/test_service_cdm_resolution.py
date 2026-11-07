@@ -205,6 +205,78 @@ def test_cdm_spec_carries_the_device_and_the_remote(monkeypatch):
     assert pr["cdm_remote_api"] == DL_PLAYREADY and "prefer_remote_cdm" not in pr
 
 
+def test_select_cdm_carries_a_named_local_cdm_through_cdm_spec(manager_env, monkeypatch, tmp_path):
+    from VibraVid.core.drm.cdm.local import local_cdm as local_cdm_module
+
+    widevine_dir = tmp_path / "widevine"
+    widevine_dir.mkdir()
+    (widevine_dir / "metadata.yml").write_text("wvd:\n  device_type: ANDROID\n  security_level: 3\n")
+    (widevine_dir / "client_id.bin").write_bytes(b"x")
+    (widevine_dir / "private_key.der").write_bytes(b"x")
+
+    playready_dir = tmp_path / "playready"
+    playready_dir.mkdir()
+    for name in local_cdm_module.PLAYREADY_IDENTITY_FILES:
+        (playready_dir / name).write_bytes(b"x")
+
+    local_widevine = {"id": "l3", "system": "widevine", "path": str(widevine_dir)}
+    local_playready = {"id": "edge", "system": "playready", "path": str(playready_dir)}
+    monkeypatch.setattr(device_install, "get_local_cdm_registry", lambda: {"l3": local_widevine, "edge": local_playready})
+
+    from VibraVid.core.ui.tracker import context_tracker
+
+    manager_env(["l3", "edge"])
+    context_tracker.cdm_override = ["l3", "edge"]
+    try:
+        mgr = DRMManager.for_site("mysite")
+    finally:
+        context_tracker.cdm_override = None
+
+    assert mgr.widevine_local_cdm == local_widevine and mgr.widevine_device_path is None
+    assert mgr.playready_local_cdm == local_playready and mgr.playready_device_path is None
+
+    _, wv = mgr.cdm_spec("widevine")
+    _, pr = mgr.cdm_spec("playready")
+    assert wv["cdm_local"] == local_widevine
+    assert pr["cdm_local"] == local_playready
+
+
+class StopCdm:
+    """A fake CDM whose ``.open()`` raises, just to prove the code got past device loading."""
+    def open(self):
+        raise RuntimeError("stop after the load line")
+
+
+def test_get_widevine_keys_uses_the_local_cdm(monkeypatch):
+    from pywidevine.cdm import Cdm
+
+    from VibraVid.core.drm import widevine as widevine_module
+    from VibraVid.core.drm.cdm.local import local_cdm as local_cdm_module
+
+    local_cfg = {"id": "l3", "system": "widevine", "path": "x"}
+    built = object()
+    monkeypatch.setattr(local_cdm_module, "build_local_device", lambda cfg: built if cfg == local_cfg else None)
+    monkeypatch.setattr(Cdm, "from_device", classmethod(lambda cls, device: StopCdm() if device is built else None))
+
+    with pytest.raises(RuntimeError, match="stop after"):
+        widevine_module._get_widevine_keys([], "https://license.test", None, None, cdm_local=local_cfg)
+
+
+def test_get_playready_keys_uses_the_local_cdm(monkeypatch):
+    from pyplayready.cdm import Cdm
+
+    from VibraVid.core.drm import playready as playready_module
+    from VibraVid.core.drm.cdm.local import local_cdm as local_cdm_module
+
+    local_cfg = {"id": "edge", "system": "playready", "path": "y"}
+    built = object()
+    monkeypatch.setattr(local_cdm_module, "build_local_device", lambda cfg: built if cfg == local_cfg else None)
+    monkeypatch.setattr(Cdm, "from_device", classmethod(lambda cls, device: StopCdm() if device is built else None))
+
+    with pytest.raises(RuntimeError, match="stop after"):
+        playready_module._get_playready_keys_local_cdm([], "https://license.test", None, None, cdm_local=local_cfg)
+
+
 @pytest.mark.parametrize(
     ("cfg", "expected"),
     [
@@ -295,6 +367,7 @@ def test_named_device_in_the_managed_folder_wins_over_a_copy_in_a_subfolder(tmp_
 def test_cdm_keys_of_other_kids_are_not_returned_but_handed_back_to_be_shown():
     used, extra = "a" * 32, "b" * 32
     manager = object.__new__(DRMManager)
+    manager._license_extra_keys = {}
     cdm_fn = lambda *a, **k: types.SimpleNamespace(get_keys_list=lambda: [f"{used}:{'1' * 32}", f"{extra}:{'2' * 32}"])
     extras = []
 
@@ -302,6 +375,7 @@ def test_cdm_keys_of_other_kids_are_not_returned_but_handed_back_to_be_shown():
 
     assert kept == [f"{used}:{'1' * 32}"]
     assert extras == [f"{extra}:{'2' * 32}"]
+    assert manager._license_extra_keys == {extra: "2" * 32}  # kept so a segment KID missing from the manifest needs no second license request
 
 
 def test_a_key_of_an_unused_kid_is_shown_without_the_star(capsys):

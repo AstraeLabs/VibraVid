@@ -40,6 +40,7 @@ def test_form_accepts_only_configured_choices():
     with _config("ita|eng|fra"):
         assert DownloadForm({"source_alias": "streamingcommunity", "audio_language": "fr"}).is_valid()
         assert DownloadForm({"source_alias": "streamingcommunity", "audio_language": "all"}).is_valid()
+        assert DownloadForm({"source_alias": "animeworld", "audio_language": "auto"}).is_valid()
         assert not DownloadForm({"source_alias": "streamingcommunity", "audio_language": "ja"}).is_valid()
 
 
@@ -73,6 +74,27 @@ def test_movie_download_receives_selected_audio(monkeypatch):
         response = download_module.start_download(request)
     assert response.status_code == 302
     assert calls[0]["audio_language"] == "en"
+
+
+def test_gui_defaults_to_automatic_without_explicit_choice():
+    from searchapp.context_processors import audio_language_context as gui_audio_context
+
+    with _config():
+        result = gui_audio_context(RequestFactory().get("/"))["audio_language_config"]
+    assert result["selection"] == "auto"
+    assert not result["explicit"]
+
+
+def test_automatic_movie_choice_survives_request(monkeypatch):
+    calls = []
+    monkeypatch.setattr(download_module, "_run_download_in_thread", lambda *args, **kwargs: calls.append(kwargs))
+    request = RequestFactory().post("/download/", {
+        "source_alias": "animeworld", "item_payload": json.dumps({"name": "Movie", "type": "movie"}),
+        "audio_language": "auto",
+    })
+    with _config():
+        assert download_module.start_download(request).status_code == 302
+    assert calls[0]["audio_language"] == "auto"
 
 
 def test_audio_inspection_is_scoped_and_reports_actual_languages(monkeypatch):

@@ -88,9 +88,12 @@ class DRMManager:
         self.playready_remote_cdm_api = playready_remote_cdm_api
         self.widevine_cdm_origin: str | None = None  # why this CDM was picked, printed with the key request
         self.playready_cdm_origin: str | None = None
+        self.widevine_local_cdm: dict | None = None  # a DRM.local_cdm block: built in memory instead of widevine_device_path
+        self.playready_local_cdm: dict | None = None
         self._cdm_site: str | None = None
         self._cdm_auto = False  # True when built by for_site(): select_cdm() may swap the CDM
         self._vaults: list[object] = self._build_vaults()
+        self._license_extra_keys: dict[str, str] = {}  # kid -> key the license returned for KIDs nobody asked for (e.g. not in the manifest); reused instead of a second license request
 
     @classmethod
     def for_site(cls, site_name: str | None, height: int | None = None) -> "DRMManager":
@@ -113,6 +116,8 @@ class DRMManager:
         self.playready_remote_cdm_api = chosen.playready_remote
         self.widevine_cdm_origin = chosen.widevine_origin
         self.playready_cdm_origin = chosen.playready_origin
+        self.widevine_local_cdm = chosen.widevine_local
+        self.playready_local_cdm = chosen.playready_local
 
     def _display_keys(
         self,
@@ -275,9 +280,17 @@ class DRMManager:
         requested_kids = set(kids)
         filtered_cdm_keys = [k for k in cdm_keys if k.split(":", 1)[0].strip().lower() in requested_kids]
         dropped = len(cdm_keys) - len(filtered_cdm_keys)
+        
         if dropped:
+            others = [k for k in cdm_keys if k not in filtered_cdm_keys]
+            for k in others:
+                extra_kid, _, extra_key = k.partition(":")
+                if extra_key and set(extra_key.strip()) != {"0"}:
+                    self._license_extra_keys[extra_kid.strip().lower()] = extra_key.strip().lower()
+
             if extras_out is not None:
-                extras_out.extend(k for k in cdm_keys if k not in filtered_cdm_keys)
+                extras_out.extend(others)
+        
         return filtered_cdm_keys
 
     def report_wrong_keys(self, pairs: list[str], license_url: str | None, pssh: str | None = None) -> threading.Thread | None:
@@ -628,6 +641,7 @@ class DRMManager:
             return get_widevine_keys, dict(
                 cdm_device_path=self.widevine_device_path,
                 cdm_remote_api=self.widevine_remote_cdm_api,
+                cdm_local=self.widevine_local_cdm,
                 headers=headers,
                 key=key,
                 license_data=license_data,
@@ -640,6 +654,7 @@ class DRMManager:
             return get_playready_keys, dict(
                 cdm_device_path=self.playready_device_path,
                 cdm_remote_api=self.playready_remote_cdm_api,
+                cdm_local=self.playready_local_cdm,
                 headers=headers,
                 key=key,
                 license_data=license_data,

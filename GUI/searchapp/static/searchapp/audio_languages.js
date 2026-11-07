@@ -4,29 +4,38 @@
     if (!node) return;
     const config = JSON.parse(node.textContent || "{}");
     const languages = config.languages || [];
-    const allowed = new Set(["all", ...languages.map(language => language.code)]);
-    const storageKey = "cn-audio:" + languages.map(language => language.code).join("|");
+    const allowed = new Set(["auto", "all", ...languages.map(language => language.code)]);
     const dialog = document.getElementById("cn-movie-audio-dialog");
     const confirmed = new WeakSet();
     let movieForm = null;
     let movieSubmitter = null;
-    let selected = config.selection || "all";
-    if (!config.explicit) {
-        try { selected = sessionStorage.getItem(storageKey) || selected; } catch (_) {}
-    }
-    if (!allowed.has(selected)) selected = "all";
+    let selected = config.selection || "auto";
+    if (!allowed.has(selected)) selected = "auto";
 
     function codes(value) {
         return String(value || "").toLowerCase().split(/[,|\s/]+/).filter(Boolean);
+    }
+    function describeAudio(select) {
+        const description = select.closest(".cn-audio-picker")?.querySelector(".cn-audio-description");
+        if (!description) return;
+        description.textContent = select.value === "auto"
+            ? "Automatic uses configured preferences or the source's original audio; it does not guarantee a specific language."
+            : select.value === "all"
+                ? (languages.length
+                    ? "Downloads the available audio tracks among your configured languages. This does not include every language offered by the source."
+                    : "Downloads all available selectable audio tracks. Combined files retain their original audio.")
+                : "Downloads audio in the selected language. If it is unavailable or cannot be verified, the download stops. For combined files, use Automatic.";
     }
     function matches(available, wanted) {
         return available === wanted || (!wanted.includes("-") && available.split("-")[0] === wanted);
     }
     function availableForSelection(available, choice) {
+        if (choice === "auto") return true;
         const wanted = choice === "all" ? languages.map(language => language.code.toLowerCase()) : [choice.toLowerCase()];
         return (available || []).some(language => !wanted.length || wanted.some(code => matches(language.code.toLowerCase(), code)));
     }
     function eligible(element) {
+        if (selected === "auto") return true;
         const available = codes(element.dataset.verifiedLanguages || element.dataset.languages);
         if (!available.length) return true;
         const wanted = selected === "all" ? languages.map(language => language.code.toLowerCase()) : [selected.toLowerCase()];
@@ -114,7 +123,6 @@
     function setFilter(value) {
         if (!allowed.has(value)) return;
         selected = value;
-        try { sessionStorage.setItem(storageKey, value); } catch (_) {}
         document.querySelectorAll('[data-audio-prompt] input[name="audio_language"]').forEach(input => { input.value = value; });
         document.querySelectorAll(".cn-quality-picker").forEach(picker => {
             picker.dispatchEvent(new CustomEvent("cn:audio-change", {bubbles: true}));
@@ -130,7 +138,7 @@
         dialog.querySelector("[data-audio-download]").disabled = false;
         status.classList.remove("is-error");
         if (!result.audio_supported) {
-            status.textContent = "This provider checks audio when the video is prepared. Missing selected audio stops that video.";
+            status.textContent = "Automatic uses configured preferences or the source's original audio. Explicit languages are checked when tracks are prepared and may be unverifiable.";
             return;
         }
         const available = (result.audio_languages || []).filter(language => !languages.length ||
@@ -171,6 +179,7 @@
             option.textContent = option.dataset.label || option.textContent;
         });
         select.value = selectionFor(form);
+        describeAudio(select);
         select.disabled = true;
         const status = dialog.querySelector(".cn-audio-result");
         status.classList.remove("is-error");
@@ -195,6 +204,7 @@
             movieForm = movieSubmitter = null;
         });
         dialog.querySelector("select").addEventListener("change", event => {
+            describeAudio(event.target);
             field(movieForm, "audio_language", event.target.value);
             dialog.querySelector(".cn-audio-result").classList.remove("is-error");
             dialog.querySelector("[data-audio-download]").disabled = !!event.target.selectedOptions[0]?.disabled;
@@ -215,7 +225,7 @@
         if (!items.length) return;
         const hasData = [...items].some(item => codes(item.dataset.verifiedLanguages || item.dataset.languages).length);
         if (hasData) return;
-        selected = "all";
+        selected = "auto";
         document.querySelectorAll("[data-language-filter]").forEach(filter => { filter.hidden = true; });
     }
     document.addEventListener("DOMContentLoaded", function () {

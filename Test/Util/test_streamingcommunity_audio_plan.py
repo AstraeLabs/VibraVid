@@ -67,6 +67,15 @@ def test_manifest_with_both_audio_tracks_does_not_download_another_catalog():
     assert result["other_tracks"] == []
 
 
+def test_automatic_does_not_require_every_manifest_language():
+    primary = {"embedded": None, "languages": ["it", "en", "fr"], "content": "#EXTM3U", "streams": []}
+    resolve = Mock()
+    with audio_language_context("auto"), patch("VibraVid.services.streamingcommunity.audio.inspect_manifest", return_value=primary):
+        result = download_audio_options("https://example.test/master.m3u8", {}, "it", ["it", "en"], resolve)
+    assert result["required_audio_languages"] == []
+    resolve.assert_not_called()
+
+
 def test_embedded_audio_is_allowed_only_for_matching_declared_language():
     tracks = [Stream(type="video", selected=True)]
     with audio_language_context("en"):

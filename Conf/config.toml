@@ -176,6 +176,14 @@ enabled = false
 # host = "https://cdm.example.com"
 # secret = "..."
 
+# Local CDMs built in memory (no .wvd/.prd required): "system" is "playready" (default) or "widevine".
+# "path" is a .wvd/.prd file, or a folder with the raw identity files (see docs). "loader" is a .py
+# escape hatch exposing load_device(path=None). Chosen with cdm = "<id>" here or in login.toml.
+[DRM.local_cdm.edge]
+system = "playready"
+path = 'C:\Users\Testing\Documents\GitHub\Edge\playready\device'
+
+
 
 [HOOKS]
 pre_run = []

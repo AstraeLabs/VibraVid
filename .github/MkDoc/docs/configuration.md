@@ -479,6 +479,35 @@ secret = "CDRM"
 
 The system (Widevine/PlayReady) is inferred: `device_type` or `type = "custom_api_1"` = Widevine, a `device_name` starting with `SL` = PlayReady, no `device_type` = PlayReady. Set `system = "widevine"` / `"playready"` to force it.
 
+### In-memory local CDMs (`DRM.local_cdm`)
+
+Declare once under `[DRM.local_cdm.<id>]`, like a remote CDM, but the `Device` is built in memory instead of reading a ready-made `.wvd`/`.prd` from the binary folder. Not to be confused with [Local CDM devices](#local-cdm-devices) (the `wvd_dir`/`prd_dir` search folders) — this is for raw key material or a custom loader.
+
+```toml
+[DRM.local_cdm.edge]
+system = "playready"          # "playready" (default) or "widevine"
+path = 'C:\binary\DEVICE\SL3000'
+
+[DRM.local_cdm.l3]
+system = "widevine"
+path = 'C:\binary\DEVICE\L3'
+```
+
+| Key | Description |
+|-----|-------------|
+| `system` | `"playready"` (default) or `"widevine"` |
+| `path` | A `.wvd`/`.prd` file anywhere on disk, or a folder with the raw identity files (below) |
+| `loader` | A `.py` file exposing `load_device(path=None)`, used instead of `path`'s own format |
+
+Raw identity folder layout (used when `path` is a directory):
+
+| System | Required files |
+|--------|-----------------|
+| PlayReady | `extracted.enc.plain`, `extracted.sig.plain`, `extracted.cert` |
+| Widevine | `metadata.yml`, `client_id.bin`, `private_key.der` (or `private_key.pem`) |
+
+The Widevine layout is exactly the output of `pywidevine export-device -o <out_dir> device.wvd` — point `path` at the exported folder and it works unmodified. `pyplayready export-device` does **not** produce a compatible folder for PlayReady (it writes `zgpriv.dat`/`bgroupcert.dat`, meant for reprovisioning, not for this raw-identity format) — for a real PlayReady device, point `path` directly at the original `.prd` file instead, or use `loader`.
+
 ### Hosted remote CDM API
 
 A third-party hosted CDM (Widevine and PlayReady) over HTTP: same `[DRM.remote_cdm.<id>]` table with `type = "custom_api_1"`, plus `host` and `secret` from your provider.
@@ -508,7 +537,7 @@ device_name = "L3"
 | `"search"` | First `.wvd` (Widevine) and `.prd` (PlayReady) in the binary folder ([Local CDM devices](#local-cdm-devices)) |
 | ends with `.wvd` / `.prd` | That file, looked up in `wvd/` or `prd/` |
 | `"default"` | `login.toml` only: use `[DRM]`'s `cdm` (`cdm = ""` means the same) |
-| anything else | Id of a remote CDM from `DRM.remote_cdm` |
+| anything else | Id of a remote CDM from `DRM.remote_cdm`, or an [in-memory local CDM](#in-memory-local-cdms-drmlocal_cdm) from `DRM.local_cdm` |
 
 The value is one entry or a list with one entry per system. Per system the order is: service `cdm` in `login.toml`, then `[DRM]`, then `"search"` (a service naming only a `.wvd` keeps the `[DRM]` choice for PlayReady). A missing file or unknown id stops the download with an error listing the known ids. The CLI `--cdm` ([cli](cli.md)) wins over both for one run.
 

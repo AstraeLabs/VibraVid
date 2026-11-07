@@ -50,4 +50,4 @@ def download_audio_options(playlist: str, headers: dict, catalog: str, catalogs:
         raise ValueError("The selected audio language is unavailable for this video")
     return {"m3u8_content": primary["content"], "embedded_audio_language": primary["embedded"],
             "other_tracks": extras, "required_audio_languages": [language for language in available
-                              if not wanted or any(matches_audio_language([language], code) for code in wanted)]}
+                               if any(matches_audio_language([language], code) for code in wanted)]}

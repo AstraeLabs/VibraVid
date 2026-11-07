@@ -1,11 +1,13 @@
 <div class="cn-audio-picker">
     <label>Audio
         <select class="cn-audio-select" aria-label="Audio languages to download">
+            <option value="auto">Automatic</option>
             <option value="all">{{ audio_language_config.allLabel|default:"All configured languages" }}</option>
             {% for language in audio_language_config.languages %}
             <option value="{{ language.code }}">{{ language.name }}</option>
             {% endfor %}
         </select>
     </label>
+    <p class="cn-seek-hint cn-audio-description" aria-live="polite">Automatic uses configured preferences or the source's original audio; it does not guarantee a specific language.</p>
     <span class="cn-audio-result" role="status">Available tracks are checked before downloading.</span>
 </div>
