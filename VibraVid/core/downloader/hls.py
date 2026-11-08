@@ -372,6 +372,10 @@ class HLS_Downloader(BaseDownloader):
         Execute the full HLS download pipeline.
         Returns ``(output_path, cancelled)`` — cancelled=True means abort.
         """
+        if not self.m3u8_url and not self.m3u8_content:
+            logger.error("HLS_Downloader.start called without manifest URL/content")
+            return DownloadResult(None, False, "No HLS manifest URL (source unavailable)")
+
         precheck = self._precheck(self.m3u8_url)
         if precheck is not None:
             return precheck
