@@ -220,12 +220,10 @@ class VideoSourceAnime(VideoSource):
 
         Extends base VideoSource with anime-specific initialization
         """
+        super().__init__(url, is_series=False)
         self.headers = {"user-agent": get_userAgent()}
-        self.url = url
         self.src_mp4 = None
         self.master_playlist = None
-        self.iframe_src = None
-        self.tmdb_id = None
 
     def get_embed(self, episode_id: int, prefer_mp4: bool = True) -> str:
         """
@@ -245,6 +243,10 @@ class VideoSourceAnime(VideoSource):
             # Extract and clean embed URL
             embed_url = response.text.strip()
             self.iframe_src = embed_url
+
+            # The embed is normally loaded from the site's own page: send it as referer
+            self.iframe_page_url = f"{self.url.rstrip('/')}/"
+            self._set_referer(self.iframe_page_url)
 
             # Fetch video content using embed URL
             with create_client(headers=self.headers) as client:
