@@ -13,7 +13,7 @@ updater = importlib.import_module("VibraVid.utils.upload.update")
 @pytest.mark.parametrize(
     ("latest", "current", "expected"),
     [
-        ("v1.4.10", "1.4.9", True),
+        ("v1.4.10", "1.5.0", True),
         ("v1.10.0", "1.9.99", True),
         ("1.4.6", "v1.4.6.0", False),
         ("1.3.99", "1.4.0", False),
