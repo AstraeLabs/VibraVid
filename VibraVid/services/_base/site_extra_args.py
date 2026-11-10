@@ -12,7 +12,7 @@ from .site_loader import load_search_functions
 
 logger = logging.getLogger(__name__)
 _LOGIN_NON_CREDENTIAL_KEYS = {"cdm", "args", "country", "region", "locale", "profile", "process"}
-_PROCESS_SWITCHES = ("live_mux", "live_decrypt")
+_PROCESS_SWITCHES = ("live_mux", "live_decrypt", "rebase_tfdt")
 
 
 def parse_site_extra_args(site: str, raw: str) -> dict:

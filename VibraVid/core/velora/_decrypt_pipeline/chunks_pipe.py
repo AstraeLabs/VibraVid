@@ -70,10 +70,15 @@ class ChunksPipeMixin:
         if getattr(self, "other_tracks", None):
             return _no(f"other_tracks={self.other_tracks}")
         flux_path = self._flux_path()
-        if not _decryptor.flux_supports_tfdt_rebase(flux_path):
-            return _no(f"flux {flux_path} lacks --chunks/--tfdt-rebase (needs >= 0.5.4)")
+        if not _decryptor.flux_supports_chunks(flux_path):
+            return _no(f"flux {flux_path} lacks --chunks (needs >= 0.5.3)")
 
-        logger.info(f"chunks-pipe: eligible (output={output_path}, flux={flux_path})")
+        from VibraVid.core.downloader.util.live_switches import tfdt_rebase_allowed
+
+        if tfdt_rebase_allowed() and not _decryptor.flux_supports_tfdt_rebase(flux_path):
+            return _no(f"flux {flux_path} lacks --tfdt-rebase (needs >= 0.5.4)")
+
+        logger.info(f"chunks-pipe: eligible (output={output_path}, flux={flux_path}, tfdt_rebase={tfdt_rebase_allowed()})")
         return True
 
     def _flux_path(self) -> str:
@@ -104,7 +109,11 @@ class ChunksPipeMixin:
             self._cleanup_streaming_mux_chapter_file()
 
     def _run_chunks_pipe(self, ctx, paths: list[Path], plan, keys: list[tuple[str, str]]) -> bool:
-        flux_cmd = [self._flux_path(), "--chunks", str(ctx.stream_dir), "-o", "-", "--ffmpeg-path", plan.cmd[0], "--tfdt-rebase"]
+        flux_cmd = [self._flux_path(), "--chunks", str(ctx.stream_dir), "-o", "-", "--ffmpeg-path", plan.cmd[0]]
+        from VibraVid.core.downloader.util.live_switches import tfdt_rebase_allowed
+
+        if tfdt_rebase_allowed():
+            flux_cmd.append("--tfdt-rebase")
         for kid, key in keys:
             flux_cmd += ["--key", f"{kid.lower()}:{key.lower()}"]
         logger.info(f"chunks-pipe: {_decryptor.Decryptor._redacted_cmd(flux_cmd)} | {' '.join(plan.cmd)}")

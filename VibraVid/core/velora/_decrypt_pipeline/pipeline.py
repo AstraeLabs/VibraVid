@@ -840,9 +840,13 @@ class DecryptPipelineMixin(
             # Cheapest possible fix first: subtract the first fragment's tfdt from
             # every fragment's tfdt in place (a handful of small seeks+writes, no
             # resize, no ffmpeg) -- see _tfdt_rebase.py.
+            from VibraVid.core.downloader.util.live_switches import tfdt_rebase_allowed
+
             from ..util._tfdt_rebase import rebase_fragment_timestamps
 
-            if not rebase_fragment_timestamps(out_path, logger=logger):
+            if not tfdt_rebase_allowed():
+                self._normalize_out_path(out_path, is_plain_subtitle)
+            elif not rebase_fragment_timestamps(out_path, logger=logger):
                 if config_manager.config.get("PROCESS", "engine", default="ffmpeg").lower() == "ffmpeg":
                     self._needs_join_ts_fix = True
                 else:

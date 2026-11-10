@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from VibraVid.core.decryptor import Decryptor
-from VibraVid.core.decryptor.decryptor import KeysManager, flux_supports_tfdt_rebase
+from VibraVid.core.decryptor.decryptor import KeysManager, flux_supports_chunks, flux_supports_tfdt_rebase
 
 from .constants import logger
 from .sniff import _reads_as_self_initializing_mp4, _skip_post_decrypt
@@ -137,7 +137,10 @@ class ChunksDecryptMixin:
         logger.info(f"Merge + decrypt in one pass (flux --chunks) -> {out_path.name} ({len(paths)} segs)")
 
         decryptor = Decryptor()
-        rebase_in_flux = flux_supports_tfdt_rebase(decryptor.flux_path)
+        from VibraVid.core.downloader.util.live_switches import tfdt_rebase_allowed
+
+        want_rebase = tfdt_rebase_allowed()
+        rebase_in_flux = want_rebase and flux_supports_tfdt_rebase(decryptor.flux_path)
         t0 = time.monotonic()
         try:
             ok = decryptor.decrypt_chunks(
@@ -168,9 +171,9 @@ class ChunksDecryptMixin:
 
         logger.info(f"Merge + decrypt finished -> {out_path.name} in {time.monotonic() - t0:.1f}s")
 
-        # The output is a clear *fragmented* MP4. flux >= 0.5.4 already zeroed its tfdt; with an older
-        # flux it keeps the original absolute tfdt, exactly like a live-decrypted track.
-        if not rebase_in_flux:
+        # The output is a clear *fragmented* MP4. flux >= 0.5.4 can zero tfdt (--tfdt-rebase);
+        # otherwise (or when disabled) Python fallback can rebase per track when wanted.
+        if want_rebase and not rebase_in_flux and flux_supports_chunks(decryptor.flux_path):
             from VibraVid.utils import config_manager
 
             from ..util._tfdt_rebase import rebase_fragment_timestamps

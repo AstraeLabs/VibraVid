@@ -149,7 +149,7 @@ def test_remote_cdm_prints_one_load_line_with_the_reason(monkeypatch):
     with pytest.raises(RuntimeError, match="stop after"):
         widevine._get_widevine_keys([], "https://license.test", None, {"device_name": "L3"}, cdm_origin="login.toml 'mysite'")
 
-    assert [line for line in printed if "[+]" in line] == ["[green]\[+][/green] [cyan]remote L3 [white]| [dim]why: login.toml 'mysite'"]
+    assert [line for line in printed if "[+]" in line] == [r"[green]\[+][/green] [cyan]remote L3 [white]| [dim]why: login.toml 'mysite'"]
     assert not any("chosen by" in line or "Using remote" in line for line in printed)
 
 
@@ -165,7 +165,7 @@ def test_local_device_prints_only_the_file_name_not_the_path(monkeypatch):
         widevine._get_widevine_keys([], "https://license.test", "C:/binary/wvd/phone_l3.wvd", None, cdm_origin="search")
 
     loads = [line for line in printed if "[+]" in line]
-    assert loads == ["[green]\[+][/green] [cyan]phone_l3.wvd [white]| [dim]why: search"]
+    assert loads == [r"[green]\[+][/green] [cyan]phone_l3.wvd [white]| [dim]why: search"]
     assert "binary" not in loads[0] and "Security" not in loads[0]
 
 
@@ -199,7 +199,7 @@ def test_widevine_line_keeps_the_system_id(monkeypatch):
     with pytest.raises(RuntimeError, match="stop after"):
         widevine._get_widevine_keys([], "https://license.test", "C:/binary/wvd/phone_l3.wvd", None, cdm_origin="search")
 
-    assert [line for line in printed if "[+]" in line] == ["[green]\[+][/green] [cyan]phone_l3.wvd [white]| [cyan]SysID: [red]22594 [white]| [dim]why: search"]
+    assert [line for line in printed if "[+]" in line] == [r"[green]\[+][/green] [cyan]phone_l3.wvd [white]| [cyan]SysID: [red]22594 [white]| [dim]why: search"]
 
 
 def test_playready_line_keeps_the_model(monkeypatch):
@@ -216,7 +216,7 @@ def test_playready_line_keeps_the_model(monkeypatch):
     with pytest.raises(RuntimeError, match="stop after"):
         playready._get_playready_keys_local_cdm([], "https://license.test", "C:/binary/prd/tv_sl3000.prd", None, cdm_origin="login.toml 'mysite'")
 
-    assert [line for line in printed if "[+]" in line] == ["[green]\[+][/green] [cyan]tv_sl3000.prd [white]| [cyan]Model: [red]TPV AOC 50U6185 [white]| [dim]why: login.toml 'mysite'"]
+    assert [line for line in printed if "[+]" in line] == [r"[green]\[+][/green] [cyan]tv_sl3000.prd [white]| [cyan]Model: [red]TPV AOC 50U6185 [white]| [dim]why: login.toml 'mysite'"]
 
 
 def test_unreadable_device_still_prints_the_file_name_and_the_reason(monkeypatch):
@@ -236,4 +236,4 @@ def test_unreadable_device_still_prints_the_file_name_and_the_reason(monkeypatch
     with pytest.raises(RuntimeError, match="stop after"):
         playready._get_playready_keys_local_cdm([], "https://license.test", "C:/binary/prd/bad.prd", None, cdm_origin="search")
 
-    assert [line for line in printed if "[+]" in line] == ["[green]\[+][/green] [cyan]bad.prd [white]| [dim]why: search"]
+    assert [line for line in printed if "[+]" in line] == [r"[green]\[+][/green] [cyan]bad.prd [white]| [dim]why: search"]

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from VibraVid.core.decryptor import Decryptor
+from VibraVid.core.downloader.util.live_switches import tfdt_rebase_allowed
 from VibraVid.core.manifest.mpd import DashParser
 from VibraVid.core.muxing.helper.video import binary_merge_segments
 from VibraVid.core.ui.bar_manager import console
@@ -595,7 +596,7 @@ class LiveDownloadMixin:
             _key_sanity_pending = False
             if not tfdt_base_decided:
                 tfdt_base_decided = True
-                if init_path and init_path.exists():
+                if tfdt_rebase_allowed() and init_path and init_path.exists():
                     tfdt_base = first_fragment_tfdt(fp)
                     logger.info(f"Live DASH: {stream.type} timeline zeroed by flux (tfdt base {tfdt_base})" if tfdt_base is not None else f"Live DASH: {stream.type} segment has no tfdt, timeline rebased afterwards")
             
@@ -996,13 +997,16 @@ class LiveDownloadMixin:
         # When the rebase cannot be done the ffmpeg reset stays as the fallback.
         # Not needed when the live mux already wrote the final file: this track file is then only a leftover.
         if out_path.suffix.lower() in (".mp4", ".m4s", ".m4a", ".ts") and not live_muxed:
-            if tfdt_base is not None or rebase_fragment_timestamps(out_path, logger=logger):
-                flux_progressive = merge_init_clear and continuity.is_contiguous() and out_path == merge_out and _decryptor is not None
+            do_rebase = tfdt_rebase_allowed()
+            if tfdt_base is not None or (do_rebase and rebase_fragment_timestamps(out_path, logger=logger)):
+                flux_progressive = do_rebase and merge_init_clear and continuity.is_contiguous() and out_path == merge_out and _decryptor is not None
                 if not continuity.is_contiguous():
                     logger.info(f"Live DASH: {stream.type} fragments are not contiguous, container fixed with ffmpeg (flux would close the gaps)")
                 self._normalize_out_path(out_path, False, flux_path=_decryptor.flux_path if flux_progressive else None)
-            else:
+            elif do_rebase:
                 _reset_live_timestamps(out_path)
+            else:
+                self._normalize_out_path(out_path, False)
 
         if not (out_path.exists() and out_path.stat().st_size > 0):
             logger.error(f"Live DASH binary merge produced an empty file: {out_path}")

@@ -47,6 +47,21 @@ def live_mux_opted_out(site: str | None = None) -> bool:
     return config_manager.config.get_bool("PROCESS", "use_live_mux", default=None) is False
 
 
+def tfdt_rebase_allowed(site: str | None = None) -> bool:
+    """Whether to rebase fragment tfdt to zero (flux ``--tfdt-rebase`` / Python fallback).
+    ``process.rebase_tfdt`` in login.toml overrides per site; default True, except ``crunchyroll`` where default is False to avoid independent per-track rebasing desync."""
+    site = site or context_tracker.site_name
+    if site:
+        from VibraVid.services._base.site_extra_args import resolve_site_process
+
+        value = resolve_site_process(site).get("rebase_tfdt")
+        if value is not None:
+            return value
+        if site.lower() == "crunchyroll":
+            return False
+    return True
+
+
 def live_mux_allowed(site: str | None = None, encrypted_tracks: bool = False) -> tuple[bool, str]:
     """Whether the streaming-mux fast path may run for *site*, with the reason when it may not."""
     site = site or context_tracker.site_name

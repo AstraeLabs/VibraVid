@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from VibraVid.core.decryptor._models import _run_flux_dump
+from VibraVid.core.downloader.util.live_switches import tfdt_rebase_allowed
 from VibraVid.core.muxing.helper.video.ts import audio_editlist_args
 from VibraVid.core.muxing.streaming_mux import NamedPipeMuxer
 from VibraVid.core.utils.language import track_title_and_iso_lang
@@ -108,7 +109,7 @@ class LiveMux:
         write(init_path.read_bytes())
 
         def send(data: bytes) -> None:
-            if rebased:
+            if rebased or not tfdt_rebase_allowed():
                 write(data)
                 return
             patched, base[0] = rebase_fragment_bytes(data, base[0])

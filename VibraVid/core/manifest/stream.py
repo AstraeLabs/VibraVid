@@ -555,7 +555,13 @@ class Stream:
             Stream(subtitle | id='subs:ita-forced' | it-IT | VTT | [Forced])
         """
         try:
-            codec = self.get_short_codec() or self.codecs or None
+            short_codec = self.get_short_codec()
+            raw_codec = (self.codecs or "").strip() or None
+            if short_codec and raw_codec and short_codec.lower() != raw_codec.lower().split(",")[0]:
+                codec = f"{short_codec} ({raw_codec})"
+            else:
+                codec = short_codec or raw_codec
+            
             lang = self.resolved_language or self.language or None
             flags = self.get_flags_display() or None
             drm = self.drm.get_drm_display() if self.drm.is_encrypted() else None

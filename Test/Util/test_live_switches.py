@@ -68,24 +68,24 @@ def env(monkeypatch):
 def test_process_is_read_from_a_table_a_json_string_and_unset(env):
     env.login(a={"process": {"live_mux": False, "live_decrypt": True}}, b={"process": '{"live_mux": false}'}, c={"cdm": ""})
 
-    assert resolve_site_process("a") == {"live_mux": False, "live_decrypt": True}
-    assert resolve_site_process("b") == {"live_mux": False, "live_decrypt": None}
-    assert resolve_site_process("c") == {"live_mux": None, "live_decrypt": None}
-    assert resolve_site_process("missing") == {"live_mux": None, "live_decrypt": None}
-    assert resolve_site_process("") == {"live_mux": None, "live_decrypt": None}
+    assert resolve_site_process("a") == {"live_mux": False, "live_decrypt": True, "rebase_tfdt": None}
+    assert resolve_site_process("b") == {"live_mux": False, "live_decrypt": None, "rebase_tfdt": None}
+    assert resolve_site_process("c") == {"live_mux": None, "live_decrypt": None, "rebase_tfdt": None}
+    assert resolve_site_process("missing") == {"live_mux": None, "live_decrypt": None, "rebase_tfdt": None}
+    assert resolve_site_process("") == {"live_mux": None, "live_decrypt": None, "rebase_tfdt": None}
 
 
 @pytest.mark.parametrize("raw", ["not json", "[1, 2]", 3, {"live_mux": "maybe"}, {"unknown": True}])
 def test_a_broken_process_never_raises_and_is_ignored(env, raw):
     env.login(a={"process": raw})
 
-    assert resolve_site_process("a") == {"live_mux": None, "live_decrypt": None}
+    assert resolve_site_process("a") == {"live_mux": None, "live_decrypt": None, "rebase_tfdt": None}
 
 
 def test_string_switches_are_accepted(env):
     env.login(a={"process": {"live_mux": "false", "live_decrypt": "true"}})
 
-    assert resolve_site_process("a") == {"live_mux": False, "live_decrypt": True}
+    assert resolve_site_process("a") == {"live_mux": False, "live_decrypt": True, "rebase_tfdt": None}
 
 
 def test_process_is_not_a_credential(env):
