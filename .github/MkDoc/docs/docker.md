@@ -46,6 +46,7 @@ Key variables (full list in `.env.example`):
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Comma-separated hostnames Django accepts |
 | `CSRF_TRUSTED_ORIGINS` | `http://localhost:8000,...` | Origins for CSRF validation |
 | `PUID` / `PGID` | unset | User/group ID the container process runs as — set these to your host user's `id -u`/`id -g` so downloaded files aren't owned by root (see the [NAS guide](nas.md) for the full walkthrough) |
+| `SKIP_MEDIA_CHOWN` | unset | `1`/`true`/`yes` skips the recursive `chown` of `/app/Video` that runs at every start when `PUID`/`PGID` are set. Use it with large libraries (the chown can delay startup by many minutes); the library must already be owned by `PUID`/`PGID`. Config, data, logs and internal folders are still fixed |
 | `VIBRAVID_HIDDEN_SITES` | unset | Comma-separated service folder names to switch off (CLI, TUI and GUI), added to `hidden_services` in `config.toml` (see [Configuration](configuration.md#default)). Uncomment it in `docker-compose.yml` |
 | `WATCHLIST_AUTO_INTERVAL_SECONDS` | `14400` (4h) | Initial interval (min 900) of the watchlist auto-download loop. An interval saved from the GUI's Watchlist page takes precedence after that |
 

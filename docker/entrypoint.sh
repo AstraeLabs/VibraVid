@@ -19,7 +19,18 @@ if [ -n "$PGID" ] && [ "$PGID" != "$CURRENT_GID" ]; then
 fi
 
 if [ -n "$PUID" ] || [ -n "$PGID" ]; then
-    chown -R appuser:appuser /app/Video /app/Conf /app/data /app/logs /app/.cache /app/tmp /home/appuser/.local/bin/binary 2>/dev/null || true
+    chown -R appuser:appuser /app/Conf /app/data /app/logs /app/.cache /app/tmp /home/appuser/.local/bin/binary 2>/dev/null || true
+
+    # The media library can hold a huge number of files: a recursive chown on every start may take many minutes.
+    # SKIP_MEDIA_CHOWN=1 skips it (the library's permissions must already be correct).
+    case "$(printf '%s' "${SKIP_MEDIA_CHOWN:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes)
+            echo "VibraVid: skipping recursive chown of /app/Video (SKIP_MEDIA_CHOWN)"
+            ;;
+        *)
+            chown -R appuser:appuser /app/Video 2>/dev/null || true
+            ;;
+    esac
 fi
 
 # Create the logs cache directories (app logs and ARR logs) for the appuser to write to, if they don't exist.

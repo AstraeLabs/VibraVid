@@ -73,6 +73,10 @@ services:
       PUID: "${PUID:-}"
       PGID: "${PGID:-}"
 
+      # Set to 1 to skip the recursive chown of /app/Video at startup (large libraries: it can take many minutes).
+      # Only do this if the library already has the right owner for PUID/PGID.
+      SKIP_MEDIA_CHOWN: "${SKIP_MEDIA_CHOWN:-}"
+
       # Host Configuration (override both in .env when you reach the UI from another machine)
       ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1,vibravid}"
       CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"

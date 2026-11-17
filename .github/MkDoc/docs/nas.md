@@ -63,6 +63,15 @@ PGID=1000
 
 The container entrypoint will remap `appuser` to these IDs at startup so all downloaded files are owned by your normal user.
 
+!!! tip "Large media libraries"
+    When `PUID`/`PGID` are set, the entrypoint also runs a recursive `chown` on `/app/Video` at every start. On a library with many files this can delay startup by many minutes. If the library already belongs to `PUID:PGID`, add this to `.env` to skip it:
+
+    ```env
+    SKIP_MEDIA_CHOWN=1
+    ```
+
+    Config, data, logs and internal folders are still fixed at startup; only the media library is left untouched.
+
 ### 3. Start the container
 
 ```bash
@@ -270,6 +279,10 @@ docker compose up -d --force-recreate
 ### Downloads owned by root
 
 `PUID` / `PGID` are not set or do not match the folder owner. Check with `id <user>` on the NAS host and set the variables accordingly.
+
+### Very slow startup with a large library
+
+With `PUID`/`PGID` set, every start runs a recursive `chown` on `/app/Video`. Set `SKIP_MEDIA_CHOWN=1` in `.env` and recreate the container (`docker compose up -d --force-recreate`) if the library already has the right owner.
 
 ### Port already in use
 
