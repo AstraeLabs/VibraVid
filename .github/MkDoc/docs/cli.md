@@ -204,6 +204,7 @@ python manual.py --yt-dlp "<URL>" --extract-audio --audio-format mp3 --audio-qua
 | `--no-manifest-info` | Don't print the manifest/streams table |
 | `--binary-update` | Check FFmpeg/Flux/Packager/dovi_tool/MKVToolNix/Velora against AstraeLabs/Binary and re-download outdated ones (the CLI also does it every 2 days: `auto_update_binaries`) |
 | `--resolve-only` | Resolve and cache manifest/keys/license/playlist without downloading (pairs with the queue) |
+| `--skip-download` | Skip the download for this run only (same as `DOWNLOAD.skip_download = true`, without editing `config.toml`) |
 | `--export [FILE]` | Resolve tracks and keys, write them to a JSON file instead of downloading (see [Export and import](#export-and-import-export-import)) |
 | `--import <FILE>` | Download every entry of a file written by `--export`, no search and no CDM when the keys were exported |
 | `--tui` | Launch the Textual terminal UI |

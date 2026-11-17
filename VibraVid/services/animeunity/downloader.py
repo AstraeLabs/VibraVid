@@ -1,5 +1,6 @@
 # 11.03.24
 
+import logging
 import os
 
 from rich.console import Console
@@ -17,10 +18,11 @@ from VibraVid.utils.media.anime_naming import series_name_and_year
 from .scrapper import ScrapeSerieAnime
 
 console = Console()
+logger = logging.getLogger(__name__)
 msg = Prompt()
 extension_output = config_manager.config.get("PROCESS", "extension")
-KILL_HANDLER = False
 DOWNOAD_HLS = True
+KILL_HANDLER = False
 
 
 def download_film(select_title: Entries):
@@ -45,8 +47,17 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
     start_message()
     print_episode_header(scrape_serie.series_name, episode=obj_episode.number)
 
-    # Collect mp4 url
-    video_source.get_embed(obj_episode.id, not DOWNOAD_HLS)
+    mp4_url = (
+        scrape_serie.get_video_url(obj_episode.id) if hasattr(scrape_serie, "get_video_url") else None
+    )
+    if not isinstance(mp4_url, str) or not mp4_url.startswith("http"):
+        mp4_url = None
+    if not mp4_url:
+        try:
+            video_source.get_embed(obj_episode.id, not DOWNOAD_HLS)
+        except Exception as error:
+            logger.error(f"[animeunity] No video source for episode {obj_episode.id}: {error}")
+            return None
 
     if scrape_serie.is_series:
         if isinstance(obj_episode.number, str) and "-" in obj_episode.number:
@@ -84,11 +95,14 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
     os_manager.create_path(mp4_path)
 
     # Start downloading
+    if mp4_url:
+        return MP4_Downloader(url=mp4_url, path=os.path.join(mp4_path, f"{mp4_name}.mp4"))
     if not DOWNOAD_HLS:
         return MP4_Downloader(url=str(video_source.src_mp4).strip(), path=os.path.join(mp4_path, f"{mp4_name}.mp4"))
-
-    else:
-        return HLS_Downloader(m3u8_url=video_source.master_playlist, output_path=os.path.join(mp4_path, f"{mp4_name}.{extension_output}")).start()
+    return HLS_Downloader(
+        m3u8_url=video_source.master_playlist,
+        output_path=os.path.join(mp4_path, f"{mp4_name}.{extension_output}"),
+    ).start()
 
 
 def _get_episode_by_number_or_index(scrape_serie, episode_number: int):
@@ -131,6 +145,7 @@ def download_series(
         mal_id=getattr(select_title, "mal_id", None),
         anilist_id=getattr(select_title, "anilist_id", None),
         tmdb_id=getattr(select_title, "tmdb_id", None),
+        fallback_year=getattr(select_title, "year", None),
     )
 
     video_source = VideoSourceAnime(site_constants.FULL_URL)

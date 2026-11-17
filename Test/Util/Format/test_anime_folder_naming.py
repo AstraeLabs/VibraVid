@@ -47,6 +47,31 @@ def test_unresolved_identity_keeps_provider_name():
     assert anime_naming.series_name_and_year("slug") == ("slug", None)  # no ids at all: no lookups
 
 
+def test_provider_year_is_used_when_identity_cannot_be_resolved():
+    with mock.patch.object(anime_id_map, "resolve_tmdb_id", return_value=None):
+        with mock.patch.object(anime_naming, "_format_has_year_token", return_value=False):
+            assert anime_naming.series_name_and_year("Naruto", fallback_year="2002") == ("Naruto (2002)", None)
+        with mock.patch.object(anime_naming, "_format_has_year_token", return_value=True):
+            assert anime_naming.series_name_and_year("Naruto", mal_id=1, fallback_year=2002) == ("Naruto", "2002")
+
+
+@pytest.mark.parametrize("year", [None, "", "0", "9999", "abcd", "20022"])
+def test_invalid_provider_year_keeps_provider_name(year):
+    assert anime_naming.series_name_and_year("Naruto", fallback_year=year) == ("Naruto", None)
+
+
+def test_tmdb_identity_wins_over_provider_year():
+    with mock.patch.object(anime_naming, "_format_has_year_token", return_value=False):
+        patches = _tmdb()
+        for p in patches:
+            p.start()
+        try:
+            assert anime_naming.series_name_and_year("slug", mal_id=1, fallback_year="1999") == ("My Hero Academia (2016)", None)
+        finally:
+            for p in patches:
+                p.stop()
+
+
 def test_year_is_appended_when_format_has_no_year_token():
     with mock.patch.object(anime_naming, "_format_has_year_token", return_value=False):
         assert _resolve(mal_id=33486) == ("My Hero Academia (2016)", None)

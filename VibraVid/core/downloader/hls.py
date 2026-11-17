@@ -448,7 +448,7 @@ class HLS_Downloader(BaseDownloader):
 
         # ── Download ──────────────────────────────────────────────────────────
         self._log_tracks_json(streams, keys, self.m3u8_url)
-        if SKIP_DOWNLOAD or context_tracker.capture_keys is not None or context_tracker.export_file is not None:
+        if SKIP_DOWNLOAD or context_tracker.skip_download or context_tracker.capture_keys is not None or context_tracker.export_file is not None:
             return self._skip_download_result()
 
         self._create_media_players()

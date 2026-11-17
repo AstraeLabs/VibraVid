@@ -205,7 +205,7 @@ class MP4FileDownloader:
         return _run(bar_mgr)
 
     def _preflight(self) -> bool:
-        if SKIP_DOWNLOAD:
+        if SKIP_DOWNLOAD or context_tracker.skip_download:
             console.print("[yellow]Download skipped due to configuration.")
             return False
 

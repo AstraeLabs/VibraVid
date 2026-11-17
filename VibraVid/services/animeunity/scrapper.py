@@ -1,4 +1,4 @@
-# 01.03.24
+# 16.11.26
 
 import logging
 import threading
@@ -19,7 +19,7 @@ class ScrapeSerieAnime:
         """
         self.is_series = False
         self.headers = get_headers()
-        self.url = url
+        self.url = url.rstrip("/")
         self.episodes_cache = None
         self._fetch_lock = threading.Lock()
 
@@ -33,13 +33,7 @@ class ScrapeSerieAnime:
             self.obj_episode_manager: EpisodeManager = EpisodeManager()
 
     def get_count_episodes(self):
-        """
-        Retrieve total number of episodes for the selected media.
-        This includes partial episodes (like episode 6.5).
-
-        Returns:
-            int: Total episode count including partial episodes
-        """
+        """Total number of episodes available for the selected media."""
         with self._fetch_lock:
             if self.episodes_cache is None:
                 self._fetch_all_episodes()
@@ -49,31 +43,26 @@ class ScrapeSerieAnime:
         return None
 
     def _fetch_all_episodes(self):
-        """
-        Fetch all episodes data at once and cache it
-        """
+        """Fetch every episode through the site API, following the ``start`` pagination."""
         try:
-            # Get initial episode count
-            with create_client(headers=self.headers) as client:
-                response = client.get(f"{self.url}/info_api/{self.media_id}/")
-            response.raise_for_status()
-            initial_count = response.json()["episodes_count"]
-
             all_episodes = []
-            start_range = 0
-
-            # Fetch episodes in chunks
-            while start_range <= initial_count:
-                end_range = min(start_range + 119, initial_count)
-                params = {"start_range": start_range, "end_range": end_range}
-
+            start = 0
+            while True:
+                params = {"start": start} if start else None
                 with create_client(headers=self.headers) as client:
-                    response = client.get(f"{self.url}/info_api/{self.media_id}/1", params=params)
+                    response = client.get(f"{self.url}/api/anime/{self.media_id}/episodes", params=params)
                 response.raise_for_status()
 
-                chunk_episodes = response.json().get("episodes", [])
-                all_episodes.extend(chunk_episodes)
-                start_range = end_range + 1
+                payload = response.json()
+                chunk = payload.get("episodes") or []
+                total = payload.get("total")
+                all_episodes.extend(chunk)
+
+                if not chunk:
+                    break
+                start += len(chunk)
+                if total is not None and len(all_episodes) >= int(total):
+                    break
 
             self.episodes_cache = all_episodes
         except Exception as e:
@@ -81,9 +70,7 @@ class ScrapeSerieAnime:
             self.episodes_cache = None
 
     def get_info_episode(self, index_ep: int) -> Episode:
-        """
-        Get episode info from cache
-        """
+        """Episode metadata from the cached list."""
         with self._fetch_lock:
             if self.episodes_cache is None:
                 self._fetch_all_episodes()
@@ -91,6 +78,45 @@ class ScrapeSerieAnime:
         if self.episodes_cache and 0 <= index_ep < len(self.episodes_cache):
             ep = self.episodes_cache[index_ep]
             return Episode(id=ep.get("id"), number=ep.get("number"), name=f"Episode {ep.get('number')}")
+        return None
+
+    def get_video_url(self, episode_id: int, prefer_language: str = "ita") -> str | None:
+        """Direct MP4 url for an episode, best available quality."""
+        try:
+            with create_client(headers=self.headers) as client:
+                response = client.get(f"{self.url}/api/episodes/{episode_id}/downloads")
+            response.raise_for_status()
+            entries = response.json() or []
+        except Exception as error:
+            logger.error(f"[animeunity] downloads list failed for episode {episode_id}: {error}")
+            return None
+
+        if not entries:
+            logger.error(f"[animeunity] no downloadable video for episode {episode_id}")
+            return None
+
+        entry = next(
+            (item for item in entries if str(item.get("language") or "").lower() == prefer_language),
+            entries[0],
+        )
+        quality = max((int(r.get("quality") or 0) for r in (entry.get("renditions") or [])), default=1080)
+
+        try:
+            with create_client(headers=self.headers) as client:
+                redirect = client.get(
+                    f"{self.url}/episode-videos/{entry.get('id')}/download",
+                    params={"quality": quality},
+                    allow_redirects=False,
+                )
+        except Exception as error:
+            logger.error(f"[animeunity] download redirect failed for episode {episode_id}: {error}")
+            return None
+
+        location = redirect.headers.get("location") or redirect.headers.get("Location")
+        if redirect.status_code in (301, 302, 303, 307, 308) and location:
+            return location
+
+        logger.error(f"[animeunity] unexpected download response: HTTP {redirect.status_code}")
         return None
 
     # ------------- FOR GUI -------------

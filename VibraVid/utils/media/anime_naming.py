@@ -62,17 +62,30 @@ def _format_has_year_token() -> bool:
         return False
 
 
-def series_name_and_year(fallback_name: str, *, mal_id=None, anilist_id=None, tmdb_id=None) -> tuple[str, str | None]:
+def _clean_year(value) -> str | None:
+    """A plausible 4-digit year from a provider value, else None (empty, 0 and the 9999 placeholder are rejected)."""
+    match = re.fullmatch(r"\s*(\d{4})\s*", str(value or ""))
+    if not match or match.group(1) in ("0000", "9999"):
+        return None
+    return match.group(1)
+
+
+def series_name_and_year(fallback_name: str, *, mal_id=None, anilist_id=None, tmdb_id=None, fallback_year=None) -> tuple[str, str | None]:
     """The ``(series_name, series_year)`` to hand to ``map_episode_path``.
 
-    Without a resolvable TMDB identity the provider's own name is kept untouched. With one, the year
+    Without a resolvable TMDB identity the provider's own name is kept, with ``fallback_year`` (the year the
+    provider itself reports) when it gives one. With an identity, the TMDB title and year are used. The year
     goes in ``series_year`` when ``OUTPUT.episode_format`` has a ``%(series_year)`` token, otherwise it
     is appended to the name (``My Hero Academia (2016)``) so the folder is right with any format.
     """
     identity = canonical_identity(mal_id=mal_id, anilist_id=anilist_id, tmdb_id=tmdb_id)
-    if not identity:
-        return fallback_name, None
-    title, year = identity
+    if identity:
+        title, year = identity
+    else:
+        year = _clean_year(fallback_year)
+        if not year:
+            return fallback_name, None
+        title = fallback_name
     if _format_has_year_token():
         return title, str(year)
     return f"{title} ({year})", None

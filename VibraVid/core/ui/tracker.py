@@ -771,6 +771,14 @@ class ContextTracker:
         self.local.resolve_only = value
 
     @property
+    def skip_download(self):
+        return getattr(self.local, "skip_download", False)
+
+    @skip_download.setter
+    def skip_download(self, value):
+        self.local.skip_download = value
+
+    @property
     def export_file(self):
         return getattr(self.local, "export_file", None)
 
