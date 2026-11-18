@@ -1,0 +1,416 @@
+# 06.06.25
+
+import importlib
+import json
+import logging
+import os
+import shutil
+import sys
+import zipfile
+
+from django.http import HttpRequest, JsonResponse
+from django.views.decorators.http import require_http_methods
+
+from VibraVid.services._base.site_loader import CompiledService, hidden_services
+from VibraVid.services._base.tv_display_manager import refresh_output_formats
+from VibraVid.utils import config_manager
+from VibraVid.utils.config import tomllib
+
+from .. import services_admin
+from .._download_infra import set_max_download_slots
+from ..security import require_service_upload, service_upload_allowed
+
+MAX_SERVICE_ZIP_BYTES = 50 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
+
+
+def _reload_service_registries(names: list[str]) -> list[str]:
+    """Make the CLI loader and the GUI API registry pick up added/removed service folders; returns the error messages."""
+    errors: list[str] = []
+    try:
+        # Drop cached VibraVid.services.<name> modules so subsequent imports see the files on disk now.
+        for svc in names:
+            prefix = f"VibraVid.services.{svc}"
+            for mod_name in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
+                del sys.modules[mod_name]
+
+        # Reload CLI service loader
+        from VibraVid.services._base import site_loader
+        importlib.reload(site_loader)
+    except Exception as e:
+        errors.append(f"Reload CLI services: {e}")
+
+    try:
+        # Drop any GUI API modules from sys.modules so previously-failed imports are retried fresh.
+        for mod_name in [m for m in sys.modules if m.startswith("searchapp.api.") and not m.endswith(".base")]:
+            del sys.modules[mod_name]
+
+        # Reload GUI API registry.
+        from searchapp import api as gui_api_module
+        gui_api_module._INITIALIZED = False
+        gui_api_module._initialize_registry()
+        gui_api_module.reset_site_categories_cache()
+    except Exception as e:
+        errors.append(f"Reload GUI API registry: {e}")
+    return errors
+
+
+def _sites_snapshot() -> dict:
+    """What the provider dropdown contains right now and which services failed to load."""
+    try:
+        from searchapp import api as gui_api_module
+        return {
+            "available_sites_now": sorted(gui_api_module.get_available_sites()),
+            "load_errors": gui_api_module.get_load_errors(),
+        }
+    except Exception:
+        return {"available_sites_now": [], "load_errors": []}
+
+
+@require_http_methods(["POST"])
+@require_service_upload
+def upload_service_zip(request: HttpRequest) -> JsonResponse:
+    """Handle ZIP file upload to install a new service plugin."""
+    uploaded = request.FILES.get("service_zip")
+    if not uploaded:
+        return JsonResponse({"success": False, "error": "Nessun file ZIP caricato."}, status=400)
+
+    if uploaded.size > MAX_SERVICE_ZIP_BYTES:
+        return JsonResponse({"success": False, "error": "Archive too large."}, status=413)
+
+    if not uploaded.name.lower().endswith(".zip"):
+        return JsonResponse({"success": False, "error": "Il file deve essere un archivio .zip"}, status=400)
+
+    services_dir = services_admin.services_dir()
+
+    if not os.path.isdir(services_dir):
+        return JsonResponse({"success": False, "error": f"Directory dei servizi non trovata: {services_dir}"}, status=500)
+
+    import tempfile
+    tmp_dir = tempfile.mkdtemp(prefix="vv_service_upload_")
+    errors = []
+    installed_services = []
+
+    try:
+        # Save uploaded ZIP to temp
+        zip_path = os.path.join(tmp_dir, "upload.zip")
+        with open(zip_path, "wb") as f:
+            for chunk in uploaded.chunks():
+                f.write(chunk)
+
+        # Extract
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(tmp_dir)
+        except zipfile.BadZipFile:
+            return JsonResponse({"success": False, "error": "File ZIP non valido o corrotto."}, status=400)
+
+        # Find service directories (source: folders with __init__.py; compiled: folders of per-platform builds)
+        extracted_items = [d for d in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, d))]
+
+        service_folders = []
+        for item in extracted_items:
+            item_path = os.path.join(tmp_dir, item)
+            if services_admin.is_service_dir(item_path):
+                service_folders.append(item)
+            else:
+                # Check one level deeper (ZIP might have a wrapper dir)
+                for sub in os.listdir(item_path):
+                    sub_path = os.path.join(item_path, sub)
+                    if os.path.isdir(sub_path) and services_admin.is_service_dir(sub_path):
+                        service_folders.append(os.path.join(item, sub))
+
+        if not service_folders:
+            return JsonResponse({
+                "success": False,
+                "error": "Nessun servizio valido trovato nello ZIP. Ogni servizio deve contenere __init__.py con 'indice' e '_useFor' (oppure le build compilate per piattaforma)."
+            }, status=400)
+
+        import ast as _ast
+
+        for svc_rel in service_folders:
+            svc_path = os.path.join(tmp_dir, svc_rel)
+            svc_name = os.path.basename(svc_rel).lower()
+            init_path = os.path.join(svc_path, "__init__.py")
+
+            if svc_name.startswith("_") or svc_name in {"base", "_base"}:
+                errors.append(f"'{svc_name}': reserved name, cannot be installed as a service")
+                continue
+            if svc_name in services_admin.BUILTIN_SERVICES:
+                errors.append(f"'{svc_name}': built-in service, cannot be replaced by an upload")
+                continue
+
+            compiled = CompiledService(svc_name, svc_path)
+            if compiled.is_candidate():
+                if compiled.find_entry() is None:
+                    errors.append(f"'{svc_name}': nessuna build compatibile con questo sistema (varianti: {', '.join(compiled.variants())})")
+                    continue
+
+                dest_path = os.path.join(services_dir, svc_name)
+                if os.path.exists(dest_path):
+                    shutil.rmtree(dest_path)
+                shutil.copytree(svc_path, dest_path)
+                installed_services.append(svc_name)
+                continue
+
+            syntax_error = None
+            for root, _, files in os.walk(svc_path):
+                for fname in files:
+                    if not fname.endswith(".py"):
+                        continue
+                    fpath = os.path.join(root, fname)
+                    try:
+                        with open(fpath, encoding="utf-8") as fh:
+                            src = fh.read()
+                        _ast.parse(src, filename=fname)
+                    except SyntaxError as se:
+                        rel = os.path.relpath(fpath, svc_path)
+                        syntax_error = f"{rel}:{se.lineno}: {se.msg}"
+                        break
+                    except Exception as ex:
+                        rel = os.path.relpath(fpath, svc_path)
+                        syntax_error = f"{rel}: impossibile leggere ({ex})"
+                        break
+                if syntax_error:
+                    break
+            if syntax_error:
+                errors.append(f"'{svc_name}': errore di sintassi nel plugin -> {syntax_error}")
+                continue
+
+            # Validate __init__.py has required declarations
+            try:
+                with open(init_path, encoding="utf-8") as f:
+                    content = f.read()
+
+                has_indice = False
+                has_usefor = False
+                for line in content.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("indice =") or stripped.startswith("indice="):
+                        has_indice = True
+                    if stripped.startswith("_useFor =") or stripped.startswith("_useFor="):
+                        has_usefor = True
+
+                if not has_indice:
+                    errors.append(f"'{svc_name}': manca la dichiarazione 'indice' in __init__.py")
+                    continue
+                if not has_usefor:
+                    errors.append(f"'{svc_name}': manca la dichiarazione '_useFor' in __init__.py")
+                    continue
+
+            except Exception as e:
+                errors.append(f"'{svc_name}': errore nella lettura di __init__.py: {e}")
+                continue
+
+            # Check for conflicts
+            dest_path = os.path.join(services_dir, svc_name)
+            if os.path.exists(dest_path):
+                shutil.rmtree(dest_path)
+
+            # Copy service to services directory
+            shutil.copytree(svc_path, dest_path)
+            installed_services.append(svc_name)
+
+        # Reload the service registries
+        if installed_services:
+            errors.extend(_reload_service_registries(installed_services))
+
+        # Report what the dropdown actually contains right now so the user can
+        # verify their upload landed and which services failed to load.
+        try:
+            from searchapp import api as gui_api_module
+            available_sites = sorted(gui_api_module.get_available_sites())
+            load_errors_list = gui_api_module.get_load_errors()
+        except Exception:
+            available_sites = []
+            load_errors_list = []
+
+        result = {
+            "success": len(installed_services) > 0,
+            "installed": installed_services,
+            "errors": errors,
+            "available_sites_now": available_sites,
+            "load_errors": load_errors_list,
+            "message": f"Installati {len(installed_services)} servizi: {', '.join(installed_services)}" if installed_services else "Nessun servizio installato."
+        }
+        return JsonResponse(result, status=200 if installed_services else 400)
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": f"Errore durante l'installazione: {e}"}, status=500)
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@require_http_methods(["POST"])
+def remove_service_view(request: HttpRequest) -> JsonResponse:
+    """Remove a service that was added through the ZIP upload (built-in services are refused)."""
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        return JsonResponse({"success": False, "error": "JSON non valido"}, status=400)
+
+    try:
+        removed = services_admin.remove_service(data.get("name"))
+    except services_admin.ServiceRemovalError as exc:
+        return JsonResponse({"success": False, "error": exc.message}, status=exc.status)
+    except OSError as exc:
+        logger.exception("Service removal failed")
+        return JsonResponse({"success": False, "error": f"Impossibile rimuovere il servizio: {exc}"}, status=500)
+
+    errors = _reload_service_registries([removed])
+    return JsonResponse({
+        "success": True,
+        "removed": removed,
+        "errors": errors,
+        "message": f"Servizio rimosso: {removed}",
+        **_sites_snapshot(),
+    })
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    merged = dict(base)
+    for key, value in patch.items():
+        merged[key] = _deep_merge(merged[key], value) if isinstance(value, dict) and isinstance(merged.get(key), dict) else value
+    return merged
+
+
+def _executable_surface(cfg: dict) -> tuple:
+    """The settings that make VibraVid run commands or import code: [HOOKS] and ``imp_service``."""
+    default = cfg.get("DEFAULT") if isinstance(cfg.get("DEFAULT"), dict) else {}
+    return (json.dumps(cfg.get("HOOKS"), sort_keys=True, default=str),
+            json.dumps(default.get("imp_service"), sort_keys=True, default=str),
+            json.dumps(cfg.get("imp_service"), sort_keys=True, default=str))
+
+
+def _changes_executable_surface(file_path: str, content: str | None, patch: dict | None, delete: list) -> bool:
+    try:
+        with open(file_path, encoding="utf-8") as fh:
+            current = tomllib.loads(fh.read())
+    except (OSError, tomllib.TOMLDecodeError):
+        current = {}
+    if patch is None:
+        proposed = tomllib.loads(content or "")
+    else:
+        proposed = _deep_merge(current, patch)
+        for key_path in delete:
+            node = proposed
+            for key in key_path[:-1]:
+                node = node.get(key) if isinstance(node, dict) else None
+            if isinstance(node, dict):
+                node.pop(key_path[-1], None)
+    return _executable_surface(current) != _executable_surface(proposed)
+
+
+@require_http_methods(["POST"])
+def save_settings(request: HttpRequest) -> JsonResponse:
+    try:
+        try:
+            data = json.loads(request.body.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            return JsonResponse({"success": False, "error": "JSON non valido"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"success": False, "error": "Parametri mancanti"}, status=400)
+
+        file_type = data.get('file_type')  # 'config' or 'login'
+        if file_type == 'config':
+            file_path = config_manager.config_file_path
+        elif file_type == 'login':
+            file_path = config_manager.login_file_path
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": "Tipo di file non valido"
+            }, status=400)
+
+        # Either the whole raw file ("content"), or a structured edit merged into it ("patch" + optional "delete" key paths)
+        patch = data.get('patch')
+        content = data.get('content', '').strip()
+        if patch is None and not content:
+            return JsonResponse({
+                "success": False,
+                "error": "Parametri mancanti"
+            }, status=400)
+        if patch is not None and not isinstance(patch, dict):
+            return JsonResponse({"success": False, "error": "Parametri mancanti"}, status=400)
+
+        if patch is None:
+            try:
+                tomllib.loads(content)
+            except tomllib.TOMLDecodeError as e:
+                # The parser message (line/column) goes to the log, not back to the browser.
+                logger.warning("Rejected invalid %s.toml: %s", file_type, e)
+                return JsonResponse({
+                    "success": False,
+                    "error": "TOML non valido: controlla la sintassi (il dettaglio è nel log)."
+                }, status=400)
+
+        if (file_type == 'config' and not service_upload_allowed()
+                and _changes_executable_surface(file_path, content, patch, data.get('delete') or [])):
+            return JsonResponse({
+                "success": False,
+                "error": "Changing [HOOKS] or imp_service is disabled: they run commands/code on the server. "
+                         "Set VIBRAVID_ALLOW_SERVICE_UPLOAD=1 to enable it, or edit config.toml on disk.",
+            }, status=403)
+
+        hidden_before = hidden_services() if file_type == 'config' else None
+
+        backup_path = file_path + ".backup"
+        if os.path.exists(file_path):
+            try:
+                shutil.copy2(file_path, backup_path)
+            except OSError as e:
+                logger.exception("Backup failed: %s", e)
+
+        if patch is None:
+            content_saved = content + "\n"
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content_saved)  # as typed: the comments in the file are the user's guide
+        else:
+            content_saved = config_manager.patch_file(file_type, patch, data.get('delete') or [])  # also reloads the cache
+
+        # Apply the download concurrency limit and refresh the in-memory config/login cache immediately
+        if file_type == 'config':
+            try:
+                new_cfg = tomllib.loads(content_saved)
+                slots = int(new_cfg.get("ARR", {}).get("max_concurrent_downloads", 1) or 1)
+                set_max_download_slots(slots)
+            except Exception as exc:
+                logger.exception("Failed to apply max concurrent slots: %s", exc)
+
+            try:
+                if patch is None:
+                    config_manager.reload_config_only()
+                refresh_output_formats()
+            except Exception as exc:
+                logger.exception("Failed to reload config cache after save: %s", exc)
+
+            if hidden_services() != hidden_before:  # services hidden/shown from the settings page apply without a restart
+                for err in _reload_service_registries([]):
+                    logger.warning("hidden_services reload: %s", err)
+
+        elif file_type == 'login' and patch is None:
+            try:
+                config_manager.reload_login_only()
+            except Exception as exc:
+                logger.exception("Failed to reload login cache after save: %s", exc)
+
+        return JsonResponse({
+            "success": True,
+            "message": f"{file_type}.toml salvato con successo",
+            "content": content_saved,
+            "parsed": tomllib.loads(content_saved),
+        })
+
+    except Exception:
+        logger.exception("Saving settings failed")
+        return JsonResponse({
+            "success": False,
+            "error": "Errore nel salvataggio: dettaglio nel log."
+        }, status=500)
+
+
+__all__ = ['upload_service_zip', 'remove_service_view', 'save_settings']

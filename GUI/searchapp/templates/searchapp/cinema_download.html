@@ -1,0 +1,789 @@
+{% extends "searchapp/cinema_base.html" %}
+
+{% block title %}ARROWAR{% endblock %}
+
+{# c'è un hero: la barra parte trasparente e si riempie allo scroll #}
+{% block top_float %} is-float{% endblock %}
+
+{% block content %}
+
+{% comment %}
+	Reso vuoto e riempito da JS col primo job attivo. Se non gira niente resta
+	lo stato di riposo: non si nasconde, altrimenti la pagina "salta" quando un
+	download parte.
+{% endcomment %}
+<section class="cn-hero" id="cn-hero">
+	<div class="cn-hero-art" id="cn-hero-art"></div>
+	<div class="cn-hero-veil"></div>
+
+	<div class="cn-hero-in">
+		<div class="cn-kicker" id="cn-hero-kicker">
+			<span class="cn-st is-wait">Idle</span>
+		</div>
+
+		<h1 class="cn-blast" id="cn-hero-title">
+			Nothing running<em id="cn-hero-sub">Queue is empty</em>
+		</h1>
+
+		<div class="cn-hero-prog" id="cn-hero-prog" hidden>
+			<div class="cn-hero-fig">
+				<span class="cn-pct" id="cn-hero-pct">0<span>%</span></span>
+				<span class="cn-of" id="cn-hero-of"></span>
+			</div>
+			<div class="cn-bar"><i id="cn-hero-bar" style="width:0%"></i></div>
+			<div class="cn-facts" id="cn-hero-facts"></div>
+		</div>
+
+		<div class="cn-acts">
+			<button class="cn-cta" type="button" id="cn-hero-stop" hidden>Stop</button>
+			<a class="cn-cta is-ghost" href="{% url 'search_page' %}">Search something</a>
+		</div>
+	</div>
+</section>
+
+{# ── FILE ─────────────────────────────────────────────────────────────────── #}
+<section class="cn-strip">
+	<div class="cn-strip-hd">
+		<h2>Now</h2><span class="cn-n" id="cn-n-active">0</span>
+		<button class="cn-cta is-ghost" type="button" id="cn-stop-all" hidden>Stop all downloads</button>
+	</div>
+	<div class="cn-lines" id="cn-reel-active"></div>
+	<p class="cn-empty" id="cn-empty-active">No downloads running.</p>
+</section>
+
+<section class="cn-strip cn-manual-section" id="cn-manual-section" hidden>
+    <div class="cn-strip-hd"><h2>Choose tracks</h2></div>
+    <div id="cn-manual-requests"></div>
+</section>
+
+<section class="cn-strip">
+	<div class="cn-strip-hd">
+		<h2>Queued</h2><span class="cn-n" id="cn-n-queue">0</span>
+		<button class="cn-more" type="button" id="cn-clear-queue" hidden>Clear queued</button>
+	</div>
+	<div class="cn-reel" id="cn-reel-queue"></div>
+	<p class="cn-empty" id="cn-empty-queue">Queue is empty.</p>
+</section>
+
+<section class="cn-strip">
+	<div class="cn-strip-hd">
+		<h2>From your watchlist</h2><span class="cn-n">{{ watchlist_items|length }}</span>
+		<a class="cn-more" href="{% url 'watchlist' %}">Manage</a>
+	</div>
+	{% if watchlist_items %}
+		<div class="cn-reel">
+			{% for item in watchlist_items %}
+				<article class="cn-tile" style="--cn-p1:{{ item.p1 }};--cn-p2:{{ item.p2 }}" tabindex="0">
+					<div class="cn-poster">
+						{% if item.is_new %}<span class="cn-flag cn-st is-run">New</span>{% endif %}
+						{% if item.poster %}
+							<img src="{{ item.poster }}" alt="" loading="lazy" decoding="async"
+							     onerror="this.remove()">
+						{% endif %}
+						<div class="cn-poster-fill">
+							<div class="cn-rule"></div>
+							<div class="cn-ptitle">{{ item.name }}</div>
+							<div class="cn-pmeta">{{ item.site }}</div>
+						</div>
+					</div>
+					<span class="cn-cap">{{ item.name }}</span>
+					<span class="cn-sub">{{ item.site }}</span>
+				</article>
+			{% endfor %}
+		</div>
+	{% else %}
+		<p class="cn-empty">No shows being watched. Add one from search.</p>
+	{% endif %}
+</section>
+
+<section class="cn-strip">
+	<div class="cn-strip-hd">
+		<h2>Recent results</h2><span class="cn-n" id="cn-n-hist">0</span>
+		<button class="cn-cta is-ghost" type="button" id="cn-clear-history" hidden>Clear history</button>
+	</div>
+	<div class="cn-reel" id="cn-reel-hist"></div>
+	<p class="cn-empty" id="cn-empty-hist">No completed downloads yet.</p>
+</section>
+
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function () {
+	"use strict";
+	var URL_DOWNLOADS = "{% url 'get_downloads_json' %}?history=20";
+    var URL_CONFIRM_TRACKS = "{% url 'confirm_manual_tracks' %}";
+	var URL_KILL      = "{% url 'kill_download' %}";
+	var URL_STOP_ALL = "{% url 'stop_all_downloads' %}";
+	var URL_CLEAR_HISTORY = "{% url 'clear_download_history' %}";
+	var URL_POSTERS   = "{% url 'resolve_tmdb_posters' %}";
+	var URL_REMOVE_QUEUE = "{% url 'remove_queued_download' %}";
+	var URL_CLEAR_QUEUE  = "{% url 'clear_queued_downloads' %}";
+	var CSRF          = "{{ csrf_token }}";
+	var esc = CN.esc, titleize = CN.titleize, duotone = CN.duotone, pct = CN.pct;
+	var posterCache = {};
+
+	function outcome(d) {
+		var status = String(d.status || "").toLowerCase();
+		if (status === "completed" || status === "success") {
+			return { label: "Done", badge: "is-done", rule: "var(--cn-go)", note: "" };
+		}
+		if (status === "cancelled" || String(d.error || "").toLowerCase() === "cancelled") {
+			return { label: "Cancelled", badge: "is-wait", rule: "var(--cn-cool)", note: "stopped" };
+		}
+		if (status === "timed_out") {
+			return { label: "Timed out", badge: "is-warn", rule: "var(--cn-gold)", note: "no signal" };
+		}
+		var why = String(d.error || "").split("\n")[0].trim();
+		if (why.length > 48) why = why.slice(0, 47) + "…";
+		return { label: "Failed", badge: "is-dead", rule: "var(--cn-hot)", note: why || "failed" };
+	}
+
+	function poster(item, opts) {
+		var url = item.poster || posterCache[item.series_name || item.title || item.name];
+		var art = url
+			? '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()">'
+			: "";
+		return '' +
+			'<div class="cn-poster">' +
+				(opts.flag || "") + (opts.ring || "") + art +
+				'<div class="cn-poster-fill">' +
+					'<div class="cn-rule"' + (opts.ruleColor ? ' style="background:' + opts.ruleColor + '"' : "") + '></div>' +
+					'<div class="cn-ptitle">' + esc(titleize(opts.posterTitle || item.title || item.name)) + '</div>' +
+					'<div class="cn-pmeta">' + esc(opts.posterMeta || item.site) + '</div>' +
+				'</div>' +
+				(opts.bar || "") +
+			'</div>';
+	}
+
+	function tile(item, opts) {
+		var key = item.series_name || item.title || item.name;
+		var d = duotone(key);
+		return '<article class="cn-tile' + (opts.wide ? " is-wide" : "") + '"' +
+			' data-key="' + esc(key) + '"' +
+			' style="--cn-p1:' + d[0] + ';--cn-p2:' + d[1] + '" tabindex="0">' +
+			poster(item, opts) +
+			(opts.cap ? '<span class="cn-cap">' + esc(titleize(opts.cap)) + "</span>" : "") +
+			(opts.sub ? '<span class="cn-sub">' + esc(opts.sub) + "</span>" : "") +
+                (opts.trackInfo || "") +
+			(opts.action || "") +
+			"</article>";
+	}
+
+	function elapsedText(startTime) {
+		if (!startTime) return "";
+		var s = Math.max(0, Math.floor(Date.now() / 1000 - startTime));
+		var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+		if (h) return h + "h " + String(m).padStart(2, "0") + "m";
+		if (m) return m + "m " + String(sec).padStart(2, "0") + "s";
+		return sec + "s";
+	}
+
+    var pendingStops = {};
+    function isStopping(item) {
+        return pendingStops[item.id] || String(item.status || "").indexOf("cancelling") === 0;
+    }
+    function stopLabel(item) {
+        return {episode: "Stop episode", season: "Stop season", seasons: "Stop seasons"}[item.stop_scope] || "Stop";
+    }
+
+    function readableLanguage(value) {
+        var raw = String(value || "").trim();
+        if (!raw || raw.toLowerCase() === "und") return "Unknown";
+        var iso = raw.toLowerCase().split(/[-_]/)[0];
+        var names = {
+            it: "Italian", ita: "Italian", en: "English", eng: "English",
+            fr: "French", fra: "French", fre: "French", de: "German", deu: "German",
+            ger: "German", es: "Spanish", spa: "Spanish", pt: "Portuguese",
+            por: "Portuguese", ja: "Japanese", jpn: "Japanese",
+        };
+        return names[iso] || raw;
+    }
+
+    function selectedTrackFacts(item) {
+        var tracks = Array.isArray(item.selected_tracks) ? item.selected_tracks : [];
+        if (!tracks.length) return "";
+        var groups = {video: [], audio: [], subtitle: []};
+        tracks.forEach(function (track) {
+            if (!track || !Object.prototype.hasOwnProperty.call(groups, track.type)) return;
+            var label = "";
+            if (track.type === "video") {
+                label = (track.height ? track.height + "p" : track.resolution || "Video");
+                if (track.codecs) label += " " + track.codecs;
+                if (track.video_range) label += " " + track.video_range;
+            } else if (track.type === "audio") {
+                label = readableLanguage(track.language);
+                if (track.codecs) label += " " + track.codecs;
+                if (track.channels) label += " " + track.channels + "ch";
+            } else {
+                label = readableLanguage(track.language);
+                if (track.forced) label += " (forced)";
+                if (track.sdh) label += " (SDH)";
+                if (track.cc) label += " (CC)";
+            }
+            if (!groups[track.type].includes(label)) groups[track.type].push(label);
+        });
+        var out = [];
+        [["video", "Video"], ["audio", "Audio"], ["subtitle", "Subs"]].forEach(function (entry) {
+            var values = groups[entry[0]];
+            if (!values.length) return;
+            var short = values.slice(0, 2).join(", ");
+            if (values.length > 2) short += " +" + (values.length - 2);
+            out.push('<span class="cn-track-spec" title="' + esc(values.join(" | ")) + '"><b>' +
+                entry[1] + ':</b> ' + esc(short) + '</span>');
+        });
+        return out.length ? '<div class="cn-selected-tracks" aria-label="Selected media tracks">' +
+            out.join("") + '</div>' : "";
+    }
+
+	function activeRowInner(item, downloadId) {
+		var key = item.series_name || item.title || item.name;
+		var d = duotone(key);
+		var url = item.poster || posterCache[key];
+		var art = url
+			? '<img src="' + esc(url) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()">'
+			: "";
+		var elapsed = elapsedText(item.start_time);
+		var facts = [item.site, elapsed && (elapsed + " elapsed")].filter(Boolean).join(" · ");
+		var tasks = item.tasks || {};
+		var taskNames = Object.keys(tasks);
+		var streams = taskNames.length > 0
+			? taskNames.map(function (k) {
+				var raw = tasks[k].display_label || tasks[k].label || k.replace(/_/g, " ");
+				// Strip only known Rich style tags (color/bold), never bracketed content
+				// like "[DEFAULT]"/"[FORCED]" which is part of the label itself.
+				var name = raw
+					.replace(/\[\/?(?:bold\s+)?(?:yellow|white|blue|cyan|red|green|magenta|dim)\]/gi, "")
+					.replace(/\\\[/g, "[")
+					.trim() || k.replace(/_/g, " ");
+				return esc(name) + " " + (tasks[k].progress || 0).toFixed(0) + "%";
+			}).join(" · ")
+			: "";
+		return '<span class="cn-thumb" style="--cn-p1:' + d[0] + ';--cn-p2:' + d[1] + '">' +
+				art + '<b>' + esc(titleize(key).slice(0, 1).toUpperCase()) + '</b>' +
+			'</span>' +
+			'<span class="cn-grow">' +
+				'<span class="cn-t">' + esc(titleize(item.title || key)) + '</span>' +
+				'<span class="cn-s">' + esc(facts) + '</span>' +
+				(item.path ? '<span class="cn-s cn-ln-path">' + esc(item.path) + '</span>' : "") +
+				'<span class="cn-ln-bar"><i style="width:' + item.pctText + '%"></i></span>' +
+				(streams ? '<span class="cn-s">' + streams + '</span>' : "") +
+                selectedTrackFacts(item) +
+			'</span>' +
+			'<span class="cn-r">' + (item.size ? esc(item.size) + ' · ' : '') + esc(item.speed || '') + ' · ' + item.pctText + '%</span>' +
+			'<button class="cn-cta is-ghost" type="button" data-stop="' + esc(downloadId) + '" ' +
+				'style="padding:8px 16px;font-size:13px"' + (isStopping(item) ? ' disabled' : '') + '>' + (isStopping(item) ? 'Stopping...' : stopLabel(item)) + '</button>';
+	}
+
+	function activeRow(item, downloadId) {
+		return '<div class="cn-ln cn-ln-active" data-id="' + esc(downloadId) + '"' +
+			(item.path ? ' title="' + esc(item.path) + '"' : "") + '>' +
+			activeRowInner(item, downloadId) +
+		'</div>';
+	}
+
+	function reelPatch(reel, rows) {
+		var existing = {};
+		Array.prototype.forEach.call(reel.children, function (node) {
+			existing[node.dataset.id] = node;
+		});
+
+		var wanted = {};
+		rows.forEach(function (r) { wanted[r.id] = true; });
+		Object.keys(existing).forEach(function (id) {
+			if (!wanted[id]) existing[id].remove();
+		});
+
+		var prev = null;
+		rows.forEach(function (r) {
+			var node = existing[r.id];
+			if (!node) {
+				var holder = document.createElement("div");
+				holder.innerHTML = r.html();
+				node = holder.firstElementChild;
+				node.dataset.id = r.id;
+			} else if (node.dataset.sig !== r.sig) {
+				r.patch(node);
+			}
+			node.dataset.sig = r.sig;
+			var target = prev ? prev.nextSibling : reel.firstChild;
+			if (node !== target) reel.insertBefore(node, target);
+			prev = node;
+		});
+	}
+
+	function fill(reelId, emptyId, countId, rows) {
+		var reel = document.getElementById(reelId);
+		reelPatch(reel, rows);
+		reel.hidden = rows.length === 0;
+		document.getElementById(emptyId).hidden = rows.length > 0;
+		document.getElementById(countId).textContent = rows.length;
+	}
+
+	function tileId(item, prefix, index) {
+		return prefix + ":" + (item.id || item.title || item.name || index);
+	}
+
+	// Scorciatoie per i pezzi che una patch aggiorna.
+	function setText(node, selector, text) {
+		var el = node.querySelector(selector);
+		if (el && el.textContent !== text) el.textContent = text;
+	}
+	function setWidth(node, selector, percent) {
+		var el = node.querySelector(selector);
+		if (el) el.style.width = percent + "%";
+	}
+
+	var heroId = null;
+	var heroEntry = null;
+	function artKey(d) { return d.series_name || d.title; }
+	var backdropCache = {};
+	var backdropAsked = {};
+
+	function askBackdrop(d) {
+		var key = artKey(d);
+		if (!key || backdropAsked[key]) return;
+		backdropAsked[key] = true;
+
+		fetch(URL_POSTERS, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+			body: JSON.stringify({ items: [{
+				index: key, name: key, site: d.site, backdrop: true,
+				is_movie: String(d.type || "").toLowerCase() === "movie"
+			}] })
+		})
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var url = (data.posters || {})[key];
+				if (!url) return;
+				backdropCache[key] = url;
+				if (heroEntry) paintHeroArt(heroEntry);
+			})
+			.catch(function () { /* niente backdrop: resta la locandina sfocata */ });
+	}
+
+	var wideCache = {};
+
+	function paintHeroArt(d) {
+		var art  = document.getElementById("cn-hero-art");
+		var tone = duotone(d.title);
+		var back = backdropCache[artKey(d)];
+		var url  = back || d.poster || "";
+
+		art.style.backgroundImage = url ? 'url("' + url + '")' : "";
+		art.style.setProperty("--cn-h1", tone[0]);
+		art.style.setProperty("--cn-h2", tone[1]);
+
+		if (!url || back) {
+			art.classList.remove("is-soft");
+			return;
+		}
+		if (url in wideCache) {
+			art.classList.toggle("is-soft", !wideCache[url]);
+			return;
+		}
+
+		art.classList.add("is-soft");
+		var probe = new Image();
+		probe.onload = function () {
+			wideCache[url] = probe.naturalWidth >= probe.naturalHeight * 1.3;
+			if ((backdropCache[artKey(d)] || d.poster || "") === url) {
+				art.classList.toggle("is-soft", !wideCache[url]);
+			}
+		};
+		probe.src = url;
+	}
+
+	function stripMediaExt(name) {
+		return String(name || "").replace(/\.(mkv|mp4|m4v|m4a|avi|ts|m2ts|webm|mov|mp3|aac|flac|ogg|srt|vtt|ass)$/i, "");
+	}
+	function heroTitle(d) {
+		var base = d.series_name || stripMediaExt(d.title) || d.title || "";
+		var s = parseInt(d.season, 10), e = parseInt(d.episode, 10);
+		var suffix = "";
+		if (s > 0 && e > 0 && !/S\d+\s*E\d+/i.test(base)) suffix = " S" + s + " E" + e;
+		else if (s > 0 && !/S\d+/i.test(base)) suffix = " S" + s;
+		return esc(titleize(base)) + esc(suffix);
+	}
+	function renderHero(active) {
+		var prog = document.getElementById("cn-hero-prog");
+		var stop = document.getElementById("cn-hero-stop");
+		var kick = document.getElementById("cn-hero-kicker");
+		var art  = document.getElementById("cn-hero-art");
+
+		if (!active.length) {
+			heroId = null;
+			document.getElementById("cn-hero-title").innerHTML =
+				'Nothing running<em id="cn-hero-sub">Queue is empty</em>';
+			kick.innerHTML = '<span class="cn-st is-wait">Idle</span>';
+			prog.hidden = true;
+			stop.hidden = true;
+			art.style.backgroundImage = "";
+			art.classList.remove("is-soft");
+			heroEntry = null;
+			return;
+		}
+
+		var d = active[0];
+		heroId = d.id;
+		stop.textContent = isStopping(d) ? "Stopping..." : stopLabel(d);
+		stop.disabled = !!isStopping(d);
+		var p = pct(d.progress);
+
+		kick.innerHTML =
+			'<span class="cn-st is-run">' + esc(d.status || "Running") + "</span>" +
+			'<span class="cn-tag" style="color:var(--cn-mute)">' + esc(d.site) +
+			(d.is_anime ? " · anime" : "") + "</span>";
+
+		document.getElementById("cn-hero-title").innerHTML = heroTitle(d);
+
+		document.getElementById("cn-hero-pct").innerHTML = p.toFixed(0) + "<span>%</span>";
+		document.getElementById("cn-hero-of").textContent = d.size || "";
+		document.getElementById("cn-hero-bar").style.width = p + "%";
+
+		var facts = [];
+		if (d.speed) facts.push("<span><b>" + esc(d.speed) + "</b></span>");
+        if (d.language && !(d.selected_tracks || []).length)
+            facts.push("<span>audio <b>" + esc(d.language) + "</b></span>");
+        document.getElementById("cn-hero-facts").innerHTML = facts.join("");
+
+		heroEntry = d;
+		askBackdrop(d);
+		paintHeroArt(d);
+
+		prog.hidden = false;
+		stop.hidden = false;
+	}
+
+    function requestStop(downloadId, button) {
+        if (!downloadId || pendingStops[downloadId]) return;
+        pendingStops[downloadId] = true;
+        button.disabled = true;
+        button.textContent = "Stopping...";
+        fetch(URL_KILL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+            body: JSON.stringify({ download_id: downloadId })
+        }).then(function (response) {
+            if (!response.ok) throw new Error("Stop failed (HTTP " + response.status + "). Please retry.");
+            return response.json();
+        }).then(function (result) {
+            if (result.status !== "success") throw new Error(result.message || "Stop failed. Please retry.");
+            return refresh();
+        }).catch(function (error) {
+            delete pendingStops[downloadId];
+            button.disabled = false;
+            button.textContent = "Retry stop";
+            window.alert(error.message);
+        });
+    }
+
+    document.getElementById("cn-hero-stop").addEventListener("click", function () {
+        requestStop(heroId, this);
+    });
+    document.getElementById("cn-reel-active").addEventListener("click", function (e) {
+        var button = e.target.closest("[data-stop]");
+        if (button) requestStop(button.dataset.stop, button);
+    });
+
+    function bindAction(id, url) {
+        document.getElementById(id).addEventListener("click", function () {
+            var button = this;
+            button.disabled = true;
+            fetch(url, { method: "POST", headers: { "X-CSRFToken": CSRF } })
+                .then(function (response) {
+                    if (!response.ok) throw new Error("Action failed. Please retry.");
+                    return refresh();
+                })
+                .catch(function (error) { window.alert(error.message); })
+                .finally(function () { button.disabled = false; });
+        });
+    }
+    bindAction("cn-stop-all", URL_STOP_ALL);
+    bindAction("cn-clear-history", URL_CLEAR_HISTORY);
+
+	function queuePost(url, payload) {
+		return fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+			body: JSON.stringify(payload || {})
+		}).then(function (response) {
+			return response.json().then(function (data) {
+				if (!response.ok) throw new Error(data.message || "Queue request failed");
+				return data;
+			});
+		});
+	}
+
+	document.getElementById("cn-reel-queue").addEventListener("click", function (e) {
+		var btn = e.target.closest("[data-remove-queued]");
+		if (!btn) return;
+		e.preventDefault();
+		e.stopPropagation();
+		btn.disabled = true;
+		queuePost(URL_REMOVE_QUEUE, { download_id: btn.dataset.removeQueued })
+			.then(refresh)
+			.catch(function () {
+				btn.disabled = false;
+				refresh();
+			});
+	});
+
+	document.getElementById("cn-clear-queue").addEventListener("click", function () {
+		var btn = this;
+		if (!window.confirm("Remove all queued downloads that have not started yet?")) return;
+		btn.disabled = true;
+		queuePost(URL_CLEAR_QUEUE, {})
+			.then(refresh)
+			.finally(function () { btn.disabled = false; });
+	});
+
+    function renderPendingTracks(requests) {
+        var section = document.getElementById("cn-manual-section");
+        var root = document.getElementById("cn-manual-requests");
+        section.hidden = !requests.length;
+        var live = new Set(requests.map(function (r) { return r.token; }));
+        Array.from(root.children).forEach(function (node) {
+            if (!live.has(node.dataset.token)) node.remove();
+        });
+        requests.forEach(function (request) {
+            if (Array.from(root.children).some(function (node) { return node.dataset.token === request.token; })) return;
+            var container = document.createElement("div");
+            container.className = "cn-manual-request";
+            container.dataset.token = request.token;
+            container.dataset.downloadId = request.download_id;
+            var header = document.createElement("strong");
+            header.textContent = "Choose tracks for " + (request.title || request.download_id);
+            container.appendChild(header);
+            var list = document.createElement("div");
+            list.className = "cn-manual-tracks-list";
+            request.tracks.forEach(function (track) {
+                var row = document.createElement("label");
+                row.className = "cn-manual-track-row";
+                var checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = String(track.index);
+                checkbox.checked = !!track.selected;
+                var resolution = track.height ? track.height + "p" : track.resolution;
+                var bitrate = track.bitrate ? (track.bitrate / 1000000).toFixed(2) + " Mbps" : "";
+                var details = [String(track.type || "").toUpperCase(),
+                    resolution, track.type !== "video" ? readableLanguage(track.language) : "",
+                    track.codecs, track.channels ? track.channels + "ch" : "", bitrate,
+                    track.forced ? "forced" : "", track.sdh ? "SDH" : "",
+                    track.cc ? "CC" : ""].filter(Boolean).join(" · ");
+                var caption = document.createElement("span");
+                caption.textContent = details || "Track " + (track.index + 1);
+                caption.title = track.language ? "Original language code: " + track.language : "";
+                row.append(checkbox, caption);
+                list.appendChild(row);
+            });
+            container.appendChild(list);
+            var note = document.createElement("p");
+            note.className = "cn-manual-track-note";
+            note.textContent = "Confirm to start downloading the selected tracks. Cancel with Stop.";
+            container.appendChild(note);
+            var button = document.createElement("button");
+            button.className = "cn-cta";
+            button.type = "button";
+            button.dataset.confirmTracks = request.download_id;
+            button.textContent = "Download selected tracks";
+            container.appendChild(button);
+            root.appendChild(container);
+        });
+    }
+
+    document.getElementById("cn-manual-requests").addEventListener("click", function (event) {
+        var button = event.target.closest("[data-confirm-tracks]");
+        if (!button) return;
+        var container = button.closest(".cn-manual-request");
+        var selected = Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(function (input) { return Number(input.value); });
+        if (!selected.length) { window.alert("Select at least one track."); return; }
+        button.disabled = true;
+        queuePost(URL_CONFIRM_TRACKS, {
+            download_id: container.dataset.downloadId,
+            token: container.dataset.token,
+            selected: selected
+        }).then(refresh).catch(function (error) {
+            window.alert(error.message);
+            button.disabled = false;
+        });
+    });
+
+	function refresh() {
+		return fetch(URL_DOWNLOADS)
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var active = data.active || [];
+				var queue  = data.scheduled || [];
+				var hist   = data.history || [];
+                renderPendingTracks(data.pending_tracks || []);
+				var clearQueue = document.getElementById("cn-clear-queue");
+
+				clearQueue.hidden = queue.length === 0;
+				clearQueue.disabled = queue.length === 0;
+
+				document.getElementById("cn-stop-all").hidden = active.length === 0;
+				document.getElementById("cn-clear-history").hidden = hist.length === 0;
+				renderHero(active);
+
+				fill("cn-reel-active", "cn-empty-active", "cn-n-active", active.map(function (d, i) {
+					var p = pct(d.progress);
+					var status = d.status || "Running";
+					d.pctText = p.toFixed(0);
+					var downloadId = d.id || tileId(d, "a", i);
+					return {
+						id: tileId(d, "a", i),
+						sig: status + "|" + !!isStopping(d) + "|" + stopLabel(d) + "|" + (d.quality || "") + "|" + p.toFixed(0) + "|" + (d.speed || "") + "|" + elapsedText(d.start_time) + "|" + JSON.stringify(d.tasks || {}) + "|" + JSON.stringify(d.selected_tracks || []),
+						html: function () {
+							return activeRow(d, downloadId);
+						},
+						patch: function (node) {
+                            // Keep the button attached: replacing it during a polling
+                            // update can swallow a click between pointer down and up.
+                            var holder = document.createElement("div");
+                            holder.innerHTML = activeRowInner(d, downloadId);
+                            [".cn-thumb", ".cn-grow", ".cn-r"].forEach(function (selector) {
+                                var current = node.querySelector(selector);
+                                var next = holder.querySelector(selector);
+                                if (current && next) current.innerHTML = next.innerHTML;
+                            });
+                            var button = node.querySelector("[data-stop]");
+                            if (button) {
+                                button.disabled = !!isStopping(d);
+                                button.textContent = isStopping(d) ? "Stopping..." : stopLabel(d);
+                            }
+							if (d.path) node.title = d.path;
+						}
+					};
+				}));
+
+				fill("cn-reel-queue", "cn-empty-queue", "cn-n-queue", queue.map(function (d, i) {
+					var place = "#" + (i + 1);
+					var queuedId = d.parent_id || d.id;
+					var removable = !active.some(function (item) { return item.id === queuedId; });
+					return {
+						id: tileId(d, "q", i),
+						sig: place + "|" + removable,
+						html: function () {
+							return tile(d, {
+								flag: '<span class="cn-flag cn-st is-wait">' + place + "</span>",
+								ruleColor: "var(--cn-cool)",
+								posterMeta: d.season ? "S" + d.season : d.type,
+								cap: d.title,
+								sub: d.site,
+								action: d.id
+									? '<button class="cn-cta is-ghost" type="button" data-remove-queued="' +
+										esc(queuedId) + '" ' + (removable ? '' : 'disabled ') + 'style="margin-top:8px;padding:7px 12px;font-size:12px">' + (d.parent_id ? 'Remove season' : 'Remove') + '</button>'
+									: ""
+							});
+						},
+						// quando la coda avanza cambia solo il numero d'ordine
+						patch: function (node) {
+                            setText(node, ".cn-flag", place);
+                            var removeButton = node.querySelector("[data-remove-queued]");
+                            if (removeButton) removeButton.disabled = !removable;
+                        }
+					};
+				}));
+
+				fill("cn-reel-hist", "cn-empty-hist", "cn-n-hist", hist.slice(0, 20).map(function (d, i) {
+					var e = outcome(d);
+					var sub = e.note ? (d.site ? d.site + " · " + e.note : e.note) : d.site;
+					return {
+						id: tileId(d, "h", i) + ":" + (d.start_time || i),
+						sig: e.label + "|" + sub + "|" + JSON.stringify(d.selected_tracks || []),
+						html: function () {
+							return tile(d, {
+								flag: '<span class="cn-flag cn-st ' + e.badge + '">' + e.label + "</span>",
+								ruleColor: e.rule,
+								posterMeta: d.site,
+								cap: d.title,
+								sub: sub,
+                                trackInfo: selectedTrackFacts(d)
+							});
+						},
+						patch: function (node) {
+							var flag = node.querySelector(".cn-flag");
+							if (flag) {
+								flag.className = "cn-flag cn-st " + e.badge;
+								flag.textContent = e.label;
+							}
+							setText(node, ".cn-sub", sub);
+                        var details = node.querySelector(".cn-selected-tracks");
+                        if (details) details.outerHTML = selectedTrackFacts(d);
+						}
+					};
+				}));
+
+				upgradePosters(active.concat(queue, hist.slice(0, 20)));
+			})
+			.catch(function () { /* rete giù: si riprova al giro dopo */ });
+	}
+
+	var posterAsked = {};
+
+	function upgradePosters(entries) {
+		var wanted = [];
+		entries.forEach(function (d) {
+			var key = artKey(d);
+			if (!key || d.poster || posterAsked[key]) return;
+			posterAsked[key] = true;
+			wanted.push({
+				index: key,
+				name: key,
+				site: d.site,
+				is_movie: String(d.type || "").toLowerCase() === "movie"
+			});
+		});
+		if (!wanted.length) return;
+
+		fetch(URL_POSTERS, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+			body: JSON.stringify({ items: wanted })
+		})
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var found = data.posters || {};
+				var any = false;
+				Object.keys(found).forEach(function (k) { posterCache[k] = found[k]; any = true; });
+				if (any) applyCachedPosters();
+			})
+			.catch(function () { /* TMDB non raggiungibile: resta la locandina composta */ });
+	}
+
+	function applyCachedPosters() {
+		document.querySelectorAll(".cn-tile[data-key]").forEach(function (tile) {
+			var url = posterCache[tile.getAttribute("data-key")];
+			if (!url) return;
+			var box = tile.querySelector(".cn-poster");
+			if (!box || box.querySelector("img")) return;
+			var img = new Image();
+			img.loading = "lazy"; img.decoding = "async"; img.alt = "";
+			img.onerror = function () { img.remove(); };
+			img.src = url;
+			box.insertBefore(img, box.querySelector(".cn-poster-fill"));
+		});
+	}
+
+	document.querySelectorAll(".cn-reel").forEach(function (r) {
+		r.addEventListener("wheel", function (e) {
+			if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+			if (r.scrollWidth <= r.clientWidth) return;
+			e.preventDefault();
+			r.scrollLeft += e.deltaY;
+		}, { passive: false });
+	});
+
+	refresh();
+	var timer = setInterval(refresh, 1000);
+	document.addEventListener("visibilitychange", function () {
+		clearInterval(timer);
+		if (!document.hidden) { refresh(); timer = setInterval(refresh, 1000); }
+	});
+})();
+</script>
+{% endblock %}

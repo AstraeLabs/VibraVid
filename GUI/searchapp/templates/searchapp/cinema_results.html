@@ -1,0 +1,310 @@
+{% extends "searchapp/cinema_base.html" %}
+{% load cinema_extras %}
+
+{% comment %}
+	Risultati della ricerca nella UI cinema (handoff-ui.md §7.1). Affianca
+	`results.html`, non lo tocca: la view `search` sceglie l'uno o l'altro.
+{% endcomment %}
+
+{% block title %}{{ query }} — ARROWAR{% endblock %}
+
+{% block content %}
+<div class="cn-pad" style="padding-top:34px">
+
+	<div class="cn-page-hd">
+		<h1 class="cn-blast">{{ query|default:"Results" }}</h1>
+		<p>
+			<span id="cn-count">{{ results|length }}</span> result{{ results|length|pluralize }}
+			{% if is_global %}across all providers{% elif selected_site %}from {{ selected_site|provider }}{% endif %}
+			{% if not tmdb_available %}
+				· TMDB covers aren't active: set <code>TMDB_API_KEY</code> in the environment and recreate the container
+			{% endif %}
+		</p>
+	</div>
+
+	{% comment %}
+		Ricercare da qui invece di tornare indietro: la ricerca è un'operazione
+		che si ripete (parole diverse, stesso ambito), e obbligare a passare
+		dalla pagina Cerca ogni volta allunga il giro senza dare niente.
+		L'ambito resta quello di questa ricerca, così si cambia solo il testo.
+	{% endcomment %}
+	<form action="{% url 'search' %}" method="get" class="cn-seek" style="margin-bottom:26px">
+		<input type="text" name="query" value="{{ query }}" required
+		       placeholder="Search again…" autocomplete="off" aria-label="Search again">
+		<input type="hidden" name="site" value="{{ selected_site }}">
+		<input type="hidden" name="audio_language" value="{{ audio_language_config.selection }}">
+		<button class="cn-cta" type="submit">Search</button>
+		<a class="cn-cta is-ghost" href="{% url 'search_page' %}"
+		   style="display:flex;align-items:center">Change scope</a>
+	</form>
+
+	{% if messages %}
+		{% for m in messages %}
+			<p class="cn-msg{% if m.tags == 'error' %} is-bad{% elif m.tags == 'warning' %} is-warn{% endif %}">{{ m }}</p>
+		{% endfor %}
+	{% endif %}
+
+	{% if results %}
+		{% include "searchapp/language_filter.html" %}
+		{% comment %}
+			Le schede compaiono solo per i tipi effettivamente presenti: una
+			ricerca di libri non deve mostrare un filtro "Serie" che non può mai
+			dare niente. Lo decide showAvailableFilters() dopo il render.
+		{% endcomment %}
+		<div class="cn-filters">
+			<div class="cn-fgroup">
+				<span class="cn-tag">Show</span>
+				<div class="cn-opts" id="cn-kinds">
+					<button class="cn-opt" type="button" data-kind="" aria-pressed="true">All</button>
+					<button class="cn-opt" type="button" data-kind="movie"  aria-pressed="false" hidden>Movies</button>
+					<button class="cn-opt" type="button" data-kind="series" aria-pressed="false" hidden>Series</button>
+					<button class="cn-opt" type="button" data-kind="anime"  aria-pressed="false" hidden>Anime</button>
+					<button class="cn-opt" type="button" data-kind="song"   aria-pressed="false" hidden>Music</button>
+					<button class="cn-opt" type="button" data-kind="book"   aria-pressed="false" hidden>Books</button>
+					<button class="cn-opt" type="button" data-kind="live"   aria-pressed="false" hidden>Live</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="cn-grid" id="cn-results">
+			{% for result in results %}
+				<article class="cn-tile"
+				         data-kind="{{ result.filter_group }}"
+				         data-media-kind="{{ result.media_kind }}"
+				         data-key="{{ result.display_title }}"
+				         data-index="{{ forloop.counter }}"
+				         data-name="{{ result.display_title }}"
+				         data-year="{{ result.year|default:'' }}"
+				         data-is-movie="{{ result.is_movie|lower }}"
+				         data-site="{{ result.source_alias }}"
+				         data-slug="{{ result.slug|default:'' }}"
+				         data-tmdb-id="{{ result.tmdb_id|default:'' }}"
+				         data-languages="{{ result.catalog_languages }}"
+				         {% if not result.is_movie %}
+				         data-fire="cn-detail-{{ forloop.counter }}"
+				         {% else %}
+				         data-fire="cn-dl-{{ forloop.counter }}"
+				         {% endif %}
+				         tabindex="0">
+
+					<div class="cn-poster">
+						<span class="cn-flag cn-st is-type">{{ result.display_type }}</span>
+						{% if result.year %}<span class="cn-ring">{{ result.year }}</span>{% endif %}
+
+						{% comment %}
+							`bg_image_url` ricade su un placeholder di via.placeholder.com
+							quando lo scraper non dà niente: è una richiesta di rete verso
+							terzi su un'app che può girare offline, e sotto c'è già la
+							locandina tipografica. Meglio non chiederlo proprio.
+						{% endcomment %}
+						{% if result.bg_image_url and "via.placeholder" not in result.bg_image_url %}
+							<img id="cn-poster-{{ forloop.counter }}" src="{{ result.bg_image_url }}"
+							     alt="" loading="lazy" decoding="async" onerror="this.remove()">
+						{% endif %}
+
+						<div class="cn-poster-fill">
+							<div class="cn-rule"></div>
+							<div class="cn-ptitle">{{ result.display_title }}</div>
+							<div class="cn-pmeta">{{ result.source_alias|provider }}</div>
+						</div>
+
+						<div class="cn-pick">
+                            {% if result.media_kind == "movie" or result.media_kind == "series" %}
+                            {% include "searchapp/quality_picker.html" %}
+                            {% endif %}
+                            <div class="cn-pick-row">
+							{% comment %}
+								`media_kind` e non `is_song`: il dizionario dei risultati
+								non ha mai avuto quella chiave (vedi
+								_media_item_to_display_dict), quindi il ramo col formato
+								audio in results.html non si è mai aperto.
+							{% endcomment %}
+							{% if result.media_kind == "song" %}
+								<form id="cn-dl-{{ forloop.counter }}" action="{% url 'start_download' %}" method="post">
+									{% csrf_token %}
+									<input type="hidden" name="source_alias" value="{{ result.source_alias }}">
+									<input type="hidden" name="item_payload" value="{{ result.payload_json }}">
+									<label class="cn-mini is-mark" title="Audio format">
+										<select name="audio_format" aria-label="Audio format">
+											<option value="flac" selected>FLAC</option>
+											<option value="mp3">MP3</option>
+										</select>
+									</label>
+									<button class="cn-mini" type="submit">Download</button>
+								</form>
+							{% elif result.is_movie %}
+								<form id="cn-dl-{{ forloop.counter }}" action="{% url 'start_download' %}" method="post"{% if result.media_kind == "movie" %} data-audio-prompt{% endif %}>
+									{% csrf_token %}
+									<input type="hidden" name="source_alias" value="{{ result.source_alias }}">
+									<input type="hidden" name="item_payload" value="{{ result.payload_json }}">
+									<button class="cn-mini" type="submit">Download</button>
+								</form>
+							{% else %}
+								<form id="cn-detail-{{ forloop.counter }}" action="{% url 'series_detail' %}" method="post">
+									{% csrf_token %}
+									<input type="hidden" name="source_alias" value="{{ result.source_alias }}">
+									<input type="hidden" name="item_payload" value="{{ result.payload_json }}">
+								</form>
+								<button class="cn-mini" type="submit" form="cn-detail-{{ forloop.counter }}">
+									Episodes
+								</button>
+							{% endif %}
+
+							{% comment %}
+								Niente watchlist per i libri: un libro non ha puntate
+								nuove da sorvegliare, la riga non farebbe mai niente.
+							{% endcomment %}
+							{% if result.media_kind != "book" %}
+								<form action="{% url 'add_to_watchlist' %}" method="post">
+									{% csrf_token %}
+									<input type="hidden" name="source_alias" value="{{ result.source_alias }}">
+									<input type="hidden" name="item_payload" value="{{ result.payload_json }}">
+									<input type="hidden" name="search_query" value="{{ query }}">
+									<input type="hidden" name="search_site" value="{{ result.source_alias }}">
+									<button class="cn-mini is-mark" type="submit" title="Add to watchlist">＋</button>
+								</form>
+							{% endif %}
+						</div></div>
+					</div>
+
+					<span class="cn-cap">{{ result.display_title }}</span>
+					<span class="cn-sub">{{ result.source_alias|provider }}{% if is_global %} · {{ result.display_type }}{% endif %}</span>
+					{% if result.availability %}<span class="cn-avail">{{ result.availability }}</span>{% endif %}
+						{% if result.catalog_language %}<span class="cn-sub" title="Provider catalog language, not verified audio">Catalog: {{ result.catalog_language|upper }}</span>{% endif %}
+				</article>
+			{% endfor %}
+		</div>
+
+		<p class="cn-empty" id="cn-nokind" hidden style="padding-left:0">
+			No results of this type.
+		</p>
+		<dialog id="cn-movie-audio-dialog" class="cn-audio-dialog" aria-labelledby="cn-audio-dialog-title" aria-describedby="cn-audio-dialog-movie">
+			<h2 id="cn-audio-dialog-title">Choose download audio</h2>
+			<p id="cn-audio-dialog-movie" class="cn-cap"></p>
+			{% include "searchapp/audio_picker.html" %}
+			<div class="cn-audio-dialog-actions">
+				<button type="button" class="cn-mini" data-audio-cancel>Cancel</button>
+				<button type="button" class="cn-mini is-mark" data-audio-download>Download</button>
+			</div>
+		</dialog>
+	{% else %}
+		<p class="cn-empty" style="padding-left:0">
+			No results for <b>{{ query }}</b>. Try fewer words, or another provider.
+		</p>
+		<p style="margin-top:18px">
+			<a class="cn-cta" href="{% url 'search_page' %}">Back to search</a>
+		</p>
+	{% endif %}
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function () {
+	"use strict";
+
+	var grid = document.getElementById("cn-results");
+	if (!grid) return;
+
+	var URL_POSTERS = "{% url 'resolve_tmdb_posters' %}";
+	var CSRF = "{{ csrf_token }}";
+	var tiles = Array.prototype.slice.call(grid.querySelectorAll(".cn-tile"));
+
+	function duotone(text) {
+		var h = 0, s = String(text || "?");
+		for (var i = 0; i < s.length; i++) h += s.charCodeAt(i);
+		h = h % 360;
+		return ["hsl(" + h + " 34% 26%)", "hsl(" + h + " 40% 10%)"];
+	}
+
+	tiles.forEach(function (t) {
+		var d = duotone(t.getAttribute("data-key"));
+		t.style.setProperty("--cn-p1", d[0]);
+		t.style.setProperty("--cn-p2", d[1]);
+	});
+
+	var kinds = document.getElementById("cn-kinds");
+	var present = {};
+	tiles.forEach(function (t) { present[t.dataset.kind] = true; });
+	kinds.querySelectorAll("button[data-kind]").forEach(function (b) {
+		if (b.dataset.kind) b.hidden = !present[b.dataset.kind];
+	});
+
+	kinds.addEventListener("click", function (e) {
+		var b = e.target.closest("button[data-kind]");
+		if (!b) return;
+		kinds.querySelectorAll("button").forEach(function (x) {
+			x.setAttribute("aria-pressed", String(x === b));
+		});
+
+		var want = b.dataset.kind, shown = 0;
+		tiles.forEach(function (t) {
+			var show = !want || t.dataset.kind === want;
+			t.hidden = !show;
+			if (show) shown++;
+		});
+		document.getElementById("cn-count").textContent = shown;
+		document.getElementById("cn-nokind").hidden = shown > 0;
+	});
+
+	function activate(tile) {
+		var form = tile.dataset.fire && document.getElementById(tile.dataset.fire);
+		if (!form) return;
+		tile.classList.add("is-firing");
+		tile.addEventListener("animationend", function () { tile.classList.remove("is-firing"); }, {once: true});
+		form.requestSubmit();
+	}
+
+	grid.addEventListener("click", function (e) {
+		if (e.target.closest("button, a, form, select, label, .cn-quality-picker")) return;
+		var tile = e.target.closest(".cn-tile");
+		if (tile) activate(tile);
+	});
+
+	grid.addEventListener("keydown", function (e) {
+		if (e.key !== "Enter" || e.target.closest("button, a, select")) return;
+		var tile = e.target.closest(".cn-tile");
+		if (tile) { e.preventDefault(); activate(tile); }
+	});
+
+	{% if tmdb_available %}
+	fetch(URL_POSTERS, {
+		method: "POST",
+		headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+		body: JSON.stringify({
+			items: tiles.map(function (t) {
+				return {
+					index: t.dataset.index,
+					name: t.dataset.name,
+					year: t.dataset.year || null,
+					is_movie: t.dataset.isMovie === "true",
+					site: t.dataset.site || null,
+					slug: t.dataset.slug || null,
+					tmdb_id: t.dataset.tmdbId || null
+				};
+			})
+		})
+	})
+		.then(function (r) { return r.ok ? r.json() : null; })
+		.then(function (data) {
+			if (!data || !data.posters) return;
+			tiles.forEach(function (t) {
+				var url = data.posters[t.dataset.index];
+				if (!url) return;
+				var img = document.getElementById("cn-poster-" + t.dataset.index);
+				if (img) { img.src = url; return; }
+				var box = t.querySelector(".cn-poster");
+				var fresh = new Image();
+				fresh.id = "cn-poster-" + t.dataset.index;
+				fresh.loading = "lazy"; fresh.decoding = "async"; fresh.alt = "";
+				fresh.onerror = function () { fresh.remove(); };
+				fresh.src = url;
+				box.insertBefore(fresh, box.querySelector(".cn-poster-fill"));
+			});
+		})
+		.catch(function () { /* restano le locandine dei siti */ });
+	{% endif %}
+})();
+</script>
+{% endblock %}

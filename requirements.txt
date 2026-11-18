@@ -1,0 +1,22 @@
+bs4
+requests
+rich
+ttconv
+unidecode
+curl_cffi
+certifi
+pathvalidate
+ua-generator
+pywidevine
+pyplayready
+pycryptodomex
+mutagen
+textual
+textual-image
+Pillow>=12.1
+tomlkit
+tomli; python_version < "3.11"
+pyyaml
+jsonpickle
+pycountry
+ytmusicapi

@@ -1,0 +1,1008 @@
+# 2.03.26
+
+import glob
+import hashlib
+import logging
+import os
+import re
+import shutil
+import time
+import uuid
+from pathlib import Path
+from typing import NamedTuple
+
+from rich.console import Console
+
+from VibraVid.core.downloader._media_tokens import MEDIA_PLACEHOLDERS, media_token_values, strip_media_tokens
+from VibraVid.core.downloader.drm_keys import build_key_fallback
+from VibraVid.core.downloader.util.live_switches import (
+    any_selected_encrypted,
+    live_decrypt_allowed,
+    live_mux_allowed,
+    live_mux_opted_out,
+)
+from VibraVid.core.muxing import (
+    build_hybrid_output,
+    embed_poster,
+    inject_chapters,
+    join_media,
+    probe_media_file,
+    retag_file,
+)
+from VibraVid.core.muxing.helper.audio import audio_ext_for_codec
+from VibraVid.core.muxing.helper.video import get_media_metadata
+from VibraVid.core.muxing.helper.video.hybrid import download_other_tracks
+from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.utils.media_players import MediaPlayers
+from VibraVid.core.utils.track_order import effective_select_filter, order_tracks
+from VibraVid.core.velora.downloader import MediaDownloader
+from VibraVid.services._base.sidecars import Sidecars
+from VibraVid.setup import get_ffmpeg_path
+from VibraVid.utils import config_manager, os_manager
+from VibraVid.utils.hooks import execute_hooks
+from VibraVid.utils.system.proc import run_logged
+
+console = Console()
+logger = logging.getLogger(__name__)
+LAST_DOWNLOADER_ERROR: str | None = None
+EXTENSION_OUTPUT = config_manager.config.get("PROCESS", "extension")
+MERGE_SUBTITLES = config_manager.config.get_bool("PROCESS", "merge_subtitle")
+MERGE_AUDIO = config_manager.config.get_bool("PROCESS", "merge_audio")
+CLEANUP_TMP = config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder")
+DELAY_SS = config_manager.config.get_int("DOWNLOAD", "delay_after_download")
+MUX_ENGINE = config_manager.config.get("PROCESS", "engine", default="ffmpeg")
+
+
+class DownloadCancelled(RuntimeError):
+    """User-initiated abort (Ctrl+C): unwinds straight to the CLI for a clean exit with no traceback."""
+
+
+class DownloadFailed(RuntimeError):
+    """Expected failure (e.g. every episode of a season failed): the CLI prints the message only, no traceback."""
+
+
+class DownloadResult(NamedTuple):
+    """Outcome of a downloader ``start()``."""
+    path: str | None
+    stopped: bool
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.path is not None and not self.stopped and not self.error
+
+    @classmethod
+    def from_raw(cls, result: object) -> "DownloadResult":
+        """Coerce a legacy return value (None, 2-tuple or 3-tuple) into a DownloadResult."""
+        if isinstance(result, DownloadResult):
+            return result
+        if result is None:
+            return cls(None, True, "no result")
+        if isinstance(result, tuple):
+            path = result[0] if len(result) >= 1 else None
+            stopped = bool(result[1]) if len(result) >= 2 else True
+            error = result[2] if len(result) >= 3 else None
+            return cls(path, stopped, error)
+        # A bare truthy value (e.g. a path string) -> treat as success.
+        return cls(str(result), False, None)
+
+
+class BaseDownloader:
+    # True for protocols whose encrypted tracks the chunks pipe (flux --chunks | ffmpeg) can mux without live decrypt.
+    supports_chunks_pipe = False
+
+    def __init__(self, output_path: str, temp_suffix: str, sanitize_path: bool = True, **kwargs):
+        """Common initialisation shared by DASH / HLS / ISM sub-classes."""
+        if not output_path:
+            output_path = f"download.{EXTENSION_OUTPUT}"
+
+        if context_tracker.video_quality:
+            quality = context_tracker.video_quality
+            output_path = str(output_path)
+            if "%(quality)" in output_path:
+                # Resolve the configured slot early so temporary files and
+                # existing-file checks remain specific to the chosen quality.
+                output_path = output_path.replace("%(quality)", quality)
+            elif not re.search(rf"(?<!\w){re.escape(quality)}(?!\w)", os.path.basename(output_path)):
+                stem, extension = os.path.splitext(output_path)
+                output_path = f"{stem} [{quality}]{extension}"
+        self.output_path = os_manager.get_sanitize_path(output_path) if sanitize_path else str(output_path)
+        if not self.output_path.endswith(f".{EXTENSION_OUTPUT}"):
+            self.output_path += f".{EXTENSION_OUTPUT}"
+
+        # Media-token placeholders (quality/codec/language) can only be resolved AFTER muxing (see _finalize).
+        self._final_name_template = self.output_path
+        self.output_path = self._strip_media_tokens(self.output_path)
+
+        self.filename_base = os.path.splitext(os.path.basename(self.output_path))[0]
+        self.output_dir = self._resolve_temp_dir(temp_suffix)
+        self.file_already_exists = self._finished_file_exists()
+
+        self.download_id = context_tracker.download_id or str(uuid.uuid4())
+        self.site_name = context_tracker.site_name
+        self._sidecar_target = Sidecars.snapshot()
+
+        self._error = None
+        self.last_merge_result = None
+        self.media_players = None
+        self.copied_subtitles = []
+        self.copied_audios = []
+        self.audio_only = False
+
+    @staticmethod
+    def _local_temp_dir(directory: str, name: str) -> str | None:
+        """``<temp_root>/<hash of the output folder>/<name>`` when VIBRAVID_TEMP_DIR or DOWNLOAD.temp_root names a writable folder, else None (the temp folder stays next to the output). The hash keeps the path stable for resuming and apart for two titles with the same name."""
+        root = str(os.environ.get("VIBRAVID_TEMP_DIR") or config_manager.config.get("DOWNLOAD", "temp_root", default="") or "").strip()
+        if not root:
+            return None
+
+        parent = os.path.join(root, hashlib.sha1(os.path.abspath(directory).encode("utf-8")).hexdigest()[:8])
+        try:
+            os.makedirs(parent, exist_ok=True)
+            if not os.access(parent, os.W_OK):
+                raise OSError("not writable")
+        except OSError as exc:
+            logger.warning(f"DOWNLOAD.temp_root {root!r} is not usable ({exc}): the temporary files stay next to the output")
+            return None
+        return os.path.join(parent, name)
+
+    def _resolve_temp_dir(self, temp_suffix: str) -> str:
+        """Path of the scratch directory for segments, muxing leftovers and subtitles."""
+        directory = os.path.dirname(self.output_path)
+        name = "." + self.filename_base + temp_suffix
+        local_dir = self._local_temp_dir(directory, name)
+        if local_dir:
+            return local_dir
+
+        temp_dir = os.path.join(directory, name)
+
+        # Adopt a temp dir left by a pre-dot-prefix version so its segments stay resumable.
+        legacy_dir = os.path.join(directory, self.filename_base + temp_suffix)
+        if os.path.isdir(legacy_dir) and not os.path.isdir(temp_dir):
+            try:
+                os.rename(legacy_dir, temp_dir)
+                logger.info(f"Migrated legacy temp dir '{legacy_dir}' to '{temp_dir}'")
+            except OSError as e:
+                logger.warning(f"Could not migrate legacy temp dir '{legacy_dir}': {e}")
+                return legacy_dir
+
+        return temp_dir
+
+    def _finished_file_exists(self) -> bool:
+        """True if the final file already exists, INCLUDING media-token variants
+        like '<name> [1080p].mkv' (the quality suffix is only added after muxing,
+        so the plain stripped path may not match an already-downloaded episode)."""
+
+        if os.path.isfile(self.output_path):
+            return True
+
+        directory = os.path.dirname(self.output_path) or "."
+        if not os.path.isdir(directory):
+            return False
+
+        pattern = os.path.join(directory, glob.escape(self.filename_base) + f"*.{EXTENSION_OUTPUT}")
+        return any(os.path.isfile(p) for p in glob.glob(pattern))
+
+    @property
+    def error(self) -> str | None:
+        return getattr(self, "_error", None)
+
+    @error.setter
+    def error(self, value: str | None) -> None:
+        self._error = value
+        global LAST_DOWNLOADER_ERROR
+        try:
+            LAST_DOWNLOADER_ERROR = str(value) if value is not None else None
+        except Exception:
+            LAST_DOWNLOADER_ERROR = None
+
+    @staticmethod
+    def _resolve_url(url_or_path: str) -> str:
+        if not url_or_path:
+            return url_or_path
+        stripped = url_or_path.strip()
+
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://", stripped):
+            return stripped
+
+        path = Path(stripped)
+        if path.exists() and path.is_file():
+            return path.resolve().as_uri()
+        return stripped
+
+    def _format_keys(self, keys: list) -> list:
+        """Return DRM keys formatted as ``kid:key`` strings."""
+        formatted_keys = []
+        for k in keys or []:
+            if isinstance(k, (list, tuple)) and len(k) == 2:
+                formatted_keys.append(f"{k[0]}:{k[1]}")
+            else:
+                formatted_keys.append(str(k))
+        return formatted_keys
+
+    def _resolve_track_info(self) -> tuple[str, str, str, str]:
+        """Emit a TRACKS_JSON logger.info and trigger Supabase download tracking."""
+        season = context_tracker.season or 0
+        episode = context_tracker.episode or 0
+        episode_name = context_tracker.episode_name or ""
+        media_type = context_tracker.media_type or "Film"
+        if season > 0 or episode > 0:
+            media_type = "TV"
+
+        title = context_tracker.title or self.filename_base
+        site = context_tracker.site_name or getattr(self, "site_name", "") or ""
+
+        # Build the display name: "<title> S<season>_E<episode> <episode name>" for TV.
+        name = title
+        if media_type == "TV":
+            name = f"{title} S{season}_E{episode}"
+            if episode_name:
+                name += f" {episode_name}"
+
+        return title, media_type, site, name
+
+    def _log_tracks_json(self, streams: list, keys: list, manifest_url: str) -> None:
+        if context_tracker.capture_keys is not None:
+            context_tracker.capture_keys.extend(self._format_keys(keys))
+            return
+
+        if context_tracker.export_file is None:
+            return
+
+        from VibraVid.core.downloader.util._export import is_synthetic, track_links, write_export
+        from VibraVid.remote.capture import media_from_downloader
+
+        try:
+            media, _ = media_from_downloader(self, key=self._format_keys(keys) or None)
+        except ValueError as exc:
+            console.print(f"[red]Cannot export this download: {exc}")
+            return
+
+        media.site = self._resolve_track_info()[2] or None
+        if is_synthetic(media):
+            media.tracks = track_links(streams) or None
+        write_export(media, context_tracker.export_file)
+
+    def _no_media_downloaded(self, status: dict) -> bool:
+        """Return True when the download produced absolutely nothing."""
+        logger.info(f"Download status: {status}")
+
+        # The chunks pipe / streaming mux consumes the video and writes the final file itself: with no other track on disk that is all there is.
+        if getattr(getattr(self, "media_downloader", None), "streaming_mux_result", None):
+            return False
+        
+        return (
+            status.get("video") is None
+            and not status.get("audios")
+            and not status.get("subtitles")
+            and not status.get("external_subtitles")
+        )
+    
+    def _precheck(self, manifest_url: str) -> "DownloadResult | None":
+        """Common short-circuits every protocol runs before its own pipeline.
+
+        Returns a terminal :class:`DownloadResult` to hand straight back, or
+        ``None`` to signal "keep going". Also creates the output directory.
+        """
+        capture = context_tracker.capture
+        if capture is not None:
+            from VibraVid.remote.capture import record_downloader
+
+            record_downloader(self, capture)
+            return DownloadResult(self.output_path, False, None)
+
+        # Key capture re-runs a download that may already exist on the server's disk: never short-circuit it.
+        if self.file_already_exists and context_tracker.capture_keys is None and context_tracker.export_file is None:
+            console.print("[yellow]File already exists.")
+            return DownloadResult(self.output_path, False, None)
+
+        if context_tracker.resolve_only:
+            from VibraVid.cli.command.queue import enqueue_down_from_context
+
+            enqueue_down_from_context(manifest_url, self.output_path)
+            return DownloadResult(self.output_path, False, None)
+
+        self._create_work_dirs()
+        return None
+
+    def _create_work_dirs(self) -> None:
+        """Create the temp folder and the output folder: the temp folder used to create the second as a side effect, which stops being true when it lives elsewhere (DOWNLOAD.temp_root)."""
+        os_manager.create_path(self.output_dir)
+        os_manager.create_path(os.path.dirname(self.output_path) or ".")
+
+    def _fail(self, error: str) -> "DownloadResult":
+        """Record a failed terminal state on the tracker and return it."""
+        if self.download_id:
+            download_tracker.complete_download(self.download_id, success=False, error=error)
+        return DownloadResult(None, True, error)
+
+    def _update_status(self, text: str) -> None:
+        """Show *text* as the GUI status of this download."""
+        if self.download_id:
+            download_tracker.update_status(self.download_id, text)
+
+    def _new_media_downloader(self, url: str, headers: dict, manifest_content: str | None, manifest_protocol: str, **extra) -> MediaDownloader:
+        """MediaDownloader for this download: only url/headers/content/protocol change between HLS, DASH and ISM, the rest is download-wide."""
+        return MediaDownloader(
+            url=url,
+            output_dir=self.output_dir,
+            filename=self.filename_base,
+            headers=headers,
+            manifest_refresh_fn=self.manifest_refresh_fn,
+            cookies=self.cookies,
+            download_id=self.download_id,
+            site_name=self.site_name,
+            max_segments=self.max_segments,
+            max_time=self.max_time,
+            manifest_content=manifest_content,
+            manifest_protocol=manifest_protocol,
+            stop_when=getattr(self, "stop_when", None),
+            live_tail_seconds=getattr(self, "live_tail_seconds", None),
+            **extra,
+        )
+
+    def _attach_key_fallback(
+        self,
+        drm_psshs: dict[str, list[dict]],
+        media_downloader: MediaDownloader | None = None,
+        *,
+        cross_drm_fallback: bool = False,
+        license_url: str | None = None,
+        license_headers: dict | None = None,
+    ) -> None:
+        """Give *media_downloader* (default: this download's) a KeyFallback over the same DRM context its keys were fetched with, so a key proven wrong mid-download is retried against the other vaults, then the CDM."""
+        md = media_downloader or getattr(self, "media_downloader", None)
+        if md is None:
+            return
+        
+        md.key_fallback = build_key_fallback(
+            self.drm_manager,
+            drm_psshs,
+            preference=self.drm_preference,
+            license_url=license_url or self.license_url,
+            license_headers=license_headers or self.license_headers,
+            license_data=self.license_data,
+            license_certificate=self.license_certificate,
+            license_request_fn=getattr(self, "license_request_fn", None),
+            cross_drm_fallback=cross_drm_fallback,
+        )
+
+    def _no_match_result(self) -> "DownloadResult | None":
+        """Terminal result when -sv/-sa/-ss with --skip-no-match matched no track, else ``None``."""
+        if getattr(self.media_downloader, "no_match_skip", False):
+            console.print("[yellow]Skipping — no track matched the requested video/audio/subtitle filter (-sv/-sa/-ss).")
+            return DownloadResult(self.output_path, False, None)
+        return None
+
+    def _skip_download_result(self) -> "DownloadResult":
+        """Result of the ``DOWNLOAD.skip_download`` switch (and of ``--export``): optional pause, then the (never downloaded) output path."""
+        if DELAY_SS > 0 and context_tracker.capture_keys is None:
+            what = "Exported" if context_tracker.export_file is not None else "Skipping download as per configuration"
+            console.print(f"\n[yellow]{what} and sleeping {DELAY_SS} seconds...")
+            time.sleep(DELAY_SS)
+        
+        return DownloadResult(self.output_path, False, None)
+
+    def _create_media_players(self) -> None:
+        """Best-effort creation of the player playlists next to the output."""
+        try:
+            self.media_players = MediaPlayers(self.output_dir)
+            self.media_players.create()
+        except Exception:
+            pass
+
+    def _gui_aborted(self) -> bool:
+        """True when the GUI stop button was pressed for this download."""
+        return bool(context_tracker.is_gui and self.download_id and download_tracker.is_stopped(self.download_id))
+
+    def _gui_failed_segments(self) -> int:
+        """Number of segments that failed to download (GUI only, else 0)."""
+        if not context_tracker.is_gui:
+            return 0
+        
+        md = getattr(self, "media_downloader", None)
+        try:
+            return int(getattr(md, "had_failed_segments", 0) or 0)
+        except Exception:
+            return 0
+
+    def _check_download_status(self, status: dict) -> "DownloadResult | None":
+        """Guard the raw download ``status``: return a terminal DownloadResult for
+        a cancelled/empty run, or ``None`` when there is media to mux."""
+        if self._gui_aborted():
+            return self._fail("Stopped by user")
+        
+        if status.get("error") == "cancelled":
+            return self._fail("cancelled")
+        
+        if self._no_media_downloaded(status):
+            logger.error("No media downloaded")
+            return self._fail("No media downloaded")
+        
+        if self._gui_failed_segments():
+            n = self._gui_failed_segments()
+            logger.error(f"{n} segment(s) failed to download")
+            return self._fail(f"{n} segment(s) failed to download")
+        return None
+
+    def _merge_and_finalize(self, status: dict) -> "DownloadResult":
+        """Mux the downloaded tracks, move to the final path and return the result."""
+        if self._gui_aborted():
+            return self._fail("Stopped by user")
+        
+        if self._gui_failed_segments():
+            n = self._gui_failed_segments()
+            logger.error(f"{n} segment(s) failed to download")
+            return self._fail(f"{n} segment(s) failed to download")
+        
+        if self.download_id:
+            download_tracker.update_status(self.download_id, "Muxing ...")
+
+        final_file = self._merge_files(status)
+        if not final_file:
+            if self.download_id and download_tracker.is_stopped(self.download_id):
+                return self._fail("cancelled")
+            
+            merge_error = self.error or "Merge failed"
+            logger.error(merge_error)
+            return self._fail(merge_error)
+
+        self._finalize(final_file=final_file)
+        if DELAY_SS > 0:
+            console.print(f"\n[green]Sleeping {DELAY_SS} seconds before finishing...")
+            time.sleep(DELAY_SS)
+
+        return DownloadResult(self.output_path, False, self.error or None)
+
+    def _maybe_enable_streaming_mux(self) -> None:
+        """Called by HLS/DASH/ISM downloaders, after streams are selected but before start_download()"""
+        media_downloader = getattr(self, "media_downloader", None)
+        encrypted = any_selected_encrypted(getattr(media_downloader, "streams", None))
+
+        allowed, why = live_mux_allowed(self.site_name, encrypted_tracks=encrypted)
+        if not allowed and encrypted and self.supports_chunks_pipe and not live_decrypt_allowed(self.site_name):
+            # Only the live-decrypt veto is waived (the chunks pipe needs no live decrypt):
+            # --no-livemux and process.live_mux still apply.
+            allowed, why = live_mux_allowed(self.site_name)
+            if not allowed and not live_mux_opted_out(self.site_name):
+                # Nobody switched the mux off: the chunks pipe is the cheapest way to finish an encrypted DASH, so it is the default.
+                # It still falls back to the file mode on its own when its conditions do not hold (see chunks_pipe.py).
+                allowed, why = True, ""
+        
+        if not allowed:
+            logger.info(f"streaming_mux: not enabled ({why})")
+            return
+
+        if MUX_ENGINE.lower() != "ffmpeg":
+            logger.info(f"streaming_mux: not enabled (PROCESS.engine={MUX_ENGINE!r} != ffmpeg)")
+            return
+        
+        if os.path.splitext(self.output_path)[1].lower() != ".mkv":
+            logger.info(f"streaming_mux: not enabled (output_path={self.output_path!r} is not .mkv)")
+            return
+
+        if media_downloader is None:
+            logger.info("streaming_mux: not enabled (media_downloader not created yet)")
+            return
+
+        # Check media_downloader.other_tracks: only hybrid VIDEO tracks (e.g. Dolby Vision
+        # companion) veto the streaming-mux fast path because they require a separate hybrid
+        # merge pass. Subtitle / extra-audio other_tracks do NOT veto streaming-mux.
+        _hybrid_video = any(
+            (t.get("type") or "").strip().lower().startswith("video")
+            for t in (getattr(media_downloader, "other_tracks", None) or [])
+        )
+        if _hybrid_video:
+            logger.info("streaming_mux: not enabled (hybrid video tracks present)")
+            return
+
+        media_downloader.enable_streaming_mux(self.output_path, chapters=self.chapters)
+        logger.info(f"streaming_mux: enabled for this download -> {self.output_path}")
+
+    def _finish_from_status(self, status: dict) -> "DownloadResult":
+        """Common tail for protocols with no post-download step: guards → mux."""
+        return self._check_download_status(status) or self._merge_and_finalize(status)
+
+    def _move_to_final_location(self, final_file: str) -> None:
+        """
+        Move *final_file* to ``self.output_path``.
+        Updates ``self.output_path`` when the merge produced a different extension.
+        """
+        final_ext = os.path.splitext(final_file)[1].lower()
+        desired_ext = os.path.splitext(self.output_path)[1].lower()
+        if final_ext != desired_ext:
+            base = os.path.splitext(self.output_path)[0]
+            self.output_path = base + final_ext
+
+        if os.path.abspath(final_file) != os.path.abspath(self.output_path):
+            try:
+                if os.path.exists(self.output_path):
+                    os.remove(self.output_path)
+                shutil.move(final_file, self.output_path)  # a plain rename fails across filesystems (temp_root on another disk)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not move file: {e}")
+                self.output_path = final_file
+
+    def _decrypt_failure_message(self) -> str | None:
+        """"Decryption failed - track(s) still encrypted: ..." from  media_downloader.decrypt_failures, or None if every track decrypted OK."""
+        md = getattr(self, "media_downloader", None)
+        failures = [
+            f for f in (getattr(md, "decrypt_failures", []) or [])
+            if not f.get("skipped") or f.get("stream_type") == "video"
+        ]
+
+        if not failures:
+            return None
+
+        labels = ", ".join(dict.fromkeys(f.get("label") or f.get("track") or "?" for f in failures))
+        kids = []
+
+        for f in failures:
+            kid = f.get("kid")
+            if kid and kid not in kids:
+                kids.append(kid)
+            else:
+                # Back-compat: older entries carry the KID inside the message.
+                m = re.search(r"KID:?\s*([0-9a-fA-F]{32})", f.get("message") or "")
+                if m and m.group(1) not in kids:
+                    kids.append(m.group(1))
+        
+        suffix = f" ({', '.join(kids)})" if kids else ""
+        return f"Decryption failed - track(s) still encrypted: {labels}{suffix}"
+
+    def _merge_files(self, status: dict) -> str | None:
+        """
+        Merge downloaded files using FFmpeg.
+        Returns the resulting file path, or None on failure.
+        """
+        err = self._decrypt_failure_message()
+        if err:
+            logger.warning(f"{err} — skipping mux, the merged file would be rejected anyway")
+            self.error = err
+            return None
+
+        media_downloader = getattr(self, "media_downloader", None)
+        streaming_mux_result = getattr(media_downloader, "streaming_mux_result", None)
+        if streaming_mux_result and os.path.exists(streaming_mux_result) and os.path.getsize(streaming_mux_result) > 0:
+            logger.info(f"Using streaming-mux fast-path output, skipping join_media(): {streaming_mux_result}")
+            merged_file = streaming_mux_result
+            if not self._merge_output_ok(merged_file):
+                return None
+
+            # The fast path already injects chapters only fall back to the separate
+            # mkvmerge/ffmpeg _inject_chapters() step if that didn't happen.
+            if self.chapters and not getattr(media_downloader, "streaming_mux_chapters_injected", False):
+                merged_file = self._inject_chapters(merged_file)
+
+            return self._embed_poster(merged_file)
+
+        video_track = status.get("video")
+        audio_tracks: list[dict] = list(status.get("audios") or [])
+        subtitle_tracks: list[dict] = [
+            t for t in (status.get("subtitles") or []) if os.path.exists(t.get("path", "")) and os.path.getsize(t["path"]) > 0
+        ]
+        _dropped_empty_subs = len(status.get("subtitles") or []) - len(subtitle_tracks)
+        if _dropped_empty_subs:
+            logger.warning(f"Dropped {_dropped_empty_subs} empty subtitle track(s) before merge (0 bytes -- ffmpeg would reject them as input)")
+
+        # DASH-specific external tracks
+        for ext_audio in status.get("external_audios") or []:
+            path = ext_audio.get("path", "")
+            if path and os.path.exists(path):
+                audio_tracks.append(
+                    {
+                        "path": path,
+                        "name": ext_audio.get("language") or ext_audio.get("file", ""),
+                        "language": ext_audio.get("language") or ext_audio.get("file", ""),
+                        "size": os.path.getsize(path),
+                    }
+                )
+
+        for ext_sub in status.get("external_subtitles") or []:
+            path = ext_sub.get("path", "")
+            if path and os.path.exists(path):
+                subtitle_tracks.append(
+                    {
+                        "path": path,
+                        "name": ext_sub.get("language") or ext_sub.get("file", ""),
+                        "language": ext_sub.get("language") or ext_sub.get("file", ""),
+                        "size": os.path.getsize(path),
+                    }
+                )
+
+        other_track_specs = list(status.get("other_tracks") or [])
+        other_track_results = list(status.get("other_tracks_downloaded") or [])
+
+        if other_track_specs and not other_track_results:
+            if self.download_id:
+                download_tracker.update_status(self.download_id, "Downloading other tracks ...")
+
+            other_track_results = download_other_tracks(
+                other_track_specs,
+                Path(self.output_dir),
+                self.filename_base,
+                keys=getattr(getattr(self, "media_downloader", None), "key", None),
+                headers=getattr(self, "headers", None) or getattr(self, "mpd_headers", None) or {},
+                cookies=getattr(self, "cookies", None) or {},
+                max_segments=getattr(self, "max_segments", None),
+                max_time=getattr(self, "max_time", None),
+            )
+            status["other_tracks_downloaded"] = other_track_results
+
+        if other_track_specs and self.download_id:
+            download_tracker.update_status(self.download_id, "Muxing ...")
+
+        for track in other_track_results:
+            track_kind = (track.get("kind") or track.get("type") or "").lower()
+            base_kind = track_kind.split(":")[0]  # "video:hdr10" -> "video"
+            if base_kind == "video":
+                continue
+            if base_kind == "audio":
+                audio_tracks.append(track)
+            elif base_kind == "subtitle":
+                subtitle_tracks.append(track)
+
+        # The files come in the alphabetical order of their names: the tracks go out in the order of the select_audio / select_subtitle the download ran with.
+        custom_filters = getattr(getattr(self, "media_downloader", None), "custom_filters", None)
+        audio_tracks = order_tracks(audio_tracks, "audio", effective_select_filter("audio", custom_filters))
+        subtitle_tracks = order_tracks(subtitle_tracks, "subtitle", effective_select_filter("subtitle", custom_filters))
+
+        if video_track is None:
+            media_downloader = getattr(self, "media_downloader", None)
+            video_was_selected = any(
+                getattr(s, "type", None) == "video" and getattr(s, "selected", False)
+                for s in getattr(media_downloader, "streams", None) or []
+            )
+            
+            if video_was_selected:
+                self.error = self.error or "Video track failed to download"
+                logger.error(f"{self.error} -- not falling back to audio-only")
+                return None
+
+            if audio_tracks:
+                valid_audio_tracks = [
+                    t
+                    for t in audio_tracks
+                    if self._merge_output_ok(t.get("path")) and get_media_metadata(t["path"]).get("audio_tracks")
+                ]
+                dropped = len(audio_tracks) - len(valid_audio_tracks)
+                if dropped:
+                    logger.error(f"Audio-only fallback: dropped {dropped} corrupted audio track(s) that failed ffprobe validation")
+                audio_tracks = valid_audio_tracks
+
+            if audio_tracks or subtitle_tracks:
+                self.audio_only = True
+                if audio_tracks:
+                    self._track_audios_for_copy(audio_tracks)
+                if subtitle_tracks:
+                    self._track_subtitles_for_copy(subtitle_tracks)
+                return self.output_path
+            return None
+
+        video_path = video_track["path"] if isinstance(video_track, dict) else video_track.get("path")
+
+        if not os.path.exists(video_path):
+            console.print(f"[red]Video file not found: {video_path}")
+
+        video_probe = video_track.get("probe") if isinstance(video_track, dict) else None
+        if not video_probe and video_path and os.path.exists(video_path):
+            video_probe = probe_media_file(video_path)
+
+        embedded_language = getattr(self, "embedded_audio_language", None)
+        if embedded_language:
+            if "audio_tracks" not in (video_probe or {}):
+                video_probe = get_media_metadata(video_path)
+            if len((video_probe or {}).get("audio_tracks") or []) != 1:
+                self.error = "The source does not contain exactly one identifiable embedded audio track"
+                return None
+            audio_tracks.insert(0, {"path": video_path, "language": embedded_language, "name": embedded_language})
+        required_languages = getattr(self, "required_audio_languages", None) or []
+        if required_languages:
+            from VibraVid.core.utils.audio_selection import matches_audio_language
+            actual = [track.get("language") or track.get("name") for track in audio_tracks]
+            if not actual or any(not matches_audio_language(actual, language) for language in required_languages):
+                self.error = "A requested audio track failed to download; the incomplete audio selection was not saved"
+                return None
+
+        if other_track_results or (video_probe or {}).get("dolby_vision"):
+            hybrid_file = build_hybrid_output(
+                video_track=video_track if isinstance(video_track, dict) else {"path": video_path},
+                other_videos=[
+                    track
+                    for track in other_track_results
+                    if (track.get("kind") or track.get("type") or "").lower().split(":")[0] == "video"
+                ],
+                audio_tracks=audio_tracks,
+                subtitle_tracks=subtitle_tracks,
+                output_path=self.output_path,
+                filename_base=self.filename_base,
+                chapters=getattr(self, "chapters", None),
+            )
+            if hybrid_file:
+                self.last_merge_result = {"hybrid": True, "output": hybrid_file}
+                return self._embed_poster(hybrid_file)
+
+        audio_tracks_to_merge: list = []
+        if audio_tracks:
+            if MERGE_AUDIO:
+                audio_tracks_to_merge = audio_tracks
+            else:
+                self._track_audios_for_copy(audio_tracks)
+
+        # CC-embedded subtitles are extracted straight from the raw video stream
+        subtitle_tracks = self._prepare_subtitle_tracks_for_merge(subtitle_tracks, video_path)
+        subtitle_tracks = order_tracks(subtitle_tracks, "subtitle", effective_select_filter("subtitle", custom_filters))  # the closed captions just extracted join the list here
+        subtitle_tracks_to_merge: list = []
+        if subtitle_tracks:
+            if MERGE_SUBTITLES:
+                subtitle_tracks_to_merge = subtitle_tracks
+            else:
+                self._track_subtitles_for_copy(subtitle_tracks)
+
+        merged_file, result_json = join_media(
+            video_path=video_path,
+            audio_tracks=audio_tracks_to_merge,
+            subtitle_tracks=subtitle_tracks_to_merge,
+            out_path=self.output_path,
+            chapters=getattr(self, "chapters", None),
+            force_ts_fix=getattr(getattr(self, "media_downloader", None), "_needs_join_ts_fix", False),
+        )
+        self.last_merge_result = result_json
+        if (result_json or {}).get("video_missing"):
+            self.error = "The muxed file lost the video track (the video file was not readable); temporary files were kept"
+        elif (result_json or {}).get("video_truncated"):
+            self.error = "The video track is much shorter than the audio (its merge was cut short); no file was muxed and the temporary files were kept"
+
+        if not self._merge_output_ok(merged_file):
+            return None
+        # Chapters are already baked into merged_file by join_media() above — no separate _inject_chapters() pass needed.
+        return self._embed_poster(merged_file)
+
+    def _inject_chapters(self, file_path: str) -> str:
+        """Add this downloader's queued chapters (self.chapters) as the final muxing step."""
+        merged_file, result_json = inject_chapters(file_path, getattr(self, "chapters", None), temp_dir=self.output_dir)
+        if result_json:
+            self.last_merge_result = result_json
+        return merged_file
+
+    def _embed_poster(self, file_path: str) -> str:
+        """Embed this downloader's poster/still image (self.poster_url) as the final muxing step."""
+        from VibraVid.services._base.tmdb_artwork import embed_enabled
+
+        if not embed_enabled():
+            return file_path
+
+        merged_file, result_json = embed_poster(file_path, getattr(self, "poster_url", None))
+        if result_json:
+            self.last_merge_result = result_json
+        return merged_file
+
+    @staticmethod
+    def _merge_output_ok(path: str) -> bool:
+        """A merge step only succeeded if ffmpeg produced a non-empty file"""
+        return bool(path) and os.path.exists(path) and os.path.getsize(path) > 0
+
+    def _prepare_subtitle_tracks_for_merge(self, subtitle_tracks: list, video_path: str | None = None) -> list:
+        """Hook for subclasses to materialize subtitle assets right before muxing (e.g. embedded-CC extraction from the raw video stream)."""
+        return subtitle_tracks
+
+    def _track_subtitles_for_copy(self, subtitles_list: list) -> None:
+        """Stage subtitle files for deferred copy to final location."""
+        for idx, subtitle in enumerate(subtitles_list):
+            sub_path = subtitle.get("path")
+            if sub_path and os.path.exists(sub_path):
+                self.copied_subtitles.append(
+                    {
+                        "src": sub_path,
+                        "language": subtitle.get("language", f"sub{idx}"),
+                        "extension": os.path.splitext(sub_path)[1],
+                    }
+                )
+
+    def _track_audios_for_copy(self, audios_list: list) -> None:
+        """Stage audio files for deferred copy to final location."""
+        for idx, audio in enumerate(audios_list):
+            audio_path = audio.get("path")
+            if audio_path and os.path.exists(audio_path):
+                self.copied_audios.append(
+                    {
+                        "src": audio_path,
+                        "language": audio.get("language", audio.get("name", f"audio{idx}")),
+                        "extension": os.path.splitext(audio_path)[1],
+                    }
+                )
+
+    def _cleanup_temp_dir(self, verified_ok: bool) -> None:
+        """Delete the temporary download folder, but only once the final file is verified: after a failed or partial run the segments and per-track files are all that is left of a (possibly 25 GB) download."""
+        if not CLEANUP_TMP:
+            return
+        if not verified_ok:
+            logger.warning(f"Output not verified: keeping the temporary files in {self.output_dir}")
+            console.print(f"[yellow]Temporary files kept in [cyan]{self.output_dir}[yellow] (the output was not verified).")
+            return
+        
+        # Sweep first: the folder trashed below is already being deleted by its own detached process
+        os_manager.sweep_trash(os.path.dirname(os.path.abspath(self.output_dir)))
+        os_manager.fast_rmtree(self.output_dir)
+
+    def _move_copied_subtitles(self) -> None:
+        """Move staged subtitle files to final location."""
+        if not self.copied_subtitles:
+            return
+
+        output_dir = os.path.dirname(self.output_path)
+        filename_base = os.path.splitext(os.path.basename(self.output_path))[0]
+        for sub_info in self.copied_subtitles:
+            dst = os.path.join(
+                output_dir,
+                f"{filename_base}.{sub_info['language']}{sub_info['extension']}",
+            )
+
+            try:
+                shutil.copy2(sub_info["src"], dst)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not copy subtitle {sub_info['language']}: {e}")
+
+    def _move_copied_audios(self) -> None:
+        """Move staged audio files to final location."""
+        if not self.copied_audios:
+            return
+
+        output_dir = os.path.dirname(self.output_path)
+        filename_base = os.path.splitext(os.path.basename(self.output_path))[0]
+        for idx, audio_info in enumerate(self.copied_audios):
+            if self.audio_only and idx == 0:
+                dst = self._audio_only_destination(audio_info["src"])
+                self.output_path = dst
+                move_func = shutil.move
+            else:
+                dst = os.path.join(
+                    output_dir,
+                    f"{filename_base}.{audio_info['language']}{audio_info['extension']}",
+                )
+                move_func = shutil.copy2
+
+            try:
+                if move_func is shutil.move and dst != audio_info["src"] and self._remux_needed(audio_info["src"], dst):
+                    self._remux_audio(audio_info["src"], dst)
+                else:
+                    move_func(audio_info["src"], dst)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not move audio {audio_info['language']}: {e}")
+
+    def _audio_only_destination(self, src: str) -> str:
+        """Determine the destination path for an audio-only download, using codec-based extension if possible."""
+        base_no_ext = os.path.splitext(self.output_path)[0]
+        try:
+            codec = (get_media_metadata(src) or {}).get("audio_codec", "")
+        except Exception:
+            codec = ""
+        ext = audio_ext_for_codec(codec) or os.path.splitext(src)[1].lstrip(".") or "mka"
+        return f"{base_no_ext}.{ext}"
+
+    @staticmethod
+    def _remux_needed(src: str, dst: str) -> bool:
+        """True if the source and destination extensions differ, indicating that remuxing is needed to change container format."""
+        return os.path.splitext(src)[1].lower() != os.path.splitext(dst)[1].lower()
+
+    def _remux_audio(self, src: str, dst: str) -> None:
+        """Remux audio to change container without re-encoding, using FFmpeg. Falls back to raw move on failure."""
+        try:
+            proc = run_logged(
+                [get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-c:a", "copy", dst],
+                "Remux audio", log=logger,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+
+            if proc.returncode == 0 and os.path.exists(dst):
+                os.remove(src)
+                return
+
+            logger.warning(f"Audio remux failed ({proc.returncode}): {proc.stderr[-200:]}; falling back to raw move")
+        except Exception as e:
+            logger.warning(f"Audio remux error: {e}; falling back to raw move")
+        shutil.move(src, os.path.splitext(dst)[0] + os.path.splitext(src)[1])
+
+    def _verify_output(self) -> bool:
+        """Authoritative decryption check."""
+        global LAST_DOWNLOADER_ERROR
+        try:
+            err = self._decrypt_failure_message()
+            if not err:
+                return True
+
+            md = getattr(self, "media_downloader", None)
+            failures = [
+                f for f in (getattr(md, "decrypt_failures", []) or [])
+                if not f.get("skipped") or f.get("stream_type") == "video"
+            ]
+            detail = failures[0].get("message", "") if failures else ""
+            logger.error(f"Decryption verification FAILED for {os.path.basename(self.output_path or '')}: {err} ({detail})")
+
+            LAST_DOWNLOADER_ERROR = err
+            self.error = err
+            return False
+        except Exception as exc:
+            logger.warning(f"Output verification skipped due to error: {exc}")
+            return True
+
+    _MEDIA_PLACEHOLDERS = MEDIA_PLACEHOLDERS
+
+    @classmethod
+    def _strip_media_tokens(cls, path: str) -> str:
+        """Remove unresolved media-token placeholders from *path*"""
+        return strip_media_tokens(path)
+
+    def _finalize(self, *, final_file: str) -> None:
+        """Common tail for start(): move to final location."""
+        if final_file and os.path.exists(final_file):
+            self._move_to_final_location(final_file)
+
+        # The working file was downloaded/muxed under a clean name (media tokens stripped).
+        template = getattr(self, "_final_name_template", self.output_path)
+        if any(p in template for p in self._MEDIA_PLACEHOLDERS):
+            try:
+                # The bit rate costs a full read of the file: only worth it when the name uses it
+                metadata = get_media_metadata(self.output_path, with_bitrate="%(video_bitrate)" in template)
+                logger.info(f"Metadata for dynamic rename: {metadata}")
+
+                replacements = media_token_values(metadata)
+
+                # Resolve placeholders on the template's name root
+                new_root = os.path.splitext(template)[0]
+                cur_ext = os.path.splitext(self.output_path)[1]
+
+                for key, val in replacements.items():
+                    placeholder = f"%({key})"
+                    if val:
+                        new_root = new_root.replace(placeholder, str(val))
+                    else:
+                        new_root = (
+                            new_root.replace(f"[{placeholder}]", "")
+                            .replace(f"({placeholder})", "")
+                            .replace(placeholder, "")
+                        )
+
+                new_root = new_root.replace("  ", " ").rstrip(" .")
+                new_path = new_root + cur_ext
+
+                if new_path != self.output_path:
+                    new_dir = os.path.dirname(new_path)
+                    if not os.path.exists(new_dir):
+                        os.makedirs(new_dir, exist_ok=True)
+
+                    # os.replace (not os.rename) so re-downloading an existing
+                    # episode overwrites it instead of raising on Windows.
+                    os.replace(self.output_path, new_path)
+                    self.output_path = new_path
+                    logger.info(f"Dynamic rename applied: {self.output_path}")
+
+            except Exception as e:
+                console.print(f"[yellow]Warning: Dynamic rename failed: {e}")
+
+        # Unverified until proven otherwise: an exception before the check keeps the temp files, one after it (retag, sidecars, tracking) must not skip the cleanup
+        verified_ok = False
+        try:
+            self._move_copied_subtitles()
+            self._move_copied_audios()
+            verified_ok = self._verify_output()
+            if verified_ok:
+                retag_file(self.output_path)
+                Sidecars.write_for(self.output_path, getattr(self, "_sidecar_target", None))
+
+            if self.output_path and os.path.exists(self.output_path):
+                title, media_type, site, _ = self._resolve_track_info()
+                from VibraVid.utils.vault.default import default_vault
+                default_vault.track_download_async(title=title, media_type=media_type, service=site)
+
+            if self.download_id:
+                download_tracker.complete_download(
+                    self.download_id,
+                    success=verified_ok,
+                    path=os.path.abspath(self.output_path),
+                    error=None if verified_ok else LAST_DOWNLOADER_ERROR,
+                )
+        finally:
+            self._cleanup_temp_dir(verified_ok)
+
+        execute_hooks("post_run")

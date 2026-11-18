@@ -1,0 +1,241 @@
+{% extends "searchapp/cinema_base.html" %}
+
+{% comment %}
+	Coda ARR nella UI cinema. Affianca `arr_stack.html`, non lo tocca.
+
+	Stessa view, stessi filtri via GET (q, status, source, sync) e stesso
+	endpoint per la sincronia manuale: cambia solo come è resa. La tabella resta
+	una tabella — è un elenco di righe con otto campi, e le locandine qui non
+	aiuterebbero a leggerlo.
+{% endcomment %}
+
+{% block title %}ARR Queue — ARROWAR{% endblock %}
+
+{% block content %}
+<div class="cn-pad" style="padding-top:34px">
+
+	<div class="cn-page-hd">
+		<h1 class="cn-blast">ARR Queue</h1>
+		<p>What ARROWAR has taken on from Sonarr, Radarr, webhooks and periodic polling.</p>
+	</div>
+
+	<div class="cn-slab">
+		<div class="cn-big"><span class="cn-v">{{ total_count }}</span><span class="cn-k">Total</span></div>
+		<div class="cn-big"><span class="cn-v is-hot">{{ active_count }}</span><span class="cn-k">Open</span></div>
+		<div class="cn-big"><span class="cn-v">{{ status_counts.pending|default:"0" }}</span><span class="cn-k">Pending</span></div>
+		<div class="cn-big"><span class="cn-v">{{ status_counts.downloading|default:"0" }}</span><span class="cn-k">Downloading</span></div>
+		<div class="cn-big"><span class="cn-v">{{ status_counts.completed|default:"0" }}</span><span class="cn-k">Completed</span></div>
+		<div class="cn-big"><span class="cn-v">{{ status_counts.failed|default:"0" }}</span><span class="cn-k">Failed</span></div>
+		<div class="cn-big"><span class="cn-v">{{ status_counts.skipped|default:"0" }}</span><span class="cn-k">Skipped</span></div>
+		<span style="margin-left:auto;display:flex;gap:11px;flex-wrap:wrap;align-items:center">
+			<span class="cn-st {% if arr_enabled %}is-done{% else %}is-wait{% endif %}">
+				ARR {% if arr_enabled %}enabled{% else %}disabled{% endif %}
+			</span>
+			<span class="cn-st {% if polling_enabled %}is-done{% else %}is-wait{% endif %}">
+				Polling {% if polling_enabled %}enabled{% else %}disabled{% endif %}
+			</span>
+			<button class="cn-cta" type="button" id="cn-arr-sync">Sync now</button>
+		</span>
+	</div>
+
+	<p class="cn-msg" id="cn-arr-msg" hidden></p>
+
+	<form method="get" class="cn-filters" style="align-items:end;margin-bottom:22px">
+		<div class="cn-fgroup" style="flex:1;min-width:240px">
+			<label class="cn-tag" for="cn-arr-q">Search</label>
+			<input class="cn-input" id="cn-arr-q" type="search" name="q" value="{{ filters.q }}"
+			       placeholder="Title, provider, ID or dedup key">
+		</div>
+
+		<div class="cn-fgroup">
+			<label class="cn-tag" for="cn-arr-status">Status</label>
+			<select class="cn-input" id="cn-arr-status" name="status">
+				<option value="all" {% if filters.status == "all" %}selected{% endif %}>All</option>
+				{% for value, label in status_choices %}
+					<option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+				{% endfor %}
+			</select>
+		</div>
+
+		<div class="cn-fgroup">
+			<label class="cn-tag" for="cn-arr-source">Source</label>
+			<select class="cn-input" id="cn-arr-source" name="source">
+				<option value="all" {% if filters.source == "all" %}selected{% endif %}>Sonarr + Radarr</option>
+				<option value="sonarr" {% if filters.source == "sonarr" %}selected{% endif %}>Sonarr</option>
+				<option value="radarr" {% if filters.source == "radarr" %}selected{% endif %}>Radarr</option>
+			</select>
+		</div>
+
+		<div class="cn-fgroup">
+			<label class="cn-tag" for="cn-arr-sync-filter">Arrived via</label>
+			<select class="cn-input" id="cn-arr-sync-filter" name="sync">
+				<option value="all" {% if filters.sync == "all" %}selected{% endif %}>All</option>
+				{% for value, label in sync_choices %}
+					<option value="{{ value }}" {% if filters.sync == value %}selected{% endif %}>{{ label }}</option>
+				{% endfor %}
+			</select>
+		</div>
+
+		<button class="cn-cta" type="submit">Filter</button>
+	</form>
+
+	<div class="cn-strip-hd" style="padding:0 0 15px">
+		<h2>Requests</h2>
+		<span class="cn-n">
+			{{ shown_count }} shown{% if filtered_count > 300 %} · page limit 300 of {{ filtered_count }}{% endif %}
+		</span>
+	</div>
+
+	{% if entries %}
+		<div class="cn-tablewrap">
+			<table class="cn-table">
+				<thead>
+					<tr>
+						<th>Title</th><th>Status</th><th>Source</th><th>Queue</th><th>Dates</th><th></th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for entry in entries %}
+						{% with item=entry.media_request %}
+							<tr>
+								<td>
+									<b data-no-tr>{{ item.title }}</b>
+									<span class="cn-s">
+										{% if item.content_type == "movie" %}Movie{% else %}Series{% endif %}
+										{% if item.year %} · {{ item.year }}{% endif %}
+										{% if item.season_number %} · S{{ item.season_number|stringformat:"02d" }}{% endif %}{% if item.episode_number %}E{{ item.episode_number|stringformat:"02d" }}{% endif %}
+										· {{ item.provider|default:"unknown provider" }}
+									</span>
+								</td>
+
+								<td>
+									<span class="cn-st
+										{% if item.status == "completed" %}is-done
+										{% elif item.status == "downloading" %}is-run
+										{% elif item.status == "pending" %}is-warn
+										{% elif item.status == "failed" %}is-dead
+										{% else %}is-wait{% endif %}">{{ item.get_status_display }}</span>
+									<span class="cn-s">
+										{% if entry.success == True %}succeeded{% elif entry.success == False %}closed without success{% else %}still open{% endif %}
+									</span>
+								</td>
+
+								<td>
+									<b style="text-transform:uppercase">{{ item.arr_source }}</b>
+									<span class="cn-s">{{ item.get_sync_source_display }}</span>
+									<span class="cn-s">ARR {{ item.arr_id }}{% if item.episode_id %} · ep {{ item.episode_id }}{% endif %}</span>
+								</td>
+
+								<td>
+									<code class="cn-key">{{ entry.dedup_key }}</code>
+									<span class="cn-s">TMDB {{ item.tmdb_id|default:"—" }} · TVDB {{ item.tvdb_id|default:"—" }}</span>
+								</td>
+
+								<td class="cn-mono" style="white-space:nowrap">
+									<span class="cn-s">queued {{ entry.enqueued_at|date:"m/d/y H:i" }}</span>
+									<span class="cn-s">started {% if entry.started_at %}{{ entry.started_at|date:"m/d/y H:i" }}{% else %}—{% endif %}</span>
+									<span class="cn-s">closed {% if entry.completed_at %}{{ entry.completed_at|date:"m/d/y H:i" }}{% else %}—{% endif %}</span>
+								</td>
+
+								<td>
+									{% if entry.started_at and not entry.completed_at %}
+										<button class="cn-cta is-ghost" type="button" disabled
+										        title="Download in progress, wait for it to finish">Delete</button>
+									{% else %}
+										<button class="cn-cta is-ghost cn-arr-delete" type="button"
+										        data-url="{% url 'arr_delete_request' entry.id %}"
+										        data-title="{{ item.title }}">Delete</button>
+									{% endif %}
+								</td>
+							</tr>
+						{% endwith %}
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	{% else %}
+		<p class="cn-empty" style="padding-left:0">
+			Nothing queued. When Sonarr or Radarr request something, it shows up here.
+		</p>
+	{% endif %}
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function () {
+	"use strict";
+
+	var btn = document.getElementById("cn-arr-sync");
+	var msg = document.getElementById("cn-arr-msg");
+
+	function say(text, kind) {
+		msg.textContent = text;
+		msg.hidden = !text;
+		msg.className = "cn-msg" + (kind ? " is-" + kind : "");
+	}
+
+	btn.addEventListener("click", function () {
+		btn.disabled = true;
+		say("Sync started…");
+
+		fetch("{% url 'arr_trigger_sync' %}", {
+			method: "POST",
+			headers: { "X-CSRFToken": "{{ csrf_token }}" }
+		})
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				if (data.status === "error" || data.status === "disabled") {
+					throw new Error(data.message || "not started");
+				}
+				// La coda la riempie un thread in background: la pagina è resa
+				// dal server, quindi l'unico modo di vederne l'esito è ricaricarla.
+				say("Sync started. Reloading in a few seconds.", "good");
+				setTimeout(function () { window.location.reload(); }, 3000);
+			})
+			.catch(function (err) {
+				say("Not started: " + err.message, "bad");
+				btn.disabled = false;
+			});
+	});
+
+	document.querySelectorAll(".cn-arr-delete").forEach(function (del) {
+		del.addEventListener("click", function () {
+			var title = del.dataset.title || "this request";
+			if (!window.confirm(
+				"Delete the ARR request for \"" + title + "\"?\n\n" +
+				"This removes the ARR queue/request entries only. " +
+				"Any downloaded file will be left untouched."
+			)) {
+				return;
+			}
+
+			del.disabled = true;
+			say("Deleting…");
+
+			fetch(del.dataset.url, {
+				method: "POST",
+				headers: { "X-CSRFToken": "{{ csrf_token }}" }
+			})
+				.then(function (r) {
+					return r.json().then(function (data) {
+						if (!r.ok || data.status === "error") {
+							throw new Error(data.message || "delete failed");
+						}
+						return data;
+					});
+				})
+				.then(function () {
+					say("Request deleted. Reloading…", "good");
+					setTimeout(function () { window.location.reload(); }, 500);
+				})
+				.catch(function (err) {
+					say("Delete failed: " + err.message, "bad");
+					del.disabled = false;
+				});
+		});
+	});
+})();
+</script>
+{% endblock %}

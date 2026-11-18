@@ -1,0 +1,226 @@
+# 06.06.25
+
+
+from VibraVid.core.utils.audio_selection import matches_audio_language, requested_audio_languages
+from VibraVid.services.streamingcommunity import _effective_languages
+from VibraVid.services.streamingcommunity.scrapper import GetSerieInfo
+from VibraVid.utils import config_manager
+
+from .base import BaseStreamingAPI, Entries, Episode, Season
+
+
+class StreamingCommunityAPI(BaseStreamingAPI):
+    def __init__(self):
+        super().__init__()
+        self.site_name = "streamingcommunity"
+        self._load_config()
+        self._search_fn = None
+        self.scrape_serie = None
+
+    def _load_config(self):
+        """Load site configuration."""
+        self.base_url = config_manager.domain.get(self.site_name, "full_url")
+        print(f"[{self.site_name}] Configuration loaded: base_url={self.base_url}")
+
+
+    def search(self, query: str) -> list[Entries]:
+        """Search for content on StreamingCommunity."""
+        search_fn = self._get_search_fn()
+        database = search_fn(query, get_onlyDatabase=True)
+        self.search_warnings = list(getattr(database, "search_warnings", []))
+
+        results = []
+        if database and hasattr(database, "media_list"):
+            items = list(database.media_list)
+            for element in items:
+                item_dict = element.__dict__.copy() if hasattr(element, "__dict__") else {}
+
+                media_item = Entries(
+                    id=item_dict.get("id"),
+                    name=item_dict.get("name"),
+                    slug=item_dict.get("slug", ""),
+                    path_id=item_dict.get("path_id"),
+                    type=item_dict.get("type"),
+                    url=item_dict.get("url"),
+                    poster=item_dict.get("image"),
+                    year=item_dict.get("year"),
+                    tmdb_id=item_dict.get("tmdb_id"),
+                    provider_language=item_dict.get("provider_language"),
+                    catalog_languages=item_dict.get("catalog_languages"),
+                    raw_data=item_dict,
+                )
+                results.append(media_item)
+
+        # Dedup by ID: search runs for both 'it' and 'en', same title appears twice.
+        # Keep 'it' version when both exist for the same ID.
+        seen: dict = {}
+        deduped = []
+        for item in results:
+            key = item.id
+            if key not in seen:
+                seen[key] = len(deduped)
+                deduped.append(item)
+            elif item.provider_language == "it" and deduped[seen[key]].provider_language != "it":
+                deduped[seen[key]] = item
+        return deduped
+
+    def resolve_tmdb_id(self, media_item: Entries) -> str | int | None:
+        """Read StreamingCommunity's own TMDB id from the exact title detail."""
+        direct_id = super().resolve_tmdb_id(media_item)
+        if direct_id not in (None, ""):
+            return direct_id
+
+        scraper = self.get_cached_scraper(media_item)
+        if not scraper:
+            scraper = GetSerieInfo(
+                url=f"{self.base_url}{media_item.provider_language or 'it'}",
+                media_id=media_item.id,
+                series_name=media_item.slug,
+                year=media_item.year,
+                provider_language=media_item.provider_language or "it",
+                series_display_name=media_item.name,
+            )
+            self.set_cached_scraper(media_item, scraper)
+
+        tmdb_id = scraper.get_tmdb_id()
+        if tmdb_id:
+            media_item.tmdb_id = str(tmdb_id)
+            if isinstance(media_item.raw_data, dict):
+                media_item.raw_data["tmdb_id"] = str(tmdb_id)
+        return tmdb_id
+
+    def get_series_metadata(self, media_item: Entries) -> list[Season] | None:
+        """Get seasons and episodes for a StreamingCommunity series."""
+        if media_item.is_movie:
+            return None
+
+        scrape_serie = self.get_cached_scraper(media_item)
+        if not scrape_serie:
+            scrape_serie = GetSerieInfo(
+                url=f"{self.base_url}{media_item.provider_language}",
+                media_id=media_item.id,
+                series_name=media_item.slug,
+                year=media_item.year,
+                provider_language=media_item.provider_language,
+                series_display_name=media_item.name,
+                languages=_effective_languages(),
+            )
+            self.set_cached_scraper(media_item, scrape_serie)
+
+        seasons_count = scrape_serie.getNumberSeason()
+        if not seasons_count:
+            return None
+
+        seasons = []
+        for s in scrape_serie.seasons_manager.seasons:
+            season_num = s.number
+            season_name = getattr(s, "name", None)
+
+            episodes_raw = scrape_serie.getEpisodeSeasons(s.number)
+            episodes = []
+            seen_numbers = set()
+
+            for idx, ep in enumerate(episodes_raw or [], 1):
+                ep_number = getattr(ep, "number", None)
+                if not ep_number and ep_number != 0:
+                    ep_number = idx
+
+                if ep_number in seen_numbers:
+                    continue
+
+                seen_numbers.add(ep_number)
+                episode = Episode(
+                    number=ep_number,
+                    name=getattr(ep, "name", f"Episodio {idx}"),
+                    id=getattr(ep, "id", idx),
+                    language=getattr(ep, "language", None),
+                    duration=getattr(ep, "duration", None),
+                )
+                episodes.append(episode)
+
+            season = Season(number=season_num, episodes=episodes, name=season_name)
+            seasons.append(season)
+            print(f"[StreamingCommunity] Season {season_num} ({season_name or f'Season {season_num}'}): {len(episodes)} episodes")
+
+        return seasons if seasons else None
+
+    def _inspection_streams(self, media_item: Entries, season=None, episode=None) -> list:
+        from VibraVid.player.vixcloud import VideoSource
+        from VibraVid.services.streamingcommunity.audio import inspect_manifest
+
+        key = (media_item.id, season, episode, tuple(requested_audio_languages()))
+        if getattr(self, "_inspection_key", None) == key:
+            return self._inspection_tracks
+        language = media_item.provider_language or "it"
+        requested = requested_audio_languages()
+        available_catalogs = media_item.catalog_languages or [language]
+        language = next((lang for wanted in requested for lang in available_catalogs
+                         if matches_audio_language([lang], wanted)), language)
+        base = f"{self.base_url.rstrip('/')}/{language}"
+        video_id = media_item.id
+        if not media_item.is_movie:
+            scraper = self.get_cached_scraper(media_item)
+            if not scraper:
+                scraper = GetSerieInfo(base, media_item.id, media_item.slug, media_item.year, language, series_display_name=media_item.name, languages=_effective_languages())
+                self.set_cached_scraper(media_item, scraper)
+            
+            scraper.getNumberSeason()
+            episodes = scraper.getEpisodeSeasons(int(season)) or []
+            selected = next((ep for index, ep in enumerate(episodes, 1)
+                             if int(getattr(ep, "number", None) or index) == int(episode)), None)
+            if selected is None:
+                return []
+            video_id = selected.id
+            language = getattr(selected, "provider_language", None) or language
+            variants = getattr(selected, "catalog_episodes", {})
+            available_catalogs = list(variants) or [language]
+            language = next((lang for wanted in requested for lang in variants
+                             if matches_audio_language([lang], wanted)), language)
+            video_id = variants.get(language, video_id)
+            base = f"{self.base_url.rstrip('/')}/{language}"
+        source = VideoSource(base, not media_item.is_movie, media_item.id)
+        source.get_iframe(video_id)
+        source.get_content()
+        playlist = source.get_playlist()
+        if not playlist:
+            raise ValueError("The provider did not return a video manifest")
+        self._inspection_info = inspect_manifest(playlist, source.headers, language)
+        self._inspection_tracks = self._inspection_info["streams"]
+        self._inspection_catalogs = available_catalogs
+        self._inspection_key = key
+        return self._inspection_tracks
+
+    def get_available_qualities(self, media_item: Entries, season=None, episode=None) -> list[str]:
+        from VibraVid.core.utils.quality import stream_quality
+        return sorted({q for s in self._inspection_streams(media_item, season, episode)
+                       if s.type == "video" and (q := stream_quality(s))}, key=lambda q: int(q[:-1]), reverse=True)
+
+    def get_available_audio_languages(self, media_item: Entries, season=None, episode=None) -> list[dict]:
+        from VibraVid.core.utils.audio_selection import language_code
+        from VibraVid.core.utils.language import resolve_language_display_name
+        languages = {}
+        streams = self._inspection_streams(media_item, season, episode)
+        for stream in streams:
+            if stream.type != "audio":
+                continue
+            code = language_code(stream.resolved_language or stream.language)
+            if code:
+                languages[code] = {"code": code, "name": resolve_language_display_name(code), "source": "manifest"}
+        if getattr(self, "_inspection_info", {}).get("embedded"):
+            for catalog in self._inspection_catalogs:
+                code = language_code(catalog)
+                languages[code] = {"code": code, "name": resolve_language_display_name(code), "source": "catalog"}
+        return list(languages.values())
+
+    def start_download(self, media_item: Entries, season: str | None = None, episodes: str | None = None) -> bool:
+        """Start downloading from StreamingCommunity."""
+        search_fn = self._get_search_fn()
+
+        # Prepare selections
+        selections = None
+        if season or episodes:
+            selections = {"season": season, "episode": episodes}
+
+        scrape_serie = self.get_cached_scraper(media_item)
+        search_fn(direct_item=media_item.raw_data, selections=selections, scrape_serie=scrape_serie)
+        return True

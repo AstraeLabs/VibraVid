@@ -1,0 +1,39 @@
+{
+    "it": {
+        "label": "Italia",
+        "home_url": "https://mediasetinfinity.mediaset.it/",
+        "site_base": "https://mediasetinfinity.mediaset.it",
+        "origin": "https://static3.mediasetplay.mediaset.it",
+        "login_url": "https://services-ott-prod-fe.mediaset.net/ita/idm/v3.0/anonymous/login",
+        "persona_login_url": "https://services-ott-prod-fe.mediaset.net/ita/idm/v3.0/persona/login",
+        "tv_login_url": "https://services-ott-prod-fe.mediaset.net/ita/idm/v3.0/action",
+        "tv_login_page": "https://account.mediasetinfinity.mediaset.it/tv",
+        "playback_url": "https://services-ott-prod-fe.mediaset.net/ita/playback/v3.0/check",
+        "playback_api": "v3",
+        "graphql_url": "https://mediasetplay.api-graph.mediaset.it/",
+        "property": "MPLAY",
+        "login_key": "mediasetinfinity",
+        "feed_public_id": "PR1GhC",
+        "geo": "geoEU|geoNoLim",
+        "image_region": "ita",
+        "qualities_full": ["4K", "HD", "HR", "SD", "SS"],
+        "qualities_anon": ["HR", "SD", "SS"]
+    },
+    "es": {
+        "label": "Espana",
+        "home_url": "https://www.mediasetinfinity.es/",
+        "site_base": "https://www.mediasetinfinity.es",
+        "origin": "https://www.mediasetinfinity.es",
+        "login_url": "https://services-ott-prod-fe.mediaset.net/esp/idm/v3.0/anonymous/login",
+        "playback_url": "https://services-ott-prod-fe.mediaset.net/esp/playback/v3.0/check",
+        "playback_api": "v3",
+        "graphql_url": "https://ottesp.api-graph.mediaset.it/",
+        "property": "MITELE",
+        "login_key": "mediasetinfinityes",
+        "feed_public_id": "PR1GhC",
+        "geo": "geoES|geoNo",
+        "image_region": "esp",
+        "qualities_full": ["4K", "HD", "HR", "SD", "SS"],
+        "qualities_anon": ["HR", "SD", "SS"]
+    }
+}

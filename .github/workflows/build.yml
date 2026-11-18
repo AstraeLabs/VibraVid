@@ -1,0 +1,263 @@
+name: Build and Publish
+
+env:
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+    contents: read
+
+on:
+    workflow_dispatch:
+    push:
+        branches:
+            - main
+            - dev
+
+jobs:
+    prepare:
+        runs-on: ubuntu-latest
+        outputs:
+            tag_name: ${{ steps.info.outputs.tag_name }}
+            is_release: ${{ steps.info.outputs.is_release }}
+            changelog: ${{ steps.changelog.outputs.changelog }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Check commit message for version
+              id: info
+              env:
+                  COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+              run: |
+                  RAW_VER=$(echo "$COMMIT_MESSAGE" | grep -iEo '(v|version\s*)[0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+                  if [ -n "$RAW_VER" ]; then
+                      VER="v$RAW_VER"
+                      echo "tag_name=$VER" >> $GITHUB_OUTPUT
+                      echo "is_release=true" >> $GITHUB_OUTPUT
+                      echo "Version found: $VER"
+                  else
+                      echo "tag_name=beta" >> $GITHUB_OUTPUT
+                      echo "is_release=false" >> $GITHUB_OUTPUT
+                      echo "No version found. Building beta."
+                  fi
+
+            - name: Generate changelog
+              id: changelog
+              run: |
+                  PREV_TAG=$(git tag --sort=-version:refname | head -1 || true)
+                  if [ -n "$PREV_TAG" ]; then
+                      LOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:'%B%x1e' 2>/dev/null || git log --pretty=format:'%B%x1e')
+                  else
+                      LOG=$(git log --pretty=format:'%B%x1e')
+                  fi
+
+                  capitalize() { echo "$1" | sed 's/./\u&/' | tr '[:upper:]' '[:lower:]' | sed 's/^./\u&/'; }
+
+                  declare -A SECTION_CONTENT
+
+                  process_record() {
+                      local body="$1"
+
+                      local normalized
+                      normalized=$(echo "$body" | sed 's/\s*\(\[[A-Za-z0-9_/]*\]\)/\n\1/g')
+
+                      while IFS= read -r part; do
+                          [ -z "$part" ] && continue
+
+                          TAG=$(echo "$part" | grep -oE '^\[[A-Za-z0-9_/]+\]' | tr -d '[]' | tr '[:lower:]' '[:upper:]')
+                          [ -z "$TAG" ] && continue
+
+                          echo "$TAG" | grep -qiE '^RELEASE$' && continue
+
+                          MSG=$(echo "$part" | sed 's/^\[[^]]*\][[:space:]]*//')
+                          MSG=$(echo "$MSG" | sed 's/[[:space:]]*([[:space:]]*#[0-9]*[[:space:]]*)//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                          [ -z "$MSG" ] && continue
+
+                          DISPLAY=$(capitalize "$TAG")
+                          if [ -z "${SECTION_CONTENT[$DISPLAY]+x}" ]; then
+                              SECTION_CONTENT["$DISPLAY"]="* $MSG"
+                          else
+                              if ! echo "${SECTION_CONTENT[$DISPLAY]}" | grep -qF "* $MSG"; then
+                                  SECTION_CONTENT["$DISPLAY"]+=$'\n'"* $MSG"
+                              fi
+                          fi
+                      done <<< "$normalized"
+                  }
+
+                  while IFS= read -r -d $'\x1e' record; do
+                      [ -z "$record" ] && continue
+                      process_record "$record"
+                  done <<< "$LOG"
+
+                  CHANGELOG=""
+                  for SECTION in $(echo "${!SECTION_CONTENT[@]}" | tr ' ' '\n' | sort); do
+                      if [ -n "${SECTION_CONTENT[$SECTION]}" ]; then
+                          CHANGELOG+="### $SECTION"$'\n'
+                          CHANGELOG+="${SECTION_CONTENT[$SECTION]}"$'\n'
+                          CHANGELOG+=$'\n'
+                      fi
+                  done
+
+                  CURRENT_TAG="${{ steps.info.outputs.tag_name }}"
+                  REPO="${{ github.repository }}"
+                  if [ -n "$PREV_TAG" ] && [ "$CURRENT_TAG" != "beta" ]; then
+                      CHANGELOG+="**Full Changelog**: https://github.com/${REPO}/compare/${PREV_TAG}...${CURRENT_TAG}"
+                  fi
+
+                  {
+                      echo "changelog<<CHANGELOG_EOF"
+                      echo "$CHANGELOG"
+                      echo "CHANGELOG_EOF"
+                  } >> $GITHUB_OUTPUT
+
+    build-binaries:
+        needs: prepare
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        strategy:
+            matrix:
+                include:
+                    - os: windows-2025
+                      arch: x64
+                      artifact_name: VibraVid_win_2025_x64
+                      executable: VibraVid_win_2025_x64.exe
+                      separator: ";"
+                    - os: windows-2022
+                      arch: x64
+                      artifact_name: VibraVid_win_2022_x64
+                      executable: VibraVid_win_2022_x64.exe
+                      separator: ";"
+                    - os: macos-26
+                      arch: arm64
+                      artifact_name: VibraVid_mac_26_arm64
+                      executable: VibraVid_mac_26_arm64
+                      separator: ":"
+                    - os: macos-15-intel
+                      arch: x64
+                      artifact_name: VibraVid_mac_15_x64
+                      executable: VibraVid_mac_15_x64
+                      separator: ":"
+                    - os: macos-15
+                      arch: arm64
+                      artifact_name: VibraVid_mac_15_arm64
+                      executable: VibraVid_mac_15_arm64
+                      separator: ":"
+                    - os: ubuntu-24.04
+                      arch: x64
+                      artifact_name: VibraVid_linux_24_04_x64
+                      executable: VibraVid_linux_24_04_x64
+                      separator: ":"
+                    - os: ubuntu-22.04
+                      arch: x64
+                      artifact_name: VibraVid_linux_22_04_x64
+                      executable: VibraVid_linux_22_04_x64
+                      separator: ":"
+
+        runs-on: ${{ matrix.os }}
+        defaults:
+            run:
+                shell: bash
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Python
+              uses: actions/setup-python@v7
+              with:
+                  python-version: "3.13"
+
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  python -m pip install --upgrade certifi
+                  python -m pip install -r requirements.txt
+                  python -m pip install pyinstaller
+                  # textual-image's character fallback (covers in terminals without Kitty/Sixel) needs Pillow >= 12.1
+                  python -c "import PIL; v = tuple(int(p) for p in PIL.__version__.split('.')[:2]); assert v >= (12, 1), PIL.__version__"
+
+            - name: Build executable with PyInstaller
+              shell: bash
+              run: |
+                  pyinstaller --onefile \
+                  --hidden-import=ua_generator \
+                  --hidden-import=bs4 \
+                  --hidden-import=rich \
+                  --hidden-import=rich._unicode_data \
+                  --collect-all rich \
+                  --collect-all textual \
+                  --collect-all textual_image \
+                  --hidden-import=unidecode \
+                  --hidden-import=editorconfig \
+                  --hidden-import=six \
+                  --hidden-import=pathvalidate \
+                  --hidden-import=sqlite3 \
+                  --hidden-import=xml.etree.ElementTree \
+                  --hidden-import=mutagen \
+                  --hidden-import=yaml \
+                  --hidden-import=jsonpickle \
+                  --collect-all pycountry \
+                  --hidden-import=pywidevine \
+                  --hidden-import=pyplayready \
+                  --hidden-import=ttconv \
+                  --collect-all ttconv \
+                  --collect-all mutagen \
+                  --hidden-import=curl_cffi \
+                  --hidden-import=_cffi_backend \
+                  --collect-all curl_cffi \
+                  --hidden-import=Cryptodome \
+                  --hidden-import=Cryptodome.Cipher \
+                  --hidden-import=Cryptodome.Cipher.AES \
+                  --hidden-import=Cryptodome.Util \
+                  --hidden-import=Cryptodome.Util.Padding \
+                  --collect-all Cryptodome \
+                  --exclude-module Cryptodome.SelfTest \
+                  --add-data "VibraVid${{ matrix.separator }}VibraVid" \
+                  --add-data "Conf/config.toml${{ matrix.separator }}Conf" \
+                  --add-data "Conf/login.toml${{ matrix.separator }}Conf" \
+                  --add-data "GUI/searchapp/api${{ matrix.separator }}GUI/searchapp/api" \
+                  --name=${{ matrix.artifact_name }} manual.py
+
+            - name: Verify binary architecture
+              if: runner.os == 'macOS'
+              run: |
+                  ACTUAL=$(lipo -archs "dist/${{ matrix.executable }}")
+                  if [ "${{ matrix.arch }}" = "arm64" ]; then EXPECTED=arm64; else EXPECTED=x86_64; fi
+                  echo "Built architecture: $ACTUAL (expected: $EXPECTED)"
+                  [ "$ACTUAL" = "$EXPECTED" ]
+
+            - name: Upload executable to Artifacts
+              uses: actions/upload-artifact@v7
+              with:
+                  name: ${{ matrix.artifact_name }}
+                  path: dist/${{ matrix.executable }}
+
+    publish-github-release:
+        needs: [prepare, build-binaries]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+            - name: Download all executables
+              uses: actions/download-artifact@v8
+              with:
+                  path: dist-artifacts
+                  merge-multiple: true
+
+            - name: Create or Update Release
+              uses: ncipollo/release-action@v1
+              with:
+                  tag: ${{ needs.prepare.outputs.tag_name }}
+                  commit: ${{ github.sha }}
+                  name: ${{ needs.prepare.outputs.is_release == 'true' && needs.prepare.outputs.tag_name || 'Beta Build' }}
+                  prerelease: ${{ needs.prepare.outputs.is_release == 'false' }}
+                  allowUpdates: true
+                  replacesArtifacts: true
+                  artifacts: "dist-artifacts/*"
+                  body: ${{ needs.prepare.outputs.changelog }}
+                  token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,894 @@
+{% extends "searchapp/cinema_base.html" %}
+
+{% comment %}
+	Sistema = quadro d'insieme + impostazioni, in una pagina sola (§1 e §7.1).
+{% endcomment %}
+
+{% block title %}Settings — ARROWAR{% endblock %}
+
+{% block content %}
+<div class="cn-pad" style="padding-top:34px">
+
+	<div class="cn-page-hd">
+		<h1 class="cn-blast">Settings</h1>
+		<p>Providers, ARR and settings. Everything behind the scenes.</p>
+	</div>
+
+	<div class="cn-slab">
+		<div class="cn-big"><span class="cn-v">{{ providers|length }}</span><span class="cn-k">Active providers</span></div>
+		<div class="cn-big">
+			<span class="cn-v {% if disabled_sites %}is-hot{% endif %}">{{ disabled_sites|length }}</span>
+			<span class="cn-k">Disabled via .env</span>
+		</div>
+		<div class="cn-big"><span class="cn-v">{{ queued }}</span><span class="cn-k">Queued</span></div>
+		<div class="cn-big">
+			<span class="cn-v" style="font-size:19px;font-weight:800">{{ app_version }}</span>
+			<span class="cn-k">Version</span>
+		</div>
+		<span style="margin-left:auto;display:flex;gap:11px;flex-wrap:wrap">
+			<a class="cn-cta" href="{% url 'arr_stack' %}">ARR Queue</a>
+		</span>
+	</div>
+
+	<div class="cn-switch" id="cn-tabs">
+		<button type="button" data-tab="view"   aria-selected="true">Overview</button>
+		<button type="button" data-tab="config" aria-selected="false">config.toml</button>
+		<button type="button" data-tab="login"  aria-selected="false">login.toml</button>
+		<button type="button" data-tab="arr"    aria-selected="false">ARR</button>
+		<button type="button" data-tab="plug"   aria-selected="false">Extensions</button>
+	</div>
+
+	{# ── QUADRO ─────────────────────────────────────────────────────────── #}
+	<section class="cn-panel" data-panel="view">
+		<div class="cn-duo">
+			<div class="cn-box">
+				<h3>Providers <span class="cn-sp"></span><span class="cn-st is-done">{{ providers|length }}</span></h3>
+				<div class="cn-lines" style="gap:2px;max-height:340px;overflow-y:auto">
+					{% for p in providers %}
+						<div class="cn-ln" style="background:var(--cn-surf-2);padding:11px 15px">
+							<span class="cn-grow">
+								<span class="cn-t" style="font-size:14px">{{ p.name }}</span>
+								{% if p.category %}<span class="cn-s">{{ p.category }}</span>{% endif %}
+							</span>
+						</div>
+					{% empty %}
+						<p class="cn-empty" style="padding:14px 0">No providers loaded.</p>
+					{% endfor %}
+				</div>
+			</div>
+
+			{% if disabled_sites %}
+			<div class="cn-box">
+				<h3>Hidden services</h3>
+				<p style="margin:0;color:var(--cn-mute);font-size:13px;line-height:1.8">
+					{% for d in disabled_sites %}<code>{{ d }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}
+				</p>
+			</div>
+			{% endif %}
+
+			<div class="cn-box">
+				<h3>ARR <span class="cn-sp"></span>
+					<span class="cn-st {% if arr.enabled %}is-done{% else %}is-wait{% endif %}">
+						{% if arr.enabled %}Enabled{% else %}Disabled{% endif %}
+					</span>
+				</h3>
+				{% if arr.enabled %}
+					<dl class="cn-kv">
+						<dt>Sonarr</dt><dd>{{ arr.sonarr|default:"not configured" }}</dd>
+						<dt>Radarr</dt><dd>{{ arr.radarr|default:"not configured" }}</dd>
+						<dt>Overseerr</dt><dd>{% if arr.seerr %}webhook active{% else %}not configured{% endif %}</dd>
+					</dl>
+				{% else %}
+					<p style="margin:0;color:var(--cn-mute);font-size:13.5px">
+						Sonarr, Radarr and Overseerr can send their requests here.
+						Enable it from the ARR tab.
+					</p>
+				{% endif %}
+			</div>
+
+			<div class="cn-box">
+				<h3>Custom CLI options <span class="cn-sp"></span><span class="cn-st is-done" id="cn-extra-args-count">{{ site_extra_args|length }}</span></h3>
+				<p class="cn-sub" style="margin:0 0 12px">
+					Extra CLI flags applied automatically to every future download for a
+					provider (e.g. Prime Video's <code>--optimize-audio</code>).
+				</p>
+				<div class="cn-lines" id="cn-extra-args-list" style="gap:2px;max-height:220px;overflow-y:auto"></div>
+				{% if cli_option_providers %}
+					<div class="cn-row" style="margin-top:12px;gap:8px">
+						<select id="cn-extra-args-site" class="cn-mini" style="flex:1;min-width:0">
+							{% for p in cli_option_providers %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}
+						</select>
+					</div>
+					<div id="cn-extra-args-fields" style="margin-top:8px"></div>
+					<div class="cn-row" style="margin-top:12px;gap:8px">
+						<button class="cn-cta is-ghost" type="button" id="cn-extra-args-add">Add</button>
+					</div>
+				{% else %}
+					<p class="cn-empty" style="padding:14px 0">No providers with custom CLI options available.</p>
+				{% endif %}
+				<p class="cn-sub" id="cn-extra-args-msg" style="margin-top:8px"></p>
+			</div>
+		</div>
+	</section>
+
+	{# ── config.toml ─────────────────────────────────────────────────────── #}
+	<section class="cn-panel" data-panel="config" hidden>
+		<p class="cn-msg">
+			The raw file, comments included. Saved only if it's valid TOML, and the previous copy
+			stays in <code>config.toml.backup</code>.
+		</p>
+		<textarea class="cn-area" id="cn-config" spellcheck="false"
+		          aria-label="config.toml content"></textarea>
+		<div class="cn-row" style="margin-top:15px">
+			<p class="cn-sub" id="cn-config-msg" style="flex:1"></p>
+			<button class="cn-cta is-ghost" type="button" data-reset="config">Discard changes</button>
+			<button class="cn-cta is-ghost" type="button" data-reload="config">Reload config</button>
+			<button class="cn-cta" type="button" data-save="config">Save config.toml</button>
+		</div>
+	</section>
+
+	{# ── login.toml ──────────────────────────────────────────────────────── #}
+	<section class="cn-panel" data-panel="login" hidden>
+		<p class="cn-msg">
+			Provider credentials. The raw file, saved only if it's valid TOML.
+		</p>
+		<textarea class="cn-area" id="cn-login" spellcheck="false"
+		          aria-label="login.toml content"></textarea>
+		<div class="cn-row" style="margin-top:15px">
+			<p class="cn-sub" id="cn-login-msg" style="flex:1"></p>
+			<button class="cn-cta is-ghost" type="button" data-reset="login">Discard changes</button>
+			<button class="cn-cta is-ghost" type="button" data-reload="login">Reload login</button>
+			<button class="cn-cta" type="button" data-save="login">Save login.toml</button>
+		</div>
+	</section>
+
+	{# ── ARR ─────────────────────────────────────────────────────────────── #}
+	<section class="cn-panel" data-panel="arr" hidden>
+		<div class="cn-slab" style="margin-bottom:22px">
+			<span class="cn-sysdot is-idle" id="cn-arr-dot"><i></i><span id="cn-arr-state">Reading status…</span></span>
+			<span style="margin-left:auto">
+				<button class="cn-cta is-ghost" type="button" id="cn-arr-sync">Sync now</button>
+			</span>
+		</div>
+
+		<div class="cn-duo">
+			<div class="cn-box">
+				<fieldset class="cn-set" style="margin:0">
+					<legend>What's on</legend>
+					<div style="display:grid;gap:11px">
+						<label class="cn-check"><input type="checkbox" id="arr-enabled"><span>ARR services</span></label>
+						<label class="cn-check"><input type="checkbox" id="arr-polling"><span>Periodic polling</span></label>
+						<label class="cn-check"><input type="checkbox" id="arr-webhook"><span>Seerr webhook</span></label>
+						<label class="cn-check"><input type="checkbox" id="arr-sonarr-webhook"><span>Sonarr webhook</span></label>
+						<label class="cn-check"><input type="checkbox" id="arr-radarr-webhook"><span>Radarr webhook</span></label>
+						<label class="cn-check"><input type="checkbox" id="arr-webhook-priority-enabled"><span>Prioritize native webhooks</span></label>
+					</div>
+				</fieldset>
+			</div>
+
+			<div class="cn-box">
+				<fieldset class="cn-set" style="margin:0">
+					<legend>Timing and limits</legend>
+					<div class="cn-formgrid">
+						<label class="cn-field"><span>Interval (s)</span>
+							<input class="cn-input" type="number" id="arr-poll-interval" min="60" step="60"></label>
+						<label class="cn-field"><span>Full resync (s)</span>
+							<input class="cn-input" type="number" id="arr-resync-interval" min="300" step="300"></label>
+						<label class="cn-field"><span>Concurrent downloads</span>
+							<input class="cn-input" type="number" id="arr-max-downloads" min="1" max="5" step="1"></label>
+						<label class="cn-field"><span>Webhook window (s)</span>
+							<input class="cn-input" type="number" id="arr-native-priority-window" min="0" step="5"></label>
+						<label class="cn-field"><span>Seerr fallback delay (s)</span>
+							<input class="cn-input" type="number" id="arr-seerr-fallback-delay" min="0" step="5"></label>
+					</div>
+				</fieldset>
+			</div>
+
+			<div class="cn-box">
+				<fieldset class="cn-set" style="margin:0">
+					<legend>Sonarr</legend>
+					<div class="cn-formgrid">
+						<label class="cn-field"><span>URL</span>
+							<input class="cn-input" type="url" id="arr-sonarr-url" placeholder="http://localhost:8989"></label>
+						<label class="cn-field"><span>API key</span>
+							<input class="cn-input" type="password" id="arr-sonarr-key" placeholder="key"></label>
+						<label class="cn-field"><span>Webhook secret</span>
+							<input class="cn-input" type="password" id="arr-sonarr-webhook-secret" placeholder="X-Webhook-Token"></label>
+					</div>
+					<p class="cn-sub" style="margin-top:11px">POST /api/arr/webhook/sonarr/</p>
+				</fieldset>
+			</div>
+
+			<div class="cn-box">
+				<fieldset class="cn-set" style="margin:0">
+					<legend>Radarr</legend>
+					<div class="cn-formgrid">
+						<label class="cn-field"><span>URL</span>
+							<input class="cn-input" type="url" id="arr-radarr-url" placeholder="http://localhost:7878"></label>
+						<label class="cn-field"><span>API key</span>
+							<input class="cn-input" type="password" id="arr-radarr-key" placeholder="key"></label>
+						<label class="cn-field"><span>Webhook secret</span>
+							<input class="cn-input" type="password" id="arr-radarr-webhook-secret" placeholder="X-Webhook-Token"></label>
+					</div>
+					<p class="cn-sub" style="margin-top:11px">POST /api/arr/webhook/radarr/</p>
+				</fieldset>
+			</div>
+
+			<div class="cn-box">
+				<fieldset class="cn-set" style="margin:0">
+					<legend>Seerr</legend>
+					<label class="cn-field"><span>Webhook secret</span>
+						<input class="cn-input" type="password" id="arr-webhook-secret" placeholder="X-Webhook-Token"></label>
+					<p class="cn-sub" style="margin-top:11px">POST /api/arr/webhook/seerr/</p>
+				</fieldset>
+			</div>
+
+			<div class="cn-box">
+				<h3>Latest test webhooks</h3>
+				<dl class="cn-kv" style="grid-template-columns:1fr">
+					<dt>Seerr</dt><dd><pre class="cn-pre" id="cn-arr-test-seerr">no test yet</pre></dd>
+					<dt>Sonarr</dt><dd><pre class="cn-pre" id="cn-arr-test-sonarr">no test yet</pre></dd>
+					<dt>Radarr</dt><dd><pre class="cn-pre" id="cn-arr-test-radarr">no test yet</pre></dd>
+				</dl>
+			</div>
+		</div>
+
+		<div class="cn-row" style="margin-top:20px">
+			<p class="cn-sub" id="cn-arr-msg" style="flex:1"></p>
+			<button class="cn-cta is-ghost" type="button" id="cn-arr-reset">Discard changes</button>
+			<button class="cn-cta" type="button" id="cn-arr-save">Save ARR</button>
+		</div>
+
+		<div class="cn-warnbox">
+			ARR values end up in <b>config.toml</b>: if you have unsaved changes
+			in the config.toml tab, save them first or they'll be lost.
+		</div>
+	</section>
+
+	{# ── ESTENSIONI ──────────────────────────────────────────────────────── #}
+	<section class="cn-panel" data-panel="plug" hidden>
+		<div class="cn-duo">
+			<div class="cn-box">
+				<h3>Add a provider</h3>
+				{% if not service_upload_allowed %}
+				<p class="cn-sub" role="note" style="margin-bottom:15px;color:var(--cn-gold)">
+					Disabled: installing provider code runs arbitrary code on the server. Set <code>VIBRAVID_ALLOW_SERVICE_UPLOAD=1</code> to enable it
+					(this also unlocks editing <code>[HOOKS]</code> and <code>imp_service</code> from this page).
+				</p>
+				{% endif %}
+				<p class="cn-sub" style="margin-bottom:15px">
+					A ZIP containing the service folder
+					(<code>Spotify/__init__.py</code>, <code>downloader.py</code>, <code>scrapper.py</code>).
+					It also needs the stub in <code>GUI/searchapp/api/</code>, which the plugin brings with it.
+				</p>
+
+				<div class="cn-drop" id="cn-drop" role="button" tabindex="0">
+					<input type="file" id="cn-zip" accept=".zip" hidden>
+					<b id="cn-drop-name">Drop the ZIP here</b>
+					<span id="cn-drop-size">or click to choose one</span>
+				</div>
+
+				<div class="cn-row" style="margin-top:15px">
+					<p class="cn-sub" id="cn-zip-msg" style="flex:1"></p>
+					<button class="cn-cta" type="button" id="cn-zip-go" disabled>Install</button>
+				</div>
+
+				<div id="cn-zip-out" hidden></div>
+
+				<h3 style="margin-top:24px">Uploaded providers</h3>
+				<p class="cn-sub" style="margin-bottom:10px">
+					Providers added from a ZIP can be removed here. The ones shipped with the app can't.
+				</p>
+				<div class="cn-lines" id="cn-uploaded" style="gap:2px">
+					{% for name in uploaded_services %}
+						<div class="cn-ln" data-uploaded-row="{{ name }}" style="background:var(--cn-surf-2);padding:11px 15px">
+							<span class="cn-grow"><span class="cn-t" style="font-size:14px">{{ name }}</span></span>
+							<button class="cn-cta" type="button" data-remove="{{ name }}">Remove</button>
+						</div>
+					{% endfor %}
+				</div>
+				<p class="cn-sub" id="cn-uploaded-empty" {% if uploaded_services %}hidden{% endif %}>None uploaded yet.</p>
+				<p class="cn-sub" id="cn-remove-msg"></p>
+			</div>
+
+			<div class="cn-box">
+				<h3>Binaries</h3>
+				<p class="cn-sub" style="margin-bottom:15px">
+					FFmpeg, Flux, dovi_tool, MKVToolNix and Velora don't go
+					through the app update: they're checked against AstraeLabs/Binary and
+					re-downloaded from here if outdated.
+				</p>
+				<div class="cn-row">
+					<p class="cn-sub" id="cn-binaries-msg" style="flex:1"></p>
+					<button class="cn-cta" type="button" id="cn-binaries">Update binaries</button>
+				</div>
+			</div>
+
+			<div class="cn-box">
+				<h3>External services</h3>
+				<p class="cn-sub" style="margin-bottom:15px">
+					Git repositories listed in <code>imp_service</code> are checked at every start and a newer
+					commit is downloaded in the background. Refresh here to apply it now, without a restart.
+				</p>
+				<div class="cn-row">
+					<p class="cn-sub" id="cn-import-msg" style="flex:1"></p>
+					<button class="cn-cta" type="button" id="cn-import">Refresh external import</button>
+				</div>
+			</div>
+		</div>
+	</section>
+
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+{% comment %}
+	I due file entrano in pagina come JSON in un <script type="application/json">,
+	non interpolati in una stringa JS: `config.toml` è testo scritto dall'utente,
+	e dentro un template literal una sequenza `${...}` verrebbe eseguita.
+{% endcomment %}
+{{ config_content|json_script:"cn-src-config" }}
+{{ config_arr|json_script:"cn-src-arr" }}
+{{ login_content|json_script:"cn-src-login" }}
+{{ site_extra_args|json_script:"cn-src-extra-args" }}
+
+<script>
+(function () {
+	"use strict";
+
+	var URL_SAVE     = "{% url 'save_settings' %}";
+	var URL_RELOAD   = "{% url 'reload_config' %}";
+	var URL_ARR      = "{% url 'arr_status' %}";
+	var URL_ARR_SYNC = "{% url 'arr_trigger_sync' %}";
+	var URL_UPLOAD   = "{% url 'upload_service_zip' %}";
+	var URL_REMOVE   = "{% url 'remove_service' %}";
+	var URL_BINARIES = "{% url 'trigger_binaries_update' %}";
+	var URL_IMPORT = "{% url 'refresh_external_import' %}";
+	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
+	var CSRF         = "{{ csrf_token }}";
+
+	function el(id) { return document.getElementById(id); }
+	function post(url, body, json) {
+		var headers = { "X-CSRFToken": CSRF };
+		if (json) headers["Content-Type"] = "application/json";
+		return fetch(url, { method: "POST", headers: headers, body: body })
+			.then(function (r) { return r.json(); });
+	}
+	function say(node, text, kind) {
+		node.textContent = text || "";
+		node.style.color = kind === "good" ? "var(--cn-go)"
+			: kind === "bad" ? "var(--cn-hot)"
+			: "var(--cn-mute)";
+	}
+
+	// ── schede ──────────────────────────────────────────────────────────────
+	var tabs = el("cn-tabs");
+	tabs.addEventListener("click", function (e) {
+		var b = e.target.closest("button[data-tab]");
+		if (!b) return;
+		tabs.querySelectorAll("button").forEach(function (x) {
+			x.setAttribute("aria-selected", String(x === b));
+		});
+		document.querySelectorAll(".cn-panel").forEach(function (p) {
+			p.hidden = p.dataset.panel !== b.dataset.tab;
+		});
+	});
+
+	// ── i due file grezzi ───────────────────────────────────────────────────
+	function source(id) { return JSON.parse(el(id).textContent); }
+	var original = { config: source("cn-src-config"), login: source("cn-src-login") };
+	var editor = { config: el("cn-config"), login: el("cn-login") };
+	editor.config.value = original.config;
+	editor.login.value = original.login;
+
+	function fileMsg(which) { return el("cn-" + which + "-msg"); }
+
+	document.querySelectorAll("[data-reset]").forEach(function (b) {
+		b.addEventListener("click", function () {
+			var which = this.dataset.reset;
+			editor[which].value = original[which];
+			say(fileMsg(which), "Reverted.");
+		});
+	});
+
+	document.querySelectorAll("[data-save]").forEach(function (b) {
+		b.addEventListener("click", function () {
+			var which = this.dataset.save;
+			var content = editor[which].value.trim();
+			var msg = fileMsg(which);
+
+			if (!content) { say(msg, "The file is empty.", "bad"); return; }
+			// Il TOML lo valida il server (non c'è un parser TOML in pagina).
+			say(msg, "Saving…");
+			post(URL_SAVE, JSON.stringify({ file_type: which, content: content }), true)
+				.then(function (data) {
+					if (!data.success) { say(msg, data.error || "Not saved.", "bad"); return; }
+					original[which] = data.content || content;
+					if (which === "config") rememberArr(data.parsed && data.parsed.ARR);
+					say(msg, data.message || "Saved.", "good");
+				})
+				.catch(function (err) { say(msg, "Save failed: " + err.message, "bad"); });
+		});
+	});
+
+	document.querySelectorAll("[data-reload]").forEach(function (b) {
+		b.addEventListener("click", function () {
+			var which = this.dataset.reload;
+			var msg = fileMsg(which);
+			say(msg, "Reloading…");
+			post(URL_RELOAD, JSON.stringify({ file_type: which }), true)
+				.then(function (data) {
+					say(msg, data.success ? (data.message || "Reloaded.") : (data.error || "Failed."),
+					    data.success ? "good" : "bad");
+				})
+				.catch(function (err) { say(msg, "Reload failed: " + err.message, "bad"); });
+		});
+	});
+
+	// ── ARR ─────────────────────────────────────────────────────────────────
+	var arrMsg = el("cn-arr-msg");
+	var arrOriginal = {};
+
+	function fillArr(arr) {
+		arr = arr || {};
+		el("arr-enabled").checked = !!arr.enabled;
+		el("arr-polling").checked = arr.enable_polling !== false;
+		el("arr-webhook").checked = !!arr.enable_seerr_webhook;
+		el("arr-sonarr-webhook").checked = !!arr.enable_sonarr_webhook;
+		el("arr-radarr-webhook").checked = !!arr.enable_radarr_webhook;
+		el("arr-webhook-priority-enabled").checked = arr.webhook_priority_enabled !== false;
+		el("arr-poll-interval").value = arr.polling_interval || 300;
+		el("arr-resync-interval").value = arr.full_resync_interval || 21600;
+		el("arr-max-downloads").value = arr.max_concurrent_downloads || 1;
+		el("arr-native-priority-window").value = arr.native_webhook_priority_window_seconds || 120;
+		el("arr-seerr-fallback-delay").value = arr.seerr_fallback_delay_seconds || 20;
+		el("arr-sonarr-url").value = (arr.sonarr || {}).url || "";
+		el("arr-sonarr-key").value = (arr.sonarr || {}).api_key || "";
+		el("arr-radarr-url").value = (arr.radarr || {}).url || "";
+		el("arr-radarr-key").value = (arr.radarr || {}).api_key || "";
+		el("arr-webhook-secret").value = (arr.seerr || {}).webhook_secret || "";
+		el("arr-sonarr-webhook-secret").value = (arr.sonarr_webhook || {}).webhook_secret || "";
+		el("arr-radarr-webhook-secret").value = (arr.radarr_webhook || {}).webhook_secret || "";
+	}
+
+	function readArr() {
+		return {
+			enabled: el("arr-enabled").checked,
+			enable_polling: el("arr-polling").checked,
+			enable_seerr_webhook: el("arr-webhook").checked,
+			enable_sonarr_webhook: el("arr-sonarr-webhook").checked,
+			enable_radarr_webhook: el("arr-radarr-webhook").checked,
+			webhook_priority_enabled: el("arr-webhook-priority-enabled").checked,
+			polling_interval: parseInt(el("arr-poll-interval").value, 10) || 300,
+			full_resync_interval: parseInt(el("arr-resync-interval").value, 10) || 21600,
+			max_concurrent_downloads: parseInt(el("arr-max-downloads").value, 10) || 1,
+			native_webhook_priority_window_seconds: parseInt(el("arr-native-priority-window").value, 10) || 120,
+			seerr_fallback_delay_seconds: parseInt(el("arr-seerr-fallback-delay").value, 10) || 20,
+			sonarr: { url: el("arr-sonarr-url").value.trim(), api_key: el("arr-sonarr-key").value.trim() },
+			radarr: { url: el("arr-radarr-url").value.trim(), api_key: el("arr-radarr-key").value.trim() },
+			seerr: { webhook_secret: el("arr-webhook-secret").value.trim() },
+			sonarr_webhook: { webhook_secret: el("arr-sonarr-webhook-secret").value.trim() },
+			radarr_webhook: { webhook_secret: el("arr-radarr-webhook-secret").value.trim() }
+		};
+	}
+
+	function isObj(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
+
+	// Fusione in profondità: il form ARR conosce solo le sue chiavi, e un
+	// assegnamento piatto cancellerebbe tutto quello che c'è dentro ARR e che
+	// il form non mostra.
+	function merge(base, updates) {
+		var out = {};
+		Object.keys(isObj(base) ? base : {}).forEach(function (k) { out[k] = base[k]; });
+		Object.keys(updates || {}).forEach(function (k) {
+			out[k] = (isObj(updates[k]) && isObj(out[k])) ? merge(out[k], updates[k]) : updates[k];
+		});
+		return out;
+	}
+
+	function rememberArr(arr) {
+		arrOriginal = JSON.parse(JSON.stringify(arr || {}));
+		fillArr(arrOriginal);
+	}
+	rememberArr(source("cn-src-arr"));
+
+	el("cn-arr-reset").addEventListener("click", function () {
+		fillArr(arrOriginal);
+		say(arrMsg, "Reverted.");
+	});
+
+	el("cn-arr-save").addEventListener("click", function () {
+		// Il server fonde ARR dentro config.toml senza toccare commenti e resto del file.
+		var arr = merge(arrOriginal, readArr());
+
+		say(arrMsg, "Saving…");
+		post(URL_SAVE, JSON.stringify({ file_type: "config", patch: { ARR: arr } }), true)
+			.then(function (data) {
+				if (!data.success) { say(arrMsg, data.error || "Not saved.", "bad"); return; }
+				editor.config.value = data.content;
+				original.config = data.content;
+				arrOriginal = JSON.parse(JSON.stringify(data.parsed.ARR || arr));
+				say(arrMsg, "ARR settings saved.", "good");
+			})
+			.catch(function (err) { say(arrMsg, "Save failed: " + err.message, "bad"); });
+	});
+
+	function arrStatus() {
+		fetch(URL_ARR)
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var dot = el("cn-arr-dot");
+				dot.classList.toggle("is-idle", !data.enabled);
+				if (!data.enabled) { el("cn-arr-state").textContent = "disabled"; return; }
+
+				var on = [];
+				if (data.polling_enabled) on.push("polling");
+				if (data.webhook_enabled) on.push("Seerr");
+				if (data.sonarr_webhook_enabled) on.push("Sonarr");
+				if (data.radarr_webhook_enabled) on.push("Radarr");
+				var s = data.stats || {};
+				el("cn-arr-state").textContent =
+					(on.length ? on.join(" + ") : "active") +
+					" · " + (s.pending || 0) + " pending, " + (s.downloading || 0) + " downloading, " +
+					(s.completed || 0) + " done, " + (s.failed || 0) + " failed";
+
+				["seerr", "sonarr", "radarr"].forEach(function (src) {
+					var payload = data["last_" + src + "_test_payload"];
+					if (payload) el("cn-arr-test-" + src).textContent = JSON.stringify(payload, null, 2);
+				});
+			})
+			.catch(function () { el("cn-arr-state").textContent = "status unreadable"; });
+	}
+	arrStatus();
+
+	el("cn-arr-sync").addEventListener("click", function () {
+		var btn = this;
+		btn.disabled = true;
+		post(URL_ARR_SYNC, null, false)
+			.then(function () { say(arrMsg, "Sync started.", "good"); })
+			.catch(function (err) { say(arrMsg, "Not started: " + err.message, "bad"); })
+			.finally(function () {
+				setTimeout(function () { btn.disabled = false; arrStatus(); }, 3000);
+			});
+	});
+
+	// ── Opzioni CLI personalizzate per provider ──────────────────────────────
+	var extraArgsState = source("cn-src-extra-args") || {};
+	var extraArgsSaved = JSON.parse(JSON.stringify(extraArgsState));  // what login.toml has now
+	var extraArgsMsg = el("cn-extra-args-msg");
+	var extraArgsList = el("cn-extra-args-list");
+	var extraArgsFields = el("cn-extra-args-fields");
+	var extraArgsSchemaCache = {};
+
+	function quoteIfNeeded(v) {
+		return /\s/.test(v) ? '"' + v.replace(/"/g, '\\"') + '"' : v;
+	}
+
+	function renderExtraArgsFields(schema) {
+		if (!extraArgsFields) return;
+		extraArgsFields.innerHTML = "";
+		if (!schema.length) {
+			extraArgsFields.innerHTML = '<p class="cn-empty" style="padding:6px 0">No custom options available for this provider.</p>';
+			return;
+		}
+		schema.forEach(function (arg) {
+			var row = document.createElement("div");
+			row.className = "cn-row";
+			row.style.gap = "8px";
+			row.style.marginBottom = "6px";
+
+			var label = document.createElement("span");
+			label.className = "cn-s";
+			label.style.flex = "1";
+			label.style.minWidth = "0";
+			label.title = arg.help || "";
+			label.textContent = arg.flag;
+
+			var control;
+			if (arg.kind === "flag") {
+				control = document.createElement("input");
+				control.type = "checkbox";
+				control.checked = !!arg.default;
+			} else if (arg.kind === "choice") {
+				control = document.createElement("select");
+				control.className = "cn-mini";
+				control.style.flex = "2";
+				var empty = document.createElement("option");
+				empty.value = "";
+				empty.textContent = "(unset)";
+				control.appendChild(empty);
+				(arg.choices || []).forEach(function (c) {
+					var opt = document.createElement("option");
+					opt.value = c;
+					opt.textContent = c;
+					if (arg.default === c) opt.selected = true;
+					control.appendChild(opt);
+				});
+			} else {
+				control = document.createElement("input");
+				control.type = arg.kind === "int" ? "number" : "text";
+				control.className = "cn-mini";
+				control.style.flex = "2";
+				control.style.minWidth = "0";
+				if (arg.default !== null && arg.default !== undefined && arg.default !== false) {
+					control.placeholder = String(arg.default);
+				}
+			}
+			control.dataset.flag = arg.flag;
+			control.dataset.kind = arg.kind;
+
+			row.appendChild(label);
+			row.appendChild(control);
+			extraArgsFields.appendChild(row);
+		});
+	}
+
+	function loadExtraArgsSchema(site) {
+		if (!extraArgsFields) return;
+		if (!site) { renderExtraArgsFields([]); return; }
+		if (extraArgsSchemaCache[site]) { renderExtraArgsFields(extraArgsSchemaCache[site]); return; }
+		extraArgsFields.innerHTML = '<p class="cn-empty" style="padding:6px 0">Loading…</p>';
+		fetch(URL_CLI_OPTIONS + "?site=" + encodeURIComponent(site))
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				var schema = data.args || [];
+				extraArgsSchemaCache[site] = schema;
+				renderExtraArgsFields(schema);
+			})
+			.catch(function () {
+				extraArgsFields.innerHTML = '<p class="cn-empty" style="padding:6px 0">Could not load options for this provider.</p>';
+			});
+	}
+
+	if (el("cn-extra-args-site")) {
+		el("cn-extra-args-site").addEventListener("change", function () { loadExtraArgsSchema(this.value); });
+		loadExtraArgsSchema(el("cn-extra-args-site").value);
+	}
+
+	function renderExtraArgs() {
+		var keys = Object.keys(extraArgsState).sort();
+		el("cn-extra-args-count").textContent = keys.length;
+
+		if (!keys.length) {
+			extraArgsList.innerHTML = '<p class="cn-empty" style="padding:10px 0">No custom options configured.</p>';
+			return;
+		}
+
+		extraArgsList.innerHTML = "";
+		keys.forEach(function (site) {
+			var row = document.createElement("div");
+			row.className = "cn-ln";
+			row.style.background = "var(--cn-surf-2)";
+			row.style.padding = "9px 13px";
+
+			var label = document.createElement("span");
+			label.className = "cn-grow";
+			var t = document.createElement("span");
+			t.className = "cn-t";
+			t.style.fontSize = "14px";
+			t.textContent = site;
+			var s = document.createElement("span");
+			s.className = "cn-s";
+			s.textContent = extraArgsState[site];
+			label.appendChild(t);
+			label.appendChild(s);
+
+			var removeBtn = document.createElement("button");
+			removeBtn.className = "cn-cta is-ghost cn-round";
+			removeBtn.type = "button";
+			removeBtn.title = "Remove";
+			removeBtn.setAttribute("aria-label", "Remove");
+			removeBtn.dataset.removeExtraArgs = site;
+			removeBtn.textContent = "×";
+
+			row.appendChild(label);
+			row.appendChild(removeBtn);
+			extraArgsList.appendChild(row);
+		});
+	}
+	renderExtraArgs();
+
+	function saveExtraArgs() {
+		// Per-site "args" key, alongside each site's other login.toml fields.
+		// The server sets/updates it for the sites in extraArgsState and empties it (args = "")
+		// for the ones that had it and no longer do (extraArgsSaved), leaving the rest of the file as is.
+		var patch = {};
+		Object.keys(extraArgsState).forEach(function (site) {
+			patch[site] = { args: extraArgsState[site] };
+		});
+		Object.keys(extraArgsSaved).forEach(function (site) {
+			if (!(site in extraArgsState)) patch[site] = { args: "" };
+		});
+
+		say(extraArgsMsg, "Saving…");
+		post(URL_SAVE, JSON.stringify({ file_type: "login", patch: patch, delete: [] }), true)
+			.then(function (data) {
+				if (!data.success) { say(extraArgsMsg, data.error || "Not saved.", "bad"); return; }
+				editor.login.value = data.content;
+				original.login = data.content;
+				extraArgsSaved = JSON.parse(JSON.stringify(extraArgsState));
+				say(extraArgsMsg, "Saved.", "good");
+			})
+			.catch(function (err) { say(extraArgsMsg, "Save failed: " + err.message, "bad"); });
+	}
+
+	if (el("cn-extra-args-add")) {
+		el("cn-extra-args-add").addEventListener("click", function () {
+			var site = el("cn-extra-args-site").value;
+			var controls = extraArgsFields.querySelectorAll("[data-flag]");
+			var parts = [];
+			controls.forEach(function (c) {
+				if (c.dataset.kind === "flag") {
+					if (c.checked) parts.push(c.dataset.flag);
+				} else {
+					var v = c.value.trim();
+					if (v) parts.push(c.dataset.flag + " " + quoteIfNeeded(v));
+				}
+			});
+			var val = parts.join(" ");
+			if (!site || !val) { say(extraArgsMsg, "Pick a provider and set at least one option.", "bad"); return; }
+
+			extraArgsState[site] = val;
+			renderExtraArgs();
+			saveExtraArgs();
+		});
+	}
+
+	extraArgsList.addEventListener("click", function (e) {
+		var b = e.target.closest("[data-remove-extra-args]");
+		if (!b) return;
+		delete extraArgsState[b.dataset.removeExtraArgs];
+		renderExtraArgs();
+		saveExtraArgs();
+	});
+
+	// ── ZIP di un provider ──────────────────────────────────────────────────
+	var drop = el("cn-drop"), zip = el("cn-zip"), chosen = null;
+
+	function pick(file) {
+		if (!file) return;
+		chosen = file;
+		el("cn-drop-name").textContent = file.name;
+		el("cn-drop-size").textContent = file.size < 1048576
+			? (file.size / 1024).toFixed(1) + " KB"
+			: (file.size / 1048576).toFixed(1) + " MB";
+		el("cn-zip-go").disabled = false;
+		el("cn-zip-out").hidden = true;
+		say(el("cn-zip-msg"), "");
+	}
+
+	drop.addEventListener("click", function () { zip.click(); });
+	drop.addEventListener("keydown", function (e) {
+		if (e.key === "Enter" || e.key === " ") { e.preventDefault(); zip.click(); }
+	});
+	zip.addEventListener("change", function () { pick(this.files[0]); });
+
+	["dragenter", "dragover"].forEach(function (ev) {
+		drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add("is-over"); });
+	});
+	["dragleave", "drop"].forEach(function (ev) {
+		drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove("is-over"); });
+	});
+	drop.addEventListener("drop", function (e) {
+		var file = e.dataTransfer.files[0];
+		if (file && /\.zip$/i.test(file.name)) pick(file);
+		else say(el("cn-zip-msg"), "A .zip file is required.", "bad");
+	});
+
+	el("cn-zip-go").addEventListener("click", function () {
+		if (!chosen) return;
+		var btn = this, out = el("cn-zip-out"), msg = el("cn-zip-msg");
+		btn.disabled = true;
+		say(msg, "Installing…");
+		out.hidden = true;
+
+		var body = new FormData();
+		body.append("service_zip", chosen);
+
+		post(URL_UPLOAD, body, false)
+			.then(function (data) {
+				out.hidden = false;
+				out.className = "cn-msg " + (data.success ? "is-good" : "is-bad");
+				var lines = [data.message || data.error || "Unknown outcome"];
+				(data.installed || []).forEach(function (s) { lines.push("installed: " + s); });
+				(data.errors || []).forEach(function (s) { lines.push("issue: " + s); });
+				// textContent, non innerHTML: i nomi dei file e i messaggi d'errore
+				// arrivano da uno ZIP di chissà chi
+				out.textContent = lines.join(" — ");
+				say(msg, data.success ? "Reload the page to see the provider." : "", "good");
+			})
+			.catch(function (err) {
+				out.hidden = false;
+				out.className = "cn-msg is-bad";
+				out.textContent = "Network error: " + err.message;
+			})
+			.finally(function () { btn.disabled = false; });
+	});
+
+	// ── Rimozione di un provider caricato ───────────────────────────────────
+	el("cn-uploaded").addEventListener("click", function (e) {
+		var btn = e.target.closest("button[data-remove]");
+		if (!btn) return;
+		var msg = el("cn-remove-msg");
+
+		if (!btn.dataset.armed) {
+			btn.dataset.armed = "1";
+			btn.textContent = "Click again to confirm";
+			setTimeout(function () {
+				delete btn.dataset.armed;
+				btn.textContent = "Remove";
+			}, 4000);
+			return;
+		}
+
+		btn.disabled = true;
+		say(msg, "Removing…");
+		post(URL_REMOVE, JSON.stringify({ name: btn.dataset.remove }), true)
+			.then(function (data) {
+				if (!data || !data.success) {
+					btn.disabled = false;
+					say(msg, (data && data.error) || "Removal failed.", "bad");
+					return;
+				}
+				var row = btn.closest("[data-uploaded-row]");
+				if (row) row.remove();
+				if (!el("cn-uploaded").children.length) el("cn-uploaded-empty").hidden = false;
+				var issues = (data.errors || []).length ? " — issue: " + data.errors.join("; ") : "";
+				say(msg, data.message + ". Reload the page to refresh the provider list." + issues,
+					(data.errors || []).length ? "bad" : "good");
+			})
+			.catch(function (err) {
+				btn.disabled = false;
+				say(msg, "Network error: " + err.message, "bad");
+			});
+	});
+
+	// ── Binaries ──────────────────────────────────────────────────────────────
+	el("cn-binaries").addEventListener("click", function () {
+		var btn = this, msg = el("cn-binaries-msg");
+		btn.disabled = true;
+		say(msg, "Checking…");
+		post(URL_BINARIES, null, false)
+			.then(function (data) {
+				if (!data || !data.success) {
+					say(msg, (data && data.message) || "Check failed.", "bad");
+					return;
+				}
+				var lines = Object.keys(data.results || {}).map(function (tool) {
+					return tool + ": " + data.results[tool].message;
+				});
+				say(msg, lines.join(" | "), "good");
+			})
+			.catch(function (err) { say(msg, "Failed: " + err.message, "bad"); })
+			.finally(function () { btn.disabled = false; });
+	});
+
+	// ── External import (imp_service git sources) ─────────────────────────────
+	el("cn-import").addEventListener("click", function () {
+		var btn = this, msg = el("cn-import-msg");
+		btn.disabled = true;
+		say(msg, "Checking…");
+		post(URL_IMPORT, null, false)
+			.then(function (data) {
+				if (!data || !data.success) {
+					say(msg, (data && data.message) || "Refresh failed.", "bad");
+					return;
+				}
+				if (!data.results.length) {
+					say(msg, "No git repository in imp_service.");
+					return;
+				}
+				var lines = data.results.map(function (r) {
+					if (r.error) { return r.source + ": " + r.error; }
+					return r.source + ": " + (r.updated ? "updated to " : "already up to date, ") + (r.commit || "");
+				});
+				var failed = data.results.some(function (r) { return r.error; });
+				say(msg, lines.join(" | "), failed ? "bad" : "good");
+			})
+			.catch(function (err) { say(msg, "Failed: " + err.message, "bad"); })
+			.finally(function () { btn.disabled = false; });
+	});
+})();
+</script>
+{% endblock %}

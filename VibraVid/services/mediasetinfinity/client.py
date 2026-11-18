@@ -1,0 +1,612 @@
+# 16.03.25
+
+import base64
+import json
+import logging
+import re
+import sys
+import threading
+import time
+import uuid
+import xml.etree.ElementTree as ET
+
+from bs4 import BeautifulSoup
+from rich.console import Console
+
+from VibraVid.services._base.login_status import Login
+from VibraVid.utils import config_manager, disk_cache
+from VibraVid.utils.http_client import create_client, get_headers, get_userAgent
+from VibraVid.utils.scope import current_scope
+
+from .regions import get_region, region_conf
+
+logger = logging.getLogger(__name__)
+console = Console()
+_api_by_region = {}
+_api_lock = threading.Lock()
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode a JWT payload without signature verification."""
+    try:
+        part = token.split(".")[1]
+        part += "=" * (4 - len(part) % 4)
+        return json.loads(base64.urlsafe_b64decode(part))
+    except (IndexError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _is_token_valid(token: str) -> bool:
+    """Check if a JWT token is still valid (with 5-minute buffer)."""
+    payload = _decode_jwt_payload(token)
+    exp = payload.get("exp", 0)
+    return exp > time.time() + 300
+
+
+class MediasetAPI:
+    def __init__(self, conf: dict):
+        self.conf = conf
+        self.client_id = str(uuid.uuid4())
+        self.sid = self.client_id
+        self.headers = get_headers()
+        self.app_name = self.get_app_name()
+
+        # Optional stored login token for this region.
+        self.adminBeToken = None
+        self.account_id = None
+        self.is_anonymous = True
+        cached = disk_cache.load_fresh("mediasetinfinity", conf["login_key"], buffer_seconds=300)
+        login_token = cached["adminBeToken"] if cached else None
+        if login_token:
+            Login.refresh_cached(disk_cache.cache_path("mediasetinfinity", conf["login_key"]))
+        if not login_token:
+            login_token = config_manager.login.get(conf["login_key"], "adminBeToken", default=None)
+
+        if not (login_token and _is_token_valid(login_token)):
+            login_token = self.refresh_betoken() or self.login_with_tv_code() or login_token
+
+        if login_token:
+            if _is_token_valid(login_token):
+                self.adminBeToken = login_token
+                self.account_id = _decode_jwt_payload(login_token).get("oid")
+                self.is_anonymous = False
+
+                try:
+                    ctx = json.loads(_decode_jwt_payload(login_token).get("ctx") or "{}")
+                    token_attributes = ctx.get("attributes") or {}
+                except (TypeError, ValueError):
+                    token_attributes = {}
+                
+                token_client_id = token_attributes.get("client_id")
+                token_internal_id = token_attributes.get("internal_id")
+                if token_client_id:
+                    self.client_id = token_client_id
+                if token_internal_id:
+                    self.sid = token_internal_id
+            else:
+                console.print("[yellow]Login adminBeToken expired, falling back to anonymous token...")
+                self.adminBeToken = self.generate_betoken()
+                self.account_id = _decode_jwt_payload(self.adminBeToken).get("oid")
+        else:
+            self.adminBeToken = self.generate_betoken()
+            self.account_id = _decode_jwt_payload(self.adminBeToken).get("oid")
+
+        Login.show(
+            Login.ANONYMOUS if self.is_anonymous else Login.ACCOUNT,
+            user="" if self.is_anonymous else self._account_name(),
+        )
+
+        self.sha256Hash = None
+        self._hash_attempted = False
+        self.listingHash = None
+        self._listing_hash_attempted = False
+        self._listing_hash_lock = threading.Lock()
+
+    def _account_name(self) -> str:
+        """
+        Account name carried by the adminBeToken itself - no network call needed.
+
+        The address lives at ctx.attributes.email; the sibling ctx.email and ctx.fullName are
+        present but come back empty, so reading those alone would look like a missing account.
+        """
+        if not self.adminBeToken:
+            return ""
+
+        try:
+            ctx = json.loads(_decode_jwt_payload(self.adminBeToken).get("ctx") or "{}")
+        except (TypeError, ValueError):
+            return self.account_id or ""
+
+        attributes = ctx.get("attributes") or {}
+        return attributes.get("email") or ctx.get("fullName") or self.account_id or ""
+
+    def get_app_name(self):
+        soup = BeautifulSoup(self.fetch_html(head_only=True), "html.parser")
+        meta_tag = soup.find("meta", attrs={"name": "app-name"})
+        return meta_tag.get("content") if meta_tag else "web//mediasetplay-web/1.3.0"
+
+    def getHash256(self):
+        if self.sha256Hash is None and not self._hash_attempted:
+            self._hash_attempted = True
+            try:
+                self.sha256Hash = self.getHash2c()
+            except Exception as e:
+                logger.debug(f"getHash2c unavailable for region {get_region()}: {e}")
+        return self.sha256Hash
+
+    def getBearerToken(self):
+        return self.adminBeToken
+
+    def get_basic_token(self):
+        raw = f":{self.adminBeToken}"
+        return base64.b64encode(raw.encode('utf-8')).decode('utf-8').strip()
+
+    def getAccountId(self):
+        return self.account_id
+
+    def generate_betoken(self):
+        json_data = {"appName": self.app_name, "client_id": self.client_id}
+        with create_client(headers=self.headers) as client:
+            response = client.post(self.conf["login_url"], json=json_data)
+            data = response.json()["response"]
+            self.sid = data.get("sid", self.client_id)
+            return data["beToken"]
+
+    def _store_betoken(self, token: str) -> None:
+        """Cache a beToken on disk until it expires."""
+        expiry = _decode_jwt_payload(token).get("exp", 0)
+        disk_cache.save("mediasetinfinity", self.conf["login_key"], {"adminBeToken": token, "expiry": expiry})
+        Login.refresh_ok(expiry)
+
+    def _exchange_persona(self, ca_token: str, persona_id: str):
+        """Exchange caToken + persona id for a 24h beToken and cache it on disk. None if the exchange fails."""
+        try:
+            with create_client(headers=self.headers) as client:
+                response = client.post(self.conf["persona_login_url"], params={"sid": self.client_id}, json={"id": persona_id, "caToken": ca_token})
+            data = response.json()
+            new_token = (data.get("response") or data).get("beToken")
+        except Exception as e:
+            logger.debug(f"beToken refresh failed: {e}")
+            Login.refresh_failed(e.__class__.__name__)
+            return None
+
+        if not new_token:
+            Login.refresh_failed("caToken invalid/expired?")
+            return None
+
+        self._store_betoken(new_token)
+        logger.debug("beToken obtained from caToken")
+        return new_token
+
+    def login_with_tv_code(self):
+        """Login via the TV code flow, which requires a console to show the PIN. Returns a beToken or None."""
+        if not self.is_tv_login_enabled():
+            return None
+        
+        login_key = self.conf["login_key"]
+        base = self.conf["tv_login_url"]
+        if not sys.stdin.isatty():
+            logger.warning("tv_login needs a console to show the code: continuing without the account")
+            return None
+
+        Login.refresh_try()
+        try:
+            with create_client(headers=self.headers) as client:
+                action = client.post(f"{base}/create", json={
+                    "action_name": "LOGIN",
+                    "action_url": f"{self.conf['tv_login_page']}?pin={{action_pin}}",
+                    "action_data": {"client_id": self.client_id, "appName": self.app_name},
+                    "action_info": {"msg": "Accedi", "stepCurrent": "1", "stepTotal": "1", "appName": self.app_name},
+                }).json()["response"]
+                valid_until = time.strftime("%H:%M", time.localtime(action["action_ttl"]))
+                console.print(f"[cyan][+][/cyan] [white]Enter the code[/white] [bold green]{action['action_pin']}[/bold green] [white]on[/white] [cyan]{self.conf['tv_login_page']}[/cyan] [white](valid until {valid_until})[/white]")
+
+                while time.time() < action["action_ttl"]:
+                    progress = client.post(f"{base}/pair", json={"action_id": action["action_id"]}).json().get("response") or {}
+                    if progress.get("action_complete"):
+                        break
+                    time.sleep(3)
+                else:
+                    raise TimeoutError("code expired")
+        except Exception as e:
+            logger.debug(f"tv code login failed: {e}")
+            Login.refresh_failed(str(e)[:120] or e.__class__.__name__)
+            return None
+
+        login = (progress.get("action_result") or {}).get("login") or {}
+        account = login.get("account") or {}
+        personas = account.get("personas") or []
+        default = ((account.get("accountSettings") or {}).get("default") or "").rsplit("/", 1)[-1]  # same persona under another host
+        persona = next((p for p in personas if p["id"].rsplit("/", 1)[-1] == default), personas[0] if personas else None)
+        if not (login.get("caToken") and persona):
+            Login.refresh_failed("the site returned no session")
+            return None
+
+        disk_cache.save("mediasetinfinity", f"{login_key}_session", {"caToken": login["caToken"], "persona": {"id": persona["id"]}})
+        return self._exchange_persona(login["caToken"], persona["id"])
+
+    def is_tv_login_enabled(self) -> bool:
+        return bool(self.conf.get("tv_login_url") and config_manager.login.get(self.conf["login_key"], "tv_login", data_type=bool, default=False))
+
+    def refresh_betoken(self):
+        login_key = self.conf["login_key"]
+        section = config_manager.login.get_section(login_key)
+        tv_session = disk_cache.load("mediasetinfinity", f"{login_key}_session") if self.is_tv_login_enabled() else None
+        acd = tv_session or section.get("rtilogin_acd") or {}
+        ca_token = acd.get("caToken")
+        persona_id = (acd.get("persona") or {}).get("id")
+        if not (ca_token and persona_id and self.conf.get("persona_login_url")):
+            return None
+
+        Login.refresh_try()
+        return self._exchange_persona(ca_token, persona_id)
+
+    def fetch_html(self, head_only: bool = False):
+        headers = dict(self.headers)
+        if head_only:
+            headers["Range"] = "bytes=0-300000"
+        with create_client(headers=headers) as client:
+            return client.get(self.conf["home_url"]).text
+
+    _HASH_PAIR_RE = re.compile(r"([a-f0-9]{64}):\$(\w+)")
+    _HASH_KEY_RE = re.compile(r"(?<![0-9a-f])([a-f0-9]{64}):")
+
+    def find_relevant_script(self, html):
+        """Return inline scripts that carry the GraphQL persisted-query map."""
+        soup = BeautifulSoup(html, "html.parser")
+        scripts = [s.get_text() for s in soup.find_all("script")]
+
+        with_map = [s for s in scripts if "hashMap" in s]
+        if with_map:
+            return with_map
+
+        with_pairs = [s for s in scripts if self._HASH_PAIR_RE.search(s.replace('\\"', ""))]
+        if with_pairs:
+            return with_pairs
+
+        return [s for s in scripts if "imageEngines" in s]
+
+    def extract_pairs_from_scripts(self, scripts):
+        pairs = {}
+        for script in scripts:
+            text = script.replace('\\"', "")
+            for match in self._HASH_PAIR_RE.finditer(text):
+                pairs.setdefault(match.group(1), f"${match.group(2)}")
+            for match in self._HASH_KEY_RE.finditer(text):
+                pairs.setdefault(match.group(1), "")
+        return pairs
+
+    def _is_valid_search_hash(self, sha256_hash: str) -> bool:
+        """Probe the search persisted-query with *sha256_hash*"""
+        params = {
+            "extensions": f'{{"persistedQuery":{{"version":1,"sha256Hash":"{sha256_hash}"}}}}',
+            "variables": '{"first":1,"property":"search","query":"a","uxReference":"filteredSearch"}',
+        }
+        try:
+            with create_client(headers=self.generate_request_headers()) as client:
+                response = client.get(self.conf["graphql_url"], params=params)
+            if response.status_code != 200:
+                return False
+            data = response.json()
+            return bool(data.get("data", {}).get("getSearchPage")) and not data.get("errors")
+        except Exception as e:
+            logger.debug(f"_is_valid_search_hash: probe failed for {sha256_hash[:12]}...: {e}")
+            return False
+
+    def _is_valid_listing_hash(self, sha256_hash: str) -> bool:
+        """The persisted query answers under its operation name: only the listing one answers with getListingPage."""
+        params = {
+            "extensions": f'{{"persistedQuery":{{"version":1,"sha256Hash":"{sha256_hash}"}}}}',
+            "variables": '{"first":1,"id":"-","pageType":"listing","context":"{}"}',
+        }
+        try:
+            with create_client(headers=self.generate_request_headers()) as client:
+                response = client.get(self.conf["graphql_url"], params=params)
+            return response.status_code == 200 and "getListingPage" in (response.json().get("data") or {})
+        except Exception as e:
+            logger.debug(f"_is_valid_listing_hash: probe failed for {sha256_hash[:12]}...: {e}")
+            return False
+
+    def getListingHash(self):
+        """Persisted-query hash of the listing page (GetListingPage), the query behind the /browse/ carousels."""
+        with self._listing_hash_lock:
+            if self.listingHash is None and not self._listing_hash_attempted:
+                self._listing_hash_attempted = True
+                try:
+                    self.listingHash = next((k for k in self._hash_candidates() if self._is_valid_listing_hash(k)), None)
+                except Exception as e:
+                    logger.debug(f"getListingHash unavailable for region {get_region()}: {e}")
+            return self.listingHash
+
+    def _hash_candidates(self) -> list[str]:
+        """Persisted-query hashes the site ships in its home page, in page order."""
+        with create_client(headers=self.headers) as client:
+            html = client.get(self.conf["home_url"]).text
+
+        scripts = self.find_relevant_script(html)
+        return list(self.extract_pairs_from_scripts(scripts)) if scripts else []
+
+    def getHash2c(self):
+        keys = self._hash_candidates()
+        if not keys:
+            return None
+
+        # Un po' una logica del cazzo ma di solito è la *-5
+        default_idx = -5 if len(keys) >= 5 else 0
+        order = sorted(range(len(keys)), key=lambda i: abs((i - len(keys)) - default_idx))
+        for idx in order:
+            candidate = keys[idx]
+            if self._is_valid_search_hash(candidate):
+                if idx != (default_idx % len(keys)):
+                    logger.info(f"getHash2c: search hash shifted position (index {idx}, expected {default_idx}) -- self-corrected")
+                return candidate
+
+        logger.warning("getHash2c: no candidate hash validated against the search API")
+        return keys[default_idx]
+
+    def generate_request_headers(self):
+        return {
+            "authorization": self.adminBeToken,
+            "user-agent": self.headers["user-agent"],
+            "x-m-device-id": self.client_id,
+            "x-m-platform": "WEB",
+            "x-m-property": self.conf["property"],
+            "x-m-sid": self.sid,
+        }
+
+
+def get_client():
+    """Get or create the MediasetAPI singleton."""
+    region = (get_region(), current_scope())
+    api = _api_by_region.get(region)
+    if api is not None and _is_token_valid(api.getBearerToken()):
+        return api
+
+    with _api_lock:
+        api = _api_by_region.get(region)
+        if api is None or not _is_token_valid(api.getBearerToken()):
+            if api is not None:
+                console.print("[yellow]adminBeToken expired, re-authenticating...")
+            api = MediasetAPI(region_conf())
+            _api_by_region[region] = api
+        return api
+
+
+def get_playback_url(CONTENT_ID):
+    conf = region_conf()
+    api = get_client()
+
+    headers = get_headers()
+    headers["authorization"] = f"Bearer {api.getBearerToken()}"
+    headers["origin"] = conf["origin"]
+    headers["referer"] = conf["origin"] + "/"
+
+    json_data = {"contentId": CONTENT_ID, "streamType": "VOD"}
+    params = None
+    if conf.get("playback_api") == "v3":
+        json_data.update({"delivery": "Streaming", "createDevice": True, "overrideAppName": api.app_name})
+        params = {"sid": api.sid}
+    elif conf.get("playback_api") == "v2":
+        params = {"sid": api.sid}
+
+    try:
+        with create_client(headers=headers) as client:
+            response = client.post(conf["playback_url"], json=json_data, params=params)
+            try:
+                resp_json = response.json()
+            except ValueError:
+                text = response.text.lstrip()
+                if text.startswith("<"):
+                    try:
+                        root = ET.fromstring(text)
+                        code_el = root.find(".//code")
+                        message_el = root.find(".//message")
+                        if code_el is not None:
+                            code = code_el.text
+                            message = message_el.text if message_el is not None else ""
+                            if code == "PL022":
+                                raise RuntimeError("Infinity+ required for this content.")
+                            if code == "PL402":
+                                raise RuntimeError("Content available for rental: you must rent it first.")
+                            if code == "PL053":
+                                raise RuntimeError("Content has no available purchasable rights")
+                            raise RuntimeError(f"{code}: {message}")
+                    except ET.ParseError:
+                        pass
+                response.raise_for_status()
+                raise
+
+            err = resp_json.get("error") if isinstance(resp_json, dict) else None
+            if err:
+                code = err.get("code")
+                if code == "PL022":
+                    raise RuntimeError("Infinity+ required for this content.")
+                if code == "PL402":
+                    raise RuntimeError("Content available for rental: you must rent it first.")
+                if code == "PL053":
+                    raise RuntimeError("Content has no available purchasable rights")
+                raise RuntimeError(f"{code}: {err.get('message')}")
+
+            response.raise_for_status()
+            return resp_json["response"]["mediaSelector"]
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to get playback URL error: {e}") from e
+
+
+def get_playback_url_direct(content_id):
+    """Get the direct playback URL for a given content ID."""
+    conf = region_conf()
+    tp_path = f"{conf['feed_public_id']}/media/guid/2702976343/{content_id}"
+    return {"url": f"https://link.theplatform.eu/s/{tp_path}"}
+
+
+def get_metadata_by_guid(guid, feed):
+    """Fetch a single entry's metadata from a theplatform feed by GUID."""
+    conf = region_conf()
+    url = f"https://feed.entertainment.tv.theplatform.eu/f/{conf['feed_public_id']}/{feed}"
+    try:
+        with create_client(headers={"user-agent": get_userAgent()}) as client:
+            response = client.get(url, params={"byGuid": guid})
+            response.raise_for_status()
+            entries = response.json().get("entries", [])
+            return entries[0] if entries else None
+    except Exception as e:
+        console.print(f"[red]Failed to fetch metadata for guid '{guid}': {e}")
+        return None
+
+
+def _parse_concurrency_lock(root, ns):
+    """Parse the concurrency lock information from a SMIL XML root element."""
+    head = root.find("smil:head", ns)
+    if head is None:
+        return None
+    
+    meta = {m.attrib.get("name"): m.attrib.get("content") for m in head.findall("smil:meta", ns)}
+    if not meta.get("lockId"):
+        return None
+    
+    return meta
+
+
+def release_concurrency_lock(lock: dict) -> bool:
+    """Release a concurrency lock using the provided lock information."""
+    concurrency_url = lock.get("concurrencyServiceUrl")
+    if not concurrency_url:
+        return False
+
+    api = get_client()
+    url = f"{concurrency_url}/web/Concurrency/unlock"
+    params = {
+        "schema": "1.0",
+        "form": "json",
+        "_clientId": f"player_{api.client_id}",
+        "_id": lock.get("lockId"),
+        "_sequenceToken": lock.get("lockSequenceToken"),
+        "_encryptedLock": lock.get("lock"),
+    }
+    try:
+        with create_client(headers={"user-agent": get_userAgent(), "accept": "application/json"}) as client:
+            response = client.get(url, params=params)
+        return response.status_code == 200 and "unlockResponse" in response.text
+    except Exception as e:
+        logger.debug(f"Failed to release concurrency lock {lock.get('lockId')}: {e}")
+        return False
+
+
+def parse_smil_for_media_info(smil_xml):
+    """Extract video streams and subtitle streams from a theplatform SMIL."""
+    root = ET.fromstring(smil_xml)
+    ns = {"smil": root.tag.split("}")[0].strip("{")}
+
+    lock = _parse_concurrency_lock(root, ns)
+    if lock:
+        if release_concurrency_lock(lock):
+            logger.debug(f"Released concurrency lock {lock.get('lockId')}")
+        else:
+            logger.debug(f"Could not release concurrency lock {lock.get('lockId')}")
+
+    videos = []
+    subtitles_raw = []
+    seen_video_urls = set()
+
+    for ref_elem in root.findall(".//smil:ref", ns):
+        url = ref_elem.attrib.get("src")
+        title = ref_elem.attrib.get("title", "")
+
+        tracking_data = {}
+        for param in ref_elem.findall(".//smil:param", ns):
+            if param.attrib.get("name") == "trackingData":
+                tracking_value = param.attrib.get("value", "")
+                tracking_data = dict(item.split("=", 1) for item in tracking_value.split("|") if "=" in item)
+                break
+
+        if url and url.endswith(".mpd") and url not in seen_video_urls:
+            seen_video_urls.add(url)
+            videos.append({"url": url, "title": title, "tracking_data": tracking_data})
+            continue
+
+        params_by_name = {p.attrib.get("name"): p.attrib.get("value") for p in ref_elem.findall(".//smil:param", ns)}
+        if params_by_name.get("isException") == "true":
+            exception = params_by_name.get("exception", "")
+            abstract = ref_elem.attrib.get("abstract", "")
+            raise RuntimeError(f"{exception}: {abstract}" if exception else abstract or "SMIL exception")
+
+    for textstream in root.findall(".//smil:textstream", ns):
+        sub_url = textstream.attrib.get("src")
+        lang = textstream.attrib.get("lang", "unknown")
+        sub_type = textstream.attrib.get("type", "unknown")
+        sub_format = "srt" if sub_type == "text/srt" else "vtt"
+        if sub_url:
+            subtitles_raw.append({"url": sub_url, "language": lang, "format": sub_format})
+
+    subtitles_by_lang = {}
+    for sub in subtitles_raw:
+        subtitles_by_lang.setdefault(sub["language"], []).append(sub)
+
+    subtitles = []
+    for _lang, subs in subtitles_by_lang.items():
+        vtt_subs = [s for s in subs if s["format"] == "vtt"]
+        srt_subs = [s for s in subs if s["format"] == "srt"]
+        if vtt_subs:
+            subtitles.append(vtt_subs[0])
+        elif srt_subs:
+            subtitles.append(srt_subs[0])
+
+    return {"videos": videos, "subtitles": subtitles}
+
+
+def _build_asset_types(conf, is_anonymous):
+    quals = conf["qualities_anon"] if is_anonymous else conf["qualities_full"]
+    parts = []
+    for q in quals:
+        parts.append(f"{q},browser,widevine,{conf['geo']}")
+        parts.append(f"{q},browser,{conf['geo']}")
+    return ":".join(parts)
+
+
+def get_tracking_info(PLAYBACK_JSON):
+    """Fetch the SMIL for a mediaSelector and return videos + subtitles."""
+    conf = region_conf()
+    api = get_client()
+
+    asset_types = _build_asset_types(conf, api.is_anonymous)
+
+    params = {
+        "format": PLAYBACK_JSON.get("format", "SMIL"),
+        "auth": api.getBearerToken(),
+        "formats": PLAYBACK_JSON.get("formats", "MPEG-DASH"),
+        "assetTypes": PLAYBACK_JSON.get("assetTypes", asset_types),
+        "balance": PLAYBACK_JSON.get("balance", "true"),
+        "auto": PLAYBACK_JSON.get("auto", "true"),
+        "tracking": PLAYBACK_JSON.get("tracking", "true"),
+        "delivery": PLAYBACK_JSON.get("delivery", "Streaming"),
+    }
+    if "publicUrl" in PLAYBACK_JSON:
+        params["publicUrl"] = PLAYBACK_JSON["publicUrl"]
+
+    try:
+        with create_client(headers={"user-agent": get_userAgent()}) as client:
+            response = client.get(PLAYBACK_JSON["url"], params=params)
+            response.raise_for_status()
+            return parse_smil_for_media_info(response.text)
+    except Exception as e:
+        console.print(f"[red]Error fetching tracking info: {e}")
+        return None
+
+
+def generate_license_url(tracking_info):
+    """Build the theplatform Widevine license URL + params (shared IT/ES)."""
+    api = get_client()
+    account_id = tracking_info["tracking_data"].get("aid", "") or api.getAccountId()
+
+    params = {
+        "releasePid": tracking_info["tracking_data"].get("pid"),
+        "account": f"http://access.auth.theplatform.com/data/Account/{account_id}",
+        "schema": "1.0",
+    }
+    headers = {
+        "authorization": f"Basic {api.get_basic_token()}",
+        "user-agent": get_userAgent(),
+    }
+    return "https://widevine.entitlement.theplatform.eu/wv/web/ModularDrm/getRawWidevineLicense", params, headers

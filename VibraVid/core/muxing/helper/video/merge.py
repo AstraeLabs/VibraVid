@@ -1,0 +1,461 @@
+# 16.04.24
+
+import bisect
+import gzip
+import io
+import logging
+import os
+import re
+import shutil
+import subprocess
+import time
+import zlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+_COPY_BUFSIZE_DEFAULT = 2 * 1024 * 1024
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_PNG_SCAN_WINDOW = 64 * 1024
+_TS_SYNC_RE = re.compile(rb"\x47(?:.{187}\x47){4}", re.DOTALL)
+_STEGO_PNG_MAGIC = b"TIKTIKPX"
+
+
+def _copy_bufsize() -> int:
+    """Return copy buffer size in bytes (env override: `VV_MERGE_COPY_BUFSIZE_MB`)."""
+    try:
+        mb = int(os.getenv("VV_MERGE_COPY_BUFSIZE_MB", "2"))
+        if mb < 1:
+            mb = 1
+        if mb > 64:
+            mb = 64
+        return mb * 1024 * 1024
+    except (TypeError, ValueError):
+        return _COPY_BUFSIZE_DEFAULT
+
+_COPY_BUFSIZE = _copy_bufsize()
+
+def _parallel_workers() -> int:
+    """Return the worker count for parallel merge (env override: `VV_MERGE_PARALLEL_WORKERS`)."""
+    try:
+        n = int(os.getenv("VV_MERGE_PARALLEL_WORKERS", "0"))
+        if n > 0:
+            return min(n, 32)
+    except (TypeError, ValueError):
+        pass
+    cpu = os.cpu_count() or 4
+    return max(2, min(8, cpu))
+
+
+def _parallel_enabled() -> bool:
+    """Return True if parallel merge is enabled (env override: `VV_MERGE_PARALLEL=1` to force it back on)."""
+    return os.getenv("VV_MERGE_PARALLEL", "0") == "1"
+
+
+def _parallel_min_total_bytes() -> int:
+    """Below this total size, thread-pool overhead isn't worth it -- use the serial path."""
+    try:
+        mb = int(os.getenv("VV_MERGE_PARALLEL_MIN_MB", "64"))
+        return max(0, mb) * 1024 * 1024
+    except (TypeError, ValueError):
+        return 64 * 1024 * 1024
+
+
+def _find_ts_start(buf: bytes) -> int:
+    """Return the offset of the first MPEG-TS packet inside a PNG-wrapped segment."""
+    m = _TS_SYNC_RE.search(buf)
+    return m.start() if m else 0
+
+
+def _try_decode_stego_png(buf: bytes) -> bytes | None:
+    """If the PNG segment is a stego-PNG, return the hidden payload bytes; else None."""
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(buf))
+        if img.mode != "RGB":
+            return None
+
+        pixels = img.tobytes()
+        if pixels[:8] != _STEGO_PNG_MAGIC:
+            return None
+
+        length = int.from_bytes(pixels[8:12], "big")
+        d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        data = d.decompress(pixels[12:12 + length]) + d.flush()
+        if data[:1] != b"\x47" or _find_ts_start(data[:_PNG_SCAN_WINDOW]) != 0:
+            return None
+
+        return data
+    except Exception:
+        return None
+
+
+def _resolve_png_segment(buf: bytes) -> tuple[bytes, str]:
+    """Given a PNG-signed segment's full bytes, return (payload_bytes, kind)."""
+    stego_data = _try_decode_stego_png(buf)
+    if stego_data is not None:
+        return stego_data, "stego_png"
+
+    ts_off = _find_ts_start(buf[:_PNG_SCAN_WINDOW])
+    if ts_off > 0:
+        return buf[ts_off:], "png"
+
+    return buf, "raw"
+
+
+def _merge_fmt_size(nb: int) -> str:
+    if nb >= 1_073_741_824:
+        return f"{nb / 1_073_741_824:.2f}GB"
+    if nb >= 1_048_576:
+        return f"{nb / 1_048_576:.1f}MB"
+    if nb >= 1_024:
+        return f"{nb / 1024:.0f}KB"
+    return f"{nb}B"
+
+
+def _segment_number(path: Path) -> int:
+    try:
+        stem = path.stem
+        if stem.startswith("seg_"):
+            return int(stem[4:])
+    except (ValueError, IndexError):
+        pass
+    return 999_999_999
+
+
+def binary_merge_segments(paths: list[Path], output_path: Path, merge_logger: logging.Logger | None = None) -> None:
+    """Merge downloaded segments using direct raw binary concatenation."""
+    log = merge_logger or logger
+    t_start = time.monotonic()
+
+    # Single stat() per path: reused for both the size filter and total accounting.
+    valid: list[tuple[Path, int, int]] = []
+    for p in paths:
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        if size > 0:
+            valid.append((p, _segment_number(p), size))
+
+    valid.sort(key=lambda item: item[1])
+    if not valid:
+        log.error("[binary_merge] No valid segments found")
+        return
+
+    raw_total = sum(size for _, _, size in valid)
+    log.debug(f"[binary_merge] {len(valid)} valid segment(s), {_merge_fmt_size(raw_total)} raw total (stat+sort in {time.monotonic() - t_start:.3f}s)")
+
+    if _parallel_enabled() and raw_total >= _parallel_min_total_bytes():
+        _binary_merge_segments_parallel(valid, output_path, log)
+    else:
+        _binary_merge_segments_serial(valid, output_path, log)
+
+
+def _is_ffprobe_readable(path: Path) -> bool:
+    """True when ffprobe can demux at least one stream (cheap corruption check)."""
+    from VibraVid.setup import get_ffprobe_path
+
+    ffprobe = get_ffprobe_path()
+    if not ffprobe:
+        return True
+
+    try:
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+        )
+    except Exception:
+        return True
+    return result.returncode == 0 and bool((result.stdout or "").strip())
+
+
+def _drop_unreadable_segments(valid: list[Path], log: logging.Logger) -> list[Path]:
+    """Split *valid* into readable files, logging (not failing on) the rest."""
+    if len(valid) < 2:
+        return valid
+
+    with ThreadPoolExecutor(max_workers=_parallel_workers()) as pool:
+        readable = list(pool.map(_is_ffprobe_readable, valid))
+
+    kept = [p for p, ok in zip(valid, readable, strict=True) if ok]
+    bad = [p for p, ok in zip(valid, readable, strict=True) if not ok]
+    for p in bad:
+        log.warning(f"[concat_demux_merge] skipping unreadable segment (kept out of the merge): {p.name}")
+
+    return kept or valid
+
+
+def _output_duration(output_path: Path) -> float | None:
+    from VibraVid.core.muxing.helper.audio.probe import get_video_duration
+
+    try:
+        return get_video_duration(str(output_path))
+    except Exception:
+        return None
+
+
+def concat_demux_merge_segments(
+    paths: list[Path],
+    output_path: Path,
+    merge_logger: logging.Logger | None = None,
+    expected_duration: float | None = None,
+) -> bool:
+    """Merge MPEG-TS segments via ffmpeg's -f concat demuxer, treating each segment as its own input instead of raw-byte-appending them (binary_merge_segments())."""
+    log = merge_logger or logger
+    valid = sorted((p for p in paths if p.exists() and p.stat().st_size > 0), key=_segment_number)
+    if not valid:
+        log.warning("[concat_demux_merge] no valid segments found")
+        return False
+
+    first_ok = _run_concat_demuxer(valid, output_path, log)
+    if first_ok and not _still_short(output_path, expected_duration):
+        return True
+
+    pruned = _drop_unreadable_segments(valid, log)
+    if len(pruned) == len(valid):
+        # Nothing to prune: a short-but-successful re-merge still replaced output_path; a failed one left
+        # the caller's previous (binary-merged) file untouched, which must not be reported as a re-merge.
+        return first_ok
+    log.warning(f"[concat_demux_merge] retrying without {len(valid) - len(pruned)} unreadable segment(s)")
+    return _run_concat_demuxer(pruned, output_path, log)
+
+
+def _still_short(output_path: Path, expected_duration: float | None) -> bool:
+    if not expected_duration or expected_duration <= 0:
+        return False
+
+    duration = _output_duration(output_path)
+    return duration is not None and duration < expected_duration * 0.95
+
+
+def _run_concat_demuxer(valid: list[Path], output_path: Path, log: logging.Logger) -> bool:
+    from VibraVid.setup import get_ffmpeg_path
+
+    list_path = output_path.with_suffix(output_path.suffix + ".concat_list.txt")
+    try:
+        with open(list_path, "w", encoding="utf-8") as f:
+            for p in valid:
+                escaped = str(p.resolve()).replace("\\", "/").replace("'", "'\\''")
+                f.write(f"file '{escaped}'\n")
+
+        # Keep the real extension on the temp file (…​.concat_tmp.ts, not ….ts.concat_tmp):
+        # ffmpeg picks the output muxer from the extension and refuses an unknown one.
+        tmp_out = output_path.with_name(f"{output_path.stem}.concat_tmp{output_path.suffix}")
+        cmd = [
+            get_ffmpeg_path(), "-v", "warning", "-f", "concat", "-safe", "0", "-i", str(list_path),
+            "-c", "copy", "-avoid_negative_ts", "make_zero", str(tmp_out), "-y",
+        ]
+        t0 = time.monotonic()
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode != 0 or not tmp_out.exists() or tmp_out.stat().st_size == 0:
+            log.warning(f"[concat_demux_merge] ffmpeg concat failed (rc={result.returncode}): {result.stderr[-400:]}")
+            tmp_out.unlink(missing_ok=True)
+            return False
+
+        os.replace(tmp_out, output_path)
+        log.info(f"[concat_demux_merge] {len(valid)} segment(s) merged via concat demuxer -> {output_path.name} in {time.monotonic() - t0:.1f}s")
+        return True
+    finally:
+        list_path.unlink(missing_ok=True)
+
+
+def _binary_merge_segments_serial(
+    valid: list[tuple[Path, int, int]], output_path: Path, log: logging.Logger
+) -> None:
+    t0 = time.monotonic()
+    total_written = 0
+    with open(output_path, "wb") as out_f:
+        png_wrapped = 0
+        stego_png_wrapped = 0
+        for seg_path, _, seg_size in valid:
+            with open(seg_path, "rb") as in_f:
+                head = in_f.read(8)
+
+                # gzip-compressed segment (magic bytes 1f 8b): the whole segment must be held in memory to decompress it.
+                if head[:2] == b"\x1f\x8b":
+                    try:
+                        log.debug(f"[binary_merge] detected gzip-compressed segment: {seg_path.name}, decompressing ...")
+                        data = gzip.decompress(head + in_f.read())
+                        out_f.write(data)
+                        total_written += len(data)
+                        continue
+                    except Exception as e:
+                        log.warning(f"[binary_merge] failed to decompress {seg_path.name}: {e}, using raw data")
+                        in_f.seek(0)
+                        shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
+                        total_written += seg_size
+                        continue
+
+                # PNG-wrapped segment: a fake image cover hides the real MPEG-TS payload.
+                if head == _PNG_SIGNATURE:
+                    full_buf = head + in_f.read()
+                    payload, kind = _resolve_png_segment(full_buf)
+                    if kind == "stego_png":
+                        stego_png_wrapped += 1
+                    elif kind == "png":
+                        png_wrapped += 1
+                    else:
+                        log.warning(f"[binary_merge] PNG-wrapped segment {seg_path.name} has no TS sync, using raw data")
+                    out_f.write(payload)
+                    total_written += len(payload)
+                    continue
+
+                # Raw segment: stream in fixed-size blocks instead of loading it whole.
+                out_f.write(head)
+                shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
+                total_written += seg_size
+
+    elapsed = time.monotonic() - t0
+    if png_wrapped:
+        log.info(f"[binary_merge] stripped PNG wrapper from {png_wrapped}/{len(valid)} segment(s)")
+    if stego_png_wrapped:
+        log.info(f"[binary_merge] recovered {stego_png_wrapped}/{len(valid)} stego-PNG segment(s)")
+
+    if output_path.exists() and output_path.stat().st_size > 0:
+        mb_s = (total_written / 1_048_576) / elapsed if elapsed > 0 else 0.0
+        log.debug(f"[binary_merge] serial raw concat OK: {output_path.name} ({_merge_fmt_size(total_written)}) in {elapsed:.2f}s ({mb_s:.1f} MB/s)")
+    else:
+        log.error(f"[binary_merge] output is empty or missing: {output_path}")
+
+
+def _classify_segment(seg_path: Path, seg_size: int) -> tuple[str, int, int, bytes | None]:
+    """Return (kind, effective_size, extra_offset, cached_bytes)."""
+    with open(seg_path, "rb") as f:
+        head = f.read(8)
+
+        if head[:2] == b"\x1f\x8b":
+            try:
+                f.seek(0)
+                data = gzip.decompress(f.read())
+                return "gzip", len(data), 0, data
+            except Exception:
+                return "raw", seg_size, 0, None
+
+        if head == _PNG_SIGNATURE:
+            full_buf = head + f.read()
+            payload, kind = _resolve_png_segment(full_buf)
+            if kind == "raw":
+                return "raw", seg_size, 0, None
+            return kind, len(payload), 0, payload
+
+    return "raw", seg_size, 0, None
+
+
+def _write_chunk(
+    output_path: Path,
+    chunk: list[tuple[Path, str, int, int, bytes | None]],
+    start_offset: int,
+) -> int:
+    """Write a *contiguous* run of segments starting at start_offset, one file open for the whole chunk instead of one per segment"""
+    written = 0
+    with open(output_path, "r+b") as out_f:
+        out_f.seek(start_offset)
+        for seg_path, kind, effective_size, _ts_off, cached_bytes in chunk:
+            if kind in ("gzip", "stego_png", "png"):
+                assert cached_bytes is not None
+                out_f.write(cached_bytes)
+                written += len(cached_bytes)
+                continue
+            with open(seg_path, "rb") as in_f:
+                shutil.copyfileobj(in_f, out_f, _COPY_BUFSIZE)
+            written += effective_size
+    return written
+
+
+def _binary_merge_segments_parallel(
+    valid: list[tuple[Path, int, int]], output_path: Path, log: logging.Logger
+) -> None:
+    workers = _parallel_workers()
+    t0 = time.monotonic()
+
+    # Pass 1: classify each segment (cheap -- only peeks the first few KB, except for the rare
+    # gzip/PNG-wrapped cases, which must be fully read/decompressed to learn their real size)
+    classified: list[tuple[Path, str, int, int, bytes | None]] = [None] * len(valid)  # type: ignore[list-item]
+    png_wrapped = 0
+    gzip_count = 0
+    stego_png_count = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_classify_segment, seg_path, seg_size): idx
+            for idx, (seg_path, _, seg_size) in enumerate(valid)
+        }
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            seg_path, _, seg_size = valid[idx]
+            kind, effective_size, extra_off, cached_bytes = fut.result()
+            if kind == "png":
+                png_wrapped += 1
+            elif kind == "gzip":
+                gzip_count += 1
+                log.debug(f"[binary_merge] detected gzip-compressed segment: {seg_path.name}, decompressing ...")
+            elif kind == "stego_png":
+                stego_png_count += 1
+            classified[idx] = (seg_path, kind, effective_size, extra_off, cached_bytes)
+
+    t_classify = time.monotonic()
+    log.debug(f"[binary_merge] classify phase: {len(valid)} segment(s) in {t_classify - t0:.2f}s ({workers} workers, {png_wrapped} png-wrapped, {stego_png_count} stego-png, {gzip_count} gzip)")
+
+    offsets: list[int] = [0] * len(valid)
+    running = 0
+    for idx, (_seg_path, _kind, effective_size, _extra_off, _cached) in enumerate(classified):
+        offsets[idx] = running
+        running += effective_size
+    total_size = running
+
+    if total_size == 0:
+        log.error(f"[binary_merge] total effective size is 0 after classification: {output_path}")
+        return
+
+    # Preallocate so every worker can seek+write its own disjoint byte range
+    # of the same file concurrently without ever touching another's region.
+    with open(output_path, "wb") as out_f:
+        out_f.truncate(total_size)
+
+    t_prealloc = time.monotonic()
+    log.debug(f"[binary_merge] preallocate phase: {_merge_fmt_size(total_size)} in {t_prealloc - t_classify:.3f}s")
+    n_chunks = max(1, min(workers, len(classified)))
+    target_step = total_size / n_chunks
+    boundaries = [0]
+    for i in range(1, n_chunks):
+        target_byte = round(i * target_step)
+        idx = bisect.bisect_left(offsets, target_byte)
+        boundaries.append(max(boundaries[-1], min(idx, len(classified))))
+    boundaries.append(len(classified))
+
+    total_written = 0
+    with ThreadPoolExecutor(max_workers=n_chunks) as pool:
+        futures = []
+        for i in range(n_chunks):
+            lo, hi = boundaries[i], boundaries[i + 1]
+            if lo >= hi:
+                continue
+            futures.append(pool.submit(_write_chunk, output_path, classified[lo:hi], offsets[lo]))
+        for fut in as_completed(futures):
+            total_written += fut.result()
+
+    t_write = time.monotonic()
+    write_elapsed = t_write - t_prealloc
+    total_elapsed = t_write - t0
+
+    if png_wrapped:
+        log.info(f"[binary_merge] stripped PNG wrapper from {png_wrapped}/{len(valid)} segment(s)")
+    if stego_png_count:
+        log.info(f"[binary_merge] recovered {stego_png_count}/{len(valid)} stego-PNG segment(s)")
+
+    if output_path.exists() and output_path.stat().st_size > 0:
+        mb_s = (total_written / 1_048_576) / write_elapsed if write_elapsed > 0 else 0.0
+        log.debug(
+            f"[binary_merge] parallel raw concat OK ({workers} workers): {output_path.name} "
+            f"({_merge_fmt_size(total_written)}) in {total_elapsed:.2f}s total "
+            f"(classify {t_classify - t0:.2f}s, prealloc {t_prealloc - t_classify:.3f}s, "
+            f"write {write_elapsed:.2f}s @ {mb_s:.1f} MB/s)"
+        )
+    else:
+        log.error(f"[binary_merge] output is empty or missing: {output_path}")

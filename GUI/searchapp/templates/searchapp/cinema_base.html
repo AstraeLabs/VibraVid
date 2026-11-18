@@ -1,0 +1,184 @@
+{% load static %}
+<!doctype html>
+{% comment %}
+	Guscio della UI. Layout tutto in cinema.css, palette fissa (niente
+	selettore temi).
+{% endcomment %}
+<html lang="{{ gui_lang|default:'en' }}">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#0B0B10" />
+		<title>{% block title %}ARROWAR{% endblock %}</title>
+
+		<link rel="icon" type="image/png" href="{% static 'searchapp/img/favicon.png' %}" />
+		<link rel="apple-touch-icon" href="{% static 'searchapp/img/favicon.png' %}" />
+
+		<link rel="stylesheet" href="{% static 'searchapp/cinema.css' %}" />
+		<style>
+			/* App-update banner: kept inline (not in cinema.css) so it needs no cache-busting of its own -- this file is always served fresh. */
+			.cn-upd-banner {
+				display: flex; align-items: center; justify-content: center; gap: 14px;
+				flex-wrap: wrap; background: rgba(255,214,10,.12);
+				border-bottom: 1px solid rgba(255,214,10,.35); color: var(--cn-white);
+				font-size: 13px; font-weight: 600; padding: 10px 16px;
+			}
+			.cn-upd-banner[hidden] { display: none; }
+			.cn-upd-actions { display: flex; align-items: center; gap: 12px; }
+			.cn-upd-x {
+				background: none; border: 0; color: var(--cn-mute); font-size: 18px;
+				line-height: 1; cursor: pointer; padding: 0 4px;
+			}
+			.cn-upd-x:hover { color: var(--cn-white); }
+		</style>
+		{% comment %}
+			Funzioni condivise (duotone, titleize, esc…). Nel <head> senza defer:
+			sono usate dagli script in fondo alle pagine, che girano dopo, e il
+			file è piccolo.
+		{% endcomment %}
+		<script src="{% static 'searchapp/cinema.js' %}"></script>
+		{% block head %}{% endblock %}
+		{% include "searchapp/_i18n_boot.html" %}
+	</head>
+
+	<body class="cn">
+		<a class="cn-sr" href="#cn-main">Skip to content</a>
+
+		{% comment %}
+			`is-float` = barra trasparente sfumata sull'hero. La mettono solo le
+			pagine che un hero ce l'hanno (plancia e dettaglio serie), e viene
+			tolta al primo scroll dallo script in fondo: altrimenti il titolo
+			della fila si legge attraverso il logo (§7.4).
+		{% endcomment %}
+		<header class="cn-top{% block top_float %}{% endblock %}" id="cn-top">
+			<a class="cn-wordmark" href="{% url 'search_home' %}">ARRO<i>WAR</i></a>
+
+			<nav class="cn-menu" aria-label="Sections">
+				<a href="{% url 'search_home' %}"
+				   {% if nav_active == 'search' %}aria-current="page"{% endif %}>Search</a>
+				<a href="{% url 'download_dashboard' %}"
+				   {% if nav_active == 'download' %}aria-current="page"{% endif %}>Download</a>
+				<a href="{% url 'watchlist' %}"
+				   {% if nav_active == 'watchlist' %}aria-current="page"{% endif %}>Watchlist</a>
+				<a href="{% url 'settings_editor' %}"
+				   {% if nav_active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+				<a href="{% url 'logs_page' %}"
+				   {% if nav_active == 'logs' %}aria-current="page"{% endif %}>Logs</a>
+			</nav>
+
+			<div class="cn-top-right">
+				<span class="cn-vtag">v{{ app_version }}</span>
+				{% include "searchapp/_lang_select.html" %}
+				{% if gui_auth_enabled %}
+				<form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button class="cn-donate" type="submit" style="cursor:pointer">Logout</button></form>
+				{% endif %}
+				<a class="cn-donate" href="https://www.paypal.com/donate/?hosted_button_id=UXTWMT8P6HE2C" target="_blank" rel="noopener">Donate</a>
+			</div>
+		</header>
+
+		{% comment %}
+			App-update banner (not the "Update binaries" panel in Settings, which
+			checks ffmpeg/flux/velora against AstraeLabs/Binary -- this one checks
+			the app itself against AstraeLabs/VibraVid's latest GitHub release).
+			Hidden by default; JS below shows it only when GET api/version/check/
+			reports update_available. Global shell, so it shows on every page.
+		{% endcomment %}
+		<div class="cn-upd-banner" id="cn-upd" hidden role="status">
+			<span id="cn-upd-text"></span>
+			<div class="cn-upd-actions">
+				<button type="button" class="cn-cta" id="cn-upd-go">Update now</button>
+				<a id="cn-upd-view" href="#" target="_blank" rel="noopener" class="cn-donate">Release notes</a>
+				<button type="button" class="cn-upd-x" id="cn-upd-dismiss" aria-label="Dismiss">&times;</button>
+			</div>
+		</div>
+
+		<main id="cn-main">
+			{% block content %}{% endblock %}
+		</main>
+
+		<script>
+			(function () {
+				var bar = document.getElementById("cn-top");
+				if (!bar.classList.contains("is-float")) return;
+				var onScroll = function () {
+					bar.classList.toggle("is-float", window.scrollY < 8);
+				};
+				addEventListener("scroll", onScroll, { passive: true });
+				onScroll();
+			})();
+		</script>
+
+		<script>
+			(function () {
+				"use strict";
+				var URL_CHECK  = "{% url 'check_updates' %}";
+				var URL_UPDATE = "{% url 'trigger_update' %}";
+				var CSRF       = "{{ csrf_token }}";
+				var DISMISS_KEY = "cn-upd-dismissed";
+
+				var banner = document.getElementById("cn-upd");
+				var text   = document.getElementById("cn-upd-text");
+				var goBtn  = document.getElementById("cn-upd-go");
+				var view   = document.getElementById("cn-upd-view");
+				var dismiss = document.getElementById("cn-upd-dismiss");
+
+				fetch(URL_CHECK).then(function (r) { return r.json(); }).then(function (info) {
+					if (!info || !info.update_available) return;
+					// One dismissal per version per tab -- reappears next
+					// session, or immediately for a newer release.
+					if (sessionStorage.getItem(DISMISS_KEY) === info.latest) return;
+					text.textContent = "A new version is available: v" + info.latest + " (you're on v" + info.current + ")";
+					view.href = info.html_url || "#";
+					banner.hidden = false;
+				}).catch(function () { /* offline/GitHub unreachable -- fail silent, not an error worth surfacing */ });
+
+				dismiss.addEventListener("click", function () {
+					var m = text.textContent.match(/v([\d.]+)/);
+					if (m) sessionStorage.setItem(DISMISS_KEY, m[1]);
+					banner.hidden = true;
+				});
+
+				goBtn.addEventListener("click", function () {
+					goBtn.disabled = true;
+					goBtn.textContent = "Updating…";
+					fetch(URL_UPDATE, { method: "POST", headers: { "X-CSRFToken": CSRF } })
+						.then(function (r) { return r.json(); })
+						.then(function (res) {
+							if (res.success) {
+								text.textContent = res.message || "Update started.";
+								goBtn.hidden = true;
+							} else {
+								goBtn.disabled = false;
+								goBtn.textContent = "Update now";
+								text.textContent = (res.message || "Update failed.") + (res.needs_manual ? " Manual update required." : "");
+							}
+						})
+						.catch(function () {
+							goBtn.disabled = false;
+							goBtn.textContent = "Update now";
+							text.textContent = "Update request failed.";
+						});
+				});
+			})();
+		</script>
+
+        {{ audio_language_config|json_script:"cn-audio-config" }}
+        <script src="{% static 'searchapp/audio_languages.js' %}?v={{ app_version }}&audio_ui=2"></script>
+        <script src="{% static 'searchapp/quality.js' %}"
+                data-quality-url="{% url 'available_qualities' %}"
+                data-download-url="{% url 'start_download' %}"
+                data-watchlist-url="{% url 'add_to_watchlist' %}"></script>
+        <script src="{% static 'searchapp/watchlist_picker.js' %}"
+                data-watchlist-url="{% url 'add_to_watchlist' %}"
+                data-metadata-url="{% url 'series_metadata' %}"></script>
+        <script src="{% static 'scheduleapp/schedule.js' %}"
+                data-css="{% static 'scheduleapp/schedule.css' %}"
+                data-csrf="{{ csrf_token }}"
+                data-download-url="{% url 'start_download' %}"
+                data-queue-url="{% url 'download_dashboard' %}"
+                data-add-url="{% url 'schedule_add' %}"
+                data-list-url="{% url 'schedule_list' %}"
+                data-update-url="{% url 'schedule_update' %}"></script>
+		{% block scripts %}{% endblock %}
+	</body>
+</html>

@@ -1,0 +1,39 @@
+{% load static %}
+<!doctype html>
+{% comment %}
+	Pagina di login minimale: non estende cinema_base.html perche' il guscio
+	controlla gli aggiornamenti e carica API che richiedono gia' una sessione.
+{% endcomment %}
+<html lang="{{ gui_lang|default:'en' }}">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#0B0B10" />
+		<title>ARROWAR - Login</title>
+		<link rel="icon" type="image/png" href="{% static 'searchapp/img/favicon.png' %}" />
+		<link rel="stylesheet" href="{% static 'searchapp/cinema.css' %}" />
+		<style>
+			.cn-login { max-width: 380px; margin: 14vh auto 0; padding: 0 16px; }
+			.cn-login form { display: grid; gap: 16px; }
+			.cn-login .cn-error { color: var(--cn-hot); font-size: 14px; margin: 0; }
+			.cn-login-lang { position: fixed; top: 14px; right: 16px; }
+		</style>
+		{% include "searchapp/_i18n_boot.html" %}
+	</head>
+	<body class="cn">
+		<div class="cn-login-lang">{% include "searchapp/_lang_select.html" %}</div>
+		<main class="cn-login">
+			<div class="cn-page-hd"><h1>Sign in</h1></div>
+			<form class="cn-box" method="post" action="{% url 'login' %}">
+				{% csrf_token %}
+				<input type="hidden" name="next" value="{{ next }}" />
+				{% if error %}<p class="cn-error" role="alert">{{ error }}</p>{% endif %}
+				<label class="cn-field"><span>Username</span>
+					<input class="cn-input" type="text" name="username" autocomplete="username" autofocus required /></label>
+				<label class="cn-field"><span>Password</span>
+					<input class="cn-input" type="password" name="password" autocomplete="current-password" required /></label>
+				<button class="cn-cta" type="submit">Sign in</button>
+			</form>
+		</main>
+	</body>
+</html>

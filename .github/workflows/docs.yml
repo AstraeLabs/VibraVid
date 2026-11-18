@@ -1,0 +1,33 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/MkDoc/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install -r .github/MkDoc/requirements-docs.txt
+
+      - name: Build and deploy
+        run: mkdocs gh-deploy --force -f .github/MkDoc/mkdocs.yml

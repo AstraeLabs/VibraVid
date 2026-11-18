@@ -1,0 +1,54 @@
+name: Bump Version
+
+on:
+    workflow_dispatch:
+        inputs:
+            bump_type:
+                description: 'Tipo di bump versione'
+                required: true
+                default: 'patch'
+                type: choice
+                options:
+                    - patch
+                    - minor
+                    - major
+
+permissions:
+    contents: write
+
+jobs:
+    bump-version:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Bump version in version.py
+              id: bump
+              run: |
+                  CURRENT=$(grep -oP '__version__ = "\K[^"]+' VibraVid/utils/upload/version.py)
+                  MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+                  MINOR=$(echo "$CURRENT" | cut -d. -f2)
+                  PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+                  case "${{ github.event.inputs.bump_type }}" in
+                      major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+                      minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+                      patch) PATCH=$((PATCH+1)) ;;
+                  esac
+
+                  NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+                  sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" VibraVid/utils/upload/version.py
+
+                  echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+                  echo "old_version=$CURRENT" >> $GITHUB_OUTPUT
+
+            - name: Commit and push version bump
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add VibraVid/utils/upload/version.py
+                  git commit -m "[RELEASE] Version ${{ steps.bump.outputs.new_version }} by @${{ github.actor }}"
+                  git push

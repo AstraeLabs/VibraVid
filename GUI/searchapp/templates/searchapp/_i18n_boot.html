@@ -1,0 +1,2 @@
+{% load static %}{% if gui_catalog %}{{ gui_catalog|json_script:"cn-i18n" }}{% endif %}
+<script src="{% static 'searchapp/i18n.js' %}?v={{ app_version }}"></script>

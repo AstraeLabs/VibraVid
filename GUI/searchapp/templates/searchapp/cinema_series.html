@@ -1,0 +1,503 @@
+{% extends "searchapp/cinema_base.html" %}
+
+{% block title %}{{ series.name }} — ARROWAR{% endblock %}
+
+{% block top_float %} is-float{% endblock %}
+
+{% block content %}
+
+<section class="cn-hero" id="cn-hero" style="min-height:420px">
+	<div class="cn-hero-art" style="--cn-h1:{{ series.p1 }};--cn-h2:{{ series.p2 }}"></div>
+	<div class="cn-hero-photo" id="cn-hero-photo"
+	     style="{% if series.backdrop %}background-image:url('{{ series.backdrop }}');{% else %}display:none;{% endif %}"></div>
+	<div class="cn-hero-veil"></div>
+
+	<div class="cn-hero-in">
+		<div class="cn-kicker">
+			<span class="cn-st is-type">{% if series.is_album %}Album{% else %}Series{% endif %}</span>
+			<span class="cn-tag" style="color:var(--cn-mute)">
+				{{ series.source_alias }}
+				{% if series.year %} · {{ series.year }}{% endif %}
+				· {{ seasons|length }} {% if series.is_album %}disc{{ seasons|length|pluralize }}{% else %}season{{ seasons|length|pluralize }}{% endif %}
+			</span>
+		</div>
+
+		<h1 class="cn-blast" data-no-tr style="font-size:clamp(34px,5.5vw,62px)">{{ series.name }}</h1>
+
+		{% if not seasons %}
+			<p class="cn-hero-line">
+				Seasons can't be loaded right now. This can happen while downloads
+				are running on the same provider: try again in a few minutes.
+			</p>
+		{% endif %}
+
+        {% if not series.is_album %}
+        <div id="cn-series-quality">{% include "searchapp/quality_picker.html" %}</div>
+        {% endif %}
+		<div class="cn-acts cn-series-actions">
+			<form method="post" style="display:inline">
+				{% csrf_token %}
+				<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
+				<input type="hidden" name="item_payload" value="{{ series.item_payload }}">
+				<input type="hidden" name="download_type" value="full_series">
+				<button class="cn-cta" type="submit" id="cn-all"
+				        {% if not seasons %}disabled{% endif %}>
+					Download all
+				</button>
+			</form>
+
+			<form action="{% url 'add_to_watchlist' %}" method="post" style="display:inline">
+				{% csrf_token %}
+				<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
+				<input type="hidden" name="item_payload" value="{{ series.item_payload }}">
+				<button class="cn-cta is-ghost" type="submit" title="Add and monitor">Watchlist</button>
+			</form>
+		</div>
+	</div>
+</section>
+
+<div class="cn-pad" style="padding-top:34px">
+
+	{% if messages %}
+		{% for m in messages %}
+			<p class="cn-msg{% if m.tags == 'error' %} is-bad{% elif m.tags == 'warning' %} is-warn{% endif %}">{{ m }}</p>
+		{% endfor %}
+	{% endif %}
+
+	{% if seasons %}
+	{% if not series.is_album %}{% include "searchapp/language_filter.html" %}{% endif %}
+	<p class="cn-empty cn-language-empty" hidden>No episodes are available in the selected language.</p>
+	<div class="cn-ssel-nav" id="cn-seasons-nav">
+		<button type="button" class="cn-ssel-arrow" id="cn-seasons-prev" hidden disabled
+		        aria-label="Scroll {% if series.is_album %}discs{% else %}seasons{% endif %} left" aria-controls="cn-seasons-list">
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>
+		</button>
+		<div class="cn-ssel" id="cn-seasons-list" role="tablist" aria-label="{% if series.is_album %}Discs{% else %}Seasons{% endif %}">
+			{% for season in seasons %}
+				<button type="button" class="cn-stab{% if forloop.first %} is-active{% endif %}"
+				        data-season="{{ season.number }}" data-image="{{ season.image|default:'' }}" role="tab"
+				        aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
+					<span class="cn-stab-pick">
+						<input type="checkbox" class="cn-season-pick" value="{{ season.number }}"
+						       aria-label="Select {% if series.is_album %}disc{% else %}season{% endif %} {{ season.number }} for a batch download">
+					</span>
+					<span class="cn-stab-txt">
+						<span class="cn-stab-t">
+							{% if series.is_album %}{{ season.name|default:season.number }}{% else %}Season {{ season.number }}{% endif %}
+						</span>
+						<span class="cn-stab-s">
+							<span data-language-count="{{ season.number }}">{{ season.episode_count }}</span> {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}ep{{ season.episode_count|pluralize }}{% endif %}
+							{% if season.owned_count %} · {{ season.owned_count }}/{{ season.episode_count }}{% endif %}
+						</span>
+					</span>
+				</button>
+			{% endfor %}
+		</div>
+		<button type="button" class="cn-ssel-arrow" id="cn-seasons-next" hidden disabled
+		        aria-label="Scroll {% if series.is_album %}discs{% else %}seasons{% endif %} right" aria-controls="cn-seasons-list">
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+		</button>
+	</div>
+
+	<form method="post" id="cn-seasons-form">
+		{% csrf_token %}
+		<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
+		<input type="hidden" name="item_payload" value="{{ series.item_payload }}">
+		<input type="hidden" name="download_type" value="selected_seasons">
+		<input type="hidden" name="selected_seasons" id="cn-seasons-input" value="">
+	</form>
+
+	<div class="cn-tray" id="cn-tray">
+		<span class="cn-tray-txt" id="cn-tray-txt"></span>
+		<button class="cn-cta" type="button" id="cn-seasons-btn">Download</button>
+	</div>
+	{% endif %}
+
+	{% for season in seasons %}
+		<section class="cn-spanel" data-season="{{ season.number }}" {% if not forloop.first %}hidden{% endif %}>
+			<div class="cn-season-hd">
+				<span style="flex:1;min-width:170px">
+					<span class="cn-t">
+						{% if series.is_album %}{{ season.name|default:season.number }}{% else %}Season {{ season.number }}{% endif %}
+					</span>
+					<span class="cn-s">
+						<span data-language-count="{{ season.number }}">{{ season.episode_count }}</span> {% if series.is_album %}track{{ season.episode_count|pluralize }}{% else %}episode{{ season.episode_count|pluralize }}{% endif %}
+						{% if season.owned_count %}
+							· <b style="color:var(--cn-go)">{{ season.owned_count }} already in library</b>
+						{% endif %}
+					</span>
+				</span>
+
+				<span class="cn-row">
+					{% if season.owned_count and season.missing_count %}
+						<button class="cn-opt" type="button" data-pick-missing="{{ season.number }}">
+							Only the {{ season.missing_count }} missing
+						</button>
+					{% endif %}
+					<button class="cn-opt" type="button" data-pick-all="{{ season.number }}">All</button>
+					<button class="cn-opt" type="button" data-pick-none="{{ season.number }}">None</button>
+				</span>
+
+				<form method="post" style="display:inline">
+					{% csrf_token %}
+					<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
+					<input type="hidden" name="item_payload" value="{{ series.item_payload }}">
+					<input type="hidden" name="season_number" value="{{ season.number }}">
+					<input type="hidden" name="download_type" value="full_season">
+					<button class="cn-cta is-ghost" type="submit" style="padding:9px 18px;font-size:13px">
+						Whole season
+					</button>
+				</form>
+			</div>
+
+			<form method="post" id="cn-form-{{ season.number }}">
+				{% csrf_token %}
+				<input type="hidden" name="source_alias" value="{{ series.source_alias }}">
+				<input type="hidden" name="item_payload" value="{{ series.item_payload }}">
+				<input type="hidden" name="season_number" value="{{ season.number }}">
+				<input type="hidden" name="download_type" value="episodes">
+				<input type="hidden" name="selected_episodes" id="cn-eps-{{ season.number }}" value="">
+
+				<div class="cn-eps">
+					{% for episode in season.episodes %}
+						<label class="cn-ep{% if episode.owned %} is-owned{% endif %}"
+						       data-season="{{ season.number }}"
+						       data-episode="{{ episode.number }}"
+						       data-languages="{{ episode.language|default:'' }}"
+						       {% if episode.owned %}data-owned="1"{% endif %}
+						       {% if not episode.image %}data-noart="1"{% endif %}
+						       style="--cn-p1:{{ series.p1 }};--cn-p2:{{ series.p2 }}">
+							<input type="checkbox" class="cn-ep-pick"
+							       data-season="{{ season.number }}" value="{{ episode.number }}"
+							       aria-label="Episode {{ episode.number }}{% if episode.name %} — {{ episode.name }}{% endif %}{% if episode.owned %} (already in library){% endif %}">
+							<span class="cn-ep-art">
+								{% if episode.image %}
+									<img src="{{ episode.image }}" alt="" loading="lazy"
+									     decoding="async" onerror="this.remove()">
+								{% elif not tmdb_available and series.poster %}
+									<img src="{{ series.poster }}" alt="" loading="lazy"
+									     decoding="async" onerror="this.remove()">
+								{% endif %}
+
+								{% if episode.owned %}
+									<span class="cn-ep-have" title="Already in library">In library</span>
+								{% endif %}
+
+								{% if episode.duration %}
+									<span class="cn-ep-dur">{{ episode.duration }}m</span>
+								{% endif %}
+
+								<span class="cn-ep-tick" aria-hidden="true"></span>
+							</span>
+
+							<span class="cn-ep-txt">
+								<span class="cn-ep-n">
+									{% if series.is_album %}{{ episode.number }}.{% else %}Episode {{ episode.number }}{% endif %}
+									{% if episode.language_list %}<span title="Available provider catalogs"> · Catalog: {% for lang in episode.language_list %}{{ lang|upper }}{% if not forloop.last %}/{% endif %}{% endfor %}</span>{% endif %}
+								</span>
+								{% if episode.name %}<span class="cn-ep-name">{{ episode.name }}</span>{% endif %}
+								<span class="cn-ep-desc" hidden></span>
+							</span>
+						</label>
+					{% endfor %}
+				</div>
+
+				<button class="cn-cta" type="submit" style="margin-top:15px"
+				        id="cn-go-{{ season.number }}">
+					Download selected
+				</button>
+			</form>
+		</section>
+	{% empty %}
+		<p class="cn-empty" style="padding-left:0">No seasons to show.</p>
+	{% endfor %}
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function () {
+	"use strict";
+
+	var URL_POSTERS = "{% url 'resolve_tmdb_posters' %}";
+	var CSRF = "{{ csrf_token }}";
+
+	function el(id) { return document.getElementById(id); }
+
+	var seasonPicks = document.querySelectorAll(".cn-season-pick");
+	var tray        = el("cn-tray");
+	var trayTxt     = el("cn-tray-txt");
+	var seasonsBtn  = el("cn-seasons-btn");
+
+	function refreshTray() {
+		var chosen = [];
+		seasonPicks.forEach(function (c) { if (c.checked) chosen.push(c.value); });
+		if (tray) {
+			tray.classList.toggle("is-show", chosen.length > 0);
+			trayTxt.textContent = chosen.length
+				? chosen.length + " season" + (chosen.length === 1 ? "" : "s") + " selected (" + chosen.join(", ") + ")"
+				: "";
+		}
+		return chosen;
+	}
+
+	seasonPicks.forEach(function (c) {
+		c.addEventListener("click", function (e) { e.stopPropagation(); });
+		c.addEventListener("change", refreshTray);
+	});
+
+	if (seasonsBtn) {
+		seasonsBtn.addEventListener("click", function () {
+			var chosen = refreshTray();
+			if (!chosen.length) return;
+			if (!confirm("Download seasons " + chosen.join(", ") + "?")) return;
+			el("cn-seasons-input").value = chosen.join(",");
+			el("cn-seasons-form").requestSubmit();
+		});
+	}
+
+	var allBtn = el("cn-all");
+	if (allBtn) {
+		allBtn.addEventListener("click", function (e) {
+			if (!confirm("Download ALL seasons? This can take a while.")) e.preventDefault();
+		});
+	}
+
+	var tabs   = document.querySelectorAll(".cn-stab");
+	var panels = document.querySelectorAll(".cn-spanel");
+
+	var seasonNav  = el("cn-seasons-nav");
+	var seasonList = el("cn-seasons-list");
+	var seasonPrev = el("cn-seasons-prev");
+	var seasonNext = el("cn-seasons-next");
+
+	if (seasonList) {
+		function updateSeasonArrows() {
+			// Measure against the full row so the arrows can disappear after a resize.
+			var overflowing = seasonList.scrollWidth > seasonNav.clientWidth + 1;
+			seasonPrev.hidden = seasonNext.hidden = !overflowing;
+			seasonPrev.disabled = seasonList.scrollLeft <= 1;
+			seasonNext.disabled = seasonList.scrollLeft + seasonList.clientWidth >= seasonList.scrollWidth - 1;
+		}
+
+		function scrollSeasons(direction) {
+			seasonList.scrollBy({
+				left: direction * seasonList.clientWidth,
+				behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+			});
+		}
+
+		seasonPrev.addEventListener("click", function () { scrollSeasons(-1); });
+		seasonNext.addEventListener("click", function () { scrollSeasons(1); });
+		seasonList.addEventListener("scroll", updateSeasonArrows, { passive: true });
+		window.addEventListener("resize", updateSeasonArrows);
+		updateSeasonArrows();
+	}
+
+	var heroPhoto = el("cn-hero-photo");
+	var seriesBackdrop = "{{ series.backdrop|default:''|escapejs }}";
+
+	function setHeroImage(url) {
+		if (!heroPhoto) return;
+		var chosen = url || seriesBackdrop;
+		if (chosen) {
+			heroPhoto.style.backgroundImage = "url('" + chosen + "')";
+			heroPhoto.style.display = "";
+		} else {
+			heroPhoto.style.display = "none";
+		}
+	}
+
+	function activateSeason(number) {
+		var activeTab = null;
+		tabs.forEach(function (t) {
+			var active = t.dataset.season === String(number);
+			t.classList.toggle("is-active", active);
+			t.setAttribute("aria-selected", active ? "true" : "false");
+			if (active) activeTab = t;
+		});
+		panels.forEach(function (p) {
+			if (p.dataset.season === String(number)) {
+				p.hidden = false;
+				p.classList.remove("cn-refade");
+				void p.offsetWidth;
+				p.classList.add("cn-refade");
+			} else {
+				p.hidden = true;
+			}
+		});
+		setHeroImage(activeTab ? activeTab.dataset.image : "");
+		if (typeof loadSeasonByNumber === "function") loadSeasonByNumber(number);
+	}
+
+	tabs.forEach(function (t) {
+		t.addEventListener("click", function () { activateSeason(this.dataset.season); });
+	});
+
+	function compress(values) {
+		var nums = values.map(function (v) { return parseInt(v, 10); })
+		                 .filter(function (n) { return !isNaN(n); })
+		                 .sort(function (a, b) { return a - b; });
+		if (!nums.length) return values.join(",");
+
+		var out = [], start = nums[0], end = nums[0];
+		for (var i = 1; i <= nums.length; i++) {
+			if (i < nums.length && nums[i] === end + 1) {
+				end = nums[i];
+				continue;
+			}
+			if (start === end) out.push(String(start));
+			else if (end === start + 1) out.push(String(start), String(end));
+			else out.push(start + "-" + end);
+			if (i < nums.length) { start = nums[i]; end = nums[i]; }
+		}
+		return out.join(",");
+	}
+
+	function syncSeason(season) {
+		var chosen = [];
+		document.querySelectorAll('.cn-ep-pick[data-season="' + season + '"]:checked:not(:disabled)')
+			.forEach(function (c) { chosen.push(c.value); });
+
+		el("cn-eps-" + season).value = chosen.length ? compress(chosen) : "";
+		el("cn-go-" + season).textContent = chosen.length
+			? "Download " + chosen.length + " episode" + (chosen.length === 1 ? "" : "s")
+			: "Download selected";
+	}
+
+	document.querySelectorAll(".cn-ep-pick").forEach(function (c) {
+		c.addEventListener("change", function () { syncSeason(this.dataset.season); });
+	});
+
+	document.querySelectorAll("[data-pick-all], [data-pick-none], [data-pick-missing]").forEach(function (b) {
+		b.addEventListener("click", function () {
+			var d = this.dataset;
+			var season = d.pickAll || d.pickNone || d.pickMissing;
+
+			document.querySelectorAll('.cn-ep-pick[data-season="' + season + '"]')
+				.forEach(function (c) {
+						if (c.disabled) { c.checked = false; return; }
+					if (d.pickMissing !== undefined) {
+						c.checked = !c.closest(".cn-ep").hasAttribute("data-owned");
+					} else {
+						c.checked = d.pickAll !== undefined;
+					}
+				});
+			syncSeason(season);
+		});
+	});
+
+	document.querySelectorAll('form[id^="cn-form-"]').forEach(function (form) {
+		form.addEventListener("submit", function (e) {
+			var field = this.querySelector('input[name="selected_episodes"]');
+			if (field && !field.value.trim()) {
+				e.preventDefault();
+				alert("Select at least one episode.");
+			}
+		});
+	});
+
+	document.querySelectorAll(".cn-spanel").forEach(function (s) { syncSeason(s.dataset.season); });
+	refreshTray();
+	document.addEventListener("cn:audio-filter", function () {
+		var current = document.querySelector(".cn-stab.is-active:not([hidden])");
+		var first = current || document.querySelector(".cn-stab:not([hidden])");
+		if (first) activateSeason(first.dataset.season);
+		else panels.forEach(function (panel) { panel.hidden = true; });
+		panels.forEach(function (panel) { syncSeason(panel.dataset.season); });
+		refreshTray();
+		if (seasonList) seasonList.dispatchEvent(new Event("scroll"));
+	});
+
+	{% if tmdb_available %}
+	var SERIES = {
+		name: "{{ series.name|escapejs }}",
+		slug: "{{ series.slug|default:''|escapejs }}",
+		year: "{{ series.year|default:''|escapejs }}",
+		tmdb_id: "{{ series.tmdb_id|default:''|escapejs }}",
+		site: "{{ series.source_alias|escapejs }}",
+		poster: "{{ series.poster|default:''|escapejs }}"
+	};
+
+	function art(label, url) {
+		var box = label.querySelector(".cn-ep-art");
+		if (!box || box.querySelector("img")) return;
+		var img = new Image();
+		img.loading = "lazy"; img.decoding = "async"; img.alt = "";
+		img.onerror = function () { img.remove(); };
+		img.src = url;
+		box.insertBefore(img, box.firstChild);
+	}
+
+	function applyEpisodeInfo(label, meta) {
+		if (!meta) return;
+		if (meta.name) {
+			var nameEl = label.querySelector(".cn-ep-name");
+			if (!nameEl) {
+				nameEl = document.createElement("span");
+				nameEl.className = "cn-ep-name";
+				label.querySelector(".cn-ep-desc").insertAdjacentElement("beforebegin", nameEl);
+			}
+			nameEl.textContent = meta.name;
+		}
+		var descEl = label.querySelector(".cn-ep-desc");
+		if (meta.overview && descEl) {
+			descEl.textContent = meta.overview;
+			descEl.hidden = false;
+		}
+	}
+
+	function loadSeason(section) {
+		var labels = Array.prototype.slice.call(section.querySelectorAll(".cn-ep[data-noart]"));
+		if (!labels.length) return;
+
+		fetch(URL_POSTERS, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+			body: JSON.stringify({
+				items: labels.map(function (l) {
+					return {
+						index: l.dataset.season + "x" + l.dataset.episode,
+						name: SERIES.name,
+						slug: SERIES.slug || null,
+						year: SERIES.year || null,
+						tmdb_id: SERIES.tmdb_id || null,
+						site: SERIES.site,
+						season: l.dataset.season,
+						episode: l.dataset.episode
+					};
+				})
+			})
+		})
+			.then(function (r) { return r.ok ? r.json() : null; })
+			.then(function (data) {
+				var found = (data && data.posters) || {};
+				var info = (data && data.episode_info) || {};
+				labels.forEach(function (l) {
+					var key = l.dataset.season + "x" + l.dataset.episode;
+					var url = found[key] || SERIES.poster;
+					if (url) art(l, url);
+					applyEpisodeInfo(l, info[key]);
+				});
+			})
+			.catch(function () {
+				if (SERIES.poster) labels.forEach(function (l) { art(l, SERIES.poster); });
+			});
+	}
+
+	var loadedSeasons = {};
+	function loadSeasonByNumber(number) {
+		if (loadedSeasons[number]) return;
+		var panel = document.querySelector('.cn-spanel[data-season="' + number + '"]');
+		if (!panel) return;
+		loadedSeasons[number] = true;
+		loadSeason(panel);
+	}
+
+	var firstTab = document.querySelector(".cn-stab.is-active") || document.querySelector(".cn-stab");
+	if (firstTab) loadSeasonByNumber(firstTab.dataset.season);
+	{% endif %}
+})();
+</script>
+{% endblock %}

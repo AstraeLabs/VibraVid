@@ -1,0 +1,198 @@
+services:
+  vibravid:
+    image: ghcr.io/astraelabs/vibravid:${VIBRAVID_TAG:-latest}
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: ${VIBRAVID_CONTAINER_NAME:-vibravid}
+
+    ### Networking
+    # VIBRAVID_BIND limits the interface the GUI listens on: 127.0.0.1 = this machine only
+    # (put a reverse proxy in front for remote access). Default 0.0.0.0 = every interface.
+    ports:
+      - "${VIBRAVID_BIND:-0.0.0.0}:${VIBRAVID_PORT:-8000}:8000"
+    # Bypass Docker's embedded DNS proxy (127.0.0.11)
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      - vibravid_network
+
+    ### Volumes - Persistent Data
+    volumes:
+      # SQLite DB + any future per-install state (isolated dir, does NOT overlay app code).
+      # Override with a host path via VIBRAVID_DB_DIR in .env (e.g. /volume1/docker/vibravid/db).
+      - ${VIBRAVID_DB_DIR:-vibravid_db}:/app/data
+      # Downloads. Override with a host path via VIBRAVID_VIDEO_DIR to store files on bulk storage
+      # (e.g. /volume2/Movies on a NAS). Named volume used when variable is not set.
+      - ${VIBRAVID_VIDEO_DIR:-vibravid_videos}:/app/Video
+      # Scratch space (segments, merge/decrypt leftovers). Keep it on a fast LOCAL disk: with only a NAS share as
+      # storage every step reads and writes the whole title over the network (about 8x the file size).
+      # Override with a host path via VIBRAVID_TMP_DIR in .env (e.g. an SSD folder). Needs about 2x the size of one title.
+      - ${VIBRAVID_TMP_DIR:-vibravid_tmp}:/app/tmp
+      # Logs persistence
+      - ${VIBRAVID_LOGS_DIR:-vibravid_logs}:/app/.cache/logs
+      # ARR logs (one file per title and day), kept out of the container layer
+      - ${VIBRAVID_ARR_LOGS_DIR:-vibravid_arr_logs}:/app/.cache/arr
+      # Configuration persistence
+      - ${VIBRAVID_CONFIG_DIR:-vibravid_config}:/app/Conf
+      # CDM / binary directory persistence
+      - ${VIBRAVID_BINARY_DIR:-vibravid_binary}:/home/appuser/.local/bin/binary
+      # Docker socket — OPTIONAL. Enables the in-app "Update now" button to pull the new
+      # image and recreate the container by driving the host Docker daemon.
+      # SECURITY: access to this socket is root on the host. Anyone who can run code inside the
+      # container (or reach an unprotected GUI) can start privileged containers. Leave it
+      # commented out unless the GUI is protected (VIBRAVID_USERNAME/PASSWORD) and you accept
+      # that; update manually with `docker compose pull && docker compose up -d` instead.
+      # - /var/run/docker.sock:/var/run/docker.sock
+      # NOTE: /app/VibraVid/services is INTENTIONALLY NOT a named volume.
+      # If it were, the volume would freeze the services directory to the
+      # snapshot captured the first time the container started, and any
+      # bugfix to a service's code in a later image rebuild would be hidden
+      # behind the stale volume content. Tradeoff: plugins uploaded via
+      # the web UI live only inside the container's writable layer and are
+      # lost on container recreation (down/up --build). Re-upload after
+      # rebuilds, or bake the plugin into your fork of the repo.
+
+    ### Environment Variables
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_DB_DIR: "/app/data"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-}"
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: "/app"
+
+      # Where the downloader keeps its temporary files (the volume above); the finished file still goes to /app/Video
+      VIBRAVID_TEMP_DIR: "/app/tmp"
+
+      # User / group ID for file ownership on host-mounted volumes.
+      # Set these to match the uid/gid that owns your NAS share so that
+      # downloaded files are writable by your normal user. Run `id <user>`
+      # on the NAS host to find the correct values.
+      # Both are read from .env (empty = keep the image's default uid/gid).
+      PUID: "${PUID:-}"
+      PGID: "${PGID:-}"
+
+      # Set to 1 to skip the recursive chown of /app/Video at startup (large libraries: it can take many minutes).
+      # Only do this if the library already has the right owner for PUID/PGID.
+      SKIP_MEDIA_CHOWN: "${SKIP_MEDIA_CHOWN:-}"
+
+      # Host Configuration (override both in .env when you reach the UI from another machine)
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1,vibravid}"
+      CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
+
+      # ── GUI access control ──
+      # Set both to require a login on every GUI page (webhooks, the Telegram bot and the remote API
+      # keep their own tokens). Without them the GUI is open to anyone who can reach the port.
+      VIBRAVID_USERNAME: "${VIBRAVID_USERNAME:-}"
+      VIBRAVID_PASSWORD: "${VIBRAVID_PASSWORD:-}"
+      # Off by default. 1 = allow uploading provider ZIPs, importing git sources and editing
+      # [HOOKS] / imp_service from the web UI. All of them run code on the server.
+      VIBRAVID_ALLOW_SERVICE_UPLOAD: "${VIBRAVID_ALLOW_SERVICE_UPLOAD:-0}"
+      # Shared secret the Telegram bot sends as X-VibraVid-Token (needed to keep /coda working once the login is on)
+      VIBRAVID_BOT_SECRET: "${VIBRAVID_BOT_SECRET:-}"
+
+      # Uncomment for private network deployment (behind reverse proxy)
+      # USE_X_FORWARDED_HOST: "true"
+      # SECURE_PROXY_SSL_HEADER_ENABLED: "true"
+      # CSRF_COOKIE_SECURE: "true"
+      # SESSION_COOKIE_SECURE: "true"
+
+      # Optional: Watchlist Auto-Download Interval (seconds)
+      # WATCHLIST_AUTO_INTERVAL_SECONDS: "14400"
+
+      # Optional: services to switch off (comma-separated folder names), added to hidden_services in config.toml
+      # VIBRAVID_HIDDEN_SITES: "${VIBRAVID_HIDDEN_SITES:-}"
+
+      # ── ARR Integration (Sonarr / Radarr / Overseerr) ──
+      TMDB_API_KEY: "${TMDB_API_KEY:-}"
+      TVDB_API_KEY: "${TVDB_API_KEY:-}"
+      # USE_ARR_SERVICES: "false"
+      # ENABLE_ARR_POLLING: "true"
+      # ENABLE_SEERR_WEBHOOK: "false"
+      # ARR_POLLING_INTERVAL: "300"
+      # ARR_FULL_RESYNC_INTERVAL: "21600"
+      # SONARR_URL: "http://sonarr:8989"
+      # SONARR_API_KEY: ""
+      # RADARR_URL: "http://radarr:7878"
+      # RADARR_API_KEY: ""
+      # SEERR_WEBHOOK_SECRET: ""
+
+    ### Restart Policy
+    restart: unless-stopped
+
+    ### Resource Limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 1G
+
+  telegram:
+    profiles: ["telegram"]
+    image: ghcr.io/astraelabs/vibravid:${VIBRAVID_TAG:-latest}
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: ${TELEGRAM_CONTAINER_NAME:-vibravid-telegram}
+    entrypoint: ["/bin/sh", "/app/docker/telegram-entrypoint.sh"]
+
+    networks:
+      - vibravid_network
+
+    depends_on:
+      vibravid:
+        condition: service_started
+
+    ### Credentials: dedicated .env file
+    env_file:
+      - path: ./.env.telegram
+        required: false
+
+    volumes:
+      # Read-only: the bot only reads the TELEGRAM section of config.toml
+      # (enabled/gui_url/max_results); it never writes to Conf.
+      - ${VIBRAVID_CONFIG_DIR:-vibravid_config}:/app/Conf:ro
+      # Telethon session + per-user site-filter prefs. Writable, bot-only.
+      - telegram_state:/app/tgstate
+
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: "/app"
+      STATE_DIR: "/app/tgstate"
+      VIBRAVID_CONFIG: "/app/Conf/config.toml"
+      # TG_GUI_URL default (http://vibravid:8000) already matches this
+      # compose network; override here or in .env.telegram if needed.
+      # VIBRAVID_BOT_SECRET: ""
+
+    restart: unless-stopped
+
+### Persistent Named Volumes
+# These are only created when the corresponding VIBRAVID_*_DIR variable is NOT set to a host
+# path. If you override a variable with a host path (e.g. VIBRAVID_VIDEO_DIR=/mnt/nas/movies),
+# Docker uses a bind mount and the named volume below is NOT created.
+volumes:
+  vibravid_db:
+    driver: local
+  vibravid_videos:
+    driver: local
+  vibravid_tmp:
+    driver: local
+  vibravid_logs:
+    driver: local
+  vibravid_arr_logs:
+    driver: local
+  vibravid_config:
+    driver: local
+  vibravid_binary:
+    driver: local
+  telegram_state:
+    driver: local
+
+### Internal Network
+networks:
+  vibravid_network:
+    driver: bridge

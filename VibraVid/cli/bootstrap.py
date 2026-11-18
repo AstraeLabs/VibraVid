@@ -1,0 +1,78 @@
+# 05.10.26
+
+import sys
+import traceback
+from collections.abc import Callable
+
+
+def pause_if_needed() -> None:
+    from VibraVid.utils.bootstrap.exit_pause import pause_if_needed as pause
+    pause()
+
+
+def fix_ld_library_path() -> None:
+    from VibraVid.utils.frozen import fix_ld_library_path as fix
+    fix()
+
+
+def _is_download_cancelled(exc: BaseException) -> bool:
+    """True for a user-initiated abort (lazy import: bootstrap must stay light at startup)."""
+    try:
+        from VibraVid.core.downloader.base import DownloadCancelled
+
+        if isinstance(exc, DownloadCancelled):
+            return True
+    except Exception:
+        pass
+    return type(exc).__name__ == "DownloadCancelled"
+
+
+def _is_expected_failure(exc: BaseException) -> bool:
+    """True for a failure already explained on screen (lazy import like above)."""
+    try:
+        from VibraVid.core.downloader.base import DownloadFailed
+        from VibraVid.utils.config import LoginConfigError
+
+        return isinstance(exc, (DownloadFailed, LoginConfigError))
+    except Exception:
+        return False
+
+
+def run_guarded(entry: Callable[[], None]) -> None:
+    """Run the given entry point, handling exceptions and Ctrl+C gracefully."""
+    if "--migrate-config" in sys.argv[1:] or any(a.startswith("--migrate-config=") for a in sys.argv[1:]):
+        from VibraVid.migrate_config import main
+
+        main(sys.argv[1:])
+        return
+
+    fix_ld_library_path()
+    try:
+        entry()
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        sys.exit(130)
+    except Exception as exc:
+        if _is_download_cancelled(exc):
+            # Double Ctrl+C: a voluntary abort, not a crash — no traceback.
+            print("\nDownload cancelled by user.")
+            sys.exit(130)
+        if _is_expected_failure(exc):
+            # The reason is already on screen (and in the log): the stack adds nothing.
+            print(f"\nError: {exc}", file=sys.stderr)
+            pause_if_needed()
+            sys.exit(1)
+        
+        traceback.print_exc()
+        pause_if_needed()
+        sys.exit(1)
+
+
+def run_cli() -> None:
+    from VibraVid.cli.run import main
+    main()
+
+
+def main() -> None:
+    """``vibravid`` console script / ``manual.py`` / ``python -m VibraVid``."""
+    run_guarded(run_cli)

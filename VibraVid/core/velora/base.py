@@ -1,0 +1,961 @@
+# 10.04.26
+
+import logging
+import platform
+import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+
+from rich.console import Console
+
+from VibraVid.core.decryptor import KeysManager
+from VibraVid.core.manifest.custom import CustomParser, is_custom_manifest
+from VibraVid.core.manifest.ism import ISMParser
+from VibraVid.core.manifest.m3u8 import HLSParser
+from VibraVid.core.manifest.mpd import DashParser
+from VibraVid.core.manifest.stream import Stream
+from VibraVid.core.ui.bar_manager import DownloadBarManager
+from VibraVid.core.ui.manual_tracks import TrackSelectionError, manual_track_broker
+from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.ui.ui import build_table
+from VibraVid.core.utils.codec import (
+    AUDIO_EXTENSIONS,
+    SUBTITLE_CODEC_MAP,
+    SUBTITLE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    format_disposition_flags,
+)
+from VibraVid.core.utils.language import LANGUAGE_MAP, language_variants, resolve_locale, subtitle_flags
+from VibraVid.core.utils.resolution import classify_resolution
+from VibraVid.core.utils.selector import (
+    StreamSelector,
+    StreamSelectorFormatter,
+    configured_mux_dtsx,
+    tag_matches_filter,
+)
+from VibraVid.core.utils.stream_selector_ui import InteractiveStreamSelector
+from VibraVid.core.utils.track_order import effective_select_filter
+from VibraVid.core.velora.subtitle import build_ext_track_label, ext_from_url, is_valid_format, normalize_sub_filename
+from VibraVid.core.velora.util._subtitle_segments import get_subtitle_resolve_workers, resolve_subtitle_segments_sync
+from VibraVid.provider.tmdb import tmdb_client
+from VibraVid.utils import config_manager
+
+logger = logging.getLogger(__name__)
+auto_select = config_manager.config.get_bool("DOWNLOAD", "auto_select")
+
+
+def lang_variants(normalized_lang: str) -> set[str]:
+    """Return every LANGUAGE_MAP key that resolves to *normalized_lang*."""
+    if not normalized_lang:
+        return set()
+    variants: set[str] = {normalized_lang, normalized_lang.lower()}
+    variants.add(normalized_lang.split("-")[0].lower())
+    for key, value in LANGUAGE_MAP.items():
+        if value == normalized_lang or value.lower() == normalized_lang.lower():
+            variants.add(key)
+            variants.add(key.lower())
+    return variants
+
+
+class BaseMediaDownloader:
+    ad_decision_fn = None
+
+    def _cleanup_cancelled_selection(self) -> None:
+        """Remove a lone generated manifest, never a resumable download."""
+        if not config_manager.config.get_bool("DOWNLOAD", "cleanup_tmp_folder"):
+            return
+        directory = self._tmp_dir
+        try:
+            if directory.is_symlink():
+                return
+            entries = list(directory.iterdir())
+            manifests = [getattr(self, name, None) for name in ("raw_m3u8", "raw_mpd", "raw_ism", "raw_custom")]
+            generated = {Path(path) for path in manifests if path is not None}
+            if len(entries) != 1 or entries[0] not in generated or entries[0].is_symlink() or not entries[0].is_file():
+                return
+            entries[0].unlink()
+            directory.rmdir()  # Never recursively delete files that appeared in the meantime.
+        except OSError as exc:
+            logger.warning("Could not clean up cancelled track selection in %s: %s", directory, exc)
+
+    def __init__(
+        self,
+        url: str,
+        output_dir: str,
+        filename: str,
+        headers: dict | None = None,
+        key: Any | None = None,
+        cookies: dict | None = None,
+        download_id: str | None = None,
+        site_name: str | None = None,
+        manifest_content: str | None = None,
+        manifest_protocol: str | None = None,
+        manifest_refresh_fn=None,
+        has_drm: bool = False,
+        display_selected_only: bool = False,
+        ad_decision_fn=None,
+    ) -> None:
+        self.url = url
+        self.output_dir = Path(output_dir)
+        self.filename = filename
+        self.headers = headers or {}
+        self.manifest_refresh_fn = manifest_refresh_fn
+        self.ad_decision_fn = ad_decision_fn
+        self.manifest_content = manifest_content
+        self.manifest_protocol = (manifest_protocol or "").lower() or None
+        self.key = key
+        
+        # KeyFallback (core.drm.key_fallback), set by the outer downloader after key fetch: replacement keys when a key-sanity check proves self.key wrong
+        self.key_fallback = None
+        self._key_swap_lock = threading.Lock()
+        self.has_drm = has_drm
+        self.cookies = cookies or {}
+        self.download_id = download_id
+        self.site_name = site_name
+
+        # Manifest and stream data
+        self.streams: list[Stream] = []
+        self.manifest_type: str = "Unknown"
+        self.raw_m3u8: Path | None = None
+        self.raw_mpd: Path | None = None
+        self.raw_ism: Path | None = None
+        self.raw_custom: Path | None = None
+        self.status: dict | None = None
+
+        # Custom selection filters (take precedence over config)
+        self._sv: str = "best"
+        self._sa: str = "best"
+        self._ss: str = "all"
+
+        # External tracks imported from manifest or added by user
+        self.external_subtitles: list = []
+        self.external_audios: list = []
+        self.external_other_tracks: list = []
+        self.other_tracks: list = []
+        self.custom_filters: dict | None = None
+        self.display_selected_only = display_selected_only
+        self.license_url: str | None = None
+        self.drm_type: str | None = None
+
+        # Manual override for HLS segment encryption (method/key_bytes/iv)
+        self.hls_enc_override: dict | None = None
+
+        # Progress-bar label tables — built in _prepare_labels()
+        self._video_label: str = ""
+        self._video_task_key: str = "vid_main"
+        self._has_video: bool = True
+        self._audio_labels: dict[str, str] = {}
+        self._audio_task_keys: list[tuple[str, str]] = []
+        self._sub_labels: dict[str, str] = {}
+        self._sub_labels_by_task_key: dict[str, str] = {}
+        self._sub_task_keys: list[tuple[str, str]] = []
+
+        # Thread-safe output filename collision tracking (subtitle streams)
+        self._assigned_sub_names: set = set()
+        self._assigned_sub_lock = threading.Lock()
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._tmp_dir = self.output_dir
+        self._tmp_dir.mkdir(exist_ok=True)
+
+        if self.download_id:
+            _type = (
+                "Movie"
+                if config_manager.config.get("OUTPUT", "movie_folder_name") in str(self.output_dir)
+                else "TV"
+                if config_manager.config.get("OUTPUT", "serie_folder_name") in str(self.output_dir)
+                else "Anime"
+                if config_manager.config.get("OUTPUT", "anime_folder_name") in str(self.output_dir)
+                else "other"
+            )
+            download_tracker.start_download(
+                self.download_id,
+                context_tracker.title or self.filename,
+                self.site_name or "Unknown",
+                _type,
+            )
+
+    def set_key(self, key: Any) -> None:
+        self.key = key.get_keys_list() if isinstance(key, KeysManager) else key
+
+    def parse_stream(self, show_table: bool = True) -> list[Stream]:
+        """Fetch manifest → parse streams → apply selection → print table."""
+        if self.download_id:
+            download_tracker.update_status(self.download_id, "Parsing ...")
+
+        url_lower = self.url.lower().split("?")[0]
+        proto = self.manifest_protocol
+        content = self.manifest_content
+
+        if content and proto:
+            effective = proto
+        elif url_lower.endswith((".mpd", ".mpp")):
+            effective = "dash"
+        elif url_lower.endswith(".ism") or url_lower.endswith(".ism/manifest"):
+            effective = "ism"
+        elif content and is_custom_manifest(content):
+            effective = "custom"
+        else:
+            effective = proto or "hls"
+
+        logger.info(f"Parsing manifest: {self.url!r}  auto_select={auto_select}  headers={bool(self.headers)}  protocol={effective}  injected={bool(content)}")
+        if effective == "dash":
+            parser = DashParser(self.url, self.headers, content=content)
+        elif effective == "ism":
+            parser = ISMParser(self.url, self.headers, content=content)
+        elif effective == "custom":
+            parser = CustomParser(self.url, self.headers, content=content)
+        else:
+            parser = HLSParser(self.url, self.headers, content=content, has_drm=self.has_drm)
+
+        if not parser.fetch_manifest():
+            logger.error("BaseMediaDownloader: manifest fetch failed")
+            return []
+
+        if isinstance(parser, DashParser):
+            self.raw_mpd = parser.save_raw(self._tmp_dir)
+            self.manifest_type = "DASH"
+        elif isinstance(parser, ISMParser):
+            self.raw_ism = parser.save_raw(self._tmp_dir)
+            self.manifest_type = "ISM"
+        elif isinstance(parser, CustomParser):
+            self.raw_custom = parser.save_raw(self._tmp_dir)
+            self.manifest_type = "DASH"
+        else:
+            self.raw_m3u8 = parser.save_raw(self._tmp_dir)
+            self.manifest_type = "HLS"
+
+        self.streams = [s for s in parser.parse_streams() if s.type != "image"]
+        self.streams = self._apply_ad_decision(effective, parser)
+
+        manual_choice = bool(
+            context_tracker.is_gui and context_tracker.manual_tracks and not context_tracker.defer_manual_tracks
+        )
+        if manual_choice or auto_select or context_tracker.video_quality or context_tracker.is_gui:
+            self._apply_selection()
+        else:
+            selector = InteractiveStreamSelector(self.streams, window_size=15)
+            selector.run()
+
+        # Register the DV companion only after the user's final selection.
+        # External audio and subtitle entries are appended below first.
+
+        for ext in self.external_subtitles:
+            lang = ext.get("language", "")
+            selected = self._ext_track_matches(ext, "subtitle")
+            ext["_selected"] = selected
+            fake = Stream(
+                type="subtitle",
+                language=lang,
+                name=ext.get("name", ""),
+                selected=selected,
+                is_external=True,
+            )
+            fake.id = "EXT"
+            fake._manual_external_entry = ext
+            self.streams.append(fake)
+
+        for ext in self.external_audios:
+            lang = ext.get("language", "")
+            selected = self._ext_lang_matches(lang, "audio")
+            ext["_selected"] = selected
+            fake = Stream(
+                type="audio",
+                language=lang,
+                name=ext.get("name", ""),
+                selected=selected,
+                is_external=True,
+            )
+            fake.id = "EXT"
+            fake._manual_external_entry = ext
+            self.streams.append(fake)
+
+        for ext in self.external_other_tracks:
+            raw_type = (ext.get("type") or "").strip().lower()
+            kind = raw_type.split(":")[0] if ":" in raw_type else raw_type
+            tag = raw_type.split(":")[1] if ":" in raw_type else ""
+            if kind not in ("video", "audio"):
+                continue
+
+            lang = ext.get("language", "") or ""
+            if lang == "und":
+                lang = ""
+
+            fake = Stream(
+                type=kind,
+                language=lang,
+                name=ext.get("name", ""),
+                selected=True,
+                is_external=True,
+            )
+
+            fake.id = "EXT"
+            if kind == "video" and tag:
+                tag_up = tag.upper()
+                if tag_up == "DV":
+                    fake.video_range = "DV"
+                elif tag_up in ("HDR10", "HDR10PLUS", "HDR10+", "HDR"):
+                    fake.video_range = "HDR10+"
+
+            self.streams.append(fake)
+
+        if manual_choice:
+            selection_id = context_tracker.download_id
+            # Only offer entries whose underlying download selection we can control.
+            # Other externally-injected video/audio tracks are not managed by
+            # the same _selected mechanism and must not be misrepresented.
+            selectable = [
+                stream for stream in self.streams
+                if not stream.is_external or getattr(stream, "_manual_external_entry", None) is not None
+            ]
+            download_tracker.update_status(selection_id, "Waiting for track selection")
+            try:
+                manual_track_broker.choose(
+                    selection_id,
+                    selectable,
+                    cancelled=lambda: download_tracker.is_stopped(selection_id),
+                    on_wait=context_tracker.manual_track_on_wait,
+                    on_confirm=context_tracker.manual_track_on_confirm,
+                )
+            except TrackSelectionError as exc:
+                if str(exc) == "Track selection cancelled":
+                    self._cleanup_cancelled_selection()
+                raise
+            for stream in selectable:
+                entry = getattr(stream, "_manual_external_entry", None)
+                if entry is not None:
+                    entry["_selected"] = bool(stream.selected)
+                if getattr(stream, "dv_companion", False) and not stream.selected:
+                    stream.dv_companion = False
+            self.no_match_skip = False
+            download_tracker.update_status(selection_id, "Preparing selected tracks")
+
+        self._register_dv_companion()
+
+        if show_table and self.streams:
+            console = Console(force_terminal=True if platform.system().lower() != "windows" else None)
+            console.print(build_table(self._streams_for_display()))
+
+        return self.streams
+
+    def _apply_ad_decision(self, effective: str, parser) -> list[Stream]:
+        """Enforce a service-provided ad decision; the service decides, the core applies."""
+        streams: list[Stream] = self.streams
+        if self.ad_decision_fn is None or effective not in ("dash", "ism"):
+            return streams
+
+        try:
+            decision = self.ad_decision_fn(effective, getattr(parser, "raw_content", None), None) or {}
+        except Exception as exc:
+            logger.debug(f"ad decision failed, keeping everything: {exc}")
+            return streams
+
+        if not decision:
+            logger.debug(f"ad decision ({effective}): no ads flagged, keeping all {len(streams)} stream(s)")
+            return streams
+
+        if effective == "ism":
+            return BaseMediaDownloader._apply_ism_decision(streams, decision)
+        return BaseMediaDownloader._apply_dash_decision(streams, decision)
+
+    @staticmethod
+    def _apply_dash_decision(streams: list[Stream], decision: dict) -> list[Stream]:
+        try:
+            drop = {int(p) for p in (decision.get("drop_period_idx") or [])}
+        except (TypeError, ValueError):
+            return streams
+
+        if not drop:
+            return streams
+
+        reason = decision.get("reason", "")
+        filtered: list[tuple] = []
+        for s in streams:
+            kept_segs = [sg for sg in s.segments if getattr(sg, "period_idx", 0) not in drop]
+            filtered.append((s, kept_segs, len(s.segments) - len(kept_segs)))
+
+        candidates = [(s, segs) for s, segs, _ in filtered if segs]
+        if not any(s.type == "video" for s, _ in candidates):
+            logger.warning("DASH ad decision would remove all video, keeping everything")
+            return streams
+
+        for s, segs, removed in filtered:
+            if removed and segs:
+                logger.info(
+                    f"DASH ad decision: dropped {removed} segment(s) period(s) {sorted(drop)}"
+                    f" | id={s.id!r} type={s.type} lang={s.language} ({reason})"
+                )
+
+            if not segs:
+                logger.info(f"DASH ad decision: stream dropped entirely (only ad segments) | id={s.id!r}")
+            s.segments = segs
+
+        kept = [s for s, _ in candidates]
+        total_dropped = sum(removed for _, _, removed in filtered)
+        total_kept = sum(len(segs) for _, segs, _ in filtered)
+        logger.info(
+            f"DASH ad decision applied: dropped {total_dropped}/{total_dropped + total_kept} segment(s)"
+            f" from periods {sorted(drop)}, {len(kept)}/{len(streams)} stream(s) kept"
+        )
+        BaseMediaDownloader._rejoin_split_audio(kept)
+        return kept
+
+    @staticmethod
+    def _apply_ism_decision(streams: list[Stream], decision: dict) -> list[Stream]:
+        """Enforce an ISM decision: ad URL substrings and/or timeline indices."""
+        subs = [str(x) for x in (decision.get("drop_url_substrings") or []) if x]
+        try:
+            idx_drop = {int(p) for p in (decision.get("drop_seg_idx") or [])}
+        except (TypeError, ValueError):
+            idx_drop = set()
+        if not subs and not idx_drop:
+            return streams
+
+        filtered: list[tuple] = []
+        for s in streams:
+            kept_segs = [
+                sg for sg in s.segments
+                if not any(sub in (sg.url or "") for sub in subs)
+                and getattr(sg, "number", -1) not in idx_drop
+            ]
+            filtered.append((s, kept_segs, len(s.segments) - len(kept_segs)))
+
+        candidates = [(s, segs) for s, segs, _ in filtered if segs]
+        if not any(s.type == "video" for s, _ in candidates):
+            logger.warning("ISM ad decision would remove all video, keeping everything")
+            return streams
+
+        for s, segs, removed in filtered:
+            if removed and segs:
+                logger.info(f"ISM ad decision: dropped {removed} chunk(s) | id={s.id!r} type={s.type} lang={s.language}")
+            if not segs:
+                logger.info(f"ISM ad decision: stream dropped entirely (only ad chunks) | id={s.id!r}")
+            s.segments = segs
+
+        kept = [s for s, _ in candidates]
+        total_dropped = sum(removed for _, _, removed in filtered)
+        total_kept = sum(len(segs) for _, segs, _ in filtered)
+        logger.info(
+            f"ISM ad decision applied: dropped {total_dropped}/{total_dropped + total_kept} chunk(s),"
+            f" {len(kept)}/{len(streams)} stream(s) kept"
+        )
+        return kept
+
+    @staticmethod
+    def _rejoin_split_audio(streams: list[Stream]) -> None:
+        """Join same-track audio continuations split by stitching (in place)"""
+        from collections import defaultdict
+
+        def _norm(v) -> str:
+            return (str(v) if v is not None else "").strip().lower()
+
+        groups: dict[tuple, list] = defaultdict(list)
+        for s in streams:
+            if s.type != "audio" or getattr(s, "is_external", False) or not s.segments:
+                continue
+            groups[(_norm(s.language), _norm(s.codecs).split(".")[0], _norm(s.channels), int(s.sample_rate or 0))].append(s)
+
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+
+            members.sort(key=lambda s: min(getattr(sg, "period_idx", 0) for sg in s.segments))
+            first, rest = members[0], members[1:]
+            seen = {getattr(sg, "period_idx", 0) for sg in first.segments}
+            if any(getattr(sg, "period_idx", 0) in seen for s in rest for sg in s.segments):
+                continue
+
+            for s in rest:
+                first.segments.extend(s.segments)
+                streams.remove(s)
+
+            first.segments.sort(key=lambda sg: (getattr(sg, "period_idx", 0), getattr(sg, "number", 0)))
+            logger.info(
+                f"DASH ad decision: rejoined {len(rest) + 1} split audio continuations"
+                f" | lang={first.language} ({len(first.segments)} segments)"
+            )
+
+    def _dv_companion_stream(self) -> "Stream | None":
+        """The DV companion stream marked by the selector, downloaded alongside the other tracks."""
+        return next(
+            (s for s in self.streams if getattr(s, "dv_companion", False) and not s.is_external),
+            None,
+        )
+
+    def _register_dv_companion(self) -> None:
+        """If a DV companion stream is present, register it as an "other_track" for download."""
+        companion = self._dv_companion_stream()
+        if companion is None:
+            return
+
+        if any((t.get("type") or "").strip().lower() == "video:dv" for t in self.other_tracks):
+            return
+
+        quality = str(getattr(companion, "dv_companion_quality", "") or "worst").strip() or "worst"
+        self.other_tracks = [*self.other_tracks, {"type": "video:dv", "url": self.url, "quality": quality}]
+        logger.info("hybrid: companion DV registrato come other_track (quality=%r, id=%s)", quality, companion.id)
+
+    def _streams_for_display(self) -> list[Stream]:
+        """Return the list of streams to display in the table, filtered by self.display_selected_only if set."""
+        if self.display_selected_only:
+            selected = [s for s in self.streams if getattr(s, "selected", False)]
+            if selected:
+                return selected
+
+        return self.streams
+
+    def get_metadata(self) -> tuple[str, str, str]:
+        return (str(self.raw_m3u8), str(self.raw_mpd), str(self.raw_ism))
+
+    def start_download(self) -> dict[str, Any]:
+        raise NotImplementedError("Subclasses must implement start_download()")
+
+    def _apply_selection(self) -> None:
+        f = self.custom_filters or {}
+        requested_quality = context_tracker.video_quality
+        v_cfg = "best" if requested_quality else f.get("video") or config_manager.config.get("DOWNLOAD", "select_video")
+        a_cfg = effective_select_filter("audio", f)
+        s_cfg = f.get("subtitle") or config_manager.config.get("DOWNLOAD", "select_subtitle")
+
+        def _pref(key: str, default: bool = False, section: str = "DOWNLOAD") -> bool:
+            return bool(f.get(key, config_manager.config.get_bool(section, key, default=default)))
+
+        selector = StreamSelector(
+            v_cfg,
+            a_cfg,
+            s_cfg,
+            formatter=StreamSelectorFormatter(),
+            prefer_h265=_pref("prefer_h265"),
+            prefer_hdr10=_pref("prefer_hdr10"),
+            prefer_drm=_pref("prefer_drm"),
+            require_drm=_pref("require_drm"),
+            minimum_video_height=0 if requested_quality else int(f.get("minimum_video_height") or config_manager.config.get("DOWNLOAD", "minimum_video_height", default=0) or 0),
+            strict_no_match=context_tracker.skip_no_match,
+            dv_auto=_pref("dv_auto", True, section="CODEC"),
+            mux_dtsx=bool(f.get("mux_dtsx", configured_mux_dtsx())),
+            drop_clear_av=bool(f.get("drop_clear_av", False)),
+            dv_top_tier_tolerance=f.get("dv_top_tier_tolerance"),
+            codec_priority=f.get("codec_priority"),
+        )
+        selectable = self.streams
+        if requested_quality:
+            from VibraVid.core.utils.quality import stream_quality
+            for stream in self.streams:
+                if stream.type == "video":
+                    stream.selected = False
+            selectable = [s for s in self.streams if s.type != "video" or stream_quality(s) == requested_quality]
+            if not any(s.type == "video" for s in selectable):
+                raise ValueError(f"Requested quality {requested_quality} is not available for this video")
+        self._sv, self._sa, self._ss = selector.apply(selectable)
+        from VibraVid.core.utils.audio_selection import enforce_audio_selection
+        if not context_tracker.defer_manual_tracks:
+            enforce_audio_selection(selectable, f.get("embedded_audio_language"))
+        if requested_quality and not any(s.type == "video" and s.selected for s in selectable):
+            raise ValueError(f"No video track matches requested quality {requested_quality}")
+        self.no_match_skip = selector.no_match
+
+    def _effective_filter(self, track_type: str) -> str:
+        """Return the active selection filter for *track_type*, preferring custom_filters over config."""
+        return effective_select_filter("subtitle" if track_type == "subtitle" else "audio", self.custom_filters)
+
+    def _ext_lang_matches(self, lang: str, track_type: str) -> bool:
+        """Return True if the external track (or closed caption) with *lang* tag should be downloaded."""
+        return tag_matches_filter(self._effective_filter(track_type), track_type, lang)
+
+    def _ext_track_matches(self, track: dict, track_type: str) -> bool:
+        """Return True if *track* (a full external track dict with flag fields) matches the configured selection filter, including flag requirements."""
+        return tag_matches_filter(
+            self._effective_filter(track_type),
+            track_type,
+            track.get("language") or "",
+            forced=bool(track.get("forced")),
+            cc=bool(track.get("cc")),
+            sdh=bool(track.get("sdh")),
+        )
+
+    def _prepare_labels(self) -> None:
+        sel_video = [s for s in self.streams if s.type == "video" and s.selected and not s.is_external]
+        sel_audio = [s for s in self.streams if s.type == "audio" and s.selected and not s.is_external]
+        sel_subs = [s for s in self.streams if s.type == "subtitle" and s.selected and not s.is_external]
+
+        # A track whose KID isn't covered by any provided key will never be downloaded
+        # (see _has_matching_key/_skip_stream_no_key)
+        sel_audio = [s for s in sel_audio if self._has_matching_key(s)]
+        sel_subs = [s for s in sel_subs if self._has_matching_key(s)]
+
+        # Keep only one subtitle stream per language+flag variant (e.g. "en", "en-forced", "en-sdh", etc.)
+        _seen_sub_variants: set[str] = set()
+        _unique_subs: list[Stream] = []
+        for s in sel_subs:
+            variant = f"{(s.resolved_language or s.language or 'und').lower()}{self._sub_discriminator(s)}"
+            if variant in _seen_sub_variants:
+                s.selected = False
+                logger.info(f"Subtitle dedup: variant '{variant}' already kept — dropping duplicate format={getattr(s, 'format', '') or '?'} id={getattr(s, 'id', '')}")
+                continue
+            _seen_sub_variants.add(variant)
+            _unique_subs.append(s)
+        sel_subs = _unique_subs
+
+        self._has_video = bool(sel_video)
+        if sel_video:
+            v = sel_video[0]
+            codec = v.get_short_codec() or v.codecs or ""
+            res = v.resolution or "main"
+            parts = []
+
+            if codec:
+                parts.append(f"[yellow]\\[{codec}][/yellow]")
+            if res:
+                display_res = classify_resolution(v.width, v.height) if v.width and v.height else res
+                parts.append(f"[white]{display_res}[/white]")
+            if v.bitrate:
+                parts.append(f"[blue]{v.bitrate_display}[/blue]")
+
+            if self.download_id:
+                quality = classify_resolution(v.width, v.height) if v.width and v.height else v.resolution
+                download_tracker.update_metadata(self.download_id, quality=quality)
+            self._video_label = " ".join(parts)
+            codec_key = re.sub(r"[^a-z0-9]+", "", codec.lower()) if codec else ""
+            self._video_task_key = f"vid_{res}_{codec_key}" if codec_key else f"vid_{res}"
+        else:
+            self._video_label = ""
+            self._video_task_key = "vid_main"
+        self._video_labels_by_task_key = {self._video_task_key: self._video_label}
+
+        companion = self._dv_companion_stream()
+        if companion is not None:
+            parts = []
+            codec = companion.get_short_codec() or companion.codecs or ""
+            if codec:
+                parts.append(f"[yellow]\\[{codec}][/yellow]")
+            if companion.width and companion.height:
+                parts.append(f"[white]{classify_resolution(companion.width, companion.height)}[/white]")
+            elif companion.resolution:
+                parts.append(f"[white]{companion.resolution}[/white]")
+            if companion.bitrate:
+                parts.append(f"[blue]{companion.bitrate_display}[/blue]")
+            self._video_labels_by_task_key[f"{self._video_task_key}_dv"] = " ".join(parts)
+
+        self._audio_labels = {}
+        self._audio_labels_by_task_key = {}
+        self._audio_task_keys = []
+        seen_normalized: set[str] = set()
+
+        for s in sel_audio:
+            label = self._audio_stream_label(s)
+            raw = (s.language or "und").lower()
+            normalized = resolve_locale(raw) if raw else ""
+            # Must match _stream_task_key's audio branch exactly (prefers resolved_language over
+            # the raw, possibly-compound s.language) or the label built here won't be found by
+            # key when the download actually runs, and the UI falls back to showing the raw
+            # task_key instead of this label.
+            key_lang = (s.resolved_language or s.language or "und").lower()
+            task_lang = key_lang.split("-")[0]
+
+            if task_lang in seen_normalized:
+                logger.info(f"Audio {raw!r} already mapped as {task_lang!r} -- skip dup")
+                continue
+            seen_normalized.add(task_lang)
+
+            self._audio_labels[raw] = label
+            for variant in lang_variants(normalized):
+                self._audio_labels[variant] = label
+            if s.id and ":" in s.id:
+                self._audio_labels.setdefault(s.id.split(":")[0].lower(), label)
+            self._audio_labels_by_task_key[f"aud_{task_lang}"] = label
+
+            self._audio_task_keys.append((task_lang, label))
+
+        self._sub_labels = {}
+        self._sub_labels_by_task_key = {}
+        self._sub_task_keys = []
+        seen_sub_keys: set[str] = set()
+
+        for s in sel_subs:
+            label = self._sub_stream_label(s)
+            raw = (s.language or "und").lower()
+            key_lang = (s.resolved_language or s.language or "und").lower()
+            task_lang = key_lang.split("-")[0]
+            task_key = f"sub_{task_lang}{self._sub_discriminator(s)}"
+
+            name = (s.name or "").strip()
+            if name:
+                self._sub_labels[f"{raw}:{tmdb_client._slugify(name)}"] = label
+            self._sub_labels.setdefault(raw, label)
+
+            # Also store under base lang so "en-us" lookup finds the "en" entry
+            self._sub_labels.setdefault(task_lang, label)
+
+            # Per-task_key label lookup (used by _run_dl for correct per-stream label)
+            self._sub_labels_by_task_key[task_key] = label
+
+            if task_key not in seen_sub_keys:
+                seen_sub_keys.add(task_key)
+                self._sub_task_keys.append((task_key, label))
+
+    @staticmethod
+    def _audio_stream_label(s: "Stream") -> str:
+        """Rich label of an audio track: ``[codec] lang bitrate [DEFAULT]``."""
+        lang = s.resolved_language or s.language or "und"
+        codec = s.get_short_codec() or s.codecs or ""
+        parts = []
+
+        if codec:
+            parts.append(f"[yellow]\\[{codec}][/yellow]")
+
+        parts.append(f"[bold white]{lang}[/bold white]")
+        if s.bitrate:
+            parts.append(f"[blue]{s.bitrate_display}[/blue]")
+
+        if s.default:
+            parts.append("[bold red][DEFAULT][/bold red]")
+
+        return " ".join(parts)
+
+    @staticmethod
+    def _sub_discriminator(stream) -> str:
+        if getattr(stream, "forced", False):
+            return "_forced"
+        if getattr(stream, "is_sdh", False):
+            return "_sdh"
+        if getattr(stream, "is_cc", False):
+            return "_cc"
+        return ""
+
+    @staticmethod
+    def _sub_stream_label(s: "Stream") -> str:
+        try:
+            lang_raw = s.language or "und"
+            sfx = re.search(r"[-_](forced|cc|sdh|hi)$", lang_raw, re.I)
+            lang_sfx = sfx.group(1).lower() if sfx else ""
+            forced = s.forced or lang_sfx == "forced"
+            cc = s.is_cc or lang_sfx == "cc"
+            sdh = s.is_sdh or lang_sfx == "sdh"
+            default = s.default and not forced
+
+            lang = s.resolved_language or lang_raw or "und"
+            parts = [f"[bold white]{lang}[/bold white]"]
+
+            flags = format_disposition_flags(forced=forced, sdh=sdh, cc=cc, default=default)
+            if flags:
+                parts.append(f"[bold red]{flags}[/bold red]")
+
+            if getattr(s, "is_wvtt_mp4", False):
+                ext_tag = "WVTT"
+            else:
+                fmt = (s.format or "").lower().strip()
+                _IGNORE = {"dash", "hls", ""}
+                if fmt not in _IGNORE:
+                    ext_tag = fmt.upper()
+                else:
+                    # Try to derive from codec string
+                    codec_lc = (s.codecs or "").lower().strip()
+                    ext_tag = SUBTITLE_CODEC_MAP.get(codec_lc, "VTT")
+
+            return f"[yellow]\\[{ext_tag}][/yellow] {' '.join(parts)}"
+        except Exception:
+            return s.language or "und"
+
+    def _get_prebuilt_tasks(self) -> list[tuple[str, str]]:
+        tasks: list[tuple[str, str]] = []
+        if self._has_video:
+            tasks.append((self._video_task_key, f"[bold cyan]Vid[/bold cyan] {self._video_label}"))
+
+        dv_task_key = f"{self._video_task_key}_dv"
+        if self._dv_companion_stream() is not None:
+            dv_label = self._video_labels_by_task_key.get(dv_task_key, "")
+            tasks.append((dv_task_key, f"[bold cyan]Vid DV[/bold cyan] {dv_label}"))
+
+        seen: set[str] = set()
+        for lang_code, label in self._audio_task_keys:
+            key = f"aud_{lang_code}"
+            if key not in seen:
+                seen.add(key)
+                tasks.append((key, f"[bold cyan]Aud[/bold cyan] {label}"))
+
+        # ── Subtitle media streams (wvtt-mp4 and any other non-external subs) ─
+        for task_key, label in self._sub_task_keys:
+            if task_key not in seen:
+                seen.add(task_key)
+                tasks.append((task_key, f"[bold cyan]Sub[/bold cyan] {label}"))
+
+        return tasks
+
+    def _resolve_external_subtitle(self, s: Stream) -> dict | None:
+        sub_url = s.playlist_url or (s.segments[0].url if s.segments else None)
+        if not sub_url:
+            return None
+
+        ext = ext_from_url(sub_url, "")
+        segments: list[tuple[str, float]] = [(sub_url, 0.0)]
+        if not ext or not is_valid_format(ext, "subtitle"):
+            segments, ext = resolve_subtitle_segments_sync(sub_url, self.headers)
+            if not ext or not is_valid_format(ext, "subtitle"):
+                logger.info(f"Skipping external subtitle (unsupported format): {s.language} url={sub_url}")
+                s.selected = False
+                return None
+
+        entry = {
+            "url": segments[0][0],
+            "segments": [{"url": u, "duration": d} for u, d in segments],
+            "language": s.language or "und",
+            "name": s.name or "",
+            "forced": s.forced,
+            "sdh": s.is_sdh,
+            "cc": s.is_cc,
+            "default": s.default,
+            "type": ext,
+            "_selected": True,
+        }
+        logger.info(f"Subtitle -> external: {s.language}  segments={len(segments)}  url={segments[0][0]}")
+        s.selected = False
+        return entry
+
+    def _promote_hls_subtitles_to_external(self) -> None:
+        """Move selected HLS subtitle streams into self.external_subtitles."""
+        candidates = [
+            s
+            for s in self.streams
+            if s.type == "subtitle" and s.selected and not s.is_external and self.manifest_type == "HLS"
+        ]
+        if not candidates:
+            return
+
+        new_ext_subs: list[dict] = []
+        workers = get_subtitle_resolve_workers()
+        if workers <= 1:
+            for s in candidates:
+                entry = self._resolve_external_subtitle(s)
+                if entry:
+                    new_ext_subs.append(entry)
+        else:
+            with ThreadPoolExecutor(max_workers=min(workers, len(candidates))) as ex:
+                for entry in ex.map(self._resolve_external_subtitle, candidates):
+                    if entry:
+                        new_ext_subs.append(entry)
+
+        self.external_subtitles.extend(new_ext_subs)
+        if new_ext_subs:
+            logger.info(f"Moved {len(new_ext_subs)} HLS subtitle(s) to external download")
+
+    def _register_external_track_tasks(self, bar_manager: DownloadBarManager) -> None:
+        """Add progress-bar tasks for every selected external subtitle/audio track."""
+        seen_task_keys: dict[str, int] = {}
+        for _track, _ttype in [(s, "subtitle") for s in self.external_subtitles if s.get("_selected", True)] + [
+            (a, "audio") for a in self.external_audios if a.get("_selected", True)
+        ]:
+            _label = build_ext_track_label(_track, _ttype)
+            _lang = _track.get("language", "und")
+            _base_lang, _flag_suffix = normalize_sub_filename(_lang, _track)
+            _base_key = f"ext_{_ttype}_{_base_lang}{_flag_suffix}"
+            _count = seen_task_keys.get(_base_key, 0)
+            seen_task_keys[_base_key] = _count + 1
+            _task_key = _base_key if _count == 0 else f"{_base_key}_{_count + 1}"
+            _track["_task_key"] = _task_key
+            _track["_label"] = _label
+            bar_manager.add_external_track_task(_label, _task_key)
+
+    def _build_status(self, ext_subs: list, ext_auds: list = None) -> dict:
+        status: dict[str, Any] = {
+            "video": None,
+            "audios": [],
+            "subtitles": ext_subs or [],
+            "external_subtitles": [],
+            "external_audios": ext_auds or [],
+            "other_tracks": list(getattr(self, "other_tracks", []) or []),
+            "other_tracks_downloaded": [],
+        }
+
+        for f in sorted(self.output_dir.iterdir()):
+            if not f.is_file():
+                continue
+
+            # Orphaned artifact from an interrupted normalize_timestamps() pass
+            # (e.g. process killed between writing "<name>.norm.<ext>" and the
+            # rename-back). Never a real track -- skip so it can't masquerade
+            # as a bogus extra audio/video track.
+            if ".norm." in f.name.lower():
+                logger.warning(f"Skipping stray normalize artifact in output dir: {f.name}")
+                continue
+
+            ext = f.suffix.lower()
+            fname_l = self.filename.lower()
+
+            # ── Dolby Vision companion (_out_filename: "{filename}.dv.{ext}") ─
+            # Only its RPU is used, by build_hybrid_output() — never a real track.
+            if ext in VIDEO_EXTENSIONS and f.stem.lower() == f"{fname_l}.dv":
+                status["other_tracks_downloaded"].append(
+                    {
+                        "path": str(f),
+                        "type": "video:dv",
+                        "kind": "video",
+                        "tag": "dv",
+                        "language": "und",
+                        "name": "Dolby Vision",
+                        "size": f.stat().st_size,
+                    }
+                )
+                continue
+
+            # ── video ────────────────────────────────────────────────────────
+            if ext in VIDEO_EXTENSIONS and f.stem.lower() == fname_l:
+                if status["video"] is None:
+                    status["video"] = {"path": str(f), "size": f.stat().st_size}
+                continue
+
+            # ── audio ────────────────────────────────────────────────────────
+            if ext in AUDIO_EXTENSIONS and f.name.lower().startswith(fname_l):
+                if status["video"] and Path(status["video"]["path"]).name == f.name:
+                    continue
+                track_name = f.stem[len(self.filename) :].lstrip(".")
+                status["audios"].append(
+                    {
+                        "path": str(f),
+                        "name": track_name,
+                        "size": f.stat().st_size,
+                        **language_variants(track_name),
+                    }
+                )
+                continue
+
+            stem_lower = f.stem.lower()  # e.g. "filename.en"
+
+            # ── wvtt-mp4 subtitles ───────────────────────────────────────────
+            if ext in (".wvtt", ".mp4") and stem_lower.startswith(fname_l + "."):
+                if status["video"] and Path(status["video"]["path"]).name == f.name:
+                    continue
+                lang_part = stem_lower[len(fname_l) + 1 :]
+                status["subtitles"].append(
+                    {
+                        "path": str(f),
+                        "language": lang_part,
+                        "type": "wvtt",
+                        "size": f.stat().st_size,
+                        "is_wvtt_mp4": True,
+                        **subtitle_flags(lang_part),
+                        **language_variants(lang_part),
+                    }
+                )
+                continue
+
+            # ── plain-text DASH subtitles (vtt, ttml, srt) ───────────────
+            # Naming: {filename}.{lang}.{ext}  e.g. "show.cs-cz.vtt"
+            if ext in SUBTITLE_EXTENSIONS and stem_lower.startswith(fname_l + "."):
+                lang_part = stem_lower[len(fname_l) + 1 :]  # e.g. "cs-cz"
+                fmt = ext.lstrip(".")  # e.g. "vtt"
+                status["subtitles"].append(
+                    {
+                        "path": str(f),
+                        "language": lang_part,
+                        "name": lang_part,
+                        "type": fmt,
+                        "size": f.stat().st_size,
+                        **subtitle_flags(lang_part),
+                        **language_variants(lang_part),
+                    }
+                )
+                continue
+
+        return status

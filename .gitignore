@@ -1,0 +1,70 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+downloaded_files/
+
+# IDEs
+.idea
+.vscode
+.ruff_cache
+
+# Other
+start.sh
+.DS_Store
+GUI/db.sqlite3
+Conf/domains.json
+Conf/login.toml
+Conf/remote.json
+Conf/migration-*/
+/.cache
+!/.cache/arr
+!/.cache/arr/.gitkeep
+.claude
+/.claude
+CLAUDE.md
+
+Vibe/*
+/Video/
+GUI/.django_secret_key
+/data/
+
+# MkDocs build output
+/site/

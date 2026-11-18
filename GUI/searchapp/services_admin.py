@@ -1,0 +1,94 @@
+# 06.10.26
+
+import os
+import re
+import shutil
+
+from VibraVid.services._base.site_loader import CompiledService
+
+BUILTIN_SERVICES = frozenset({
+    "animeunity",
+    "animeworld",
+    "aurora",
+    "chili",
+    "crunchyroll",
+    "discoveryplus",
+    "guardoseries",
+    "la7",
+    "mediasetinfinity",
+    "plutotv",
+    "raiplay",
+    "rakutentv",
+    "streamingcommunity",
+    "timvision",
+    "tubitv",
+    "youtube",
+    "youtube_music",
+})
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+class ServiceRemovalError(Exception):
+    """Refusal to remove a service; ``status`` is the HTTP status the view answers with."""
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def services_dir() -> str:
+    """Absolute path of ``VibraVid/services`` (the folder the upload installs into)."""
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(project_root, "VibraVid", "services")
+
+
+def is_service_dir(path: str) -> bool:
+    """A service folder is either source (``__init__.py``) or compiled per-platform builds (see ``CompiledService``)."""
+    return os.path.isfile(os.path.join(path, "__init__.py")) or CompiledService(os.path.basename(path), path).is_candidate()
+
+
+def removable_services() -> list[str]:
+    """Names of the uploaded (non built-in) service folders that currently exist, sorted."""
+    base = services_dir()
+    if not os.path.isdir(base):
+        return []
+
+    names = []
+    for entry in sorted(os.listdir(base)):
+        full = os.path.join(base, entry)
+        if entry.startswith(("_", ".")) or entry in BUILTIN_SERVICES or not _NAME_RE.fullmatch(entry):
+            continue
+        if os.path.islink(full) or not is_service_dir(full):
+            continue
+        names.append(entry)
+    return names
+
+
+def remove_service(name) -> str:
+    """Delete the uploaded service folder ``name`` and return its name; raises ``ServiceRemovalError`` otherwise."""
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name.strip()):
+        raise ServiceRemovalError(400, "Nome del servizio non valido.")
+    name = name.strip()
+
+    if name in BUILTIN_SERVICES:
+        raise ServiceRemovalError(403, f"'{name}' è un servizio incluso nel progetto e non può essere rimosso.")
+
+    # The name only selects among the folders that exist on disk: it is never joined into a path itself.
+    base = os.path.realpath(services_dir())
+    folder = next((entry for entry in os.listdir(base) if entry == name), None) if os.path.isdir(base) else None
+    if folder is None:
+        raise ServiceRemovalError(404, f"Servizio '{name}' non trovato tra quelli caricati.")
+    
+    target = os.path.join(base, folder)
+    if os.path.islink(target):
+        raise ServiceRemovalError(403, f"'{name}' è un collegamento simbolico: non viene rimosso.")
+    
+    if name not in removable_services():
+        raise ServiceRemovalError(404, f"Servizio '{name}' non trovato tra quelli caricati.")
+    
+    if os.path.dirname(os.path.realpath(target)) != base:
+        raise ServiceRemovalError(403, f"'{name}' non si trova nella cartella dei servizi.")
+
+    shutil.rmtree(target)
+    return name

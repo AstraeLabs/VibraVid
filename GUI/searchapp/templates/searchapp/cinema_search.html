@@ -1,0 +1,241 @@
+{% extends "searchapp/cinema_base.html" %}
+{% load cinema_extras %}
+
+{% block title %}Search — ARROWAR{% endblock %}
+
+{% block content %}
+<div class="cn-pad cn-seekpage">
+
+	{% for message in messages %}
+		<p class="cn-msg{% if message.tags == 'error' %} is-bad{% elif message.tags == 'warning' %} is-warn{% endif %}">{{ message }}</p>
+	{% endfor %}
+
+	{% comment %}
+		Il form va alla view `search` storica, che resta la sola a parlare coi
+		provider. Metodo GET perché quella view accetta query+site anche da
+		querystring: così un risultato è linkabile e ricaricabile.
+	{% endcomment %}
+	<form action="{% url 'search' %}" method="get" id="cn-form">
+		<label class="cn-seek-label" for="cn-q">Search</label>
+
+		<div class="cn-seek is-hero">
+			<input type="text" name="query" id="cn-q" required
+			       placeholder="Title, actor, author…" autocomplete="off" autofocus>
+			<button class="cn-cta" type="submit">Search</button>
+		</div>
+		<input type="hidden" name="site" id="cn-site" value="{{ all_token }}">
+		<input type="hidden" name="audio_language" value="{{ audio_language_config.selection }}">
+
+		{% comment %}
+			L'interruttore dei provider sta nella STESSA riga degli ambiti, non
+			sotto: da solo finiva su una riga sua e sembrava un pulsante di
+			default del browser rimasto lì per sbaglio. È una scelta sorella
+			delle altre — "cerca ovunque / in una categoria / su uno solo" — e
+			deve leggersi così, distinta dalle categorie ma non estranea.
+		{% endcomment %}
+		<div class="cn-opts" id="cn-scope">
+			<button class="cn-opt" type="button" aria-pressed="true"
+			        data-scope="{{ all_token }}" data-cat="">
+				All <span class="cn-opt-n">{{ sites|length }}</span>
+			</button>
+			{% for s in scopes %}
+				<button class="cn-opt" type="button" aria-pressed="false"
+				        data-scope="{{ s.value }}" data-cat="{{ s.category }}"
+				        data-label="{{ s.label }}">
+					{{ s.label }} <span class="cn-opt-n">{{ s.count }}</span>
+				</button>
+			{% endfor %}
+
+			<button class="cn-opt is-toggle" type="button" id="cn-toggle"
+			        aria-expanded="false" aria-controls="cn-site-filter">
+				Single provider <i aria-hidden="true">▾</i>
+			</button>
+		</div>
+
+		<p class="cn-seek-hint" id="cn-scope-hint"></p>
+		<p class="cn-seek-hint cn-extra-line" id="cn-extra-line" hidden></p>
+		<p class="cn-seek-hint cn-extra-line" id="cn-login-line" hidden></p>
+
+		<div class="cn-opts cn-sitelist" id="cn-site-filter" hidden>
+			{% for s in sites %}
+				<button class="cn-opt" type="button" aria-pressed="false"
+				        data-site="{{ s.name }}" data-cat="{{ s.category }}">{{ s.name|provider }}</button>
+			{% endfor %}
+		</div>
+	</form>
+
+	{% if not sites %}
+		<p class="cn-empty" style="padding-left:0">
+			No active providers. Check <code>hidden_services</code> in <code>config.toml</code>.
+		</p>
+	{% endif %}
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+{# Le opzioni personalizzate (login.toml -> args) entrano come JSON, non interpolate in JS: sono testo scritto dall'utente. #}
+{{ site_extra_args|json_script:"cn-site-extra-args" }}
+<script>
+(function () {
+	"use strict";
+
+	var URL_CLI_OPTIONS = "{% url 'site_cli_options_schema' %}";
+	var extraLine = document.getElementById("cn-extra-line");
+	var loginLine = document.getElementById("cn-login-line");
+	var savedArgs = {};
+	try { savedArgs = JSON.parse(document.getElementById("cn-site-extra-args").textContent) || {}; }
+	catch (err) { savedArgs = {}; }
+	var schemaCache = {};
+	var shownSite = null;
+	var loginSeq = 0;
+
+	function describe(arg) {
+		if (arg.kind === "flag") return arg.flag;
+		if (arg.kind === "choice") return arg.flag + " {" + arg.choices.join(",") + "}";
+		if (arg.kind === "int") return arg.flag + " N";
+		return arg.flag + " " + String(arg.dest || "value").toUpperCase();
+	}
+
+	function paint(site, args) {
+		if (shownSite !== site) return;  // the user already picked something else
+		extraLine.textContent = "Custom arguments: ";
+		if (!args.length) extraLine.appendChild(document.createTextNode("none"));
+		args.forEach(function (arg, i) {
+			if (i) extraLine.appendChild(document.createTextNode(" · "));
+			var item = document.createElement("span");
+			item.textContent = describe(arg);
+			if (arg.help) item.title = arg.help;
+			extraLine.appendChild(item);
+		});
+		if (savedArgs[site]) extraLine.appendChild(document.createTextNode("  —  saved: " + savedArgs[site]));
+		extraLine.hidden = false;
+	}
+
+	function paintLogin(login) {
+		loginLine.textContent = "";
+		loginLine.classList.remove("is-ok", "is-missing");
+
+		if (!login) { loginLine.hidden = true; return; }
+		var needed = login.need === "required";
+		var label = needed ? "Need key for login: " : "Login (optional, works anonymous): ";
+		loginLine.appendChild(document.createTextNode(label));
+		var strong = document.createElement("b");
+		strong.textContent = needed ? "yes" : "no";
+		loginLine.appendChild(strong);
+		loginLine.appendChild(document.createTextNode(" · Present: "));
+		var state = document.createElement("b");
+		state.textContent = login.present ? "yes" : "no";
+		loginLine.appendChild(state);
+
+		if (!login.present && login.missing && login.missing.length)
+			loginLine.appendChild(document.createTextNode("  (missing: " + login.missing.join(", ") + ")"));
+
+		loginLine.title = (login.keys || []).map(function (k) {
+			return (k.present ? "✓ " : "✗ ") + k.key + (k.optional ? " (optional)" : "");
+		}).join("\n");
+
+		loginLine.classList.add(login.present ? "is-ok" : "is-missing");
+		loginLine.hidden = false;
+	}
+
+	function showLogin(site) {
+		var seq = ++loginSeq;
+		if (!site) { paintLogin(null); return; }
+		fetch(URL_CLI_OPTIONS + "?site=" + encodeURIComponent(site))
+			.then(function (r) { return r.json(); })
+			.then(function (data) { if (seq === loginSeq && shownSite === site) paintLogin(data && data.login); })
+			.catch(function () { if (seq === loginSeq) paintLogin(null); });
+	}
+
+	// Info only: the options this provider's CLI accepts (the same list as Settings -> Custom CLI options).
+	function showExtra(site) {
+		shownSite = site;
+		showLogin(site);
+		if (!site) { extraLine.hidden = true; extraLine.textContent = ""; return; }
+		if (schemaCache[site]) { paint(site, schemaCache[site]); return; }
+		extraLine.textContent = "Custom arguments: …";
+		extraLine.hidden = false;
+		fetch(URL_CLI_OPTIONS + "?site=" + encodeURIComponent(site))
+			.then(function (r) { return r.json(); })
+			.then(function (data) { schemaCache[site] = (data && data.args) || []; paint(site, schemaCache[site]); })
+			.catch(function () { schemaCache[site] = []; paint(site, []); });
+	}
+
+	var scopeRow = document.getElementById("cn-scope");
+	var siteRow  = document.getElementById("cn-site-filter");
+	var hidden   = document.getElementById("cn-site");
+	var hint     = document.getElementById("cn-scope-hint");
+	var toggle   = document.getElementById("cn-toggle");
+
+	function press(row, chosen) {
+		row.querySelectorAll("[data-scope], [data-site]").forEach(function (b) {
+			b.setAttribute("aria-pressed", String(b === chosen));
+		});
+	}
+
+	function openSites(open) {
+		siteRow.hidden = !open;
+		toggle.setAttribute("aria-expanded", String(open));
+	}
+
+	function narrow(category) {
+		var visible = 0;
+		siteRow.querySelectorAll("button[data-site]").forEach(function (b) {
+			var show = !category || b.dataset.cat === category;
+			b.hidden = !show;
+			if (show) visible++;
+		});
+		return visible;
+	}
+
+	scopeRow.addEventListener("click", function (e) {
+		var b = e.target.closest("button[data-scope]");
+		if (!b) return;
+
+		press(scopeRow, b);
+		press(siteRow, null);
+		hidden.value = b.dataset.scope;
+		showExtra(null);
+
+		var n = narrow(b.dataset.cat);
+		hint.textContent = b.dataset.cat
+			? "Will search across the " + n + " " + b.dataset.label + " providers together."
+			: "Will search all active providers together. Takes longer, but nothing gets missed.";
+	});
+
+	siteRow.addEventListener("click", function (e) {
+		var b = e.target.closest("button[data-site]");
+		if (!b) return;
+
+		press(siteRow, b);
+		press(scopeRow, null);
+		hidden.value = b.dataset.site;
+		hint.textContent = "Will search only on " + b.textContent.trim() + ".";
+		showExtra(b.dataset.site);
+	});
+
+	toggle.addEventListener("click", function () {
+		openSites(siteRow.hidden);
+	});
+
+	document.getElementById("cn-form").addEventListener("submit", function (e) {
+		if (!document.getElementById("cn-q").value.trim()) e.preventDefault();
+	});
+
+	function resetScope() {
+		var defaultSite = siteRow.querySelector('button[data-site="streamingcommunity"]');
+		if (defaultSite) {
+			defaultSite.click();
+		} else {
+			scopeRow.querySelector("button[data-scope]").click();
+		}
+		openSites(false);
+	}
+	resetScope();
+	window.addEventListener("pageshow", function (e) {
+		if (e.persisted) resetScope();
+	});
+})();
+</script>
+{% endblock %}
