@@ -473,9 +473,9 @@ class GetSerieInfo:
 
                 ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
                 try:
-                    ep_num = int(ep_num) if ep_num else 0
+                    ep_num = int(ep_num) if ep_num else None
                 except Exception:
-                    ep_num = 0
+                    ep_num = None
 
                 category = entry.get("mediasetprogram$category")
                 if not category:
@@ -642,11 +642,12 @@ class GetSerieInfo:
                 duration = (
                     int(entry.get("mediasetprogram$duration", 0) / 60) if entry.get("mediasetprogram$duration") else 0
                 )
-                ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber", 0)
+                ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
                 try:
-                    ep_num = int(ep_num)
+                    ep_num = int(ep_num) if ep_num else None
                 except Exception:
-                    ep_num = 0
+                    ep_num = None
+                
                 episodes.append(
                     Episode(
                         id=entry.get("guid", ""),
