@@ -3,7 +3,7 @@
 
 import json
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from VibraVid.utils.http_client import create_client, get_userAgent
 
@@ -48,11 +48,96 @@ def _extract_dash_url(html: str) -> str | None:
     return dash_url
 
 
+
+def _la7play_metadata(html: str) -> dict | None:
+    """Read the public Next.js player metadata without executing JavaScript."""
+    chunks = re.findall(
+        r'self\.__next_f\.push\(\[(?:1|2),("(?:\\.|[^"\\])*")\]\)',
+        html,
+    )
+    decoded = []
+    for chunk in chunks:
+        try:
+            decoded.append(json.loads(chunk))
+        except (TypeError, ValueError):
+            continue
+    payload = "".join(decoded)
+    if not payload:
+        return None
+
+    def field(key: str) -> str | None:
+        match = re.search(r'"' + re.escape(key) + r'":"([^"]*)"', payload)
+        return match.group(1) if match else None
+
+    remote = field("cf_remote_url")
+    cdn = field("hostnameCdn")
+    if not remote or not cdn:
+        return None
+
+    # A content-level DRM flag must take precedence over any playback URL.
+    drm_flag = re.search(r'"drm":(true|false)', payload)
+    drm = drm_flag is not None and drm_flag.group(1) == "true"
+    if not drm_flag:
+        return None  # Fail closed when protection status cannot be determined.
+
+    # Restrict URL construction to the provider's HTTPS CDN and its paths.
+    cdn_parts = urlsplit(cdn)
+    if cdn_parts.scheme != "https" or not cdn_parts.netloc or cdn_parts.username or cdn_parts.password:
+        return None
+    old_entry_id = field("cf_old_entry_id")
+    is_new = old_entry_id is None  # JSON null is represented by an absent quoted value.
+    paths = []
+    for path in remote.split(","):
+        path = path.strip()
+        if not path.startswith("/") or "?" in path or "#" in path or ".." in path:
+            return None
+        path = re.sub(r"\.mp4$", "", path)
+        if is_new and not path.startswith("/nk/"):
+            path = "/nk" + path
+        paths.append(path)
+
+    if not paths:
+        return None
+    joined = ",".join(paths)
+    base = cdn.rstrip("/")
+    return {
+        "dash_url": f"{base}/local/dash/,{joined},.mp4.urlset/manifest.mpd",
+        "hls_url": f"{base}/local/hls/,{joined},.mp4.urlset/master.m3u8",
+        "drm": "DRM" if drm else None,
+    }
+
 def get_playback_info(page_url: str) -> dict:
     with create_client(headers={"user-agent": get_userAgent(), "referer": page_url}) as client:
         response = client.get(page_url)
         response.raise_for_status()
         html = response.text
+    la7play = _la7play_metadata(html)
+    if la7play:
+        # Never offer a protected source to the non-DRM download path.
+        if la7play["drm"]:
+            return {
+                "title": page_url.rsplit("/", 1)[-1],
+                "mp4_url": None, "hls_url": None, "dash_url": None,
+                "drm": la7play["drm"],
+            }
+        with create_client(headers={"user-agent": get_userAgent(), "referer": page_url}) as client:
+            response = client.get(la7play["dash_url"], timeout=15)
+            response.raise_for_status()
+            manifest = response.text
+        if "contentprotection" in manifest.lower() or "cenc:default_kid" in manifest.lower():
+            return {
+                "title": page_url.rsplit("/", 1)[-1],
+                "mp4_url": None, "hls_url": None, "dash_url": None,
+                "drm": "DRM",
+            }
+        return {
+            "title": page_url.rsplit("/", 1)[-1],
+            "mp4_url": None,
+            "hls_url": la7play["hls_url"],
+            "dash_url": la7play["dash_url"],
+            "drm": None,
+        }
+
     sources = []
     for item in _jsonld(html):
         content_url = item.get("contentUrl")
