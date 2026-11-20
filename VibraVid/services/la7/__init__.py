@@ -4,7 +4,7 @@
 import re
 import sys
 import unicodedata
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from curl_cffi.requests.exceptions import HTTPError
 from rich.console import Console
@@ -80,61 +80,90 @@ def _page_links_cinema(path: str) -> list[tuple[str, str]]:
     return list(dict.fromkeys(links))
 
 
+def _program_episode_links(path: str) -> list[tuple[str, str]]:
+    """Collect each episode from the paginated LA7 program archive."""
+    archive_path = path.rstrip("/") + "/puntate"
+    with create_client(headers={"user-agent": get_userAgent()}) as client:
+        response = client.get(urljoin(BASE_URL, archive_path), timeout=10)
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        first_page = response.text
+
+        page_numbers = [
+            int(page) for page in re.findall(
+                r'href=["\']' + re.escape(archive_path) + r'\?page=(\d+)["\']',
+                first_page,
+            )
+        ]
+        last_page = min(max(page_numbers, default=1), 100)
+        pages = [first_page]
+        for number in range(2, last_page + 1):
+            response = client.get(
+                urljoin(BASE_URL, f"{archive_path}?page={number}"), timeout=10
+            )
+            response.raise_for_status()
+            pages.append(response.text)
+
+    episodes = {}
+    prefixes = (path.rstrip("/") + "/rivedila7/", path.rstrip("/") + "/puntate/")
+    for html in pages:
+        for href in re.findall(r'href=["\']([^"\']+)["\']', html):
+            url = urljoin(BASE_URL, href).split("?", 1)[0]
+            # LA7 redirects to la7play.it; normalize back to LA7.
+            url_path = urlparse(url).path
+            if not url_path.startswith(prefixes):
+                continue
+            slug = url_path.rsplit("/", 1)[-1]
+            if not re.search(r"-\d+$", slug):
+                continue
+            title = re.sub(r"-\d{1,2}-\d{1,2}-\d{4}-\d+$", "", slug)
+            program_slug = path.strip("/").split("/")[-1]
+            if title.startswith(program_slug + "-"):
+                title = title[len(program_slug) + 1:]
+            display = title.replace("-", " ").strip().title() or slug
+            date = re.search(r"(\d{1,2}-\d{1,2}-\d{4})-\d+$", slug)
+            if date:
+                display += f" ({date.group(1)})"
+            episodes.setdefault(BASE_URL + url_path, display)
+    return [(name, url) for url, name in episodes.items()]
+
+
 def title_search(query: str) -> int:
     entries_manager.clear()
     table_show_manager.clear()
     query_key = _normalize(query)
-    
-    # Search both programs and films (equivalent to "all")
+
     try:
-        # Construct likely slugs from query
         candidates = [
             f"/{query_key.replace(' ', '-')}",
             f"/{query_key.replace(' ', '')}",
         ]
-        # Add compact version only if different
-        compact = re.sub(r'[^a-z0-9]+', '', query_key)
-        if compact != query_key.replace(' ', ''):
+        compact = re.sub(r"[^a-z0-9]+", "", query_key)
+        if compact != query_key.replace(" ", ""):
             candidates.append(f"/{compact}")
-        
-        for slug in dict.fromkeys(candidates):
-            path = slug if slug.startswith("/") else urljoin(BASE_URL, slug).replace(BASE_URL, "")
-            # Quick check if program page exists (has rivedila7 content)
-            check_url = urljoin(BASE_URL, path.rstrip("/") + "/rivedila7")
-            page_html = None
-            with create_client(headers={"user-agent": get_userAgent()}) as client:
-                try:
-                    resp = client.get(check_url, timeout=5)
-                    if resp.status_code != 200:
-                        continue
-                    # Check if page has episode links
-                    if "rivedila7/" not in resp.text and "video/" not in resp.text:
-                        continue
-                    page_html = resp.text
-                except Exception:
+
+        seen_urls = set()
+        for path in dict.fromkeys(candidates):
+            try:
+                episodes = _program_episode_links(path)
+            except Exception as exc:
+                console.print(f"[yellow]La7 archive search failed for {path}: {exc}")
+                continue
+            for name, url in episodes:
+                if url in seen_urls:
                     continue
-            # Extract clean program name from slug
-            program_name = path.strip("/").split("/")[-1].replace("-", " ").title()
-            # Try to get latest episode date from page for display
-            display_name = program_name
-            if page_html:
-                dates = re.findall(r'(\d{2}-\d{2}-\d{4})', page_html)
-                if dates:
-                    # Sort dates and pick the latest
-                    from datetime import datetime
-                    parsed_dates = [(datetime.strptime(d, "%d-%m-%Y"), d) for d in dates]
-                    parsed_dates.sort(reverse=True)
-                    display_name = f"{program_name} {parsed_dates[0][1]}"
-            entries_manager.add(Entries(
-                name=display_name,
-                type="tv",
-                url=check_url,
-                year="9999",
-                path_id=path,
-            ))
+                seen_urls.add(url)
+                entries_manager.add(Entries(
+                    name=name,
+                    type="tv",
+                    url=url,
+                    year="9999",
+                    path_id=path,
+                ))
     except Exception as exc:
         console.print(f"[red]La7 programs search error: {exc}")
-    
+
     # Search films (LA7 Cinema)
     try:
         links = _page_links_cinema(CINEMA_BASE + "/rivedila7")
