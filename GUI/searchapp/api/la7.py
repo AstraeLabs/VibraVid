@@ -1,7 +1,7 @@
 # 02.10.26
 
-from dataclasses import replace
 import logging
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 from .generic import GenericStreamingAPI
