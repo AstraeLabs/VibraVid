@@ -67,13 +67,13 @@ def test_origin_includes_the_quality_rule_that_matched(setup_cdm):
 def test_cli_override_beats_the_service_and_the_global_setting(setup_cdm):
     setup_cdm("mine.wvd", global_cdm="remote_playready_1", cli=["remote_widevine_1"])
     resolved = resolve_cdm("mysite")
-    assert resolved.widevine_remote == DL_WIDEVINE and resolved.widevine_origin == "--cdm"
+    assert resolved.widevine_remote == {**DL_WIDEVINE, "id": "remote_widevine_1"} and resolved.widevine_origin == "--cdm"
     assert resolved.playready_remote is not None and resolved.playready_origin == "config.toml [DRM]"  # the option only covers Widevine
 
 
 def test_cli_override_with_a_quality_rule(setup_cdm):
     setup_cdm(cli=parse_cdm_cli(['[{"min_height": 1080, "cdm": "remote_widevine_1"}, {"cdm": "mine.wvd"}]']))
-    assert resolve_cdm("mysite", 2160).widevine_remote == DL_WIDEVINE
+    assert resolve_cdm("mysite", 2160).widevine_remote == {**DL_WIDEVINE, "id": "remote_widevine_1"}
     assert resolve_cdm("mysite", 720).wvd_path == "/bin/mine.wvd"
 
 

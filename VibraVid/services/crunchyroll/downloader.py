@@ -14,7 +14,13 @@ from VibraVid.services._base.tv_display_manager import map_episode_path, map_mov
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
 from VibraVid.utils import config_manager, os_manager, start_message
 
-from .client import CrunchyrollClient, get_episode_chapters, get_playback_session
+from .client import (
+    CrunchyrollClient,
+    CrunchyrollHardSubError,
+    get_episode_chapters,
+    get_playback_session,
+    merge_subtitles,
+)
 from .manifest_builder import build_unified_manifest
 from .scrapper import GetSerieInfo
 
@@ -63,23 +69,6 @@ def _subtitles_to_other_tracks(subtitles: list) -> list:
     return tracks
 
 
-def _merge_subtitles(base: list, extra: list) -> list:
-    """Union subtitle lists by (language, closed_caption), preferring entries already in ``base``."""
-    merged = list(base or [])
-    seen = {(s.get("language"), bool(s.get("closed_caption"))) for s in merged if isinstance(s, dict)}
-
-    for sub in extra or []:
-        if not isinstance(sub, dict):
-            continue
-        key = (sub.get("language"), bool(sub.get("closed_caption")))
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(sub)
-
-    return merged
-
-
 def parse_select_audio_filter(select_audio: str) -> list:
     """
     Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all", or exclusive-priority slots "1ita|2eng") to extract locale groups.
@@ -118,6 +107,12 @@ def parse_select_audio_filter(select_audio: str) -> list:
             groups.append(locales)
 
     return groups
+
+
+def _refuse_hard_sub(client: CrunchyrollClient, error: CrunchyrollHardSubError) -> tuple:
+    """Stop a download whose video only exists with burned-in subtitles that were not chosen (the caller reports the message)."""
+    client.close()
+    return None, True, str(error)
 
 
 def _make_license_request_fn(client: CrunchyrollClient, content_id: str):
@@ -192,7 +187,10 @@ def download_film(select_title: Entries) -> str:
             main_locale = locale
             break
 
-    mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, None)
+    try:
+        mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, None)
+    except CrunchyrollHardSubError as e:
+        return _refuse_hard_sub(client, e)
     extra_audio_tracks = []
     for locale in preferred_locales:
         if locale == main_locale:
@@ -206,7 +204,7 @@ def download_film(select_title: Entries) -> str:
 
         try:
             time.sleep(2)
-            ex_mpd_url, ex_hdrs, _, ex_token, _ = get_playback_session(client, guid, None)
+            ex_mpd_url, ex_hdrs, _, ex_token, _ = get_playback_session(client, guid, None, video=False)
             if not ex_mpd_url:
                 console.print(f"[yellow]Locale {locale} not available for this film")
                 continue
@@ -297,9 +295,12 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
             main_locale = locale
             break
 
-    mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, main_guid)
+    try:
+        mpd_url, mpd_headers, mpd_list_sub, token, audio_locale = get_playback_session(client, main_id, main_guid)
+    except CrunchyrollHardSubError as e:
+        return _refuse_hard_sub(client, e)
     audio_locale = main_locale or audio_locale
-    all_subtitles = _merge_subtitles(mpd_list_sub, [])
+    all_subtitles = merge_subtitles(mpd_list_sub, [])
     license_headers = _build_license_headers(client, mpd_headers, main_id, mpd_url, token)
 
     # Fetch extra audio tracks for the remaining preferred locales
@@ -316,7 +317,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
 
         try:
             time.sleep(2)
-            ex_mpd_url, ex_hdrs, ex_subs, ex_token, _ = get_playback_session(client, guid, None)
+            ex_mpd_url, ex_hdrs, ex_subs, ex_token, _ = get_playback_session(client, guid, None, video=False)
             if not ex_mpd_url:
                 console.print(f"[yellow]Locale {locale} not available for this episode")
                 continue
@@ -331,7 +332,7 @@ def download_episode(obj_episode, index_season_selected, index_episode_selected,
                     "license_headers": ex_license_hdrs,
                 }
             )
-            all_subtitles = _merge_subtitles(all_subtitles, ex_subs)
+            all_subtitles = merge_subtitles(all_subtitles, ex_subs)
             time.sleep(5)  # Small delay to avoid rate limiting between calls
         except Exception as e:
             console.print(f"[yellow]Errore fetch audio {locale}: {e}")

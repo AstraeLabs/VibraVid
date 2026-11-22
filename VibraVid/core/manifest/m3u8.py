@@ -19,16 +19,13 @@ from VibraVid.core.manifest._utils import calc_base_url, save_raw_manifest
 from VibraVid.core.manifest.stream import DRMInfo, DRMType, Stream
 from VibraVid.core.utils.codec import AUDIO_CODEC_PREFIXES, VIDEO_CODEC_PREFIXES, detect_stream_type, infer_video_range
 from VibraVid.core.utils.language import resolve_locale
+from VibraVid.core.utils.subtitle_flags import classify, is_audio_description, split_lang_flags
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers, get_with_retry
 
 logger = logging.getLogger(__name__)
 console = Console()
 
-_CC_NAME_RE = re.compile(r"\[CC\]|\bCC\b|closed[- _]captions?|\bSDH\b", re.IGNORECASE)
-_SDH_NAME_RE = re.compile(r"\[SDH\]|\bSDH\b|hearing[- _]impaired|\bHI\b", re.IGNORECASE)
-_FORCED_NAME_RE = re.compile(r"\[forced\]|\bforced\b", re.IGNORECASE)
-_COMPOUND_LANG_RE = re.compile(r"^(.+?)[-_.]\[?(forced|cc|sdh|hi|default)\]?$", re.IGNORECASE)
 _KEY_LINE_RE = re.compile(r"#EXT-X-(?:SESSION-)?KEY:([^\r\n]+)", re.IGNORECASE)
 _SESSION_KEY_LINE_RE = re.compile(r"#EXT-X-SESSION-KEY:([^\r\n]+)", re.IGNORECASE)
 _KEY_URI_RE = re.compile(r'URI="([^"]+)"', re.IGNORECASE)
@@ -506,18 +503,11 @@ class HLSParser:
         lang = self._attr(line, "LANGUAGE", "")
         name = self._attr(line, "NAME", "")
 
+        lang_flag_words: set[str] = set()
         if lang:
-            lang_m = _COMPOUND_LANG_RE.match(lang)
-            if lang_m:
-                base_lang = lang_m.group(1)
-                lang_suffix = lang_m.group(2).lower()
-            else:
-                base_lang = lang
-                lang_suffix = ""
+            base_lang, lang_flag_words = split_lang_flags(lang)
             s.language = lang  # preserve original for filename generation
             s.resolved_language = resolve_locale(base_lang)
-        else:
-            lang_suffix = ""
         if name:
             s.name = name
 
@@ -551,15 +541,6 @@ class HLSParser:
             elif "audio-atmos" in group_id:
                 s.bitrate = 2_448_000
 
-        if not s.forced and stream_type == "subtitle":
-            if lang_suffix == "forced":
-                s.forced = True
-            elif name and _FORCED_NAME_RE.search(name):
-                s.forced = True
-
-        if s.forced:
-            s.default = False
-
         assoc = self._attr(line, "ASSOC-LANGUAGE", "")
         if assoc:
             s.assoc_language = assoc
@@ -567,23 +548,27 @@ class HLSParser:
         chars = self._attr(line, "CHARACTERISTICS", "")
         if chars:
             s.accessibility = chars
-            if "describes-music-and-sound" in chars.lower() or "hearing" in chars.lower():
-                s.is_sdh = True
 
-        # is_cc: detect from the LANGUAGE suffix or NAME for TYPE=SUBTITLES.
-        if not s.is_cc and lang_suffix == "cc":
-            s.is_cc = True
-        if not s.is_cc and name and _CC_NAME_RE.search(name):
-            s.is_cc = True
+        if stream_type == "subtitle":
+            # forced / cc / sdh / hi from FORCED, CHARACTERISTICS, the LANGUAGE suffix and the NAME, each kept distinct
+            flags = classify(lang=lang, name=name, forced=s.forced, characteristics=chars)
+            s.forced, s.is_cc, s.is_sdh, s.is_hi = flags.forced, flags.cc, flags.sdh, flags.hi
 
-        # is_sdh: detect from the LANGUAGE suffix, NAME, or CHARACTERISTICS
-        if not s.is_sdh and lang_suffix == "sdh":
-            s.is_sdh = True
-        if not s.is_sdh and name and _SDH_NAME_RE.search(name):
-            s.is_sdh = True
+            # Renditions of one group sharing a language (plain / forced / SDH...) must not collapse into one id
+            if not stable_id and lang:
+                extra = [n for n in flags.names() if n not in lang_flag_words]
+                if extra:
+                    s.id += "".join(f"_{n}" for n in extra)
+        elif stream_type == "audio":
+            s.is_ad = is_audio_description(lang=lang, name=name, characteristics=chars)
+            if s.is_ad and not stable_id and lang:
+                s.id += "_ad"
+
+        if s.forced:
+            s.default = False
 
         # Name annotation for display (non-destructive)
-        if s.forced and "[Forced]" not in (s.name or ""):
+        if s.forced and not classify(name=s.name).forced:
             s.name = f"{s.name} [Forced]" if s.name else "[Forced]"
 
         return s

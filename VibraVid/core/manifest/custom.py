@@ -15,6 +15,7 @@ from VibraVid.core.drm.system import DRMType
 from VibraVid.core.manifest._utils import calc_base_url, fast_urljoin_auto, save_raw_manifest
 from VibraVid.core.manifest.stream import Segment, Stream
 from VibraVid.core.utils.language import resolve_locale
+from VibraVid.core.utils.subtitle_flags import classify, is_audio_description
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
@@ -183,11 +184,18 @@ class CustomParser:
             s.channels = str(track.get("channels") or "")
             s.sample_rate = int(track.get("sample_rate") or 0)
             s.default = bool(track.get("default"))
+            s.is_ad = is_audio_description(lang=lang_raw, name=s.name, ad=bool(track.get("is_ad") or track.get("ad")))
 
         if stype == "subtitle":
-            s.forced = bool(track.get("forced"))
-            s.is_cc = bool(track.get("is_cc"))
-            s.is_sdh = bool(track.get("is_sdh"))
+            flags = classify(
+                lang=lang_raw,
+                name=s.name,
+                forced=bool(track.get("forced")),
+                cc=bool(track.get("is_cc") or track.get("cc")),
+                sdh=bool(track.get("is_sdh") or track.get("sdh")),
+                hi=bool(track.get("is_hi") or track.get("hi")),
+            )
+            s.forced, s.is_cc, s.is_sdh, s.is_hi = flags.forced, flags.cc, flags.sdh, flags.hi
             s.time_origin = float(track.get("time_origin") or 0.0)
 
         drm = track.get("drm")

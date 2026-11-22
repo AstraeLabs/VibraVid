@@ -36,6 +36,7 @@ from VibraVid.core.utils.selector import (
     tag_matches_filter,
 )
 from VibraVid.core.utils.stream_selector_ui import InteractiveStreamSelector
+from VibraVid.core.utils.subtitle_flags import SubFlags, split_lang_flags
 from VibraVid.core.utils.track_order import effective_select_filter
 from VibraVid.core.velora.subtitle import build_ext_track_label, ext_from_url, is_valid_format, normalize_sub_filename
 from VibraVid.core.velora.util._subtitle_segments import get_subtitle_resolve_workers, resolve_subtitle_segments_sync
@@ -573,6 +574,7 @@ class BaseMediaDownloader:
             forced=bool(track.get("forced")),
             cc=bool(track.get("cc")),
             sdh=bool(track.get("sdh")),
+            hi=bool(track.get("hi")),
         )
 
     def _prepare_labels(self) -> None:
@@ -716,29 +718,21 @@ class BaseMediaDownloader:
 
     @staticmethod
     def _sub_discriminator(stream) -> str:
-        if getattr(stream, "forced", False):
-            return "_forced"
-        if getattr(stream, "is_sdh", False):
-            return "_sdh"
-        if getattr(stream, "is_cc", False):
-            return "_cc"
-        return ""
+        """Canonical flag suffix (``_forced``, ``_forced_sdh``...): every flag, so two variants never share a key."""
+        return SubFlags.from_stream(stream).suffix()
 
     @staticmethod
     def _sub_stream_label(s: "Stream") -> str:
         try:
             lang_raw = s.language or "und"
-            sfx = re.search(r"[-_](forced|cc|sdh|hi)$", lang_raw, re.I)
-            lang_sfx = sfx.group(1).lower() if sfx else ""
-            forced = s.forced or lang_sfx == "forced"
-            cc = s.is_cc or lang_sfx == "cc"
-            sdh = s.is_sdh or lang_sfx == "sdh"
+            flags = SubFlags.from_stream(s) | SubFlags.from_names(split_lang_flags(lang_raw)[1])
+            forced, cc, sdh, hi = flags.forced, flags.cc, flags.sdh, flags.hi
             default = s.default and not forced
 
             lang = s.resolved_language or lang_raw or "und"
             parts = [f"[bold white]{lang}[/bold white]"]
 
-            flags = format_disposition_flags(forced=forced, sdh=sdh, cc=cc, default=default)
+            flags = format_disposition_flags(forced=forced, sdh=sdh, cc=cc, hi=hi, default=default)
             if flags:
                 parts.append(f"[bold red]{flags}[/bold red]")
 
@@ -805,6 +799,7 @@ class BaseMediaDownloader:
             "forced": s.forced,
             "sdh": s.is_sdh,
             "cc": s.is_cc,
+            "hi": s.is_hi,
             "default": s.default,
             "type": ext,
             "_selected": True,

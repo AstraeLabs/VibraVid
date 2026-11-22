@@ -62,6 +62,7 @@ def offline_variant_playlists(monkeypatch):
 
 
 REMOTE_L1 = {"type": "custom_api_1", "secret": "k", "device_name": "L1"}
+RESOLVED_L1 = {**REMOTE_L1, "id": "remote_l1"}  # what resolve_cdm hands out: the block plus its id
 RULES = [{"min_height": 1080, "cdm": "remote_l1"}, {"cdm": "mine.wvd"}]
 
 
@@ -137,10 +138,10 @@ def test_height_is_the_tallest_selected_video(picked, expected_height):
 def test_picking_1080_uses_the_remote_l1_cdm(key_requests):
     stub, _ = _download(_hls_streams({1080: True}))
     assert len(key_requests) == 1  # one license session for the whole download
-    assert key_requests[0]["cdm_remote_api"] == REMOTE_L1
+    assert key_requests[0]["cdm_remote_api"] == RESOLVED_L1
     assert key_requests[0]["cdm_device_path"] is None
     assert key_requests[0]["cdm_origin"] == "login.toml 'mysite', min_height 1080"
-    assert stub.drm_manager.widevine_remote_cdm_api == REMOTE_L1
+    assert stub.drm_manager.widevine_remote_cdm_api == RESOLVED_L1
 
 
 def test_picking_720_uses_the_local_device_file(key_requests):
@@ -154,7 +155,7 @@ def test_picking_720_uses_the_local_device_file(key_requests):
 def test_picking_several_variants_the_tallest_decides_and_still_one_session(key_requests):
     _download(_hls_streams({480: True, 1080: True}))
     assert len(key_requests) == 1
-    assert key_requests[0]["cdm_remote_api"] == REMOTE_L1
+    assert key_requests[0]["cdm_remote_api"] == RESOLVED_L1
 
 
 def test_unselected_variants_do_not_change_the_choice(key_requests):
@@ -177,12 +178,12 @@ def test_the_license_request_carries_the_keys_of_the_selected_variants_only(key_
 def test_two_selected_variants_are_licensed_together_by_the_same_cdm(key_requests):
     _, drm_psshs = _download(_hls_streams({480: True, 1080: True}))
     assert _kids(drm_psshs[DRMType.WIDEVINE]) == {KIDS[480].hex, KIDS[1080].hex}
-    assert len(key_requests) == 1 and key_requests[0]["cdm_remote_api"] == REMOTE_L1  # one session: the tallest one decides for both keys
+    assert len(key_requests) == 1 and key_requests[0]["cdm_remote_api"] == RESOLVED_L1  # one session: the tallest one decides for both keys
 
 
 def test_the_key_fallback_reuses_the_cdm_chosen_for_this_download(key_requests):
     """_attach_key_fallback hands the same manager to the mid-download retry, so it can't fall back to another CDM."""
     stub, drm_psshs = _download(_hls_streams({1080: True}))
-    assert stub.drm_manager.cdm_spec("widevine")[1]["cdm_remote_api"] == REMOTE_L1
+    assert stub.drm_manager.cdm_spec("widevine")[1]["cdm_remote_api"] == RESOLVED_L1
     assert drm_psshs[DRMType.WIDEVINE]
     assert len(key_requests) == 1

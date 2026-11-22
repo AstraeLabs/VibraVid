@@ -20,6 +20,7 @@ from VibraVid.core.muxing.streaming_mux import StreamingMuxFeeder
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import track_title_and_iso_lang
 from VibraVid.core.utils.resolution import classify_resolution
+from VibraVid.core.utils.subtitle_flags import SubFlags
 from VibraVid.core.utils.track_order import effective_select_filter, order_tracks
 from VibraVid.setup import get_ffmpeg_path
 from VibraVid.utils import config_manager
@@ -63,15 +64,11 @@ def _subtitle_disposition_info(entry: Any) -> "SubtitleDispositionInfo":
     """Normalize one subtitle entry into the shared SubtitleDispositionInfo"""
     if isinstance(entry, dict):
         lang_source = entry.get("language") or entry.get("name") or ""
-        forced = bool(entry.get("forced"))
-        sdh = bool(entry.get("sdh"))
-        cc = bool(entry.get("cc"))
+        flags = SubFlags.from_track(entry)
     else:
         lang_source = entry.resolved_language or entry.language or ""
-        forced = bool(getattr(entry, "forced", False))
-        sdh = bool(getattr(entry, "is_sdh", False))
-        cc = bool(getattr(entry, "is_cc", False))
-    return SubtitleDispositionInfo(language=lang_source, forced=forced, sdh=sdh, cc=cc)
+        flags = SubFlags.from_stream(entry)
+    return SubtitleDispositionInfo(language=lang_source, forced=flags.forced, sdh=flags.sdh, cc=flags.cc, hi=flags.hi)
 
 
 class StreamingMuxMixin:

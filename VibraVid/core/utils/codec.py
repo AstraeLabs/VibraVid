@@ -387,16 +387,18 @@ def format_bitrate(bps: int | float | None) -> str:
     return f"{bw:.0f} bps" if bw else ""
 
 
-def format_disposition_flags(*, forced: bool = False, sdh: bool = False, cc: bool = False, default: bool = False) -> str:
-    """Rich-markup subtitle disposition tags (e.g. "[FORCED] [SDH]")."""
+def format_disposition_flags(*, forced: bool = False, sdh: bool = False, cc: bool = False, default: bool = False, hi: bool = False) -> str:
+    """Rich-markup subtitle disposition tags in canonical order (e.g. "[FORCED] [CC] [SDH] [HI]")."""
     default = default and not forced
     flags = []
     if forced:
         flags.append("[FORCED]")
-    if sdh:
-        flags.append("[SDH]")
     if cc:
         flags.append("[CC]")
+    if sdh:
+        flags.append("[SDH]")
+    if hi:
+        flags.append("[HI]")
     if default:
         flags.append("[DEFAULT]")
     return " ".join(flags)

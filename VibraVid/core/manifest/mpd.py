@@ -29,6 +29,7 @@ from VibraVid.core.utils.codec import (
     infer_video_range,
 )
 from VibraVid.core.utils.language import resolve_locale
+from VibraVid.core.utils.subtitle_flags import classify, is_audio_description
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
@@ -94,9 +95,7 @@ def _stream_dedup_key(s: Stream):
             _norm(s.channels),
             int(s.sample_rate or 0),
             int(s.bitrate or 0),
-            bool(s.is_sdh),
-            bool(s.forced),
-            bool(s.is_cc),
+            bool(s.is_ad),
         )
 
     return (
@@ -106,6 +105,7 @@ def _stream_dedup_key(s: Stream):
         bool(s.forced),
         bool(s.is_cc),
         bool(s.is_sdh),
+        bool(s.is_hi),
     )
 
 
@@ -749,7 +749,15 @@ class DashParser:
                 except ValueError:
                     pass
 
-        s.is_sdh = self._is_accessibility_sdh(rep) or self._is_accessibility_sdh(adapt)
+        label_el = _first_not_none(rep.find("mpd:Label", _NS), adapt.find("mpd:Label", _NS))
+        s.is_ad = is_audio_description(
+            name=(label_el.text or "") if label_el is not None else "",
+            roles=[el.get("value", "") for el in (*adapt.findall(".//mpd:Role", _NS), *rep.findall(".//mpd:Role", _NS))],
+            accessibility=[
+                (el.get("schemeIdUri", ""), el.get("value", ""))
+                for el in (*adapt.findall(".//mpd:Accessibility", _NS), *rep.findall(".//mpd:Accessibility", _NS))
+            ],
+        )
 
     def _parse_subtitle_fields(self, rep, adapt, s):
         raw_lang = adapt.get("lang", "und")
@@ -795,14 +803,16 @@ class DashParser:
         s.format = fmt
 
         # ── Roles / flags ─────────────────────────────────────────────────────
-        role_values = {el.get("value", "").lower() for el in adapt.findall(".//mpd:Role", _NS)}
-        if "forced-subtitle" in role_values or "forced_subtitle" in role_values:
-            s.forced = True
-
-        if "caption" in role_values or "captions" in role_values:
-            s.is_cc = True
-
-        s.is_sdh = self._is_accessibility_sdh(adapt)
+        flags = classify(
+            lang=raw_lang,
+            name=s.name or s.label,
+            roles=[el.get("value", "") for el in (*adapt.findall(".//mpd:Role", _NS), *rep.findall(".//mpd:Role", _NS))],
+            accessibility=[
+                (el.get("schemeIdUri", ""), el.get("value", ""))
+                for el in (*adapt.findall(".//mpd:Accessibility", _NS), *rep.findall(".//mpd:Accessibility", _NS))
+            ],
+        )
+        s.forced, s.is_cc, s.is_sdh, s.is_hi = flags.forced, flags.cc, flags.sdh, flags.hi
 
         if s.forced and not s.name:
             s.name = f"{s.language} [Forced]"
@@ -839,18 +849,6 @@ class DashParser:
             return "HDR10"
 
         return ""
-
-    def _is_accessibility_sdh(self, element) -> bool:
-        for acc in element.findall(".//mpd:Accessibility", _NS):
-            scheme = (acc.get("schemeIdUri") or "").lower()
-            value = (acc.get("value") or "").lower().strip()
-            if "audiopurpose" in scheme and value == "1":
-                return True
-            if "role" in scheme and value in ("caption", "description"):
-                return True
-            if value in {"1", "2", "hearing-impaired", "description", "caption"}:
-                return True
-        return False
 
     def _extract_drm(self, element) -> DRMInfo:
         info = DRMInfo()

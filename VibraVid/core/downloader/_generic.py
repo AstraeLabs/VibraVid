@@ -88,7 +88,7 @@ def _track_signature(s) -> tuple:
     if s.type == "audio":
         lang = (getattr(s, "resolved_language", "") or getattr(s, "language", "") or "").lower()
         ch = (getattr(s, "channels", "") or "").lower()
-        return ("audio", codec, lang, ch, btr)
+        return ("audio", codec, lang, ch, btr, bool(getattr(s, "is_ad", False)))
 
     lang = (getattr(s, "resolved_language", "") or getattr(s, "language", "") or "").lower()
     return (
@@ -98,6 +98,7 @@ def _track_signature(s) -> tuple:
         bool(getattr(s, "forced", False)),
         bool(getattr(s, "is_cc", False)),
         bool(getattr(s, "is_sdh", False)),
+        bool(getattr(s, "is_hi", False)),
     )
 
 

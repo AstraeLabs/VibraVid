@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from VibraVid.core.utils.language import extract_lang_and_flags, resolve_iso639_1
+from VibraVid.core.utils.subtitle_flags import SubFlags, flags_satisfy, split_lang_flags
 from VibraVid.utils import config_manager
 
 
@@ -12,26 +13,22 @@ class SubtitleDispositionInfo:
     forced: bool = False
     sdh: bool = False
     cc: bool = False
+    hi: bool = False
 
     @classmethod
     def from_track(cls, track: dict) -> "SubtitleDispositionInfo":
-        """From a muxer subtitle dict (``language`` plus the optional ``forced`` / ``sdh`` / ``cc`` booleans)."""
-        return cls(
-            language=track.get("language", ""),
-            forced=bool(track.get("forced")),
-            sdh=bool(track.get("sdh")),
-            cc=bool(track.get("cc")),
-        )
+        """From a muxer subtitle dict (``language`` plus the optional ``forced`` / ``sdh`` / ``cc`` / ``hi`` booleans)."""
+        flags = SubFlags.from_track(track)
+        return cls(language=track.get("language", ""), forced=flags.forced, sdh=flags.sdh, cc=flags.cc, hi=flags.hi)
 
     @property
     def is_forced(self) -> bool:
-        lang_lower = (self.language or "").lower()
-        return self.forced or "_forced" in lang_lower or "-forced" in lang_lower
+        return self.forced or "forced" in split_lang_flags(self.language)[1]
 
     @property
     def is_hearing_impaired(self) -> bool:
-        lang_lower = (self.language or "").lower()
-        return self.sdh or self.cc or any(f"{sep}{flag}" in lang_lower for sep in "_-" for flag in ("sdh", "cc"))
+        """cc, sdh and hi all mean "for the deaf / hard of hearing" and share the muxer's single hearing_impaired disposition."""
+        return self.sdh or self.cc or self.hi or bool(split_lang_flags(self.language)[1] & {"cc", "sdh", "hi"})
 
 
 def get_configured_disposition_language() -> str:
@@ -54,7 +51,7 @@ def disposition_lang_matches(subtitle_lang_raw: str, config_lang_raw: str, track
     if not sub_iso2 or sub_iso2 != cfg_iso2:
         return False
 
-    return cfg_flags.issubset(sub_flags)
+    return flags_satisfy(sub_flags, cfg_flags)
 
 
 def find_default_subtitle(tracks: list[SubtitleDispositionInfo], config_lang_raw: str = "") -> int | None:
@@ -63,7 +60,7 @@ def find_default_subtitle(tracks: list[SubtitleDispositionInfo], config_lang_raw
     if not config_lang:
         return None
     for idx, t in enumerate(tracks):
-        if disposition_lang_matches(t.language, config_lang, {"forced": t.forced, "sdh": t.sdh, "cc": t.cc}):
+        if disposition_lang_matches(t.language, config_lang, {"forced": t.forced, "sdh": t.sdh, "cc": t.cc, "hi": t.hi}):
             return idx
     return None
 
@@ -93,9 +90,9 @@ def build_subtitle_disposition_args(tracks: list[SubtitleDispositionInfo], confi
     if default_idx is not None:
         config_lang = config_lang_raw.lower().strip()
         disp = "default"
-        if "_forced" in config_lang or "-forced" in config_lang:
+        if "forced" in split_lang_flags(config_lang)[1]:
             disp += "+forced"
-        if "_sdh" in config_lang or "_cc" in config_lang or "-sdh" in config_lang or "-cc" in config_lang:
+        if split_lang_flags(config_lang)[1] & {"cc", "sdh", "hi"}:
             disp += "+hearing_impaired"
         args += [f"-disposition:s:{default_idx}", disp]
 

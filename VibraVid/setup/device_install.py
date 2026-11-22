@@ -205,7 +205,13 @@ def remote_cdm_system(cfg: dict) -> str:
     if device_type == "PLAYREADY" or device_name.upper().startswith("SL"):
         return "playready"
     
-    if str(cfg.get("type", "")).lower() == "custom_api_1" or device_type:
+    from VibraVid.core.drm.cdm.remote.remote_cdm_api import load_remote_client
+
+    client = load_remote_client(cfg)
+    if client is not None:
+        return client.remote_system(cfg)
+
+    if device_type:
         return "widevine"
     
     return "playready"  # a stock pyplayready block has no device_type
@@ -213,6 +219,12 @@ def remote_cdm_system(cfg: dict) -> str:
 
 def describe_remote_cdm(cfg: dict) -> dict:
     """Name, device type (CHROME / ANDROID, Widevine only) and security level of a remote CDM block, as far as the block tells."""
+    from VibraVid.core.drm.cdm.remote.remote_cdm_api import load_remote_client
+
+    describe = getattr(load_remote_client(cfg), "describe", None)
+    if describe is not None:
+        return describe(cfg)
+
     name = str(cfg.get("device_name", cfg.get("Device Name", "")) or "")
     kind = str(cfg.get("device_type", cfg.get("Device Type", "")) or "").upper()
     level = cfg.get("security_level", cfg.get("Security Level"))
@@ -342,11 +354,11 @@ def _apply_cdm_entry(entry: str, origin: str, short: str, registry: dict, result
         console.print(f"[red]Error: {message}")
         raise FileNotFoundError(message)
 
-    system = remote_cdm_system(remote_cfg)
+    system = remote_cdm_system({**remote_cfg, "id": entry})
     if system in filled:
         return
 
-    remote_cfg = {k: v for k, v in remote_cfg.items() if k != "system"}
+    remote_cfg = {**{k: v for k, v in remote_cfg.items() if k != "system"}, "id": entry}
     fill(system, "widevine_remote" if system == "widevine" else "playready_remote", remote_cfg)
 
 

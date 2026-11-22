@@ -18,6 +18,9 @@ from VibraVid.utils import config_manager
 
 DL_WIDEVINE = {"type": "custom_api_1", "secret": "k", "device_name": "L3"}
 DL_PLAYREADY = {"type": "custom_api_1", "secret": "k", "device_name": "SL3"}
+# What resolve_cdm hands out for the registry entries below: the block plus the id it was declared under.
+RESOLVED_WIDEVINE = {**DL_WIDEVINE, "id": "remote_widevine_1"}
+RESOLVED_PLAYREADY = {**DL_PLAYREADY, "id": "remote_playready_1"}
 STOCK_WIDEVINE = {"device_type": "ANDROID", "system_id": 22594, "security_level": 3, "host": "http://h", "secret": "s", "device_name": "d"}
 STOCK_PLAYREADY = {"host": "http://h/playready", "secret": "s", "device_name": "d", "security_level": 3000}
 
@@ -67,7 +70,7 @@ def test_remote_cdm_system_inference(cfg, expected):
 def test_id_selects_the_remote_cdm_for_its_system(setup_cdm):
     setup_cdm("remote_widevine_1")
     resolved = resolve_cdm("mysite")
-    assert resolved.widevine_remote == DL_WIDEVINE
+    assert resolved.widevine_remote == RESOLVED_WIDEVINE
     assert resolved.wvd_path is None  # the remote CDM replaces the local file for that system
     assert resolved.prd_path == "/default/default.prd" and resolved.playready_remote is None
 
@@ -76,7 +79,7 @@ def test_files_and_ids_can_be_mixed_and_system_key_is_not_forwarded(setup_cdm):
     setup_cdm(["mine.wvd", "remote_playready_2", "tagged"])
     resolved = resolve_cdm("mysite")
     assert resolved.wvd_path == "/bin/mine.wvd"
-    assert resolved.playready_remote == STOCK_PLAYREADY
+    assert {k: v for k, v in resolved.playready_remote.items() if k != "id"} == STOCK_PLAYREADY
     assert resolved.widevine_remote is None  # "tagged" is also Widevine but the file came first
     assert "system" not in resolved.playready_remote
 
@@ -84,7 +87,7 @@ def test_files_and_ids_can_be_mixed_and_system_key_is_not_forwarded(setup_cdm):
 def test_system_tag_is_not_forwarded_to_the_remote_cdm(setup_cdm):
     setup_cdm("tagged")
     resolved = resolve_cdm("mysite")
-    assert resolved.widevine_remote == STOCK_PLAYREADY and "system" not in resolved.widevine_remote
+    assert {k: v for k, v in resolved.widevine_remote.items() if k != "id"} == STOCK_PLAYREADY and "system" not in resolved.widevine_remote
 
 
 def test_unknown_id_fails_with_the_known_ids(setup_cdm):
@@ -102,15 +105,15 @@ def test_missing_device_file_still_fails(setup_cdm):
 def test_empty_and_default_defer_to_the_global_cdm(setup_cdm):
     for service_value in (None, "", "default", ["default"]):
         setup_cdm(service_value, global_cdm="remote_widevine_1")
-        assert resolve_cdm("mysite").widevine_remote == DL_WIDEVINE
+        assert resolve_cdm("mysite").widevine_remote == RESOLVED_WIDEVINE
 
 
 def test_global_cdm_without_site_and_for_a_system_the_service_did_not_cover(setup_cdm):
     setup_cdm("mine.wvd", global_cdm=["remote_widevine_1", "remote_playready_1"])
     resolved = resolve_cdm("mysite")
     assert resolved.wvd_path == "/bin/mine.wvd" and resolved.widevine_remote is None  # the service wins for Widevine
-    assert resolved.playready_remote == DL_PLAYREADY  # PlayReady falls through to [DRM].cdm
-    assert resolve_cdm(None).widevine_remote == DL_WIDEVINE
+    assert resolved.playready_remote == RESOLVED_PLAYREADY  # PlayReady falls through to [DRM].cdm
+    assert resolve_cdm(None).widevine_remote == RESOLVED_WIDEVINE
 
 
 def test_search_is_the_first_file_found_for_both_systems(setup_cdm):
@@ -137,7 +140,7 @@ QUALITY_RULES = [{"min_height": 1080, "cdm": "remote_widevine_1"}, {"cdm": "mine
 
 @pytest.mark.parametrize(
     ("height", "remote", "path"),
-    [(2160, DL_WIDEVINE, None), (1080, DL_WIDEVINE, None), (1079, None, "/bin/mine.wvd"), (720, None, "/bin/mine.wvd"), (0, None, "/bin/mine.wvd"), (None, None, "/bin/mine.wvd")],
+    [(2160, RESOLVED_WIDEVINE, None), (1080, RESOLVED_WIDEVINE, None), (1079, None, "/bin/mine.wvd"), (720, None, "/bin/mine.wvd"), (0, None, "/bin/mine.wvd"), (None, None, "/bin/mine.wvd")],
 )
 def test_quality_rules_pick_by_the_selected_video_height(setup_cdm, height, remote, path):
     setup_cdm(QUALITY_RULES)
@@ -149,13 +152,13 @@ def test_quality_rules_pick_by_the_selected_video_height(setup_cdm, height, remo
 def test_max_height_is_inclusive_and_uncovered_heights_fall_through(setup_cdm):
     setup_cdm([{"max_height": 720, "cdm": "mine.wvd"}], global_cdm="remote_widevine_1")
     assert resolve_cdm("mysite", 720).wvd_path == "/bin/mine.wvd"
-    assert resolve_cdm("mysite", 721).widevine_remote == DL_WIDEVINE
+    assert resolve_cdm("mysite", 721).widevine_remote == RESOLVED_WIDEVINE
 
 
 def test_a_rule_can_hold_a_list_for_both_systems(setup_cdm):
     setup_cdm([{"min_height": 1080, "cdm": ["remote_widevine_1", "remote_playready_1"]}, {"cdm": ["mine.wvd", "mine.prd"]}])
     hd = resolve_cdm("mysite", 1080)
-    assert (hd.widevine_remote, hd.playready_remote) == (DL_WIDEVINE, DL_PLAYREADY)
+    assert (hd.widevine_remote, hd.playready_remote) == (RESOLVED_WIDEVINE, RESOLVED_PLAYREADY)
     sd = resolve_cdm("mysite", 480)
     assert (sd.wvd_path, sd.prd_path) == ("/bin/mine.wvd", "/bin/mine.prd")
 
@@ -169,7 +172,7 @@ def manager_env(monkeypatch, setup_cdm):
 def test_for_site_remote_id_replaces_the_local_device_for_its_system(manager_env):
     manager_env("remote_widevine_1")
     mgr = DRMManager.for_site("mysite")
-    assert mgr.widevine_remote_cdm_api == DL_WIDEVINE and mgr.widevine_device_path is None
+    assert mgr.widevine_remote_cdm_api == RESOLVED_WIDEVINE and mgr.widevine_device_path is None
     assert mgr.playready_device_path == "/default/default.prd"
 
 
@@ -184,7 +187,7 @@ def test_select_cdm_swaps_the_cdm_for_the_selected_height(manager_env):
     mgr = DRMManager.for_site("mysite")
     assert mgr.widevine_device_path == "/bin/mine.wvd"  # height not known yet
     mgr.select_cdm(1080)
-    assert mgr.widevine_remote_cdm_api == DL_WIDEVINE and mgr.widevine_device_path is None
+    assert mgr.widevine_remote_cdm_api == RESOLVED_WIDEVINE and mgr.widevine_device_path is None
     mgr.select_cdm(480)
     assert mgr.widevine_device_path == "/bin/mine.wvd" and not mgr.widevine_remote_cdm_api
 

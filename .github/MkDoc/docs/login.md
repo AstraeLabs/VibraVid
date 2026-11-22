@@ -44,6 +44,13 @@ Open the site, log in, click the extension, **GET COOKIES** -> **COPY JSON**, an
 cookies = '''<paste_copied_json_here>'''
 ```
 
+**Crunchyroll, original audio with burned-in subtitles.** Some versions, usually the original `ja-JP` one, are only served with the subtitles burned into the video: there is no subtitle-free manifest and no soft subtitle track (so `select_subtitle`, forced / CC / SDH flags have nothing to act on).
+
+```toml
+[crunchyroll]
+hard_sub_locale = "it-IT"
+```
+
 **Discovery+ / HBO Max without the extension**: Developer Tools (<kbd>F12</kbd>) -> **Application** -> **Cookies**, find the `st` cookie and set `st = "<value>"` in the `[discoveryplus]` / `[hbomax]` section.
 
 ![st location](assets/login/discoveryplus_eu_st.png)

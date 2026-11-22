@@ -9,13 +9,42 @@ from collections.abc import Callable
 from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
-from VibraVid.core.drm.cdm.remote.remote_cdm_api import RemoteCdmApi, build_remote_cdm
+from VibraVid.core.drm.cdm.remote.analchrome import AnalChromeCdm
+from VibraVid.core.drm.cdm.remote.decryptlabs import DecryptLabsCdm
+from VibraVid.core.drm.cdm.remote.remote_cdm_api import build_remote_cdm, remote_label
 from VibraVid.core.drm.system import accumulate_content_key, cdm_load_line, normalize_kid
 from VibraVid.setup import binary_paths, read_device_wvd
 from VibraVid.utils.http_client import create_client
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+def _unwrap_license_payload(response) -> bytes | None:
+    """Extract raw binary license / cert payload from HTTP response (raw bytes or JSON wrapper)."""
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "application/json" not in content_type:
+        return response.content
+    resp_json = response.json()
+    if "widevineLicense" in resp_json:
+        return base64.b64decode(resp_json["widevineLicense"]["license"])
+    if "license" in resp_json:
+        return base64.b64decode(resp_json["license"])
+    return None
+
+
+def _post_widevine_payload(license_url: str, challenge: bytes, headers: dict | None, license_data: dict | None):
+    """POST a Widevine challenge or service-certificate request to ``license_url``."""
+    req_headers = headers.copy() if headers else {}
+    if license_data:
+        body = {**license_data, "licenseChallenge": base64.b64encode(challenge).decode("utf-8")}
+        req_headers["Content-Type"] = "text/plain"
+        post_kwargs = {"data": json.dumps(body, separators=(",", ":"))}
+    else:
+        req_headers.setdefault("Content-Type", "application/octet-stream")
+        post_kwargs = {"data": challenge}
+    with create_client(headers=req_headers) as client:
+        return client.post(license_url, **post_kwargs), req_headers
 
 
 def get_widevine_keys(
@@ -147,7 +176,7 @@ def _get_widevine_keys(
             console.print(f"[red]Error loading local CDM device: {e}")
             return None
     else:
-        console.print(f"\n{cdm_load_line('remote ' + str(cdm_remote_api.get('device_name', '?')), cdm_origin)}")
+        console.print(f"\n{cdm_load_line('remote ' + remote_label(cdm_remote_api), cdm_origin)}")
         try:
             cdm = build_remote_cdm(cdm_remote_api, "widevine")
         except Exception as e:
@@ -158,16 +187,37 @@ def _get_widevine_keys(
     # Open CDM session
     session_id = cdm.open()
 
-    if license_certificate:
+    cert_set = False
+    if isinstance(cdm, AnalChromeCdm) and pssh_list and not license_certificate:
         try:
-            cert = license_certificate.strip().replace("\n", "").replace(" ", "")
-            cdm.set_service_certificate(session_id, cert)
-            console.print("[dim]Service certificate set (Privacy Mode enabled).")
+            probe_pssh = pssh_list[0]["pssh"]
+            probe_challenge = cdm.get_license_challenge(session_id, PSSH(probe_pssh))
+            if probe_challenge and len(probe_challenge) <= 16:
+                real_cert = None
+                if license_request_fn is not None:
+                    real_cert = license_request_fn(probe_challenge, pssh_list[0])
+                elif license_url:
+                    probe_resp, _ = _post_widevine_payload(license_url, probe_challenge, headers, license_data)
+                    if probe_resp.status_code == 200:
+                        real_cert = _unwrap_license_payload(probe_resp) or probe_resp.content
+                if real_cert:
+                    cdm.set_service_certificate(session_id, real_cert)
+                    cert_set = True
+                    console.print("[dim]Service certificate negotiated live with the license server (Privacy Mode).")
         except Exception as e:
-            logger.error(f"Failed to set service certificate: {e}")
-            console.print(f"[yellow]Warning: Failed to set service certificate: {e}")
-    elif isinstance(cdm, RemoteCdmApi):
-        cdm.set_service_certificate(session_id, None)  # default privacy certificate for L1/L2
+            logger.debug(f"Live certificate negotiation failed, falling back to a static certificate: {e}")
+
+    if not cert_set:
+        if license_certificate:
+            try:
+                cert = license_certificate.strip().replace("\n", "").replace(" ", "")
+                cdm.set_service_certificate(session_id, cert)
+                console.print("[dim]Service certificate set (Privacy Mode enabled).")
+            except Exception as e:
+                logger.error(f"Failed to set service certificate: {e}")
+                console.print(f"[yellow]Warning: Failed to set service certificate: {e}")
+        elif isinstance(cdm, (DecryptLabsCdm, AnalChromeCdm)):
+            cdm.set_service_certificate(session_id, None)  # default privacy certificate for L1/L2 / AnalChrome
 
     all_content_keys = []
     extracted_kids = set()
@@ -186,10 +236,10 @@ def _get_widevine_keys(
             console.print(f"[red]{type_info} [cyan](PSSH: [yellow]{pssh[:30]}...[cyan] KID: [red]{kid_info})")
 
             # Create license challenge
-            if isinstance(cdm, RemoteCdmApi) and kid_info and kid_info != "n/a":
+            if isinstance(cdm, DecryptLabsCdm) and kid_info and kid_info != "n/a":
                 cdm.set_required_kids([kid_info], session_id)
-            challenge = cdm.get_license_challenge(session_id, PSSH(pssh), **({"ask_cache": False} if fresh_license and isinstance(cdm, RemoteCdmApi) else {}))
-            if not challenge and isinstance(cdm, RemoteCdmApi):
+            challenge = cdm.get_license_challenge(session_id, PSSH(pssh), **({"ask_cache": False} if fresh_license and isinstance(cdm, DecryptLabsCdm) else {}))
+            if not challenge and isinstance(cdm, DecryptLabsCdm):
                 for key_obj in cdm.get_keys(session_id):
                     if key_obj.type == "CONTENT":
                         accumulate_content_key(all_content_keys, extracted_kids, key_obj.kid.hex, key_obj.key.hex())
@@ -220,32 +270,15 @@ def _get_widevine_keys(
                     console.print(f"[red]Error extracting keys for PSSH {pssh[:30]}...: {e}")
                 continue
 
-            # Prepare headers (use original headers from fetch)
-            req_headers = headers.copy() if headers else {}
-            if "Content-Type" not in req_headers:
-                req_headers["Content-Type"] = "application/octet-stream"
-
             if license_url is None:
                 logger.error("License URL is None")
                 console.print("\n[red]License URL is None.")
                 continue
 
-            if license_data:
-                body = {
-                    **license_data,
-                    "licenseChallenge": base64.b64encode(challenge).decode("utf-8"),
-                }
-                req_headers["Content-Type"] = "text/plain"
-                post_kwargs = {"data": json.dumps(body, separators=(",", ":"))}
-            else:
-                if "Content-Type" not in req_headers:
-                    req_headers["Content-Type"] = "application/octet-stream"
-                post_kwargs = {"data": challenge}
-
             # Make license request
+            req_headers = headers.copy() if headers else {}
             try:
-                with create_client(headers=req_headers) as client:
-                    response = client.post(license_url, **post_kwargs)
+                response, req_headers = _post_widevine_payload(license_url, challenge, headers, license_data)
             except Exception as e:
                 logger.error(f"License request error for {kid_info}: {e}")
                 console.print(f"[red]License request error for PSSH {pssh[:30]}...: {e}")
@@ -263,12 +296,11 @@ def _get_widevine_keys(
             if "application/json" in content_type:
                 logger.debug(f"Parsing JSON license response for {kid_info}")
                 try:
-                    resp_json = response.json()
-                    if "widevineLicense" in resp_json:
-                        license_bytes = base64.b64decode(resp_json["widevineLicense"]["license"])
-                    elif "license" in resp_json:
-                        license_bytes = base64.b64decode(resp_json["license"])
+                    unwrapped = _unwrap_license_payload(response)
+                    if unwrapped is not None:
+                        license_bytes = unwrapped
                     else:
+                        resp_json = response.json()
                         logger.error(f"No license field in JSON response for {kid_info}: {list(resp_json.keys())}")
                         console.print(f"[red]No license field in JSON response for PSSH {pssh[:30]}...] — keys: {list(resp_json.keys())}")
                         continue

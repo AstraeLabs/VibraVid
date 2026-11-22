@@ -1,13 +1,7 @@
 # 28.02.26
 
 
-_SUBTITLE_FLAG_WORDS = (
-    "forced", 
-    "cc", 
-    "sdh", 
-    "hi", 
-    "default"
-)
+from VibraVid.core.utils.subtitle_flags import split_lang_flags
 
 LANGUAGES: dict[str, dict] = {
     "ita": {"iso1": "it", "bcp47": "it-IT", "display": "Italian", "aliases": ["italiano"]},
@@ -300,7 +294,6 @@ def resolve_locale(lang: str) -> str:
     return _ISO3_TO_BCP47.get(iso3, "") if iso3 else ""
 
 
-_SUBTITLE_FLAGS = ("forced", "cc", "sdh", "hi", "default")
 
 
 def resolve_ietf(value: str) -> str:
@@ -309,15 +302,7 @@ def resolve_ietf(value: str) -> str:
     if not raw:
         return "und"
 
-    low = raw.lower()
-    for flag in _SUBTITLE_FLAGS:
-        for sep in ("_", "-"):
-            suffix = sep + flag
-            if low.endswith(suffix):
-                raw = raw[: -len(suffix)]
-                low = raw.lower()
-                break
-
+    raw = split_lang_flags(raw)[0]
     raw = raw.replace("_", "-")
     if not raw:
         return "und"
@@ -394,49 +379,32 @@ def resolve_iso639_1(lang: str) -> str:
 
 def extract_lang_and_flags(lang_raw: str, track_info: dict = None):
     """Split a raw language string like ``en-us_cc`` or ``en-us.[CC]`` into (base_lang, flags_set)."""
-    import re as _re
-
-    parts = _re.split(r"[-_.]", lang_raw or "")
-    flags = set()
-    clean = []
+    clean, flags = split_lang_flags(lang_raw)
 
     if track_info:
-        if track_info.get("forced"):
-            flags.add("forced")
-        if track_info.get("sdh"):
-            flags.add("sdh")
-        if track_info.get("cc"):
-            flags.add("cc")
-        if track_info.get("default"):
-            flags.add("default")
+        for key in ("forced", "sdh", "cc", "hi", "ad", "default"):
+            if track_info.get(key):
+                flags.add(key)
 
-    for n, p in enumerate(parts):
-        token = p.strip("[]").lower()
-        
-        # "hi" is also the code of Hindi: as the first token it is the language, not "hearing impaired".
-        if token in _SUBTITLE_FLAG_WORDS and not (n == 0 and token == "hi"):
-            flags.add(token)
-        else:
-            clean.append(p)
-
-    return "-".join(clean), flags
+    return clean, flags
 
 
 def subtitle_flags(lang_raw: str, track_info: dict = None) -> dict[str, bool]:
-    """Return {'forced','cc','sdh','default'} booleans parsed from a raw language string and/or track dict."""
+    """Return {'forced','cc','sdh','hi','default'} booleans parsed from a raw language string and/or track dict (each flag stays distinct)."""
     _, flags = extract_lang_and_flags(lang_raw, track_info)
     forced = "forced" in flags
     return {
         "forced": forced,
         "sdh": "sdh" in flags,
-        "cc": "cc" in flags or "hi" in flags,
+        "cc": "cc" in flags,
+        "hi": "hi" in flags,
         "default": "default" in flags and not forced,
     }
 
 
 def language_variants(lang_raw: str) -> dict[str, str]:
     """Return the same language expressed as BCP-47, ISO 639-1 and ISO 639-2 codes."""
-    base = (lang_raw or "").strip()
+    base = split_lang_flags((lang_raw or "").strip())[0] or (lang_raw or "").strip()
     return {
         "language_bcp47": resolve_locale(base) or base,
         "language_iso2": resolve_iso639_1(base),
@@ -448,7 +416,7 @@ def track_language_and_flags(track) -> tuple[str, set[str]]:
     """Language tag (``it-it``) and flags (``forced``, ``sdh``, ``cc``) of an audio or subtitle track: a dict (the ones ``_build_status`` lists, or an external track) or a manifest stream."""
     get = track.get if isinstance(track, dict) else (lambda key, default=None: getattr(track, key, default))
     raw = str(get("lang") or get("resolved_language") or get("language") or get("name") or "und")
-    return extract_lang_and_flags(raw, {"forced": get("forced"), "sdh": get("sdh") or get("is_sdh"), "cc": get("cc") or get("is_cc")})
+    return extract_lang_and_flags(raw, {"forced": get("forced"), "sdh": get("sdh") or get("is_sdh"), "cc": get("cc") or get("is_cc"), "hi": get("hi") or get("is_hi"), "ad": get("ad") or get("is_ad")})
 
 
 def track_title_and_iso_lang(track) -> tuple[str, str]:
@@ -461,8 +429,7 @@ def track_title_and_iso_lang(track) -> tuple[str, str]:
     labels = []
     if "forced" in flags:
         labels.append("[Forced]")
-    if "sdh" in flags:
-        labels.append("[SDH]")
-    elif "cc" in flags or "hi" in flags:
-        labels.append("[CC]")
+    for flag, label in (("cc", "[CC]"), ("sdh", "[SDH]"), ("hi", "[HI]"), ("ad", "[AD]")):
+        if flag in flags:
+            labels.append(label)
     return " ".join([resolve_language_display_name(base), *labels]).strip(), resolve_iso639_2(base)

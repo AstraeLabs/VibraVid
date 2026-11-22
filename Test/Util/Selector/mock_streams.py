@@ -45,6 +45,8 @@ class MockStream:
     forced: bool = False
     is_cc: bool = False
     is_sdh: bool = False
+    is_hi: bool = False
+    is_ad: bool = False
 
     # Flags
     default: bool = False

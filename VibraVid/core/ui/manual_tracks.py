@@ -33,6 +33,8 @@ def _describe(stream, index):
         "forced": bool(getattr(stream, "forced", False)),
         "sdh": bool(getattr(stream, "is_sdh", False)),
         "cc": bool(getattr(stream, "is_cc", False)),
+        "hi": bool(getattr(stream, "is_hi", False)),
+        "ad": bool(getattr(stream, "is_ad", False)),
         "selected": bool(getattr(stream, "selected", False)),
     }
 
@@ -41,7 +43,7 @@ def selected_track_metadata(streams):
     """JSON-safe metadata for selected manifest tracks, without media URLs or secrets."""
     fields = (
         "type", "resolution", "height", "codecs", "language", "channels",
-        "bitrate", "video_range", "forced", "sdh", "cc", "default",
+        "bitrate", "video_range", "forced", "sdh", "cc", "hi", "ad", "default",
     )
     output = []
     for stream in streams:
@@ -74,7 +76,7 @@ def _catalog_key(tracks):
     keys = [
         (track["type"], track["resolution"], track["width"], track["height"],
          track["codecs"], track["video_range"], track["language"], track["channels"],
-         track["default"], track["forced"], track["sdh"], track["cc"])
+         track["default"], track["forced"], track["sdh"], track["cc"], track.get("hi", False), track.get("ad", False))
         for track in tracks
     ]
     if len(keys) != len(set(keys)):

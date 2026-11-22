@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 
 from VibraVid.core.drm.system import DRMType, _DRMSystems
+from VibraVid.core.utils.subtitle_flags import SubFlags, canonical_name
 
 logger = logging.getLogger(__name__)
 
@@ -403,6 +404,8 @@ class Stream:
     is_cc: bool = False
     instream_id: str = ""
     is_sdh: bool = False
+    is_hi: bool = False
+    is_ad: bool = False
 
     # All types
     label: str = ""
@@ -533,6 +536,16 @@ class Stream:
         """Encryption mode (cenc/cbcs/SAMPLE-AES…), derived from the attached DRMInfo."""
         return self.drm.method if self.drm else None
 
+    @property
+    def sub_flags(self) -> SubFlags:
+        """forced / cc / sdh / hi of this stream (see ``utils.subtitle_flags``)."""
+        return SubFlags.from_stream(self)
+
+    @property
+    def canonical_name(self) -> str:
+        """Language plus every flag in canonical order (``ita_forced_sdh``): the token ``select_subtitle`` accepts."""
+        return canonical_name(self.language or "und", self.sub_flags)
+
     def get_flags_display(self) -> str:
         flags = []
         if self.forced:
@@ -541,6 +554,10 @@ class Stream:
             flags.append("CC")
         if self.is_sdh:
             flags.append("SDH")
+        if self.is_hi:
+            flags.append("HI")
+        if self.is_ad:
+            flags.append("AD")
         if self.default:
             flags.append("Default")
         return f"[{', '.join(flags)}]" if flags else ""

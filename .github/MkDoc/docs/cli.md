@@ -39,6 +39,7 @@ python manual.py ... -sv 1080                  # video
 python manual.py ... -sa "eng"                 # audio language (long form: --audio-langs)
 python manual.py ... -ss "eng"                 # subtitles (long form: --sub-langs)
 python manual.py ... -ss "ita_forced"          # only the forced subtitle track
+python manual.py ... -ss "ita_forced|eng_sdh"  # flags per language: forced, cc, sdh, hi (combinable: "ita_forced_sdh")
 python manual.py ... -sa "deu" --skip-no-match # skip the whole download if the filter matches no track
 python manual.py ... --extension mp4           # container (overrides PROCESS.extension for this run)
 ```

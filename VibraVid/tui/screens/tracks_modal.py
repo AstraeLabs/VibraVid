@@ -16,19 +16,25 @@ def describe_track(track: dict) -> str:
     kind = track.get("type", "")
     parts = [kind.ljust(8)]
     detail = track.get("resolution") or (f"{track['channels']}ch" if track.get("channels") else "")
+    
     if detail:
         parts.append(str(detail))
+    
     if track.get("video_range"):
         parts.append(track["video_range"])
     if track.get("codecs"):
         parts.append(track["codecs"])
+    
     if track.get("language"):
         parts.append(track["language"])
+    
     if track.get("bitrate"):
         parts.append(f"{track['bitrate'] // 1000} kbps")
-    for flag in ("forced", "sdh", "cc"):
+    
+    for flag in ("forced", "cc", "sdh", "hi", "ad"):
         if track.get(flag):
             parts.append(flag.upper())
+    
     return "  ".join(parts)
 
 

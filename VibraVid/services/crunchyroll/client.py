@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import math
+import re
 import sys
 import threading
 import time
@@ -92,6 +93,10 @@ class CrunchyrollError(Exception):
     """Crunchyroll refused playback (subscription, rate limit, endpoint error)."""
 
 
+class CrunchyrollHardSubError(CrunchyrollError):
+    """The version is only served with burned-in subtitles and none of them was chosen."""
+
+
 class CrunchyrollRateLimitError(CrunchyrollError):
     """HTTP 429: the server asked us to back off for ``retry_after`` seconds."""
     def __init__(self, message: str, retry_after: float = 0.0) -> None:
@@ -123,6 +128,7 @@ def note_rate_limit(retry_after: float) -> None:
     global _cooldown_until
     with _cooldown_lock:
         _cooldown_until = max(_cooldown_until, time.monotonic() + retry_after)
+    logger.warning(f"Crunchyroll answered HTTP 429: backing off for {math.ceil(retry_after)}s")
 
 
 def cooldown_remaining() -> float:
@@ -156,16 +162,59 @@ def license_bytes(response) -> bytes:
     return content
 
 
-def manifest_url(payload: dict) -> str:
-    """DASH manifest url of a TV playback payload: the clean (soft-subtitle) one, else a hard-subbed variant, else the root url."""
-    root = payload.get("url")
-    if root and "/clean/" in root:
+_BURNED_IN_SEGMENT = re.compile(r"/([a-z0-9]{2,8})/cenc/")
+
+
+def _locale_key(locale: str) -> str:
+    """'it-IT' -> 'itit', 'es-419' -> 'es419': the spelling Crunchyroll uses in manifest paths."""
+    return re.sub(r"[^a-z0-9]", "", str(locale or "").lower())
+
+
+def configured_hard_sub_locale() -> str:
+    """Burned-in subtitle language the user accepts when a version has no subtitle-free video (empty: refuse)."""
+    return str(config_manager.login.get("crunchyroll", "hard_sub_locale", default="") or "").strip()
+
+
+def manifest_url(payload: dict, hard_sub_locale: str = "") -> str:
+    """
+    DASH manifest url of a TV playback payload."""
+    root = payload.get("url") or ""
+    if "/clean/" in root:
         return root
-    hard_subs = payload.get("hardSubs") or {}
-    for locale in ("none", "fr-FR", *hard_subs):
-        if isinstance(hard_subs.get(locale), dict) and hard_subs[locale].get("url"):
-            return hard_subs[locale]["url"]
-    return root or ""
+
+    hard_subs = {k: v["url"] for k, v in (payload.get("hardSubs") or {}).items() if isinstance(v, dict) and v.get("url")}
+    for locale, url in hard_subs.items():
+        if _locale_key(locale) in ("none", "clean"):
+            return url
+
+    match = _BURNED_IN_SEGMENT.search(root)
+    burned = match.group(1) if match else ""
+    if not hard_subs and burned in ("", "none"):
+        return root  # nothing says the video is hard-subbed
+
+    wanted = _locale_key(hard_sub_locale)
+    if wanted:
+        for locale, url in hard_subs.items():
+            if _locale_key(locale) == wanted:
+                return url
+        if "-" not in hard_sub_locale:  # a bare language ('it') matches 'it-IT'
+            for locale, url in hard_subs.items():
+                if locale.split("-")[0].lower() == wanted:
+                    return url
+        if burned == wanted:
+            return root
+
+    available = sorted(hard_subs) or ([burned] if burned else [])
+    if wanted:
+        reason = f"has no burned-in {hard_sub_locale} version (available: {', '.join(available) or 'none'})"
+    else:
+        reason = f"is only offered with burned-in subtitles ({', '.join(available)})"
+    
+    raise CrunchyrollHardSubError(
+        f"This audio version {reason} and no subtitle-free manifest. "
+        'Set hard_sub_locale in the crunchyroll section of Conf/login.toml (e.g. hard_sub_locale = "it-IT") to accept a hard-subbed video, '
+        "or choose an audio version with a clean video (for example a dub)."
+    )
 
 
 class CrunchyrollClient:
@@ -1078,12 +1127,30 @@ def _extract_subtitles(data: dict) -> list[dict]:
     return subtitles
 
 
+def merge_subtitles(base: list, extra: list) -> list:
+    """Union subtitle lists by (language, closed_caption), preferring entries already in ``base``."""
+    merged = list(base or [])
+    seen = {(s.get("language"), bool(s.get("closed_caption"))) for s in merged if isinstance(s, dict)}
+
+    for sub in extra or []:
+        if not isinstance(sub, dict):
+            continue
+        key = (sub.get("language"), bool(sub.get("closed_caption")))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(sub)
+
+    return merged
+
+
 def get_playback_session(
-    client: CrunchyrollClient, url_id: str, main_guid: str | None = None
+    client: CrunchyrollClient, url_id: str, main_guid: str | None = None, video: bool = True
 ) -> tuple[str, dict, list[dict], str | None, str | None]:
     """
     Get playback session with SINGLE API call.
     If main_guid is provided, fetch subtitles from main track for complete subs.
+    ``video`` is False when only the audio of this version is used (an extra audio track): its video may then be burned-in.
 
     Returns:
         - mpd_url: str
@@ -1095,28 +1162,17 @@ def get_playback_session(
     playback_data = client.get_streams(url_id)
 
     # Extract relevant data
-    mpd_url = manifest_url(playback_data) if client.use_tv else playback_data.get("url")
-    audio_locale = playback_data.get("audioLocale") or playback_data.get("audio_locale") or (playback_data.get("audio") or {}).get("locale")
     token = playback_data.get("token") or _find_token_recursive(playback_data)
+    try:
+        mpd_url = manifest_url(playback_data, configured_hard_sub_locale()) if client.use_tv and video else playback_data.get("url")
+    except CrunchyrollHardSubError:
+        if token:  # free the slot of a session that will not be played
+            client.deauth_video(url_id, token)
+        raise
+    audio_locale = playback_data.get("audioLocale") or playback_data.get("audio_locale") or (playback_data.get("audio") or {}).get("locale")
 
-    # Get subtitles: prefer main_guid for complete subtitles if available
-    if main_guid and main_guid != url_id:
-        try:
-            # Fetch subtitles from main track
-            main_playback_data = client.get_streams(main_guid)
-            subtitles = _extract_subtitles(main_playback_data)
-
-            # Deauth main track token
-            main_token = main_playback_data.get("token") or _find_token_recursive(main_playback_data)
-            if main_token:
-                client.deauth_video(main_guid, main_token)
-
-        except Exception as e:
-            logger.error(f"Failed to fetch subtitles from main track: {e}")
-            subtitles = _extract_subtitles(playback_data)
-
-    else:
-        subtitles = _extract_subtitles(playback_data)
+    # The version's own soft subtitles and captions (a dub carries its language, the main version may carry none)
+    subtitles = _extract_subtitles(playback_data)
 
     if client.use_tv and mpd_url:
         mpd_url = client.prefetch_manifest(mpd_url)
@@ -1127,6 +1183,20 @@ def get_playback_session(
             client.deauth_video(url_id, token)
         except Exception as e:
             logger.error(f"Deauth during playback failed: {e}")
+
+    # main_guid can add the languages the version itself lacks; the version's own tracks stay either way.
+    # Asked once this version's slot is free: an account allowing one concurrent stream would refuse it before.
+    if main_guid and main_guid != url_id:
+        try:
+            main_playback_data = client.get_streams(main_guid)
+            subtitles = merge_subtitles(_extract_subtitles(main_playback_data), subtitles)
+
+            main_token = main_playback_data.get("token") or _find_token_recursive(main_playback_data)
+            if main_token:
+                client.deauth_video(main_guid, main_token)
+
+        except Exception as e:
+            logger.error(f"Failed to fetch subtitles from main track: {e}")
 
     headers = client._get_headers()
     return mpd_url, headers, subtitles, token, audio_locale

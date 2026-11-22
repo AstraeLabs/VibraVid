@@ -9,6 +9,7 @@ from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.downloader.base import DownloadResult
 from VibraVid.core.drm.system import DRMType
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.core.utils.subtitle_flags import external_subtitle_track, flags_from_kind
 from VibraVid.services._base import Entries, movie_folder, print_download_header, print_episode_header, series_folder
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
@@ -19,8 +20,6 @@ from .scrapper import GetSerieInfo
 
 console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
-_SDH_TYPES = {"sdh", "hearing_impaired", "hard_of_hearing", "hi"}
-_CC_TYPES = {"cc", "closed_captions", "closed_caption"}
 
 
 def _options() -> dict:
@@ -59,25 +58,9 @@ def _subtitle_tracks(stream_info: dict) -> list[dict]:
 
                 fmt = str(sub.get("format") or "vtt").strip("[]' ").lower() or "vtt"
                 locale = (sub.get("locale") or sub.get("language") or lang or "und").lower()
-                kind = str(sub.get("subtitle_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
-                forced = kind == "forced" or bool(sub.get("forced"))
-                sdh = kind in _SDH_TYPES
-                cc = kind in _CC_TYPES
-                flags = [name for name, on in (("forced", forced), ("sdh", sdh), ("cc", cc)) if on]
+                flags = flags_from_kind(str(sub.get("subtitle_type") or ""), forced=bool(sub.get("forced")))
                 label = str(sub.get("language") or locale).upper()
-                tracks.append(
-                    {
-                        "type": "subtitle",
-                        "url": url,
-                        "language": "-".join([locale, *flags]),
-                        "format": fmt,
-                        "extension": fmt,
-                        "name": " ".join([label, *flags]),
-                        "forced": forced,
-                        "sdh": sdh,
-                        "cc": cc,
-                    }
-                )
+                tracks.append(external_subtitle_track(url, locale, fmt, label, flags))
     
     elif isinstance(all_subs, list):
         for sub in all_subs:
@@ -87,25 +70,9 @@ def _subtitle_tracks(stream_info: dict) -> list[dict]:
 
             fmt = str(sub.get("format") or "vtt").strip("[]' ").lower() or "vtt"
             locale = (sub.get("locale") or sub.get("language") or "und").lower()
-            kind = str(sub.get("subtitle_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
-            forced = kind == "forced" or bool(sub.get("forced"))
-            sdh = kind in _SDH_TYPES
-            cc = kind in _CC_TYPES
-            flags = [name for name, on in (("forced", forced), ("sdh", sdh), ("cc", cc)) if on]
+            flags = flags_from_kind(str(sub.get("subtitle_type") or ""), forced=bool(sub.get("forced")))
             label = str(sub.get("language") or locale).upper()
-            tracks.append(
-                {
-                    "type": "subtitle",
-                    "url": url,
-                    "language": "-".join([locale, *flags]),
-                    "format": fmt,
-                    "extension": fmt,
-                    "name": " ".join([label, *flags]),
-                    "forced": forced,
-                    "sdh": sdh,
-                    "cc": cc,
-                }
-            )
+            tracks.append(external_subtitle_track(url, locale, fmt, label, flags))
     return tracks
 
 

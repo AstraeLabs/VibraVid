@@ -23,6 +23,7 @@ from textual.widgets import (
 )
 
 from VibraVid.cli.run import _probe_binary_version
+from VibraVid.core.drm.cdm.remote.remote_cdm_api import remote_label
 from VibraVid.setup import resolve_cdm
 from VibraVid.setup.system import (
     get_dovi_tool_path,
@@ -152,7 +153,7 @@ class SystemScreen(Screen):
             if chosen is None:
                 return error
             if remote:
-                return f"[green]Remote[/] ({remote.get('device_name') or remote.get('host') or '?'})"
+                return f"[green]Remote[/] ({remote_label(remote) if remote.get('id') or remote.get('device_name') else remote.get('host') or '?'})"
             return f"[green]OK[/] ({path})" if path and os.path.exists(path) else "[red]Missing[/]"
 
         wvd_status = status(chosen and chosen.wvd_path, chosen and chosen.widevine_remote)

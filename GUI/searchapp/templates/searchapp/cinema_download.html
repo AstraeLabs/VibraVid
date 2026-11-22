@@ -571,8 +571,9 @@
                 var details = [String(track.type || "").toUpperCase(),
                     resolution, track.type !== "video" ? readableLanguage(track.language) : "",
                     track.codecs, track.channels ? track.channels + "ch" : "", bitrate,
-                    track.forced ? "forced" : "", track.sdh ? "SDH" : "",
-                    track.cc ? "CC" : ""].filter(Boolean).join(" · ");
+                    track.forced ? "forced" : "", track.cc ? "CC" : "",
+                    track.sdh ? "SDH" : "", track.hi ? "HI" : "",
+                    track.ad ? "AD" : ""].filter(Boolean).join(" · ");
                 var caption = document.createElement("span");
                 caption.textContent = details || "Track " + (track.index + 1);
                 caption.title = track.language ? "Original language code: " + track.language : "";

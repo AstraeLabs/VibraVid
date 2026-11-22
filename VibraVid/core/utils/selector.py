@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from VibraVid.core.utils.codec import DV_CODEC_PREFIXES, get_codec_token
 from VibraVid.core.utils.language import canonical_iso639_2, resolve_iso639_1, resolve_locale
+from VibraVid.core.utils.subtitle_flags import FLAG_ORDER, SubFlags, flags_satisfy
 from VibraVid.utils import config_manager
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ _AUDIO_SLOT_RESERVED = {"best", "worst", "all", "false", "default", "non-default
 NON_MUXABLE_AUDIO_CODECS = frozenset({"dtsx"})
 NON_MUXABLE_AUDIO_ID_PREFIXES = ("dts-x", "atmos")
 _UNSUPPORTED_VIDEO_CODEC_PREFIXES = ("vp09", "vp90", "vp08", "av01", "av1")
-_LANG_FLAG_AFFIXES = frozenset({"forced", "cc", "sdh"})
+_LANG_FLAG_AFFIXES = frozenset(FLAG_ORDER)
 _CODEC_FAMILIES = {
     "hevc": ("hvc1", "hev1", "hevc", "h265"),
     "avc": ("avc1", "avc3", "avc", "h264"),
@@ -640,7 +641,7 @@ def _strip_lang_flag_affixes(tag: str) -> str:
         return ""
     
     parts = [p for p in re.split(r"[-_]", tag.strip().lower()) if p]
-    kept = [p for p in parts if p not in _LANG_FLAG_AFFIXES]
+    kept = [p for i, p in enumerate(parts) if p not in _LANG_FLAG_AFFIXES or (i == 0 and p == "hi")]
     if not kept:
         return tag.strip().lower()
     
@@ -665,6 +666,12 @@ def _matches_lang(s, langs: str) -> bool:
     rl_iso = canonical_iso639_2(rl_base) if rl_base else "und"
 
     for t in tokens:
+        if t.endswith("_ad"):
+            # "<lang>_ad" asks for the audio description of that language
+            if not getattr(s, "is_ad", False):
+                continue
+            t = t[:-3]
+        
         if t == sl or t == rl:
             return True
 
@@ -722,6 +729,7 @@ def _subtitle_pref_score(s) -> tuple:
         1 if bool(getattr(s, "forced", False)) else 0,
         1 if not bool(getattr(s, "is_cc", False)) else 0,
         1 if not bool(getattr(s, "is_sdh", False)) else 0,
+        1 if not bool(getattr(s, "is_hi", False)) else 0,
         1 if bool(getattr(s, "default", False)) else 0,
         _bitrate(s),
     )
@@ -734,14 +742,7 @@ def _subtitle_lang_key(s) -> str:
 
 def _subtitle_flags(s) -> set:
     """Return a set of flags for a subtitle stream, e.g. {"forced", "cc"}."""
-    flags: set = set()
-    if bool(getattr(s, "forced", False)):
-        flags.add("forced")
-    if bool(getattr(s, "is_cc", False)):
-        flags.add("cc")
-    if bool(getattr(s, "is_sdh", False)):
-        flags.add("sdh")
-    return flags
+    return SubFlags.from_stream(s).as_set()
 
 
 def _canon_lang_token(token: str) -> str:
@@ -772,10 +773,7 @@ def _parse_subtitle_lang_requests(langs: str) -> list[tuple[str, set]]:
             continue
 
         base_raw = parts[0]
-        flags = {p for p in parts[1:] if p in {"forced", "cc", "sdh", "hi"}}
-        if "hi" in flags:
-            flags.discard("hi")
-            flags.add("cc")
+        flags = {p for p in parts[1:] if p in FLAG_ORDER}
 
         base = _canon_lang_token(base_raw)
         if not base:
@@ -798,11 +796,10 @@ def _subtitle_matches_request(s, base: str, req_flags: set) -> bool:
     if not req_flags:
         return True
 
-    sflags = _subtitle_flags(s)
-    return req_flags.issubset(sflags)
+    return flags_satisfy(_subtitle_flags(s), req_flags)
 
 
-def tag_matches_filter(raw: str, stream_type: str, language: str, forced: bool = False, cc: bool = False, sdh: bool = False) -> bool:
+def tag_matches_filter(raw: str, stream_type: str, language: str, forced: bool = False, cc: bool = False, sdh: bool = False, hi: bool = False) -> bool:
     """Whether a track known only by its language tag (an external one, or a closed caption inside the video) is asked for by a select_audio / select_subtitle value.
 
     It matches like a manifest stream does (ISO 639-1/2, locales, names: "spa" is "es-419"): any language of the filter, whichever its slot ("1ita|2eng" asks for both: there is no pool to choose among), and the flags of a token ("ita_forced") must be carried by the track.
@@ -814,7 +811,7 @@ def tag_matches_filter(raw: str, stream_type: str, language: str, forced: bool =
     if value.lower() == "false":
         return False
 
-    track = SimpleNamespace(language=language, resolved_language=language, forced=forced, is_cc=cc, is_sdh=sdh)
+    track = SimpleNamespace(language=language, resolved_language=language, forced=forced, is_cc=cc, is_sdh=sdh, is_hi=hi)
     requests = _parse_subtitle_lang_requests("|".join(filter_language_order(value, stream_type)))
     return any(_subtitle_matches_request(track, base, flags) for base, flags in requests)
 
@@ -822,11 +819,7 @@ def tag_matches_filter(raw: str, stream_type: str, language: str, forced: bool =
 def _subtitle_variant_key(s) -> tuple[str, ...]:
     """Variant bucket used for plain language requests (no explicit flags)."""
     flags = _subtitle_flags(s)
-    ordered: list[str] = []
-    for f in ("forced", "cc", "sdh"):
-        if f in flags:
-            ordered.append(f)
-    return tuple(ordered)
+    return tuple(f for f in FLAG_ORDER if f in flags)
 
 
 def _normalize_filter_value(value, default: str) -> str:
@@ -1451,7 +1444,8 @@ class StreamSelector:
 
                 # Explicit flags (e.g. it_forced) are strict: choose one best matching track.
                 if req_flags:
-                    pick = sorted(pool, key=_subtitle_pref_score, reverse=True)[0]
+                    # sdh and hi are interchangeable when matching, but the track that spells the requested flags wins
+                    pick = sorted(pool, key=lambda t: (req_flags <= _subtitle_flags(t), _subtitle_pref_score(t)), reverse=True)[0]
                     sid = _stream_id(pick) or id(pick)
                     if sid in used_ids:
                         continue
@@ -1523,7 +1517,8 @@ class StreamSelector:
                     continue
 
                 if req_flags:
-                    pick = sorted(pool, key=_subtitle_pref_score, reverse=True)[0]
+                    # sdh and hi are interchangeable when matching, but the track that spells the requested flags wins
+                    pick = sorted(pool, key=lambda t: (req_flags <= _subtitle_flags(t), _subtitle_pref_score(t)), reverse=True)[0]
                     sid = _stream_id(pick) or id(pick)
                     if sid in used_ids:
                         continue
@@ -1586,12 +1581,13 @@ class StreamSelector:
 
     @staticmethod
     def _mark_best_per_lang(streams: list, best: bool = True) -> None:
-        seen: dict = {}
-        for s in sorted(streams, key=_bitrate, reverse=best):
-            lang = _language(s) or "und"
-            if lang not in seen:
-                seen[lang] = True
-                s.selected = True
+        by_lang: dict = {}
+        for s in streams:
+            by_lang.setdefault(_language(s) or "und", []).append(s)
+        
+        for pool in by_lang.values():
+            main = [s for s in pool if not getattr(s, "is_ad", False)] or pool
+            (max if best else min)(main, key=_bitrate).selected = True
 
     @staticmethod
     def _mark_best_subtitle_per_lang(streams: list) -> None:

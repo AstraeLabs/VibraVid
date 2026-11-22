@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from VibraVid.core.decryptor import KeysManager
 from VibraVid.core.ui.bar_manager import DownloadBarManager, console
 from VibraVid.core.ui.tracker import context_tracker, download_tracker
+from VibraVid.core.utils.subtitle_flags import SubFlags
 from VibraVid.core.velora.bridge import run_download_plan
 from VibraVid.core.velora.curl_bridge import run_download_plan_curl_cffi
 from VibraVid.core.velora.subtitle import download_external_tracks_with_progress
@@ -618,13 +619,7 @@ class MediaDownloader(
         raw_lang = getattr(stream, "resolved_language", "") or stream.language or "und"
         lang = safe_name(raw_lang.lower())
         if stream.type == "subtitle":
-            if getattr(stream, "forced", False):
-                lang = f"{lang}_forced"
-            elif getattr(stream, "is_sdh", False):
-                lang = f"{lang}_sdh"
-            elif getattr(stream, "is_cc", False):
-                lang = f"{lang}_cc"
-
+            lang = f"{lang}{SubFlags.from_stream(stream).suffix()}"
             if getattr(stream, "is_wvtt_mp4", False):
                 base = f"{self.filename}.{lang}.wvtt"
             else:
@@ -648,4 +643,7 @@ class MediaDownloader(
                     counter += 1
 
         audio_ext = "webm" if ext == "webm" else "m4a"
+        if getattr(stream, "is_ad", False):
+            lang = f"{lang}_ad"
+        
         return f"{self.filename}.{lang}.{audio_ext}"

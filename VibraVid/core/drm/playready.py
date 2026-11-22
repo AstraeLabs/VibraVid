@@ -8,7 +8,8 @@ import os
 from rich.console import Console
 
 from VibraVid.core.decryptor import KeysManager
-from VibraVid.core.drm.cdm.remote.remote_cdm_api import RemoteCdmApi, build_remote_cdm
+from VibraVid.core.drm.cdm.remote.decryptlabs import DecryptLabsCdm
+from VibraVid.core.drm.cdm.remote.remote_cdm_api import build_remote_cdm, remote_label
 from VibraVid.core.drm.system import _DRMSystems, accumulate_content_key, cdm_load_line, normalize_kid
 from VibraVid.setup import binary_paths, read_device_prd
 from VibraVid.utils.http_client import create_client
@@ -126,7 +127,7 @@ def _get_playready_keys_local_cdm(
             console.print(f"[red]Error loading local CDM device: {e}")
             return None
     else:
-        console.print(f"\n{cdm_load_line('remote ' + str(cdm_remote_api.get('device_name', '?')), cdm_origin)}")
+        console.print(f"\n{cdm_load_line('remote ' + remote_label(cdm_remote_api), cdm_origin)}")
         try:
             cdm = build_remote_cdm(cdm_remote_api, "playready")
         except Exception as e:
@@ -166,13 +167,13 @@ def _get_playready_keys_local_cdm(
                 continue
 
             # Create license challenge
-            if isinstance(cdm, RemoteCdmApi):
+            if isinstance(cdm, DecryptLabsCdm):
                 cdm.set_pssh_b64(pssh, session_id)
                 if kid_info and kid_info != "n/a":
                     cdm.set_required_kids([kid_info], session_id)
             challenge = cdm.get_license_challenge(session_id, pssh_obj.wrm_headers[0])
 
-            if not challenge and isinstance(cdm, RemoteCdmApi):
+            if not challenge and isinstance(cdm, DecryptLabsCdm):
                 for key_obj in cdm.get_keys(session_id):
                     accumulate_content_key(all_content_keys, extracted_kids, key_obj.key_id.hex, key_obj.key.hex())
                 continue

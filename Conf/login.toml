@@ -41,6 +41,7 @@ cookies = '''[paste here]'''
 device_id = ""
 tv_client_id = ""
 tv_client_secret = ""
+hard_sub_locale = ""
 cdm = ""
 args = ""
 process = { live_mux = true, live_decrypt = true, rebase_tfdt = false }

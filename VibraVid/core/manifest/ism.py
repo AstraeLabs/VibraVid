@@ -14,6 +14,7 @@ from VibraVid.core.manifest._utils import fast_urljoin, is_simple_relative_ref, 
 from VibraVid.core.manifest.stream import DRMInfo, Segment, Stream
 from VibraVid.core.utils.codec import infer_video_range
 from VibraVid.core.utils.language import resolve_locale
+from VibraVid.core.utils.subtitle_flags import classify, is_audio_description, split_lang_flags
 from VibraVid.utils import config_manager
 from VibraVid.utils.http_client import create_client, get_headers
 
@@ -200,6 +201,7 @@ class ISMParser:
             url_template = si.get("Url") or si.get("url") or ""
             lang_raw = si.get("Language") or si.get("language") or ""
             si_name = si.get("Name") or si.get("name") or ""
+            si_subtype = si.get("Subtype") or si.get("subtype") or ""
             default_lang = (si.get("DefaultLanguage") or "").strip().lower()
 
             # Chunk timeline shared across all QualityLevels in this StreamIndex
@@ -210,7 +212,7 @@ class ISMParser:
 
             for ql in si.findall("QualityLevel"):
                 s = self._parse_quality_level(
-                    ql, stype, lang_raw, si_name, default_lang, global_duration, url_template, timeline, global_drm
+                    ql, stype, lang_raw, si_name, default_lang, global_duration, url_template, timeline, global_drm, si_subtype
                 )
                 if s is not None:
                     streams.append(s)
@@ -276,6 +278,7 @@ class ISMParser:
         url_template: str,
         timeline: list[int],
         global_drm: DRMInfo,
+        subtype: str = "",
     ) -> Stream | None:
         """Parse a single ``<QualityLevel>`` into a :class:`Stream`."""
         bitrate = int(ql.get("Bitrate") or ql.get("bitrate") or "0")
@@ -310,9 +313,14 @@ class ISMParser:
 
         elif stype == "audio":
             self._parse_audio_fields(ql, s, lang_raw, si_name, default_lang)
+            if lang_raw and s.is_ad:
+                s.id = f"{stype[0]}:{lang_raw}_ad:{bitrate}"
 
         elif stype == "subtitle":
-            self._parse_subtitle_fields(ql, s, lang_raw, si_name, fourcc)
+            self._parse_subtitle_fields(ql, s, lang_raw, si_name, fourcc, subtype)
+            extra = [n for n in s.sub_flags.names() if n not in split_lang_flags(lang_raw)[1]]
+            if lang_raw and extra:
+                s.id = f"{stype[0]}:{lang_raw}{''.join(f'_{n}' for n in extra)}:{bitrate}"
 
         # ── Segments ──────────────────────────────────────────────────────────
         if not url_template:
@@ -345,6 +353,7 @@ class ISMParser:
         s.language = lang_raw or "und"
         s.resolved_language = resolve_locale(lang_raw) if lang_raw else ""
         s.name = "" if _is_technical_stream_name(si_name) else (si_name or lang_raw)
+        s.is_ad = is_audio_description(lang=lang_raw, name=si_name)
 
         sr = ql.get("SamplingRate") or ql.get("AudioSamplingRate") or ""
         if sr:
@@ -361,10 +370,14 @@ class ISMParser:
         if lang_raw and default_lang and default_lang == lang_raw.lower():
             s.default = True
 
-    def _parse_subtitle_fields(self, ql, s: Stream, lang_raw: str, si_name: str, fourcc: str) -> None:
+    def _parse_subtitle_fields(self, ql, s: Stream, lang_raw: str, si_name: str, fourcc: str, subtype: str = "") -> None:
         s.language = lang_raw or "und"
-        s.resolved_language = resolve_locale(lang_raw) if lang_raw else ""
+        s.resolved_language = resolve_locale(split_lang_flags(lang_raw)[0]) if lang_raw else ""
         s.name = "" if _is_technical_stream_name(si_name) else (si_name or lang_raw)
+
+        # forced / cc / sdh / hi from the StreamIndex Subtype (FORC, CAPT), the Language suffix and the Name
+        flags = classify(lang=lang_raw, name=si_name, subtype=subtype)
+        s.forced, s.is_cc, s.is_sdh, s.is_hi = flags.forced, flags.cc, flags.sdh, flags.hi
 
         # ISM subtitle content is virtually always TTML/DFXP
         fc_low = (fourcc or "").lower()

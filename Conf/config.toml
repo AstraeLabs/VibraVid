@@ -67,7 +67,8 @@ select_video = "best"
 select_audio = "ita|eng"
 # Examples:
 #   "ita|eng"            languages in order of preference
-#   "ita_forced|eng_cc"  language with flag (forced, cc, sdh)
+#   "ita_forced|eng_cc"  language with flag (forced, cc, sdh, hi), flags can be combined: "ita_forced_sdh"
+#                        sdh and hi are interchangeable when matching; cc and forced match only themselves
 #   "all", "default", "non-default", "false" (no subtitles)
 select_subtitle = "ita|eng"
 extract_embedded_cc = false
@@ -170,18 +171,13 @@ enabled = false
 # protocol = "custom"
 
 # Remote CDMs with an id, chosen with cdm = "<id>" here or in login.toml.
-# Same fields as a pywidevine / pyplayready remote CDM, or type = "custom_api_1" for a hosted CDM.
 # [DRM.remote_cdm.my_widevine]
-# type = "custom_api_1"
 # host = "https://cdm.example.com"
 # secret = "..."
 
 # Local CDMs built in memory (no .wvd/.prd required): "system" is "playready" (default) or "widevine".
 # "path" is a .wvd/.prd file, or a folder with the raw identity files (see docs). "loader" is a .py
 # escape hatch exposing load_device(path=None). Chosen with cdm = "<id>" here or in login.toml.
-[DRM.local_cdm.edge]
-system = "playready"
-path = 'C:\Users\Testing\Documents\GitHub\Edge\playready\device'
 
 
 

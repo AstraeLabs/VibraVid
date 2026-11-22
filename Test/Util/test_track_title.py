@@ -24,7 +24,10 @@ from VibraVid.core.utils.language import extract_lang_and_flags, track_title_and
         ({"language": "en-us_sdh", "sdh": True}, ("English [SDH]", "eng")),
         ({"language": "it-it_forced_sdh"}, ("Italian [Forced] [SDH]", "ita")),
         ({"language": "en-us.[CC]"}, ("English [CC]", "eng")),
-        ({"language": "en-us_hi"}, ("English [CC]", "eng")),
+        ({"language": "en-us_hi"}, ("English [HI]", "eng")),
+        ({"language": "en-us", "hi": True}, ("English [HI]", "eng")),
+        ({"language": "en-us_forced_cc"}, ("English [Forced] [CC]", "eng")),
+        ({"language": "hi"}, ("Hindi", "hin")),
         # "lang" wins over "language" and "name", as join_media has always read it
         ({"lang": "fr-fr_cc", "language": "it-it"}, ("French [CC]", "fra")),
         # nothing known

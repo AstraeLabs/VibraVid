@@ -34,17 +34,20 @@ def _same_language(token_base: str, track_base: str) -> bool:
 def order_tracks(items: list[Any], kind: str, select_filter: str | None = None, track_of: Callable[[Any], Any] = lambda item: item) -> list[Any]:
     """Sort audio or subtitle *items* by the language priority of their track (dicts or manifest streams; *track_of* picks the track out of an item such as a ``(stream, path)`` pair), the unmatched ones last, each group in its original order.
 
-    The priority is the order of *select_filter*, the select_audio / select_subtitle the download ran with ("ita|eng", or "1ita|2eng" by slot number); a filter that names no language leaves *items* as they are. A token with flags ("ita_forced") ranks only the tracks that carry them.
+    The priority is the order of *select_filter*, the select_audio / select_subtitle the download ran with ("ita|eng", or "1ita|2eng" by slot number); a filter that names no language leaves *items* as they are. A token with flags ("ita_forced") ranks only the tracks that carry them. An audio description (``ad``) always follows the main audio of its language, even when the filter names no language.
     """
     requests = [extract_lang_and_flags(token.strip()) for token in filter_language_order(select_filter or "", kind) if token.strip()]
-    if not items or not requests:
+    if not items:
+        return items
+    if not requests and not (kind == "audio" and any("ad" in track_language_and_flags(track_of(item))[1] for item in items)):
         return items
 
-    def rank(item: Any) -> int:
+    def rank(item: Any) -> tuple[int, bool]:
         base, flags = track_language_and_flags(track_of(item))
+        is_ad = "ad" in flags
         for position, (token_base, token_flags) in enumerate(requests):
             if token_flags <= flags and _same_language(token_base.lower(), base.lower()):
-                return position
-        return len(requests)
+                return position, is_ad
+        return len(requests), is_ad
 
     return sorted(items, key=rank)

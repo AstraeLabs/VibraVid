@@ -9,6 +9,7 @@ from typing import Any
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.codec import AUDIO_EXTENSIONS, SUBTITLE_EXTENSIONS
 from VibraVid.core.utils.language import extract_lang_and_flags, language_variants, resolve_locale, subtitle_flags
+from VibraVid.core.utils.subtitle_flags import SubFlags
 from VibraVid.core.velora.bridge import run_download_plan
 from VibraVid.core.velora.curl_bridge import _fetch_one
 from VibraVid.core.velora.util._subtitle_segments import (
@@ -62,22 +63,15 @@ def build_ext_track_label(track: dict, track_type: str, ext_override: str = None
     lang_raw = (track.get("language") or "und").strip()
     base_lang, parsed_flags = _extract_lang_and_flags(lang_raw, track)
 
-    forced = bool(track.get("forced")) or "forced" in parsed_flags
-    sdh = bool(track.get("sdh")) or "sdh" in parsed_flags
-    cc = bool(track.get("cc")) or "cc" in parsed_flags
+    flags_found = SubFlags.from_track(track) | SubFlags.from_names(parsed_flags)
+    forced = flags_found.forced
 
     # Suppress DEFAULT when the track is only DEFAULT because it's forced
     default = (bool(track.get("default")) or "default" in parsed_flags) and not forced
     resolved = resolve_locale(base_lang) or base_lang
     parts: list[str] = [f"[bold white]{resolved}[/bold white]"]
 
-    flags: list[str] = []
-    if forced:
-        flags.append("[FORCED]")
-    if sdh:
-        flags.append("[SDH]")
-    if cc:
-        flags.append("[CC]")
+    flags: list[str] = [f"[{n.upper()}]" for n in flags_found.names()]
     if default:
         flags.append("[DEFAULT]")
 
@@ -129,15 +123,7 @@ def normalize_sub_filename(lang_raw: str, track_info: dict = None) -> tuple[str,
     base_lang = (resolve_locale(base_lang) or base_lang).lower()
     base_lang = _apply_name_region(base_lang, (track_info or {}).get("name") or "")
 
-    flags: list[str] = []
-    if (track_info and track_info.get("forced")) or "forced" in parsed_flags:
-        flags.append("forced")
-    if (track_info and track_info.get("sdh")) or "sdh" in parsed_flags:
-        flags.append("sdh")
-    if (track_info and track_info.get("cc")) or "cc" in parsed_flags or "hi" in parsed_flags:
-        flags.append("cc")
-
-    flag_str = ("_" + "_".join(flags)) if flags else ""
+    flag_str = (SubFlags.from_track(track_info or {}) | SubFlags.from_names(parsed_flags)).suffix()
     return base_lang, flag_str
 
 

@@ -291,11 +291,26 @@ Native `key=value` filters combine constraints with `:`: `r=` resolution, `c=` c
 | `"ita\|best"`, `"ita\|best,AAC"` | Language (+ codec) with fallback | Falls back to best |
 | `"b=64-192:f=best"` | Bitrate range (kbps) | Ignores range |
 | `"1ita\|2eng"` | Numbered slots, exclusive priority | Skips the whole download |
+| `"ita_ad"` | The audio description (narration for the visually impaired) of that language | Falls back to best (nothing in strict mode) |
 | `"false"` | Skip audio | n/a |
 
 Same native keys as video plus `l=` language, e.g. `"l=ita:c=aac:f=best"`.
 
-**Subtitle**: `"all"`, `"default"`, `"non-default"`, `"ita|eng"` (languages), `"ita_forced"` (flags `forced`, `cc`, `sdh`), `"ita_forced|eng_cc"`, `"false"`.
+An audio description is detected the same way in HLS (`CHARACTERISTICS="public.accessibility.describes-video"` or a name such as "Audio Description"), DASH (`Role` or `Accessibility` `description` / AudioPurpose 1), ISM (name) and custom manifests. A plain language request (`"ita"`) always takes the main audio, even when the description has a higher bitrate, and the description goes after the main audio in the output file so it never becomes the default track. It is titled `Italian [AD]` and saved as `<name>.ita_ad.m4a`.
+
+**Subtitle**: `"all"`, `"default"`, `"non-default"`, `"ita|eng"` (languages), `"ita_forced"` (flags `forced`, `cc`, `sdh`, `hi`), `"ita_forced|eng_cc"`, `"false"`.
+
+| Value | Selects | If the flag is missing |
+|---|---|---|
+| `"ita"` | One track per variant: plain, forced, cc, sdh and hi, if present | Skips Italian |
+| `"ita_forced"` | Only the forced Italian track | Skips Italian (no fallback to the plain track) |
+| `"eng_cc"` | Only the closed captions (CC) | Skips English |
+| `"eng_sdh"` or `"eng_hi"` | Subtitles for the deaf and hard of hearing: the track spelled as asked first, otherwise the other one | Skips English |
+| `"ita_forced_sdh"` | A track carrying both flags | Skips Italian |
+
+Every track keeps the flags its manifest declares, separately: `forced`, `cc` (closed captions), `sdh` and `hi` (hearing impaired). One never implies another, so a track is never labelled `[CC]` only because its name says "SDH". When matching, `sdh` and `hi` are interchangeable; `cc` and `forced` match only themselves. Files and track titles carry every flag in a fixed order (`forced`, `cc`, `sdh`, `hi`), e.g. `ita_forced_sdh` and `Italian [Forced] [SDH]`.
+
+HLS, DASH and Smooth Streaming (ISM) manifests are read the same way. The flags come from `FORCED`, `CHARACTERISTICS` and the name (HLS), `Role` and `Accessibility` (DASH), `Subtype` (`FORC`, `CAPT`) and the name (ISM), or from the language suffix (`it-forced`, `en_cc`) in any of them. `hi` as the first part of a language tag is Hindi, not a flag.
 
 ## CODEC
 
@@ -477,7 +492,7 @@ secret = "CDRM"
 | `secret` | x | x | Authentication secret |
 | `device_name` | x | x | Device registered on the remote service |
 
-The system (Widevine/PlayReady) is inferred: `device_type` or `type = "custom_api_1"` = Widevine, a `device_name` starting with `SL` = PlayReady, no `device_type` = PlayReady. Set `system = "widevine"` / `"playready"` to force it.
+The system (Widevine/PlayReady) is inferred: `device_type` or a hosted client (`decryptlabs`, `analchrome`, see below) = Widevine, a `device_name` starting with `SL` = PlayReady, no `device_type` = PlayReady. Set `system = "widevine"` / `"playready"` to force it.
 
 ### In-memory local CDMs (`DRM.local_cdm`)
 
@@ -508,25 +523,6 @@ Raw identity folder layout (used when `path` is a directory):
 
 The Widevine layout is exactly the output of `pywidevine export-device -o <out_dir> device.wvd` — point `path` at the exported folder and it works unmodified. `pyplayready export-device` does **not** produce a compatible folder for PlayReady (it writes `zgpriv.dat`/`bgroupcert.dat`, meant for reprovisioning, not for this raw-identity format) — for a real PlayReady device, point `path` directly at the original `.prd` file instead, or use `loader`.
 
-### Hosted remote CDM API
-
-A third-party hosted CDM (Widevine and PlayReady) over HTTP: same `[DRM.remote_cdm.<id>]` table with `type = "custom_api_1"`, plus `host` and `secret` from your provider.
-
-```toml
-[DRM.remote_cdm.hosted_widevine]
-type = "custom_api_1"
-host = "YOUR_PROVIDER_API_URL"
-secret = "YOUR_PROVIDER_API_KEY"
-device_name = "L3"
-```
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `type` | - | Must be `"custom_api_1"` (otherwise a standard pywidevine/pyplayready remote CDM) |
-| `host`, `secret` | required | Provider API URL and key |
-| `device_name` | `ChromeCDM` | Widevine: `ChromeCDM`, `L1`, `L2`, `L3`. PlayReady: `SL2`, `SL3` |
-| `auth_header` | `x-api-key` | Header the provider expects the key in |
-| `service_name` | - | Optional service tag |
 
 ### Choosing the CDM (`cdm`)
 
