@@ -1,6 +1,7 @@
 # 29.01.26
 
 import logging
+import os
 import threading
 from typing import Any
 
@@ -118,6 +119,23 @@ class DRMManager:
         self.playready_cdm_origin = chosen.playready_origin
         self.widevine_local_cdm = chosen.widevine_local
         self.playready_local_cdm = chosen.playready_local
+
+    def cdm_label(self, system: str) -> str | None:
+        """Short name of the CDM picked for *system* ("widevine" / "playready"): remote id, ``local:<id>`` or device file name."""
+        from VibraVid.core.drm.cdm.remote.remote_cdm_api import remote_label
+
+        prefix = "widevine" if system == "widevine" else "playready"
+        path = self.widevine_device_path if prefix == "widevine" else self.playready_device_path
+        local = getattr(self, f"{prefix}_local_cdm")
+        remote = getattr(self, f"{prefix}_remote_cdm_api")
+        
+        if remote:
+            return remote_label(remote)
+        
+        if local:
+            return f"local:{local.get('id', '?')}"
+        
+        return os.path.basename(path) if path else None
 
     def _display_keys(
         self,

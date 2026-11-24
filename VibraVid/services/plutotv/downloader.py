@@ -17,6 +17,7 @@ from VibraVid.services._base import (
 )
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import process_episode_download, process_season_selection
+from VibraVid.setup import resolve_cdm
 from VibraVid.utils import config_manager, start_message
 from VibraVid.utils.http_client import create_client, get_headers
 
@@ -27,11 +28,24 @@ from .client import (
     get_playback_dash_episode,
     get_playback_url_episode,
     get_playready_license,
+    get_widevine_license,
 )
 from .scrapper import GetSerieInfo, GetSerieInfoBySlug
 
 console = Console()
 extension_output = config_manager.config.get("PROCESS", "extension")
+
+
+def _pick_drm() -> str:
+    """PlayReady by default; Widevine when only the Widevine CDM was chosen on purpose (``--cdm`` / login.toml / config.toml, not ``search``)."""
+    chosen = resolve_cdm(context_tracker.site_name)
+
+    def explicit(origin: str | None) -> bool:
+        return bool(origin) and origin != "search"
+
+    if explicit(chosen.widevine_origin) and not explicit(chosen.playready_origin):
+        return DRMType.WIDEVINE
+    return DRMType.PLAYREADY
 
 
 def _download(content_id: str, content_ids: dict, output_path: str):
@@ -41,7 +55,9 @@ def _download(content_id: str, content_ids: dict, output_path: str):
 
     if protocol == "dash":
         mpd_url, mpd_headers = get_playback_dash_episode(content_id, content_ids)
-        license_url, license_headers = get_playready_license(mpd_headers)
+        drm_type = _pick_drm()
+        get_license = get_widevine_license if drm_type == DRMType.WIDEVINE else get_playready_license
+        license_url, license_headers = get_license(mpd_headers)
         if clip_url:
             # The clip lives on S3: the bearer is only for the license server (S3 rejects foreign Authorization headers).
             mpd_url, ad_decision_fn = clip_url, None
@@ -56,7 +72,7 @@ def _download(content_id: str, content_ids: dict, output_path: str):
             license_url=license_url,
             license_headers=license_headers,
             output_path=output_path,
-            drm_preference=DRMType.PLAYREADY,
+            drm_preference=drm_type,
             ad_decision_fn=ad_decision_fn,
         ).start()
 

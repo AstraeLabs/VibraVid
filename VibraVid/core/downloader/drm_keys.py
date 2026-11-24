@@ -3,7 +3,10 @@
 import logging
 from typing import Any
 
+from rich.markup import escape
+
 from VibraVid.core.drm.system import DRMType
+from VibraVid.core.ui.bar_manager import console
 
 logger = logging.getLogger(__name__)
 _DRM_TYPE_NAMES = {DRMType.WIDEVINE: "widevine", DRMType.PLAYREADY: "playready", DRMType.FAIRPLAY: "fairplay"}
@@ -76,6 +79,7 @@ def fetch_drm_keys(
         drm_manager.select_cdm(height)
     
     effective_pref = _effective_preference(drm_psshs, preference, cross_drm_fallback)
+    warn_unused_cli_cdm(drm_manager, effective_pref)
 
     def _resolve(label: str, call):
         if not swallow_errors:
@@ -120,6 +124,31 @@ def fetch_drm_keys(
         keys = manual_keys(key)
 
     return keys or []
+
+def warn_unused_cli_cdm(drm_manager, drm_type: str) -> None:
+    """Say so when ``--cdm`` only picked a CDM for the other DRM system than the one this download uses (e.g. a Widevine-only CDM on a PlayReady service)."""
+    from VibraVid.setup import CLI_ORIGIN
+
+    names = {DRMType.WIDEVINE: ("widevine", "Widevine"), DRMType.PLAYREADY: ("playready", "PlayReady")}
+    if drm_manager is None or drm_type not in names or getattr(drm_manager, "_cli_cdm_warned", False):
+        return
+
+    used, used_name = names[drm_type]
+    other, other_name = names[DRMType.PLAYREADY if drm_type == DRMType.WIDEVINE else DRMType.WIDEVINE]
+    used_origin = str(getattr(drm_manager, f"{used}_cdm_origin", None) or "")
+    other_origin = str(getattr(drm_manager, f"{other}_cdm_origin", None) or "")
+    if used_origin.startswith(CLI_ORIGIN) or not other_origin.startswith(CLI_ORIGIN):
+        return
+
+    drm_manager._cli_cdm_warned = True
+    label_fn = getattr(drm_manager, "cdm_label", None)
+    forced = label_fn(other) if label_fn else None
+    fallback = label_fn(used) if label_fn else None
+    console.print(
+        f"[yellow]{escape(CLI_ORIGIN)} {escape(forced or '?')} covers {other_name} only; this service uses {used_name} "
+        f"-> using {escape(fallback or '?')} (why: {escape(used_origin or '?')})"
+    )
+
 
 def _effective_preference(drm_psshs: dict[str, list[dict]], preference: str, cross_drm_fallback: bool) -> str:
     """*preference*, or the other of Widevine/PlayReady when the manifest only carries that one."""

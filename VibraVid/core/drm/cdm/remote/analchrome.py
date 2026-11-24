@@ -25,14 +25,15 @@ def _pssh_to_bytes(pssh_or_wrm) -> bytes:
 
 
 class AnalChromeCdm:
-    """Remote Widevine CDM client communicating over /challenge and /parse using host and secret."""
-    def __init__(self, host: str, secret: str = "", **_ignored):
+    def __init__(self, host: str, secret: str = "", backend: str | None = None, scheme: str | None = None, **_ignored):
         host = str(host or "").strip().rstrip("/")
         if not host:
             raise ValueError("AnalChrome CDM: 'host' is required")
-        
+
         self.host = host
         self.secret = str(secret or "").strip()
+        self._backend = str(backend).strip().lower() if backend else None
+        self._scheme = str(scheme).strip().lower() if scheme else None
 
         self._http = requests.Session()
         if self.secret:
@@ -77,7 +78,12 @@ class AnalChromeCdm:
         remote_sid = self._sessions[session_id]
         if remote_sid:
             payload["session_id"] = remote_sid
-        
+        elif self._backend or self._scheme:
+            if self._backend:
+                payload["system"] = self._backend
+            if self._scheme:
+                payload["scheme"] = self._scheme
+
         has_cert, cert_b64 = self._pending_cert.get(session_id, (False, None))
         if has_cert:
             payload["certificate"] = cert_b64
@@ -106,11 +112,10 @@ class AnalChromeCdm:
         else:
             lic_b64 = base64.b64encode(bytes(license_message)).decode("utf-8")
 
-        r = self._http.post(
-            f"{self.host}/parse",
-            json={"session_id": remote_sid, "license": lic_b64},
-            timeout=60,
-        )
+        parse_payload: dict = {"session_id": remote_sid, "license": lic_b64}
+        if self._scheme:
+            parse_payload["scheme"] = self._scheme
+        r = self._http.post(f"{self.host}/parse", json=parse_payload, timeout=60)
         if r.status_code != 200:
             raise RuntimeError(f"AnalChrome CDM parse failed: {r.text}")
 
@@ -128,7 +133,12 @@ class AnalChromeCdm:
 def build_anal_chrome_cdm(cfg: dict | None = None) -> AnalChromeCdm:
     """Build an AnalChromeCdm client from a remote_cdm config mapping using host and secret."""
     cfg = dict(cfg or {})
-    return AnalChromeCdm(host=cfg.get("host", ""), secret=cfg.get("secret", ""))
+    return AnalChromeCdm(
+        host=cfg.get("host", ""),
+        secret=cfg.get("secret", ""),
+        backend=cfg.get("backend"),
+        scheme=cfg.get("scheme"),
+    )
 
 
 def remote_system(cfg: dict) -> str:

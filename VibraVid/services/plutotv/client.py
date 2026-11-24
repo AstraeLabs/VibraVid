@@ -382,6 +382,17 @@ def get_playready_license(mpd_headers: dict):
     return license_url, license_headers
 
 
+def get_widevine_license(mpd_headers: dict):
+    """Widevine license server URL + headers, reusing the session bearer token from the MPD request."""
+    license_url = f"{LICENSE_BASE}/wv/alt"
+    license_headers = {
+        "authorization": mpd_headers["authorization"],
+        "origin": "https://pluto.tv",
+        "referer": "https://pluto.tv/",
+    }
+    return license_url, license_headers
+
+
 def is_bumper(name: str) -> bool:
     """True for Pluto bumper/promo/ad clips (matched on the clip name)."""
     return any(marker in (name or "") for marker in _BUMPER_MARKERS)
