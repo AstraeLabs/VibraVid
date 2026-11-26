@@ -24,6 +24,21 @@ class FuzzyItem(NamedTuple):
     payload: Any = None
 
 
+class FuzzyItemLabel(Static):
+    """Label for a result row that Textual must not treat as selectable text.
+
+    Search results are cleared and rebuilt while providers finish in the
+    background.  A mouse-down may therefore hit a label that has just been
+    detached from its ListItem.  Textual's automatic text-selection path then
+    dereferences the missing parent and crashes before dispatching the click.
+    Result rows already implement their own click handling, so disabling text
+    selection here avoids that race without affecting Input/TextArea widgets or
+    selectable text elsewhere in the application.
+    """
+
+    ALLOW_SELECT = False
+
+
 class HoverListItem(ListItem):
     """ListItem container for FuzzyList items."""
 
@@ -155,7 +170,7 @@ class FuzzyList(Widget):
         lv = self.query_one("#fuzzy-list", ListView)
         await lv.clear()
         for it in items:
-            li = HoverListItem(Static(it.label))
+            li = HoverListItem(FuzzyItemLabel(it.label))
             li.fuzzy_payload = it
             lv.append(li)
         if len(lv) > 0:
