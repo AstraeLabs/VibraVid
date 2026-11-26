@@ -50,6 +50,8 @@ class GetSerieInfo:
         "Il serale",
     ]
     FEED_PAGE_SIZE = 600
+    _TITLE_EP_RE = re.compile(r"^\s*(?:episodio|puntata)\s+(\d+)\b", re.IGNORECASE)
+    _SLUG_EP_RE = re.compile(r"/(?:episodio|puntata)-(\d+)_", re.IGNORECASE)
 
     def __init__(self, url):
         """Initialize the GetSerieInfo class for scraping."""
@@ -471,12 +473,7 @@ class GetSerieInfo:
                 if not self.disable_filters and duration < MIN_DURATION:
                     continue
 
-                ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
-                try:
-                    ep_num = int(ep_num) if ep_num else None
-                except Exception:
-                    ep_num = None
-
+                ep_num = self._feed_episode_number(entry)
                 category = entry.get("mediasetprogram$category")
                 if not category:
                     category = category_name if duration >= FULL_EPISODE_MIN_DURATION else "Clip"
@@ -499,6 +496,19 @@ class GetSerieInfo:
         except Exception as e:
             logger.error(f"_get_all_season_episodes failed: {e}")
             return []
+
+    @classmethod
+    def _feed_episode_number(cls, entry):
+        """Episode number as the site labels it ("Episodio 169"), falling back to tvSeasonEpisodeNumber."""
+        m = cls._TITLE_EP_RE.match(entry.get("title") or "") or cls._SLUG_EP_RE.search(entry.get("mediasetprogram$videoPageUrl") or "")
+        if m:
+            return int(m.group(1))
+
+        ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
+        try:
+            return int(ep_num) if ep_num else None
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _feed_release_date(entry):
@@ -642,12 +652,7 @@ class GetSerieInfo:
                 duration = (
                     int(entry.get("mediasetprogram$duration", 0) / 60) if entry.get("mediasetprogram$duration") else 0
                 )
-                ep_num = entry.get("tvSeasonEpisodeNumber") or entry.get("mediasetprogram$episodeNumber")
-                try:
-                    ep_num = int(ep_num) if ep_num else None
-                except Exception:
-                    ep_num = None
-                
+                ep_num = self._feed_episode_number(entry)
                 episodes.append(
                     Episode(
                         id=entry.get("guid", ""),

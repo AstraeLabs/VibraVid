@@ -243,9 +243,19 @@ class BaseMediaDownloader:
         # Register the DV companion only after the user's final selection.
         # External audio and subtitle entries are appended below first.
 
+        manifest_sub_keys = [
+            self._cross_source_sub_key(s.resolved_language or s.language, SubFlags.from_stream(s))
+            for s in self.streams
+            if s.type == "subtitle" and s.selected and not s.is_external
+        ]
         for ext in self.external_subtitles:
             lang = ext.get("language", "")
             selected = self._ext_track_matches(ext, "subtitle")
+            if selected:
+                ext_key = self._cross_source_sub_key(lang, SubFlags.from_track(ext))
+                if any(self._same_sub_variant(ext_key, kept) for kept in manifest_sub_keys):
+                    selected = False
+                    logger.info(f"Subtitle dedup: external {ext_key[0]}{'_forced' if ext_key[1] else ''}{'_hearing' if ext_key[2] else ''} already covered by the manifest -- skipping format={ext.get('format') or ext.get('extension') or '?'}")
             ext["_selected"] = selected
             fake = Stream(
                 type="subtitle",
@@ -715,6 +725,24 @@ class BaseMediaDownloader:
             parts.append("[bold red][DEFAULT][/bold red]")
 
         return " ".join(parts)
+
+    @staticmethod
+    def _cross_source_sub_key(language: str, flags: SubFlags) -> tuple[str, bool, bool]:
+        """(language, forced, hearing) of a subtitle, to match a manifest track with an external one: cc / sdh / hi count as one."""
+        lang, names = split_lang_flags((language or "und").replace("_", "-"))
+        flags = flags | SubFlags.from_names(names)
+        return (lang.lower() or "und", flags.forced, flags.hearing_impaired)
+
+    @staticmethod
+    def _same_sub_variant(a: tuple[str, bool, bool], b: tuple[str, bool, bool]) -> bool:
+        """Same flags and same language: ``it`` matches ``it-it`` (no region on one side), ``pt-br`` never matches ``pt-pt``."""
+        if a[1:] != b[1:]:
+            return False
+        if a[0] == b[0]:
+            return True
+        base_a, _, region_a = a[0].partition("-")
+        base_b, _, region_b = b[0].partition("-")
+        return base_a == base_b and not (region_a and region_b)
 
     @staticmethod
     def _sub_discriminator(stream) -> str:

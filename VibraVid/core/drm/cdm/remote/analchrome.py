@@ -113,6 +113,8 @@ class AnalChromeCdm:
             lic_b64 = base64.b64encode(bytes(license_message)).decode("utf-8")
 
         parse_payload: dict = {"session_id": remote_sid, "license": lic_b64}
+        if self._backend:
+            parse_payload["system"] = self._backend
         if self._scheme:
             parse_payload["scheme"] = self._scheme
         r = self._http.post(f"{self.host}/parse", json=parse_payload, timeout=60)
