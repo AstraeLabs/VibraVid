@@ -1,12 +1,15 @@
 # 16.11.26
 
+import html
 import logging
+import re
 import threading
 
 from VibraVid.services._base.object import Episode, EpisodeManager
 from VibraVid.utils.http_client import create_client, get_headers
 
 logger = logging.getLogger(__name__)
+_EMBED_RE = re.compile(r"https://vixcloud\.[a-z]+/embed/\d+\?[^\"'\s<>]+")
 
 
 class ScrapeSerieAnime:
@@ -47,6 +50,35 @@ class ScrapeSerieAnime:
         except Exception as error:
             logger.warning(f"[animeunity] external ids lookup failed for {self.media_id}-{slug}: {error}")
             return None, None
+
+    def get_episode_videos(self, index_ep: int) -> dict[str, int]:
+        """``{language: video id}`` of one episode: every dub or sub of it is a separate video (``ita``, ``jpn``...)."""
+        with self._fetch_lock:
+            if self.episodes_cache is None:
+                self._fetch_all_episodes()
+
+        if not self.episodes_cache or not 0 <= index_ep < len(self.episodes_cache):
+            return {}
+        
+        videos = {}
+        for video in self.episodes_cache[index_ep].get("videos") or []:
+            language = str(video.get("language") or "").strip().lower()
+            if language and video.get("id") and language not in videos:
+                videos[language] = video["id"]
+        return videos
+
+    def get_embed_url(self, video_id: int) -> str | None:
+        """Signed vixcloud player url of one video, written by the site into the episode page."""
+        slug = getattr(self, "series_name", None) or ""
+        try:
+            with create_client(headers=self.headers) as client:
+                response = client.get(f"{self.url}/anime/{self.media_id}-{slug}/{video_id}")
+            response.raise_for_status()
+        except Exception as error:
+            logger.error(f"[animeunity] episode page failed for video {video_id}: {error}")
+            return None
+        match = _EMBED_RE.search(html.unescape(response.text))
+        return match.group(0) if match else None
 
     def get_count_episodes(self):
         """Total number of episodes available for the selected media."""

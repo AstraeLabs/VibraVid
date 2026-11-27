@@ -8,7 +8,7 @@ from rich.console import Console
 
 from VibraVid.core.drm.manager import DRMManager
 from VibraVid.core.drm.system import DRMType, _DRMSystems
-from VibraVid.core.manifest.stream import track_label
+from VibraVid.core.manifest.stream import Stream, track_label
 from VibraVid.core.muxing.helper.sub import extract_embedded_cc
 from VibraVid.core.muxing.helper.video.hybrid import split_other_tracks
 from VibraVid.core.ui.tracker import context_tracker
@@ -413,6 +413,7 @@ class HLS_Downloader(BaseDownloader):
         if no_match is not None:
             return no_match
 
+        self._promote_single_audio_tracks()
         self._embedded_cc_streams = self._collect_embedded_cc(streams)
         if not self._embedded_cc_streams and not self.embedded_audio_language:
             # The streaming-mux fast path builds a plain ffmpeg command with no
@@ -460,6 +461,39 @@ class HLS_Downloader(BaseDownloader):
 
         # ── Guards → merge → finalize (shared tail)
         return self._finish_from_status(status)
+
+    def _promote_single_audio_tracks(self) -> None:
+        """Audio taken from another catalog's HLS playlist (``single_audio`` other tracks) joins the main download."""
+        md = self.media_downloader
+        promoted, kept = [], []
+        for track in self.other_tracks:
+            kind = str(track.get("type") or "").split(":")[0].strip().lower()
+            if track.get("single_audio") and kind in ("audio", "aud") and track.get("url"):
+                promoted.append(track)
+            else:
+                kept.append(track)
+        if not promoted:
+            return
+
+        languages = set()
+        for track in promoted:
+            language = track.get("language") or "und"
+            stream = Stream(type="audio", language=language, name=track.get("name") or "", selected=True)
+            stream.id = f"aud:{language}:catalog"
+            stream.playlist_url = track["url"]
+            stream.format = "hls"
+            md.streams.append(stream)
+            languages.add(language)
+            logger.info(f"Audio {language} from another catalog joins the main download: {track['url'].split('?')[0]}")
+
+        # The external rows shown in the track table stand for the tracks now downloaded as real streams
+        md.streams = [
+            s for s in md.streams
+            if not (s.is_external and s.type == "audio" and s.id == "EXT" and (s.language or "und") in languages)
+        ]
+        self.other_tracks = kept
+        md.other_tracks = kept
+        md.external_other_tracks = [t for t in (md.external_other_tracks or []) if t not in promoted]
 
     def _merge_files(self, status: dict) -> str | None:
         merged = super()._merge_files(status)

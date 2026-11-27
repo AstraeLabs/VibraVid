@@ -225,6 +225,14 @@ class VideoSourceAnime(VideoSource):
         self.src_mp4 = None
         self.master_playlist = None
 
+    def load_embed(self, embed_url: str, page_url: str) -> str | None:
+        """Master playlist of a signed vixcloud embed url (as found in the site's episode page), or None."""
+        self.iframe_src = embed_url
+        self.iframe_page_url = page_url
+        self.get_content()
+        self.master_playlist = self.get_playlist()
+        return self.master_playlist
+
     def get_embed(self, episode_id: int, prefer_mp4: bool = True) -> str:
         """
         Retrieve embed URL and extract video source.

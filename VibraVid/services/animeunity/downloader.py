@@ -8,6 +8,7 @@ from rich.prompt import Prompt
 
 from VibraVid.core.downloader import HLS_Downloader, MP4_Downloader
 from VibraVid.core.ui.tracker import context_tracker
+from VibraVid.core.utils.audio_selection import language_code
 from VibraVid.player.vixcloud import VideoSourceAnime
 from VibraVid.services._base import Entries, anime_folder, movie_folder, print_episode_header, site_constants
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path, map_movie_path
@@ -15,6 +16,7 @@ from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import config_manager, os_manager, start_message
 from VibraVid.utils.media.anime_naming import crosswalk_placement, series_name_and_year
 
+from .audio import lightest_rendition, plan_audio, wanted_audio_languages
 from .scrapper import ScrapeSerieAnime
 
 console = Console()
@@ -47,17 +49,49 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
     start_message()
     print_episode_header(scrape_serie.series_name, episode=obj_episode.number)
 
-    mp4_url = (
-        scrape_serie.get_video_url(obj_episode.id) if hasattr(scrape_serie, "get_video_url") else None
-    )
-    if not isinstance(mp4_url, str) or not mp4_url.startswith("http"):
-        mp4_url = None
-    if not mp4_url:
-        try:
-            video_source.get_embed(obj_episode.id, not DOWNOAD_HLS)
-        except Exception as error:
-            logger.error(f"[animeunity] No video source for episode {obj_episode.id}: {error}")
+    # Every dub is its own video: the first requested language gives the video, the others add only their audio
+    videos = scrape_serie.get_episode_videos(index_select) if hasattr(scrape_serie, "get_episode_videos") else {}
+    primary, extras = plan_audio(list(videos), wanted_audio_languages())
+    if context_tracker.manual_tracks:
+        extras = []
+
+    hls_source = None
+    if extras:
+        hls_source = _vixcloud_playlist(scrape_serie, videos[primary])
+        if not hls_source:
+            console.print(f"[yellow]Audio {', '.join(extras)} unavailable for this episode: downloading {primary} only.")
+            extras = []
+
+    mp4_url = None
+    if not hls_source:
+        mp4_url = (
+            scrape_serie.get_video_url(obj_episode.id, prefer_language=primary or "ita")
+            if hasattr(scrape_serie, "get_video_url") else None
+        )
+        if not isinstance(mp4_url, str) or not mp4_url.startswith("http"):
+            mp4_url = None
+    
+    if not mp4_url and not hls_source:
+        if primary:
+            hls_source = _vixcloud_playlist(scrape_serie, videos[primary])
+        else:
+            try:
+                video_source.get_embed(obj_episode.id, not DOWNOAD_HLS)
+                if video_source.master_playlist:
+                    hls_source = (video_source.master_playlist, dict(video_source.headers))
+            except Exception as error:
+                logger.error(f"[animeunity] No video source for episode {obj_episode.id}: {error}")
+        if not hls_source and DOWNOAD_HLS:
+            logger.error(f"[animeunity] No video source for episode {obj_episode.id}")
             return None
+
+    other_tracks = []
+    for language in extras:
+        track = _audio_only_track(scrape_serie, language, videos[language])
+        if track:
+            other_tracks.append(track)
+        else:
+            console.print(f"[yellow]Audio {language} unavailable for this episode: skipped.")
 
     if scrape_serie.is_series:
         if isinstance(obj_episode.number, str) and "-" in obj_episode.number:
@@ -100,10 +134,52 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
         return MP4_Downloader(url=mp4_url, path=os.path.join(mp4_path, f"{mp4_name}.mp4"))
     if not DOWNOAD_HLS:
         return MP4_Downloader(url=str(video_source.src_mp4).strip(), path=os.path.join(mp4_path, f"{mp4_name}.mp4"))
+
+    master_playlist, headers = hls_source
+    audio_options = {}
+    if other_tracks:
+        audio_options = {
+            "other_tracks": other_tracks,
+            "embedded_audio_language": language_code(primary),
+            "required_audio_languages": [language_code(primary), *(track["language"] for track in other_tracks)],
+        }
     return HLS_Downloader(
-        m3u8_url=video_source.master_playlist,
+        m3u8_url=master_playlist,
+        headers=headers,
         output_path=os.path.join(mp4_path, f"{mp4_name}.{extension_output}"),
+        **audio_options,
     ).start()
+
+
+def _vixcloud_playlist(scrape_serie, video_id) -> tuple[str, dict] | None:
+    """(master playlist, headers) of one language video, from the signed player url in its episode page."""
+    embed_url = scrape_serie.get_embed_url(video_id)
+    if not embed_url:
+        return None
+    source = VideoSourceAnime(site_constants.FULL_URL)
+    page_url = f"{scrape_serie.url}/anime/{scrape_serie.media_id}-{scrape_serie.series_name}/{video_id}"
+    try:
+        master_playlist = source.load_embed(embed_url, page_url)
+    except Exception as error:
+        logger.error(f"[animeunity] player of video {video_id} failed: {error}")
+        return None
+    return (master_playlist, dict(source.headers)) if master_playlist else None
+
+
+def _audio_only_track(scrape_serie, language: str, video_id) -> dict | None:
+    """Other track carrying only the audio of *language*, from the lightest rendition of its own video."""
+    resolved = _vixcloud_playlist(scrape_serie, video_id)
+    if not resolved:
+        return None
+    master_playlist, headers = resolved
+    try:
+        playlist = lightest_rendition(master_playlist, headers)
+    except Exception as error:
+        logger.error(f"[animeunity] {language} playlist unreadable: {error}")
+        return None
+    if not playlist:
+        return None
+    return {"type": "audio", "language": language_code(language), "url": playlist, "headers": headers, "single_audio": True}
 
 
 def _get_episode_by_number_or_index(scrape_serie, episode_number: int):
