@@ -32,6 +32,22 @@ class ScrapeSerieAnime:
             self.series_name = series_name
             self.obj_episode_manager: EpisodeManager = EpisodeManager()
 
+    def get_external_ids(self) -> tuple[str | None, str | None]:
+        """MyAnimeList and AniList ids linked from the detail page (the search API no longer returns them)."""
+        from VibraVid.utils.media.anime_naming import external_ids_from_html
+
+        slug = getattr(self, "series_name", None)
+        if not self.media_id or not slug:
+            return None, None
+        try:
+            with create_client(headers=self.headers) as client:
+                response = client.get(f"{self.url}/anime/{self.media_id}-{slug}")
+            response.raise_for_status()
+            return external_ids_from_html(response.text)
+        except Exception as error:
+            logger.warning(f"[animeunity] external ids lookup failed for {self.media_id}-{slug}: {error}")
+            return None, None
+
     def get_count_episodes(self):
         """Total number of episodes available for the selected media."""
         with self._fetch_lock:

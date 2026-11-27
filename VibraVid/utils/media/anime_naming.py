@@ -14,6 +14,7 @@ _identity_cache: dict[tuple, tuple[str, int] | None] = {}
 _YEAR_TOKEN = "%(series_year)"
 _MAL_URL_RE = re.compile(r"myanimelist\.net/anime/(\d+)")
 _ANILIST_URL_RE = re.compile(r"anilist\.co/anime/(\d+)")
+_LANG_SUFFIX_RE = re.compile(r"(?:\s*[\(\[]\s*(?:sub\s*[-_ ]?\s*)?ita\s*[\)\]]|[\s_-]+(?:sub[\s_-]+)?ita)\s*$", re.IGNORECASE)
 
 
 def external_ids_from_html(html: str) -> tuple[str | None, str | None]:
@@ -33,8 +34,18 @@ def _tmdb_identity(tmdb_id) -> tuple[str, int] | None:
     return (title, year) if title and year else None
 
 
+def _imdb_identity(imdb_id) -> tuple[str, int] | None:
+    """(title, first year) from IMDb, which needs no API key: the fallback when TMDB is not configured."""
+    from VibraVid.provider.imdb import IMDbClient
+
+    title = IMDbClient().get_title(str(imdb_id)) or {}
+    name = (title.get("titleText") or {}).get("text")
+    year = (title.get("releaseYear") or {}).get("year")
+    return (name, int(year)) if name and year else None
+
+
 def canonical_identity(*, mal_id=None, anilist_id=None, tmdb_id=None) -> tuple[str, int] | None:
-    """(TMDB title, first-air year) of the show, or None when it cannot be resolved."""
+    """(title, first-air year) of the whole show from TMDB, or from IMDb when TMDB has no key; None when unresolved."""
     key = (str(mal_id or ""), str(anilist_id or ""), str(tmdb_id or ""))
     if not any(key):
         return None
@@ -47,12 +58,41 @@ def canonical_identity(*, mal_id=None, anilist_id=None, tmdb_id=None) -> tuple[s
         resolved = tmdb_id or anime_id_map.resolve_tmdb_id("tv", mal_id=mal_id, anilist_id=anilist_id)
         if resolved:
             identity = _tmdb_identity(resolved)
+
+        if not identity and (mal_id or anilist_id):
+            imdb_id = (anime_id_map.lookup(mal_id=mal_id, anilist_id=anilist_id) or {}).get("imdb_id")
+            if imdb_id:
+                identity = _imdb_identity(imdb_id)
+        
     except Exception as exc:
         logger.warning(f"[anime_naming] could not resolve canonical title: {exc}")
 
     with _lock:
         _identity_cache[key] = identity
     return identity
+
+
+def crosswalk_placement(*, mal_id=None, anilist_id=None) -> tuple[int | None, int]:
+    """(TMDB season, TMDB episode offset) of one provider entry, so "Vinland Saga 2" lands in S02 and a "Part 2"
+    continues the numbering of its season. ``(None, 0)`` when the entry is not in the crosswalk."""
+    if not (mal_id or anilist_id):
+        return None, 0
+    try:
+        record = anime_id_map.lookup(mal_id=mal_id, anilist_id=anilist_id) or {}
+    except Exception as exc:
+        logger.warning(f"[anime_naming] crosswalk lookup failed: {exc}")
+        return None, 0
+    season = (record.get("season") or {}).get("tmdb") if isinstance(record.get("season"), dict) else None
+    offset = (record.get("episode_offset") or {}).get("tmdb") if isinstance(record.get("episode_offset"), dict) else None
+    season = season if isinstance(season, int) and season > 0 else None
+    offset = offset if isinstance(offset, int) and offset > 0 else 0
+    return season, offset
+
+
+def strip_language_suffix(name: str) -> str:
+    """``Vinland Saga (ITA)`` -> ``Vinland Saga``: the dub and the sub of a show share one folder."""
+    stripped = _LANG_SUFFIX_RE.sub("", name or "").strip()
+    return stripped or name
 
 
 def _format_has_year_token() -> bool:
@@ -82,6 +122,7 @@ def series_name_and_year(fallback_name: str, *, mal_id=None, anilist_id=None, tm
     if identity:
         title, year = identity
     else:
+        fallback_name = strip_language_suffix(fallback_name)
         year = _clean_year(fallback_year)
         if not year:
             return fallback_name, None

@@ -13,7 +13,7 @@ from VibraVid.services._base import Entries, anime_folder, movie_folder, print_e
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import config_manager, os_manager, start_message
-from VibraVid.utils.media.anime_naming import series_name_and_year
+from VibraVid.utils.media.anime_naming import crosswalk_placement, series_name_and_year
 
 from .scrapper import ScrapeSerieAnime
 
@@ -68,6 +68,7 @@ def download_episode(obj_episode, index_select, scrape_serie, video_source, seas
         else:
             episode_number = 1
         episode_name = f"Episode {obj_episode.number}"
+        episode_number += getattr(scrape_serie, "episode_offset", 0)
 
         # Add episode information to context tracker
         context_tracker.season = season_number
@@ -139,17 +140,22 @@ def download_series(
         scrape_serie = ScrapeSerieAnime(site_constants.FULL_URL)
         scrape_serie.setup(None, select_title.id, select_title.slug)
 
-    # One "Title (Year)" folder for every season/part/dub of the show (TMDB via the MAL/AniList crosswalk)
+    # One "Title (Year)" folder for every season/part/dub of the show (TMDB or IMDb via the MAL/AniList crosswalk)
+    mal_id, anilist_id = getattr(select_title, "mal_id", None), getattr(select_title, "anilist_id", None)
+    if not (mal_id or anilist_id) and hasattr(scrape_serie, "get_external_ids"):
+        mal_id, anilist_id = scrape_serie.get_external_ids()
     scrape_serie.series_identity = series_name_and_year(
         getattr(select_title, "name", None) or scrape_serie.series_name,
-        mal_id=getattr(select_title, "mal_id", None),
-        anilist_id=getattr(select_title, "anilist_id", None),
+        mal_id=mal_id,
+        anilist_id=anilist_id,
         tmdb_id=getattr(select_title, "tmdb_id", None),
         fallback_year=getattr(select_title, "year", None),
     )
 
     video_source = VideoSourceAnime(site_constants.FULL_URL)
     season_number = int(season_selection) if str(season_selection or "").isdigit() and int(season_selection) > 0 else 1
+    crosswalk_season, scrape_serie.episode_offset = crosswalk_placement(mal_id=mal_id, anilist_id=anilist_id)
+    season_number = crosswalk_season or season_number
 
     # Get episode information
     episoded_count = scrape_serie.get_count_episodes()

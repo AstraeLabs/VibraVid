@@ -12,7 +12,7 @@ from VibraVid.services._base import Entries, anime_folder, print_episode_header,
 from VibraVid.services._base.tv_display_manager import manage_selection, map_episode_path, map_movie_path
 from VibraVid.services._base.tv_download_manager import _is_user_stop_requested
 from VibraVid.utils import os_manager, start_message
-from VibraVid.utils.media.anime_naming import series_name_and_year
+from VibraVid.utils.media.anime_naming import crosswalk_placement, series_name_and_year
 
 from .scrapper import ScrapSerie
 
@@ -57,8 +57,8 @@ def download_episode(episode_data, index_select, scrape_serie, season_number=1):
     """
     start_message()
 
-    # Episode number is 1-based
-    episode_number = index_select + 1
+    # Episode number is 1-based; a "Part 2" entry continues the numbering of its TMDB season
+    episode_number = index_select + 1 + getattr(scrape_serie, "episode_offset", 0)
     episode_name = f"Episode {episode_number}"
     series_name = scrape_serie.get_name()
     print_episode_header(series_name, episode=episode_number)
@@ -122,6 +122,8 @@ def download_series(
         scrape_serie.get_name(), mal_id=mal_id, anilist_id=anilist_id, tmdb_id=getattr(select_title, "tmdb_id", None)
     )
     season_number = int(season_selection) if str(season_selection or "").isdigit() and int(season_selection) > 0 else 1
+    crosswalk_season, scrape_serie.episode_offset = crosswalk_placement(mal_id=mal_id, anilist_id=anilist_id)
+    season_number = crosswalk_season or season_number
 
     # Download selected episodes
     if len(list_episode_select) == 1 and last_command != "*":
