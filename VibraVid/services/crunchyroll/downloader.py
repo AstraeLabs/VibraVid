@@ -7,7 +7,7 @@ from rich.console import Console
 
 from VibraVid.core.downloader import DASH_Downloader
 from VibraVid.core.utils.language import resolve_locale
-from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
+from VibraVid.core.utils.selector import filter_language_groups
 from VibraVid.core.utils.track_order import effective_select_filter
 from VibraVid.services._base import Entries, anime_folder, movie_folder, print_download_header, print_episode_header
 from VibraVid.services._base.tv_display_manager import map_episode_path, map_movie_path
@@ -71,22 +71,12 @@ def _subtitles_to_other_tracks(subtitles: list) -> list:
 
 def parse_select_audio_filter(select_audio: str) -> list:
     """
-    Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all", or exclusive-priority slots "1ita|2eng") to extract locale groups.
+    Parse select_audio config format (shared FilterSpec grammar, e.g. "ita|it", "l=ita", "all", exclusive-priority slots "1ita|2eng" or ";" groups) to extract locale groups.
     """
     if not select_audio:
         return []
 
-    raw = select_audio.strip()
-    slots = split_audio_slots(raw)
-
-    if slots is not None:
-        groups_raw = [slots[num] for num in sorted(slots)]
-    else:
-        spec = FilterSpec.parse(raw, "audio")
-        if spec.select_all or spec.drop:
-            return []
-        groups_raw = [spec.langs] if spec.langs else []
-
+    groups_raw = filter_language_groups(select_audio.strip(), "audio")
     groups = []
     for langs in groups_raw:
         raw_codes = [c.strip() for c in langs.split("|") if c.strip()]

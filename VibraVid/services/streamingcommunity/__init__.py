@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from rich.console import Console
 
 from VibraVid.core.utils.language import resolve_iso639_1
-from VibraVid.core.utils.selector import FilterSpec, split_audio_slots
+from VibraVid.core.utils.selector import filter_language_groups
 from VibraVid.services._base import Entries, EntriesManager, site_constants
 from VibraVid.services._base.site_search_manager import make_search_entrypoints
 from VibraVid.utils import TVShowManager, config_manager
@@ -34,17 +34,7 @@ def _effective_languages() -> list[str]:
     if not select_audio:
         return ["it", "en"]
 
-    raw = select_audio.strip()
-    slots = split_audio_slots(raw)
-
-    if slots is not None:
-        groups_raw = [slots[num] for num in sorted(slots)]
-    else:
-        spec = FilterSpec.parse(raw, "audio")
-        if spec.select_all or spec.drop:
-            return ["it", "en"]
-        groups_raw = [spec.langs] if spec.langs else []
-
+    groups_raw = filter_language_groups(select_audio.strip(), "audio")
     languages = []
     for langs in groups_raw:
         raw_codes = [c.strip() for c in langs.split("|") if c.strip()]

@@ -291,10 +291,21 @@ Native `key=value` filters combine constraints with `:`: `r=` resolution, `c=` c
 | `"ita\|best"`, `"ita\|best,AAC"` | Language (+ codec) with fallback | Falls back to best |
 | `"b=64-192:f=best"` | Bitrate range (kbps) | Ignores range |
 | `"1ita\|2eng"` | Numbered slots, exclusive priority | Skips the whole download |
+| `"ita\|eng,AAC;ger,EAC3"` | Several filters separated by `;`, each one with its own codec: Italian and English in AAC, German in E-AC-3 | Per group: see below |
 | `"ita_ad"` | The audio description (narration for the visually impaired) of that language | Falls back to best (nothing in strict mode) |
 | `"false"` | Skip audio | n/a |
 
 Same native keys as video plus `l=` language, e.g. `"l=ita:c=aac:f=best"`.
+
+**Groups with `;`**: every group is a complete filter, written like the values above, and the tracks of all the groups are downloaded together. A group that names languages looks only at those languages, so `"ger,EAC3"` never takes the E-AC-3 of another language.
+
+| Value | Downloads |
+|-------|-----------|
+| `"ita\|eng,AAC;ger,EAC3"` | Italian and English in AAC, German in E-AC-3 |
+| `"ita,AAC;ger"` | Italian in AAC, the best German track (any codec) |
+| `"l=ita\|eng:c=aac;l=ger:c=ec-3"` | The same as the first row, with the native keys |
+
+If a group's language is in the title but not in its codec, the best track of that language is taken (with `--skip-no-match` / strict mode the download is skipped instead). If the language is not in the title at all, that group adds nothing and the other groups are downloaded. The tracks are written in the order the groups name their languages. With `-sa` / `--audio` put the value in quotes: `-sa "ita|eng,AAC;ger,EAC3"`.
 
 An audio description is detected the same way in HLS (`CHARACTERISTICS="public.accessibility.describes-video"` or a name such as "Audio Description"), DASH (`Role` or `Accessibility` `description` / AudioPurpose 1), ISM (name) and custom manifests. A plain language request (`"ita"`) always takes the main audio, even when the description has a higher bitrate, and the description goes after the main audio in the output file so it never becomes the default track. It is titled `Italian [AD]` and saved as `<name>.ita_ad.m4a`.
 

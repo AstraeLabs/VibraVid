@@ -38,7 +38,7 @@ class AnalChromeCdm:
         self._http = requests.Session()
         if self.secret:
             self._http.headers["X-API-Key"] = self.secret
-        
+
         self._sessions: dict[bytes, str | None] = {}
         self._pending_cert: dict[bytes, tuple[bool, str | None]] = {}
         self._cached_keys: dict[bytes, list[Key]] = {}
@@ -58,21 +58,21 @@ class AnalChromeCdm:
     def set_service_certificate(self, session_id: bytes, certificate) -> None:
         if session_id not in self._sessions:
             raise InvalidSession(f"AnalChrome CDM: invalid session ID: {session_id.hex()}")
-        
+
         cert_b64 = None
         if certificate:
             if isinstance(certificate, str):
                 cert_b64 = certificate.strip().replace("\n", "").replace(" ", "")
             elif isinstance(certificate, (bytes, bytearray)):
                 cert_b64 = base64.b64encode(certificate).decode("utf-8")
-            
+
         # Queued locally and attached to the next /challenge call.
         self._pending_cert[session_id] = (True, cert_b64)
 
     def get_license_challenge(self, session_id: bytes, pssh_or_wrm, *_args, **_kwargs) -> bytes:
         if session_id not in self._sessions:
             raise InvalidSession(f"AnalChrome CDM: invalid session ID: {session_id.hex()}")
-        
+
         pssh_bytes = _pssh_to_bytes(pssh_or_wrm)
         payload: dict = {"pssh": base64.b64encode(pssh_bytes).decode("utf-8")}
         remote_sid = self._sessions[session_id]
@@ -91,7 +91,7 @@ class AnalChromeCdm:
         r = self._http.post(f"{self.host}/challenge", json=payload, timeout=15)
         if r.status_code != 200:
             raise RuntimeError(f"AnalChrome CDM challenge failed: {r.text}")
-        
+
         data = r.json()
         self._sessions[session_id] = data["session_id"]
         self._pending_cert[session_id] = (False, None)
@@ -104,7 +104,7 @@ class AnalChromeCdm:
         remote_sid = self._sessions[session_id]
         if not remote_sid:
             raise InvalidSession("AnalChrome CDM: get_license_challenge must be called before parse_license")
-        
+
         if isinstance(license_message, str):
             lic_b64 = license_message
         elif isinstance(license_message, (bytes, bytearray)):

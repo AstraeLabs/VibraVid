@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from VibraVid.core.ui.tracker import context_tracker
 from VibraVid.core.utils.language import LANGUAGES, canonical_iso639_2, resolve_iso639_1, resolve_language_display_name
-from VibraVid.core.utils.selector import FilterSpec, _matches_lang, split_audio_slots
+from VibraVid.core.utils.selector import _matches_lang, filter_language_groups
 from VibraVid.utils import config_manager
 
 
@@ -23,10 +23,8 @@ def language_code(value: str) -> str:
 
 def configured_audio_languages(raw: str | None = None) -> list[dict[str, str]]:
     raw = config_manager.config.get("DOWNLOAD", "select_audio", default="") if raw is None else raw
-    slots = split_audio_slots(raw)
-    groups = [slots[number] for number in sorted(slots)] if slots else [FilterSpec.parse(raw, "audio").langs or ""]
     choices = {}
-    for group in groups:
+    for group in filter_language_groups(raw or "", "audio"):
         for token in re.split(r"[|\s]+", group):
             code = language_code(token)
             if code and code not in choices:

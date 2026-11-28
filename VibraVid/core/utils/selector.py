@@ -48,15 +48,33 @@ def split_audio_slots(raw: str) -> dict[int, str] | None:
     return {num: "|".join(langs) for num, langs in slots.items()}
 
 
-def filter_language_order(raw: str, stream_type: str) -> list[str]:
-    """Language tokens of a select_audio/select_subtitle value in the order they rank: as written ("ita|eng", "ita eng", "l=ita|eng"), slots by number ("2eng|1ita" -> ita, eng). Empty for filters that name no language ("best", "all", "false", a codec or an id)."""
-    r = (raw or "").strip()
-    if not r or r.lower() in _AUDIO_SLOT_RESERVED:
-        return []
+def split_filter_groups(raw) -> list[str]:
+    """The independent filters of a value, separated by ";": "ita|eng,AAC;ger,EAC3" -> ["ita|eng,AAC", "ger,EAC3"]. A value without ";" is one group."""
+    text = str(raw or "").strip()
+    return [group.strip() for group in text.split(";") if group.strip()] or [text]
 
-    slots = split_audio_slots(r)
-    langs = "|".join(slots[num] for num in sorted(slots)) if slots else (FilterSpec.parse(r, stream_type).langs or "")
-    return [t for t in re.split(r"[|\s]+", langs) if t and t.lower() not in ("best", "worst")]
+
+def filter_language_groups(raw: str, stream_type: str) -> list[str]:
+    """The languages a filter asks for, "|"-joined, one entry per exclusive-priority slot ("1ita|2eng" -> ["ita", "eng"]) or one for a plain filter ("ita|eng,AAC" -> ["ita|eng"]). With ";" groups every group is downloaded, so their languages come as one entry ("ita|eng,AAC;ger,EAC3" -> ["ita|eng|ger"]). Empty for filters that name no language ("best", "all", "false", a codec or an id)."""
+    groups = split_filter_groups(raw)
+    found: list[str] = []
+    for group in groups:
+        if group.lower() in _AUDIO_SLOT_RESERVED:
+            continue
+        slots = split_audio_slots(group)
+        found += [slots[num] for num in sorted(slots)] if slots else [FilterSpec.parse(group, stream_type).langs or ""]
+    found = [langs for langs in found if langs]
+    return ["|".join(found)] if len(groups) > 1 and found else found
+
+
+def filter_language_order(raw: str, stream_type: str) -> list[str]:
+    """Language tokens of a select_audio/select_subtitle value in the order they rank: as written ("ita|eng", "ita eng", "l=ita|eng"), slots by number ("2eng|1ita" -> ita, eng), ";" groups one after the other. Empty for filters that name no language ("best", "all", "false", a codec or an id)."""
+    tokens: list[str] = []
+    for langs in filter_language_groups(raw, stream_type):
+        for token in re.split(r"[|\s]+", langs):
+            if token and token.lower() not in ("best", "worst") and token not in tokens:
+                tokens.append(token)
+    return tokens
 
 
 def _height(s) -> int:
@@ -894,12 +912,7 @@ class StreamSelector:
 
         rv = self._select_video(muxable, pv)
 
-        audio_slots = split_audio_slots(self._af)
-        if audio_slots is not None:
-            ra = self._select_audio_slotted(muxable, audio_slots)
-        else:
-            pa = FilterSpec.parse(self._af, "audio")
-            ra = self._select_audio(muxable, pa)
+        ra = self._select_audio_groups(muxable, self._af)
 
         subtitle_slots = split_audio_slots(self._sf)
         if subtitle_slots is not None:
@@ -1345,6 +1358,56 @@ class StreamSelector:
         result.streams = self._apply_default_filter(selected, spec)
         result.matched_ids = _collect_ids(result.streams)
         return result
+
+    def _select_audio_filter(self, streams: list, raw: str) -> SelectionResult:
+        """One audio filter: exclusive-priority slots ("1ita|2eng") or a plain FilterSpec."""
+        slots = split_audio_slots(raw)
+        if slots is not None:
+            return self._select_audio_slotted(streams, slots)
+        return self._select_audio(streams, FilterSpec.parse(raw, "audio"))
+
+    def _select_audio_groups(self, streams: list, raw: str) -> SelectionResult:
+        """Audio filters separated by ";", each applied on its own and the picks added together: "ita|eng,AAC;ger,EAC3" takes ita and eng in AAC and ger in EAC3."""
+        groups = split_filter_groups(raw)
+        if len(groups) == 1:
+            return self._select_audio_filter(streams, groups[0])
+
+        audios = [s for s in streams if getattr(s, "type", "") == "audio"]
+        picked: list = []
+        codecs: set = set()
+        no_match = False
+        for group in groups:
+            langs = "|".join(filter_language_groups(group, "audio"))
+            # A group that names languages only looks at those: "ger,EAC3" never takes the EAC3 of another language
+            pool = [s for s in audios if _matches_lang(s, langs)] if langs else audios
+            if not pool:
+                logger.info(f"StreamSelector audio group {group!r}: no track in lang={langs!r}")
+                no_match = no_match or self._strict_no_match
+                continue
+
+            result = self._select_audio_filter(pool, group)
+            if langs and not result.streams and not self._strict_no_match:
+                # The language is there, only not in the requested codec: keep the language
+                logger.info(f"StreamSelector audio group {group!r}: no match, taking the best track of lang={langs!r}")
+                self._mark_best_per_lang(pool, True)
+                result = SelectionResult(streams=[s for s in pool if s.selected])
+
+            no_match = no_match or result.no_match
+            codecs.add(result.matched_codec)
+            picked += [s for s in result.streams if all(s is not p for p in picked)]
+            logger.info(f"StreamSelector audio group {group!r}: {[f'{_language(s)}/{_codecs(s)}' for s in result.streams]}")
+
+        combined = SelectionResult(streams=picked)
+        if not picked:
+            combined.drop = True
+            combined.no_match = no_match
+            return combined
+
+        combined.matched_ids = _collect_ids(picked)
+        combined.matched_langs = _actual_langs(picked) or None
+        combined.matched_codec = codecs.pop() if len(codecs) == 1 else None
+        combined.no_match = no_match and self._strict_no_match
+        return combined
 
     def _select_audio_slotted(self, streams: list, slots: dict[int, str]) -> SelectionResult:
         """Exclusive-priority audio selection, e.g. select_audio="1ita|2eng"."""

@@ -178,7 +178,7 @@ def setup_argument_parser(search_functions, site_module=None, extra_site_modules
     # ── Track selection
     track_group = parser.add_argument_group("Track selection")
     track_group.add_argument("-sv", "--video", type=str, metavar="SPEC", help='Video track filter (e.g. "best", "1080p", "r=1080:c=hvc1:f=best")')
-    track_group.add_argument("-sa", "--audio", "--audio-langs", dest="audio", type=str, metavar="SPEC", help='Audio track filter (e.g. "ita|it", "l=ita:c=aac:f=best")')
+    track_group.add_argument("-sa", "--audio", "--audio-langs", dest="audio", type=str, metavar="SPEC", help='Audio track filter (e.g. "ita|it", "l=ita:c=aac:f=best", "ita|eng,AAC;ger,EAC3" for a codec per group)')
     track_group.add_argument("-ss", "--subtitle", "--sub-langs", dest="subtitle", type=str, metavar="SPEC", help='Subtitle track filter (e.g. "ita|eng"); also the subtitle languages for --yt-dlp')
     track_group.add_argument("--skip-no-match", dest="skip_no_match", action="store_true", help="Skip the whole download if -sv/-sa/-ss matches no track, instead of falling back to the best available one")
 

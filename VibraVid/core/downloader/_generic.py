@@ -47,6 +47,9 @@ from VibraVid.core.utils.selector import (
     _subtitle_pref_score,
     _subtitle_variant_key,
     configured_mux_dtsx,
+    filter_language_groups,
+    filter_language_order,
+    split_filter_groups,
 )
 from VibraVid.core.utils.track_order import effective_select_filter, order_tracks
 from VibraVid.core.velora.downloader import MediaDownloader
@@ -945,10 +948,8 @@ class Generic_Downloader(BaseDownloader):
     @staticmethod
     def _explicit_lang_pool_matched(narrowed: list | None, lang_filter: str, stream_type: str, src_lang: str) -> bool:
         """True when the candidate pool was restricted by a language constraint."""
-        if narrowed:
-            spec = FilterSpec.parse(lang_filter or ("all" if stream_type == "subtitle" else "best"), stream_type)
-            if spec.langs:
-                return True
+        if narrowed and filter_language_groups(lang_filter or "", stream_type):
+            return True
         
         if src_lang and narrowed is None:
             # Per-source "language" already restricted the pool (single lang).
@@ -958,7 +959,7 @@ class Generic_Downloader(BaseDownloader):
     @staticmethod
     def _best_per_lang_explicit(cands: list, audio_filter: str = "") -> list:
         """Best rendition per language, ties broken by filter-token order (ita before eng)."""
-        tokens = [t for t in re.split(r"[|\s]+", audio_filter or "") if t.strip()]
+        tokens = filter_language_order(audio_filter or "", "audio")
 
         def _pref(s) -> int:
             for i, tok in enumerate(tokens):
@@ -1029,7 +1030,15 @@ class Generic_Downloader(BaseDownloader):
 
     @staticmethod
     def _narrow_explicit_audio_cands(cands: list, audio_filter: str = "") -> tuple[list | None, str]:
-        """Narrow explicit audio candidates by select_audio (langs/codec/id)."""
+        """Narrow explicit audio candidates by select_audio (langs/codec/id); ";" groups add up their candidates."""
+        groups = split_filter_groups(audio_filter or "best")
+        if len(groups) > 1:
+            results = [Generic_Downloader._narrow_explicit_audio_cands(cands, group) for group in groups]
+            if any(pool is None for pool, _ in results):
+                return None, ""
+            pool = [s for s in cands if any(any(s is c for c in group_pool) for group_pool, _ in results)]
+            return pool, f"audio filter={audio_filter!r}"
+
         spec = FilterSpec.parse(audio_filter or "best", "audio")
         if spec.drop or spec.select_all:
             return None, ""
